@@ -1,12 +1,18 @@
 import type { Session } from '@/lib/opencode/model';
 import type { I18nKey } from '@/lib/i18n';
+import { getSessionGoal } from '@/lib/sessionGoalMetadata';
 import type { LaneReplyState } from './useLaneSummaries';
+
+/** The server is still driving this lane: idle now means between two goal turns. */
+export const hasRunningGoal = (session: Pick<Session, 'metadata'> | undefined): boolean => (
+  getSessionGoal(session)?.status === 'active'
+);
 
 /**
  * What a run member is doing, from live and recorded facts only:
  * - `permission` / `question`: a blocking request waits for the user, so the
  *   turn cannot move on (a blocked session also counts as busy, so this wins);
- * - `working`: the turn is live;
+ * - `working`: the turn is live, or an active goal is between turns;
  * - `failed` / `stopped`: OpenCode recorded the turn as failed or interrupted;
  * - `notStarted`: no turn has ended and none is running;
  * - `noReply`: the turn ended normally without any answer text;
@@ -17,13 +23,13 @@ export type LaneStatus = 'permission' | 'question' | 'working' | 'failed' | 'sto
 export type LaneBlockingState = 'permission' | 'question' | null;
 
 export function resolveLaneStatus(input: {
-  session: Pick<Session, 'outcome' | 'time'>;
+  session: Pick<Session, 'outcome' | 'time' | 'metadata'>;
   busy: boolean;
   blocking: LaneBlockingState;
   reply: LaneReplyState | undefined;
 }): LaneStatus {
   if (input.blocking) return input.blocking;
-  if (input.busy) return 'working';
+  if (input.busy || hasRunningGoal(input.session)) return 'working';
   if (input.session.outcome === 'failed') return 'failed';
   if (input.session.outcome === 'interrupted') return 'stopped';
   if (!input.session.time.idle) return 'notStarted';

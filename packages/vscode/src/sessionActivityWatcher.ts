@@ -1,5 +1,6 @@
 import { OpenCode, type OpenCodeClient, type OpenCodeEvent } from '@opencode/client';
 import type { OpenCodeManager } from './opencode';
+import { openCodeTrust } from './opencodeTrust';
 
 // Session activity tracking (mirrors web server and desktop behavior)
 type ActivityPhase = 'idle' | 'busy' | 'cooldown';
@@ -243,6 +244,13 @@ export const startGlobalEventWatcher = async (
             // does not carry a 30s delay into its next reconnect.
             attempt = 0;
             console.log('[VSCode:Activity] connected');
+            // Folder trust answers hold until OpenCode closes the folder, which
+            // this stream reports from now on.
+            openCodeTrust.followLocations(true);
+          }
+
+          if (event.type === 'location.shutdown' && event.location?.directory) {
+            void openCodeTrust.forget(event.location.directory);
           }
 
           const activity = deriveSessionActivity(event);
@@ -260,6 +268,8 @@ export const startGlobalEventWatcher = async (
         }
         console.warn('[VSCode:Activity] disconnected', error instanceof Error ? error.message : error);
       }
+      // Closings go unreported until the stream is back.
+      openCodeTrust.followLocations(false);
 
       const backoffMs = Math.min(1000 * Math.pow(2, Math.min(attempt, 5)), 30000);
       await new Promise(r => setTimeout(r, backoffMs));
@@ -272,6 +282,7 @@ export const startGlobalEventWatcher = async (
 export const stopGlobalEventWatcher = (): void => {
   globalEventWatcherStartToken += 1;
   clearGlobalEventWatcherRetry();
+  openCodeTrust.followLocations(false);
 
   if (globalEventWatcherAbortController) {
     try {

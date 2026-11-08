@@ -6,6 +6,7 @@ import { RuntimeAPIContext } from '@/contexts/runtimeAPIContext';
 import { useGitStore } from '@/stores/useGitStore';
 import { installHookTestDom } from '../test-utils/testDom';
 import { useProjectRepoStatus } from './useProjectRepoStatus';
+import { switchRuntimeEndpoint } from '@/lib/runtime-switch';
 
 type Project = { id: string; path: string; normalizedPath: string; sidebarCollapsed?: boolean };
 
@@ -117,6 +118,19 @@ describe('useProjectRepoStatus', () => {
 
     await render([project('a'), project('b'), project('c')], true, batchingAPIs);
     expect(events).toEqual(['prefetch:/a,/b', 'read:/a', 'read:/b', 'prefetch:/c', 'read:/c']);
+  });
+
+  test('a prefetch spanning an instance round trip cannot start per-project reads', async () => {
+    switchRuntimeEndpoint({ apiBaseUrl: 'http://local.test', runtimeKey: 'local' });
+    let release = () => {};
+    const held = new Promise<void>(resolve => { release = resolve; });
+    const batchingAPIs = { ...runtimeAPIs, git: { ...runtimeAPIs.git, prefetchProjectStatuses: () => held } };
+    await render([project('a'), project('b')], true, batchingAPIs);
+    expect(reads).toEqual([]);
+    switchRuntimeEndpoint({ apiBaseUrl: 'http://remote.test', runtimeKey: 'remote' });
+    switchRuntimeEndpoint({ apiBaseUrl: 'http://local.test', runtimeKey: 'local' });
+    await act(async () => { release(); await held; });
+    expect(reads).toEqual([]);
   });
 
   test('a failed read is retried on the next list change; a removed and re-added project is read again', async () => {

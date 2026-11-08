@@ -55,13 +55,12 @@ export function createDockerDisk({ engine, runCommand, colimaPath, owner, image,
     };
   };
 
-  /** This owner's space volumes, found by label and checked again on the inspect result. */
+  /** This owner's space volumes with the space each belongs to, found by label and checked again on the inspect result. */
   const spaceVolumes = async () => (await engine.findByLabel('volume', labelFilterArgs({ owner })))
-    .filter((entry) => {
+    .flatMap((entry) => {
       const labels = parseSpaceLabels(entry.Labels);
-      return labels?.owner === owner && labels.role === ROLE_VOLUME;
-    })
-    .map((entry) => String(entry.Name));
+      return labels?.owner === owner && labels.role === ROLE_VOLUME ? [{ name: String(entry.Name), spaceId: labels.id }] : [];
+    });
 
   /**
    * An image with what it alone takes, or null when it is not there. In use when any container
@@ -94,9 +93,10 @@ export function createDockerDisk({ engine, runCommand, colimaPath, owner, image,
   };
 
   /**
-   * What the page shows: the image, the tools and the spaces' own volumes in bytes, and what a
-   * clean-up would free now. `freesImage` says whether the current image is part of that. A
-   * retired image is counted only in what a clean-up frees.
+   * What the page shows: the image, the tools and the spaces' own volumes in bytes, each space's
+   * volumes by its id (its work and home, what deleting it gives back), and what a clean-up would
+   * free now. `freesImage` says whether the current image is part of that. A retired image is
+   * counted only in what a clean-up frees.
    */
   const read = async () => {
     const { volumes, ours, oldTools, spaces, image: imageState, retired, sizeOf } = await measure();
@@ -104,6 +104,8 @@ export function createDockerDisk({ engine, runCommand, colimaPath, owner, image,
     const freesImage = imageState !== null && !imageState.inUse;
     const freeRetired = retired.filter((state) => !state.inUse).reduce((total, state) => total + state.bytes, 0);
     const sum = (names) => names.reduce((total, name) => total + sizeOf(name), 0);
+    const bytesBySpace = {};
+    for (const volume of spaces) bytesBySpace[volume.spaceId] = (bytesBySpace[volume.spaceId] ?? 0) + sizeOf(volume.name);
     const pull = imagePullState();
     return {
       imageBytes: imageState?.bytes ?? null,
@@ -111,7 +113,8 @@ export function createDockerDisk({ engine, runCommand, colimaPath, owner, image,
       imagePulling: pull.pulling,
       imageFailure: imageState === null && !pull.pulling ? pull.failure : null,
       toolsBytes: sum(ours.volumes),
-      spacesBytes: sum(spaces),
+      spacesBytes: sum(spaces.map((volume) => volume.name)),
+      bytesBySpace,
       freeBytes: sum(freeTools) + (freesImage ? imageState.bytes : 0) + freeRetired,
       freesImage,
     };

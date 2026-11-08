@@ -402,6 +402,58 @@ describe('session folders routes', () => {
       expect(response.body.updatedAt).toBe(5_001);
     });
 
+    describe('a move with the place it started from', () => {
+      const stored = (holding) => ({
+        ...folderPayload(20),
+        foldersMap: { '/repo': Object.entries(holding).map(([id, sessionIds]) => folder(id, id, sessionIds)) },
+      });
+      const holding = (response) => Object.fromEntries(response.body.foldersMap['/repo'].map((entry) => [entry.id, entry.sessionIds]));
+
+      it('applies while the chat is still there', async () => {
+        const routes = createPersistingRoutes(stored({ p: ['s1'], x: [] }), { now: () => 1_000 });
+        const response = await routes.patch([{ type: 'assign', scopeKey: '/repo', folderId: 'x', sessionIds: ['s1'], from: { s1: 'p' } }]);
+        expect(holding(response)).toEqual({ p: [], x: ['s1'] });
+      });
+
+      it('leaves a chat another client moved since, writes nothing and announces nothing', async () => {
+        const onChanged = vi.fn();
+        const routes = createPersistingRoutes(stored({ p: [], x: [], y: ['s1'] }), { onChanged });
+        const response = await routes.patch([
+          { type: 'assign', scopeKey: '/repo', folderId: 'x', sessionIds: ['s1'], from: { s1: 'p' } },
+          { type: 'unassign', scopeKey: '/repo', sessionIds: ['s1'], from: { s1: 'x' } },
+        ]);
+        expect(holding(response)).toEqual({ p: [], x: [], y: ['s1'] });
+        expect(onChanged).not.toHaveBeenCalled();
+      });
+
+      it('sent twice, the second one changes nothing', async () => {
+        const onChanged = vi.fn();
+        const routes = createPersistingRoutes(stored({ p: [], x: ['s1'] }), { onChanged });
+        await routes.patch([{ type: 'assign', scopeKey: '/repo', folderId: 'x', sessionIds: ['s1'], from: { s1: 'p' } }]);
+        expect(onChanged).not.toHaveBeenCalled();
+      });
+
+      it('moves only the chats of a batch that are still in place', async () => {
+        const routes = createPersistingRoutes(stored({ p: ['s1'], x: [], y: ['s2'] }), { now: () => 1_000 });
+        const response = await routes.patch([{ type: 'assign', scopeKey: '/repo', folderId: 'x', sessionIds: ['s1', 's2'], from: { s1: 'p', s2: 'p' } }]);
+        expect(holding(response)).toEqual({ p: [], x: ['s1'], y: ['s2'] });
+      });
+
+      it('moves a chat whose folder another client deleted', async () => {
+        const routes = createPersistingRoutes(stored({ x: [] }), { now: () => 1_000 });
+        const response = await routes.patch([{ type: 'assign', scopeKey: '/repo', folderId: 'x', sessionIds: ['s1'], from: { s1: 'deleted' } }]);
+        expect(holding(response)).toEqual({ x: ['s1'] });
+      });
+
+      it('takes a chat that was in no folder only while it is in none', async () => {
+        const routes = createPersistingRoutes(stored({ x: [], y: ['s1'] }), { now: () => 1_000 });
+        const response = await routes.patch([
+          { type: 'assign', scopeKey: '/repo', folderId: 'x', sessionIds: ['s1', 's2'], from: { s1: null, s2: null } },
+        ]);
+        expect(holding(response)).toEqual({ x: ['s2'], y: ['s1'] });
+      });
+    });
+
     it('writes nothing and announces nothing for a change that is already in place', async () => {
       const onChanged = vi.fn();
       const routes = createPersistingRoutes({

@@ -31,7 +31,7 @@ export const KnowledgePinToggle: React.FC<{
       className={cn(KNOWLEDGE_ICON_BUTTON_CLASS, pinned ? 'text-primary hover:text-primary' : reveal)}
       aria-pressed={pinned}
       aria-label={label}
-      title={label}
+      data-row-tooltip={label}
     >
       {/* Filled while attached; the outline offers to attach. */}
       <Icon name={pinned ? 'pushpin-2-fill' : 'pushpin-2'} className="h-3.5 w-3.5" />
@@ -67,7 +67,7 @@ export const KnowledgeMenu: React.FC<{
           disabled={disabled}
           className={cn(KNOWLEDGE_ICON_BUTTON_CLASS, reveal)}
           aria-label={label}
-          title={label}
+          data-row-tooltip={label}
         >
           <Icon name="more" className="h-3.5 w-3.5" />
         </button>

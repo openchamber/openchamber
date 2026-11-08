@@ -13,6 +13,8 @@ import { z } from 'zod';
 
 import { requireSpaceId } from './labels.js';
 import { MAX_KEPT_OUTPUT_CHARACTERS, MAX_SETUP_COMMAND_LENGTH, MAX_SETUP_COMMANDS } from './space-setup.js';
+import { sanitizeSpaceTaskTitle, spaceTaskTitleSchema } from './task-title.js';
+import { SpaceError } from './errors.js';
 
 const RECORDS_DIRECTORY = path.join('spaces', 'records');
 
@@ -112,6 +114,7 @@ const recordSchema = z.object({
   placeId: z.string().min(1).default('docker'),
   /** The display name and the creation time, as the labels hold them, for a list while the place cannot be asked. */
   name: z.string().nullable().default(null),
+  taskTitle: spaceTaskTitleSchema.nullable().default(null),
   created: z.string().nullable().default(null),
   network: networkSchema,
   /** The host repository the code came from, as the user's project names it. */
@@ -173,7 +176,13 @@ export function createSpaceRecords({ dataDir, logger = console }) {
       return { status: 'unreadable', record: null };
     }
     try {
-      const parsed = recordSchema.safeParse(withReadableSetup(spaceId, withReadableGrants(spaceId, JSON.parse(text))));
+      const raw = withReadableSetup(spaceId, withReadableGrants(spaceId, JSON.parse(text)));
+      // A display name must not make the network choice or grants unreadable.
+      if (raw instanceof Object && raw.taskTitle != null && !spaceTaskTitleSchema.safeParse(raw.taskTitle).success) {
+        logger.warn?.(`[spaces] the record of space ${spaceId} holds a task title this host cannot read; it is left out`);
+        raw.taskTitle = null;
+      }
+      const parsed = recordSchema.safeParse(raw);
       if (parsed.success) return { status: 'ok', record: parsed.data };
     } catch {
       // Reported below.
@@ -224,5 +233,18 @@ export function createSpaceRecords({ dataDir, logger = console }) {
       .map(({ id, record }) => ({ id, record }));
   };
 
-  return { read, write, update, remove, list };
+  const setTaskTitle = (spaceId, { title: rawTitle, by }) => {
+    z.enum(['user', 'agent']).parse(by);
+    const current = read(spaceId);
+    if (current.status !== 'ok') throw new SpaceError('space_record_unreadable', 'The space record cannot be read.');
+    const title = sanitizeSpaceTaskTitle(rawTitle);
+    if (by === 'agent' && (!title || current.record.taskTitle?.by === 'user')) {
+      return { applied: false, taskTitle: current.record.taskTitle };
+    }
+    const taskTitle = title ? { title, by } : null;
+    if (current.record.taskTitle?.title !== title || current.record.taskTitle?.by !== by) write(spaceId, { ...current.record, taskTitle });
+    return { applied: true, taskTitle };
+  };
+
+  return { read, write, update, remove, list, setTaskTitle };
 }

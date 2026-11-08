@@ -1,0 +1,52 @@
+---
+title: Barra lateral
+description: O que a barra lateral lista e como ela é organizada.
+---
+
+# Barra lateral
+
+De cima para baixo, a barra lateral mostra **Conversas**, **Fixadas** se você fixou algo, **Em andamento** e depois seus projetos. Para ver tudo numa só lista por data, escolha **Por data** em **Sessões**, no menu de exibição da barra lateral. **Por projeto** traz os projetos de volta.
+
+## Uma linha é um trabalho
+
+- **Uma sessão na pasta do projeto** é uma linha. O que nasceu dela, como subagentes, revisões automáticas e perguntas paralelas, fica embaixo, atrás da seta à esquerda. Um fork simples é uma linha própria.
+- **Um worktree** é uma linha embaixo do projeto, com todas as sessões dele embaixo. Clique na linha para abrir a sessão em que você trabalhou por último ali, ou na seta para ver todas. Veja [Sessões de Worktree](/pt-br/worktrees/).
+- **Um espaço isolado** funciona do mesmo jeito que um worktree.
+
+## O que uma linha mostra
+
+O lado esquerdo de uma linha mostra o que ela é:
+
+- um ícone de branch: um worktree
+- o ícone de espaço: um espaço isolado
+- nada, ou uma seta: uma sessão na pasta do projeto
+
+O lado direito mostra o que está acontecendo: em execução, uma resposta nova ou esperando por você. Uma marca colorida no fim é o pull request ou a issue que o trabalho acompanha.
+
+## Nomes dos worktrees
+
+Uma linha de worktree mostra o nome da tarefa, que o agente escolhe assim que a tarefa fica clara. Até lá, mostra a branch. Se você renomear, o seu nome fica. Uma sessão que você move para um worktree novo leva o nome da tarefa junto.
+
+Para ler os worktrees pela branch, ative **Nomear worktrees pelo branch** no menu de exibição. A branch vira o nome da linha, e o nome da tarefa passa para baixo dela nas linhas detalhadas.
+
+## Em andamento e Fixadas
+
+**Em andamento** reúne o trabalho que você ainda não terminou; veja [Sessões em andamento](/pt-br/sessions-in-work/). Um trabalho que está lá sai do projeto, então ative **Mostrar também o que está em andamento nos projetos** para mantê-lo nos dois lugares. **Fixadas** reúne as sessões e worktrees que você fixou pelo menu da linha.
+
+## O menu de exibição
+
+- **Sessões**: por projeto ou por data
+- **Ordenar projetos**: manual, A → Z, Z → A ou mais recentes
+- **Mostrar seção de chats**, **Mostrar fixadas**, **Mostrar em andamento**
+- **Mostrar também o que está em andamento nos projetos**
+- **Linhas detalhadas**: uma segunda linha com a branch ou o nome da tarefa, o pull request ou a issue, e o projeto quando a lista mistura projetos
+- **Nomear worktrees pelo branch**
+- **Recolher tudo** e **Expandir tudo**
+
+Uma lista longa termina em **Mostrar mais**. **Mostrar menos** recolhe de novo.
+
+## No celular
+
+A lista e o menu são os mesmos. As linhas ocupam duas linhas de texto, a menos que você desative **Linhas detalhadas**, e para ver as ações de uma linha você a desliza para o lado.
+
+O VS Code mantém a lista que tinha antes deste layout.

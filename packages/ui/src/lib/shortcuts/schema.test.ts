@@ -2,10 +2,15 @@ import { describe, expect, test } from 'bun:test';
 import {
   getCustomizableShortcutActions,
   getEffectiveShortcutCombo,
+  getNativeMenuShortcutCombos,
   getShortcutBindingConflicts,
   getShortcutAction,
+  isMenuAcceleratorCombo,
+  isShortcutAvailable,
   parseShortcut,
   SHORTCUT_SCHEMA,
+  shortcutMatchesRecordedCombo,
+  UNASSIGNED_SHORTCUT,
   type ShortcutCategory,
 } from './index';
 
@@ -62,18 +67,86 @@ describe('shortcut schema', () => {
     expect(getShortcutAction('focus_input')?.category).toBe('session');
   });
 
+  test('exposes prompt history search as a customizable session shortcut', () => {
+    const action = getShortcutAction('search_prompt_history');
+
+    expect(action?.category).toBe('session');
+    expect(action?.defaultBinding).toBe('mod+arrowup');
+    expect(action?.customizable).toBe(true);
+    if (action?.customizable !== true) throw new Error('search_prompt_history must be customizable');
+    expect(action.settingsLabelKey)
+      .toBe('settings.openchamber.keyboardShortcuts.action.search_prompt_history.label');
+  });
+
   test('splits the held digit prefixes between session tabs and surfaces', () => {
     expect(getShortcutAction('switch_session_tab')?.defaultBinding).toBe('mod');
     expect(getShortcutAction('switch_context_surface')?.defaultBinding).toBe('mod+alt');
   });
 
-  test('every action ships with a default binding', () => {
-    // Palette-only commands live outside this schema entirely; an action in
-    // the schema without a binding would be dead weight in Settings.
-    // Desktop-category actions are the exception: they register as OS-level
-    // global shortcuts, not in-app bindings, so their default is unassigned.
+  test('lists every keyboard action in Settings except the double Escape stop', () => {
+    expect(SHORTCUT_SCHEMA.filter((action) => !action.customizable).map((action) => action.id)).toEqual(['abort_run']);
+  });
+
+  test('keeps native menu keys out of the way where the menu does not exist', () => {
+    const conflict = getShortcutBindingConflicts('new_chat', 'mod+shift+g')
+      .find((candidate) => candidate.action.id === 'open_git_panel');
+    expect(conflict).toBeUndefined();
+    expect(isShortcutAvailable(getShortcutAction('open_git_panel')!)).toBe(false);
+    expect(isShortcutAvailable(getShortcutAction('new_chat')!)).toBe(true);
+  });
+
+  test('accepts only combos the native menu can show', () => {
+    for (const combo of ['alt+insert', 'mod+minus', 'mod+=', 'ctrl+alt+arrowup', 'mod+shift+alt+n']) {
+      expect(isMenuAcceleratorCombo(combo)).toBe(true);
+    }
+    for (const combo of ['g', 'shift+g', 'mod+k g', 'alt+capslock', 'alt+contextmenu']) {
+      expect(isMenuAcceleratorCombo(combo)).toBe(false);
+    }
+  });
+
+  test('reports the menu keys, with an unassigned one as empty', () => {
+    const combos = getNativeMenuShortcutCombos({ zoom_in: 'mod+shift+=', zoom_out: '__unassigned__' });
+    expect(combos.zoom_in).toBe('mod+shift+=');
+    expect(combos.zoom_out).toBe('');
+    expect(combos.new_window).toBe('mod+shift+alt+n');
+    expect(Object.keys(combos)).toHaveLength(10);
+  });
+
+  test('a digit prefix answers to the prefix plus the digits it accepts', () => {
+    const sessionTab = getShortcutAction('switch_session_tab');
+    const contextSurface = getShortcutAction('switch_context_surface');
+    if (!sessionTab || !contextSurface) throw new Error('Digit-prefix actions missing');
+
+    expect(shortcutMatchesRecordedCombo(sessionTab, 'mod+1')).toBe(true);
+    expect(shortcutMatchesRecordedCombo(sessionTab, 'mod+0')).toBe(false);
+    expect(shortcutMatchesRecordedCombo(sessionTab, 'mod+alt+1')).toBe(false);
+    expect(shortcutMatchesRecordedCombo(sessionTab, 'mod+a')).toBe(false);
+    expect(shortcutMatchesRecordedCombo(contextSurface, 'mod+alt+0')).toBe(true);
+    expect(shortcutMatchesRecordedCombo(contextSurface, 'mod+1')).toBe(false);
+    expect(shortcutMatchesRecordedCombo(sessionTab, 'alt+1', { switch_session_tab: 'alt' })).toBe(true);
+    expect(shortcutMatchesRecordedCombo(sessionTab, 'mod+1', { switch_session_tab: UNASSIGNED_SHORTCUT })).toBe(false);
+  });
+
+  test('a sequence answers to its second key with the leader modifiers held', () => {
+    const archive = getShortcutAction('archive_current_session');
+    const bulkDelete = getShortcutAction('sessions_bulk_delete');
+    if (!archive || !bulkDelete) throw new Error('Actions missing');
+
+    expect(shortcutMatchesRecordedCombo(archive, 'mod+k backspace')).toBe(true);
+    expect(shortcutMatchesRecordedCombo(archive, 'mod+k mod+backspace')).toBe(true);
+    expect(shortcutMatchesRecordedCombo(archive, 'mod+k mod+shift+backspace')).toBe(false);
+    expect(shortcutMatchesRecordedCombo(archive, 'mod+j mod+backspace')).toBe(false);
+    expect(shortcutMatchesRecordedCombo(bulkDelete, 'mod+k mod+backspace')).toBe(false);
+  });
+
+  test('every action ships with a default binding or is explicitly unassigned', () => {
+    // A customizable action may use UNASSIGNED_SHORTCUT when it stays off until
+    // the user assigns it. Desktop-category actions are the other exception:
+    // they register as OS-level global shortcuts, not in-app bindings, so their
+    // default is unassigned.
     for (const action of SHORTCUT_SCHEMA) {
       if (action.category === 'desktop') continue;
+      if (action.defaultBinding === UNASSIGNED_SHORTCUT) continue;
       expect(getEffectiveShortcutCombo(action.id)).not.toBe('');
     }
   });
@@ -84,8 +157,8 @@ describe('shortcut schema', () => {
   });
 
   test('keeps internal bindings authoritative over persisted overrides', () => {
-    expect(getEffectiveShortcutCombo('save_file', { save_file: 'mod+k' })).toBe('mod+s');
-    expect(getEffectiveShortcutCombo('save_file', { save_file: '__unassigned__' })).toBe('mod+s');
+    expect(getEffectiveShortcutCombo('abort_run', { abort_run: 'mod+k' })).toBe('escape');
+    expect(getEffectiveShortcutCombo('abort_run', { abort_run: '__unassigned__' })).toBe('escape');
   });
 
   test('surfaces a desktop global combo override as a replaceable conflict', () => {
@@ -98,10 +171,10 @@ describe('shortcut schema', () => {
   test('detects conflicts against customizable and internal bindings', () => {
     const customizableConflict = getShortcutBindingConflicts('new_chat', 'mod+p')
       .find((conflict) => conflict.action.id === 'open_command_palette');
-    const internalConflict = getShortcutBindingConflicts('new_chat', 'mod+f')
-      .find((conflict) => conflict.action.id === 'find_in_file');
-    const internalPrefixConflict = getShortcutBindingConflicts('new_chat', 'mod+s x')
-      .find((conflict) => conflict.action.id === 'save_file');
+    const internalConflict = getShortcutBindingConflicts('new_chat', 'escape')
+      .find((conflict) => conflict.action.id === 'abort_run');
+    const internalPrefixConflict = getShortcutBindingConflicts('new_chat', 'escape x')
+      .find((conflict) => conflict.action.id === 'abort_run');
     const leaderPrefixConflict = getShortcutBindingConflicts('new_chat', 'mod+k')
       .find((conflict) => conflict.action.id === 'open_session_list');
     const blockingPrefixConflict = getShortcutBindingConflicts('new_chat', 'mod+p x')

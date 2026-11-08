@@ -206,6 +206,16 @@ export async function proxySessionMessageRequest(options: {
   });
 }
 
+export async function searchFilesRequest<T>(
+  payload: { directory: string; query: string; limit?: number; includeHidden: boolean; respectGitignore: boolean },
+  signal?: AbortSignal,
+): Promise<T> {
+  return sendBridgeMessageWithOptions<T>('api:fs:search', payload, {
+    signal,
+    onAbort: (requestID) => getVSCodeAPI().postMessage({ id: `abort_${requestID}`, type: 'api:fs:search:abort', payload: { requestID } }),
+  });
+}
+
 export type ProxiedSseStartResponse = {
   status: number;
   headers: Record<string, string>;

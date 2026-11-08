@@ -3,6 +3,7 @@ import { Button } from '@/components/ui/button';
 import { Icon } from "@/components/icon/Icon";
 import { useI18n } from '@/lib/i18n';
 import { sanitizeBranchNameInput } from './branchName';
+import { ButtonTooltip } from '@/components/ui/action-toolbar';
 
 interface WorktreeBranchDisplayProps {
   currentBranch: string | null | undefined;
@@ -85,29 +86,31 @@ export const WorktreeBranchDisplay: React.FC<WorktreeBranchDisplayProps> = ({
             onKeyDown={handleKeyDown}
             autoFocus
           />
-          <button
-            type="submit"
-            disabled={isRenaming || !sanitizeBranchNameInput(editBranchName)}
-            aria-label={isRenaming ? t('gitView.branch.renameSaving') : t('gitView.branch.renameSave')}
-            title={isRenaming ? t('gitView.branch.renameSaving') : t('gitView.branch.renameSave')}
-            className="shrink-0 text-muted-foreground hover:text-foreground disabled:opacity-50"
-          >
-            {isRenaming ? (
-              <Icon name="loader-4" className="size-4 animate-spin" />
-            ) : (
-              <Icon name="check" className="size-4" />
-            )}
-          </button>
-          <button
-            type="button"
-            onClick={handleCancelEdit}
-            disabled={isRenaming}
-            aria-label={t('gitView.branch.renameCancel')}
-            title={t('gitView.branch.renameCancel')}
-            className="shrink-0 text-muted-foreground hover:text-foreground disabled:opacity-50"
-          >
-            <Icon name="close" className="size-4" />
-          </button>
+          <ButtonTooltip label={isRenaming ? t('gitView.branch.renameSaving') : t('gitView.branch.renameSave')} side="bottom" className="shrink-0">
+            <button
+              type="submit"
+              disabled={isRenaming || !sanitizeBranchNameInput(editBranchName)}
+              aria-label={isRenaming ? t('gitView.branch.renameSaving') : t('gitView.branch.renameSave')}
+              className="shrink-0 text-muted-foreground hover:text-foreground disabled:opacity-50"
+            >
+              {isRenaming ? (
+                <Icon name="loader-4" className="size-4 animate-spin" />
+              ) : (
+                <Icon name="check" className="size-4" />
+              )}
+            </button>
+          </ButtonTooltip>
+          <ButtonTooltip label={t('gitView.branch.renameCancel')} side="bottom" className="shrink-0">
+            <button
+              type="button"
+              onClick={handleCancelEdit}
+              disabled={isRenaming}
+              aria-label={t('gitView.branch.renameCancel')}
+              className="shrink-0 text-muted-foreground hover:text-foreground disabled:opacity-50"
+            >
+              <Icon name="close" className="size-4" />
+            </button>
+          </ButtonTooltip>
         </form>
       </div>
     );
@@ -121,15 +124,17 @@ export const WorktreeBranchDisplay: React.FC<WorktreeBranchDisplayProps> = ({
           {currentBranch || t('gitView.branch.detachedHead')}
         </span>
         {showEditButton && onRename && currentBranch && (
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-7 w-7 p-0 shrink-0"
-            onClick={handleStartEdit}
-            title={t('gitView.branch.renameTitle')}
-          >
-            <Icon name="edit" className="size-4" />
-          </Button>
+          <ButtonTooltip label={t('gitView.branch.renameTitle')} side="bottom" className="shrink-0">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 w-7 p-0 shrink-0"
+              onClick={handleStartEdit}
+              aria-label={t('gitView.branch.renameTitle')}
+            >
+              <Icon name="edit" className="size-4" />
+            </Button>
+          </ButtonTooltip>
         )}
       </div>
     </div>

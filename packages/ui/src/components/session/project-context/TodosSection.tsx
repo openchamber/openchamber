@@ -25,6 +25,7 @@ import { cn } from '@/lib/utils';
 import { KnowledgeComposer } from './KnowledgeComposer';
 import { KNOWLEDGE_ICON_BUTTON_CLASS, useKnowledgeRevealClass } from './knowledgeRowStyle';
 import { KnowledgeMenu } from './KnowledgeActions';
+import { ButtonTooltip } from '@/components/ui/action-toolbar';
 
 const createTodoId = (): string => {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -205,7 +206,7 @@ export const TodosSection: React.FC<{
         onSubmit={handleAddTodo}
       />
 
-      <div className="rounded-lg border border-border/60 bg-background/40">
+      <div className="rounded-lg border border-edge bg-background/40">
         {visibleTodos.length === 0 ? (
           <p className="px-3 py-3 typography-meta text-muted-foreground">
             {query.trim()
@@ -222,7 +223,7 @@ export const TodosSection: React.FC<{
               items={visibleTodos.map((todo) => todo.id)}
               strategy={verticalListSortingStrategy}
             >
-              <ul className="divide-y divide-border/50">
+              <ul className="divide-y divide-edge">
                 {visibleTodos.map((todo) => {
                   const isExpandedTodo = expandedTodoIds.has(todo.id);
                   return (
@@ -240,15 +241,18 @@ export const TodosSection: React.FC<{
                             }}
                             className={cn('flex h-6 w-4 flex-shrink-0 touch-none items-center justify-center text-muted-foreground hover:text-foreground', reveal)}
                             aria-label={t('rightSidebar.contextNotesTodo.todo.actions.reorder', { text: todo.text })}
-                            title={t('rightSidebar.contextNotesTodo.todo.actions.reorder', { text: todo.text })}
+                            data-row-tooltip={t('contextTooltips.workspace.todo.reorder')}
                           >
                             <Icon name="draggable" className="h-3.5 w-3.5" />
                           </button>
-                          <div className="flex h-6 items-center">
+                          <div
+                            className="flex h-6 items-center"
+                            data-row-tooltip={t(todo.completed ? 'contextTooltips.workspace.todo.reopen' : 'contextTooltips.workspace.todo.complete')}
+                          >
                             <Checkbox
                               checked={todo.completed}
                               onChange={(checked) => handleToggleTodo(todo.id, checked)}
-                              ariaLabel={t('rightSidebar.contextNotesTodo.todo.actions.markComplete', { text: todo.text })}
+                              ariaLabel={t(todo.completed ? 'contextTooltips.workspace.todo.reopenAria' : 'rightSidebar.contextNotesTodo.todo.actions.markComplete', { text: todo.text })}
                             />
                           </div>
                           <button
@@ -277,7 +281,7 @@ export const TodosSection: React.FC<{
                                   disabled={sendingTodoId === todo.id}
                                   className={cn(KNOWLEDGE_ICON_BUTTON_CLASS, reveal)}
                                   aria-label={t('rightSidebar.contextNotesTodo.todo.actions.send', { text: todo.text })}
-                                  title={t('rightSidebar.contextNotesTodo.todo.actions.send', { text: todo.text })}
+                                  data-row-tooltip={t('contextTooltips.workspace.todo.send')}
                                 >
                                   <Icon name="send-plane" className="h-3.5 w-3.5" />
                                 </button>
@@ -318,14 +322,16 @@ export const TodosSection: React.FC<{
       </div>
 
       {completedTodoCount > 0 ? (
-        <button
-          type="button"
-          onClick={handleClearCompletedTodos}
-          disabled={disabled}
-          className="px-1 typography-meta text-muted-foreground/80 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          {t('rightSidebar.contextNotesTodo.todo.clearCompleted')}
-        </button>
+        <ButtonTooltip label={t('contextTooltips.workspace.todo.clearCompleted')} className="shrink-0">
+          <button
+            type="button"
+            onClick={handleClearCompletedTodos}
+            disabled={disabled}
+            className="px-1 typography-meta text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {t('rightSidebar.contextNotesTodo.todo.clearCompleted')}
+          </button>
+        </ButtonTooltip>
       ) : null}
     </div>
   );

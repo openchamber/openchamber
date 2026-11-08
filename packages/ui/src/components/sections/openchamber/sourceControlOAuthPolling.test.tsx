@@ -341,6 +341,10 @@ mock.module('@/components/ui/collapsible', () => ({
   CollapsibleTrigger: ({ children }: ElementProps) => children ?? null,
   CollapsibleContent: ({ children }: ElementProps) => children ?? null,
 }));
+// The confirm hook renders the real dialog, which this file's React stand-in cannot host.
+mock.module('@/components/ui/confirm-dialog', () => ({
+  useConfirmDialog: () => ({ confirm: async () => true, dialog: null }),
+}));
 mock.module('@/components/sections/shared/SettingsSection', () => ({
   SETTINGS_CONTROL_CLUSTER_CLASS: '',
   SETTINGS_FIELDS_STACK_CLASS: '',
@@ -371,7 +375,10 @@ mock.module('@/stores/useSourceControlAuthStore', () => ({
 mock.module('@/lib/device', () => ({ useDeviceInfo: () => ({ isMobile: false }) }));
 mock.module('@/lib/i18n', () => ({ useI18n: () => ({ t: translate }) }));
 mock.module('@/lib/url', () => ({ openExternalUrl: async () => undefined }));
-mock.module('@/lib/worktrees/worktreeBootstrap', () => ({ waitForWorktreeGitReady: async () => undefined }));
+mock.module('@/lib/worktrees/worktreeBootstrap', () => ({
+  getWorktreeBootstrapState: () => null,
+  waitForWorktreeGitReady: async () => undefined,
+}));
 mock.module('@/lib/utils', () => ({
   cn: (...values: Array<string | false | null | undefined>) => values.filter(Boolean).join(' '),
 }));

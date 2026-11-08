@@ -1,7 +1,13 @@
 import React from 'react';
 import { normalizeContextPanelDirectoryKey, useUIStore } from '@/stores/useUIStore';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
-import { isZoneShown } from '@/lib/workspace/zones';
+import {
+  CONTEXT_ZONE_DEFAULT_WIDTH,
+  isZoneShown,
+  resolveZoneActiveTab,
+  showsFileTreeOnly,
+  sideZoneWidth,
+} from '@/lib/workspace/zones';
 
 /**
  * Fixed panel width. The panel is not user-resizable: it is an object inside
@@ -12,7 +18,8 @@ export const WORK_STATUS_PANEL_WIDTH = 300;
 
 /**
  * Minimum width the message column must keep for itself. Below this the panel
- * yields — a squeezed transcript costs more than the status it displaces.
+ * yields, beside the context panel too: a squeezed transcript costs more than
+ * the status it displaces.
  */
 const WORK_STATUS_MIN_CHAT_WIDTH = 560;
 
@@ -40,6 +47,13 @@ type Result = {
    */
   roomy: boolean;
   /**
+   * The chat area is also wide enough for the panel's column beside the
+   * context panel at the width it shows at, or will open at. Answered while
+   * the context panel is closed too, so the commit that opens it already
+   * knows whether the card stays.
+   */
+  roomyBesidePanel: boolean;
+  /**
    * Attach to the flex row that contains the chat column and the panel.
    *
    * A callback ref, not an object ref: an object ref gives no signal when the
@@ -62,10 +76,11 @@ type Result = {
  */
 export const useWorkStatusVisibility = ({ isMobile, isVSCode }: Options): Result => {
   const [rowNode, setRowNode] = React.useState<HTMLDivElement | null>(null);
-  // Only the threshold decision is state: the chat area's width changes on
+  // Only the threshold decisions are state: the chat area's width changes on
   // every frame of a sidebar animation, and storing the width itself
   // re-rendered the whole chat on each of those frames.
   const [wideEnough, setWideEnough] = React.useState<boolean | null>(null);
+  const [wideEnoughBesidePanel, setWideEnoughBesidePanel] = React.useState(false);
   const rowRef = React.useCallback((node: HTMLDivElement | null) => { setRowNode(node); }, []);
 
   // Keyed exactly like the rail and the panel itself: whichever directory the
@@ -93,13 +108,37 @@ export const useWorkStatusVisibility = ({ isMobile, isVSCode }: Options): Result
     ),
   );
 
+  // The width the right zone shows at, or opens at: its tab's width even
+  // while closed, so opening it changes no threshold. An expanded zone takes
+  // everything but a narrow chat column, so the card never stays beside it;
+  // Files showing only its tree never expands (ContextPanel's isTreeOnly).
+  const contextPanelWidth = useUIStore(
+    React.useCallback(
+      (state) => {
+        const panel = directoryKey ? state.contextPanelByDirectory[directoryKey] : undefined;
+        const tab = panel ? resolveZoneActiveTab(panel, state.contextSurfaceZones, 'right') : null;
+        return panel && tab ? sideZoneWidth(panel, tab, 'right', state) : CONTEXT_ZONE_DEFAULT_WIDTH;
+      },
+      [directoryKey],
+    ),
+  );
+  const contextPanelExpanded = useUIStore(
+    React.useCallback(
+      (state) => {
+        const panel = directoryKey ? state.contextPanelByDirectory[directoryKey] : undefined;
+        if (!panel?.expanded) return false;
+        const tab = isZoneShown(panel, state.contextSurfaceZones, 'right')
+          ? resolveZoneActiveTab(panel, state.contextSurfaceZones, 'right')
+          : null;
+        return tab !== null && !showsFileTreeOnly(panel, tab, state);
+      },
+      [directoryKey],
+    ),
+  );
+
   // The user's own switch, persisted to server settings, gates everything
   // before layout is even measured.
   const panelEnabled = useUIStore((state) => state.workStatusPanelEnabled);
-
-  // Split from the switch: a narrow chat is a layout fact, and the header needs
-  // it to offer the panel as an overlay instead of pretending it is off.
-  const layoutAllows = !isMobile && !isVSCode && !contextPanelOpen;
 
   // Measures the chat AREA — the container holding the chat and the context
   // panel together — not the chat row inside it.
@@ -112,24 +151,44 @@ export const useWorkStatusVisibility = ({ isMobile, isVSCode }: Options): Result
   // the context panel opens, so the reading is correct the instant it closes.
   //
   // It is also the stable input the oscillation argument needs: this panel's
-  // own visibility cannot change the width being measured.
+  // own visibility cannot change the width being measured. Nor can the context
+  // panel's: its width is the user's setting, read from the store.
+  const areaWidthRef = React.useRef<number | null>(null);
+  const contextPanelWidthRef = React.useRef(contextPanelWidth);
+  contextPanelWidthRef.current = contextPanelWidth;
+  const applyAreaWidth = React.useCallback((width: number) => {
+    areaWidthRef.current = width;
+    setWideEnough(width >= WORK_STATUS_REQUIRED_ROW_WIDTH);
+    setWideEnoughBesidePanel(width >= WORK_STATUS_REQUIRED_ROW_WIDTH + contextPanelWidthRef.current);
+  }, []);
+
   React.useEffect(() => {
     if (!rowNode || typeof ResizeObserver === 'undefined') return undefined;
 
     const measured = rowNode.closest<HTMLElement>('[data-chat-area]') ?? rowNode;
-    setWideEnough(measured.getBoundingClientRect().width >= WORK_STATUS_REQUIRED_ROW_WIDTH);
+    applyAreaWidth(measured.getBoundingClientRect().width);
     const observer = new ResizeObserver((entries) => {
       const entry = entries[0];
       if (!entry) return;
-      setWideEnough(entry.contentRect.width >= WORK_STATUS_REQUIRED_ROW_WIDTH);
+      applyAreaWidth(entry.contentRect.width);
     });
     observer.observe(measured);
     return () => observer.disconnect();
-  }, [rowNode]);
+  }, [applyAreaWidth, rowNode]);
+
+  // A resized context panel or another surface in it moves the threshold, not
+  // the area: re-decided from the last reading, before paint, so the slot
+  // animates once to the final width.
+  React.useLayoutEffect(() => {
+    if (areaWidthRef.current !== null) applyAreaWidth(areaWidthRef.current);
+  }, [applyAreaWidth, contextPanelWidth]);
 
   const roomy = !isMobile && !isVSCode && wideEnough === true;
-  const fits = layoutAllows && roomy;
+  const roomyBesidePanel = roomy && wideEnoughBesidePanel && !contextPanelExpanded;
+  // Split from the switch: a narrow chat is a layout fact, and the header needs
+  // it to offer the panel as an overlay instead of pretending it is off.
+  const fits = contextPanelOpen ? roomyBesidePanel : roomy;
   const visible = panelEnabled && fits;
 
-  return { rowRef, visible, fits, roomy };
+  return { rowRef, visible, fits, roomy, roomyBesidePanel };
 };

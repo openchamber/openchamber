@@ -2,6 +2,8 @@ import express from 'express';
 import { mintOutsideFileGrant } from '../fs/routes.js';
 import { unwrapOpenCodeResponse } from '../opencode/response-envelope.js';
 import { fitRenderPageImages, renderPageImageSources } from '../openchamber-control/render-page.js';
+import { generatedImagePaths } from '../openchamber-control/generate-image.js';
+import { capturedScreenshotPaths } from '../openchamber-control/screenshots.js';
 import { isString } from '../shared/guards.js';
 import { inspectLocalImage } from './inspect-image.js';
 
@@ -194,6 +196,57 @@ const renderPageSources = (message) => {
   return sources;
 };
 
+/**
+ * A file path the way two spellings of it compare: the chat sends the
+ * destination Markdown made of it, percent-encoded and, for a Windows path, a
+ * `file:` URL. Only the generated images compare this way; text and pages
+ * keep their exact references.
+ */
+const comparablePath = (value) => {
+  let text = value;
+  if (/^file:\/\//i.test(text)) {
+    try {
+      text = new URL(text).pathname;
+    } catch {
+      return '';
+    }
+  }
+  try {
+    text = decodeURIComponent(text);
+  } catch {
+    // A stray % in a literal path stays as written.
+  }
+  text = text.replace(/\\/g, '/');
+  return /^\/[A-Za-z]:\//.test(text) ? text.slice(1) : text;
+};
+
+// The tools whose stored result names image files the chat draws in their row,
+// with the reader of those names. `browser.capture` runs behind Code Mode, so
+// its result is usually an `execute` call's.
+const TOOL_RESULT_IMAGE_PATHS = new Map([
+  ['openchamber_image', generatedImagePaths],
+  ['openchamber_web', capturedScreenshotPaths],
+  ['execute', capturedScreenshotPaths],
+]);
+
+/**
+ * The files the message's openchamber_image calls saved and its page
+ * screenshots, named by the result each call stored, as `comparablePath`
+ * spells them. The chat draws them in the call's row.
+ */
+const toolResultImageSources = (message) => {
+  const sources = new Set();
+  for (const part of messageContent(message)) {
+    const readPaths = part?.type === 'tool' ? TOOL_RESULT_IMAGE_PATHS.get(part.name) : undefined;
+    if (!readPaths || part.state?.status !== 'completed') continue;
+    for (const item of Array.isArray(part.state.content) ? part.state.content : []) {
+      if (item?.type !== 'text' || !isString(item.text)) continue;
+      for (const source of readPaths(item.text)) sources.add(comparablePath(source));
+    }
+  }
+  return sources;
+};
+
 const fetchMessage = async ({ sessionId, messageId, directory, buildOpenCodeUrl, getOpenCodeAuthHeaders }) => {
   const url = new URL(buildOpenCodeUrl(
     `/api/session/${encodeURIComponent(sessionId)}/message/${encodeURIComponent(messageId)}`,
@@ -276,7 +329,8 @@ export const registerMarkdownImageGrantRoutes = (app, dependencies) => {
           check = (source) => checked.get(source) ?? { status: 'error' };
         } else {
           const referenced = new Set([...markdownImageSources(message), ...renderPageSources(message)]);
-          check = (source) => (referenced.has(source) ? inspect(source) : { status: 'error' });
+          const generated = toolResultImageSources(message);
+          check = (source) => (referenced.has(source) || generated.has(comparablePath(source)) ? inspect(source) : { status: 'error' });
         }
         const results = [];
         for (const source of sources) {

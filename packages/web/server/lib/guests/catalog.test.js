@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { guestAssetContentType, hasGuestFrame, inspectGuestPackage, listInstalledGuests, resolveGuestAssetPath, resolveGuestServedFile, toPublicGuest } from './catalog.js';
+import { guestAssetContentType, hasGuestFrame, inspectGuestPackage, listInstalledGuests, noteGuestPackageChanged, resolveGuestAssetPath, resolveGuestServedFile, toPublicGuest } from './catalog.js';
 import { setCapabilityGrants, writeExtensionPaths } from './persist.js';
 
 const writeBuiltGuest = async (root) => {
@@ -280,6 +280,27 @@ describe('page-less packages', () => {
     } finally { await fs.rm(dir, { recursive: true, force: true }); }
   });
 
+  test('a source status section publishes its path and interval and loads no frame', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-status-source-'));
+    try {
+      await fs.writeFile(path.join(dir, 'package.json'), JSON.stringify({ version: '1.0.0', openchamber: {
+        apiVersion: 1, contributes: {
+          panel: { id: 'monitor', name: 'Monitor', icon: 'pulse' },
+          statusSection: { source: { path: '/status' }, title: 'Resources' },
+          service: { entry: 'service/main.js', runtime: 'host' },
+        },
+      } }));
+      await fs.mkdir(path.join(dir, 'service'));
+      await fs.writeFile(path.join(dir, 'service/main.js'), 'console.log("service")');
+      const inspected = await inspectGuestPackage(dir);
+      expect(inspected.ok).toBe(true);
+      const row = toPublicGuest(inspected.guest);
+      expect(row).toMatchObject({ statusSource: { path: '/status', interval: 2000 }, statusTitle: 'Resources' });
+      expect(row).not.toHaveProperty('statusEntry');
+      expect(hasGuestFrame(inspected.guest)).toBe(false);
+    } finally { await fs.rm(dir, { recursive: true, force: true }); }
+  });
+
   test('a file-editor-only package validates each editor page, publishes the editors, and counts as a frame', async () => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-file-editor-'));
     try {
@@ -405,6 +426,40 @@ describe('actions and commands on the public row', () => {
   });
 });
 
+describe('an OpenCode plugin in the package', () => {
+  const writePluginGuest = async (root, plugin) => {
+    await fs.mkdir(root, { recursive: true });
+    await fs.writeFile(path.join(root, 'package.json'), JSON.stringify({
+      name: '@openchamber/teapot', version: '1.0.0',
+      openchamber: { apiVersion: 1, contributes: { panel: { id: 'teapot', name: 'Teapot', icon: 'cup' }, opencodePlugin: 'plugin' } },
+    }));
+    if (plugin) {
+      await fs.mkdir(path.join(root, 'plugin'), { recursive: true });
+      await fs.writeFile(path.join(root, 'plugin', 'package.json'), JSON.stringify(plugin));
+      await fs.writeFile(path.join(root, 'plugin', 'index.js'), 'export default { id: "teapot", setup: async () => {} }');
+    }
+  };
+
+  test('the install refuses a missing folder and lists a good one on the row', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-guest-plugin-'));
+    const root = path.join(dir, 'teapot');
+    await writePluginGuest(root, null);
+    expect(await inspectGuestPackage(root)).toEqual({ ok: false, code: 'invalid-opencode-plugin' });
+    await writePluginGuest(root, { name: 'teapot-plugin', version: '1.0.0', type: 'module' });
+    const inspected = await inspectGuestPackage(root);
+    expect(inspected.ok).toBe(true);
+    if (inspected.ok) {
+      expect(inspected.guest.opencodePlugin).toBe('plugin');
+      const row = toPublicGuest({ ...inspected.guest, source: 'path', path: root, capabilityGrants: [] });
+      expect(row.opencodePlugin).toBe(true);
+      expect(row.capabilities).toEqual({ requested: ['opencodePlugin'], granted: [] });
+      // The plugin folder stays on the server: the row says only that there is one.
+      expect(JSON.stringify(row)).not.toContain(path.join(root, 'plugin'));
+    }
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+});
+
 describe('grant scopes', () => {
   const writeScopedGuest = async (root, filesystem) => {
     await fs.mkdir(path.join(root, 'panel'), { recursive: true });
@@ -465,5 +520,119 @@ describe('catalog cache under a store write', () => {
     } finally {
       await fs.rm(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe('package revision', () => {
+  test('a changed package shows a new revision on the next listing, past the cache', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-guest-'));
+    const persistPath = path.join(dir, 'extensions.json');
+    const guestRoot = path.join(dir, 'hello');
+    await writeBuiltGuest(guestRoot);
+    await writeExtensionPaths([guestRoot], persistPath);
+
+    const [before] = await listInstalledGuests({ persistPath });
+    expect(before.revision).toBe(0);
+    expect(toPublicGuest(before).revision).toBeUndefined();
+    noteGuestPackageChanged(persistPath, 'hello');
+    const [after] = await listInstalledGuests({ persistPath });
+    expect(toPublicGuest(after).revision).toBe(1);
+
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+
+  test('a folder whose build emptied its output keeps the row it last loaded with', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-guest-'));
+    const persistPath = path.join(dir, 'extensions.json');
+    const guestRoot = path.join(dir, 'hello');
+    await writeBuiltGuest(guestRoot);
+    await writeExtensionPaths([guestRoot], persistPath);
+    expect((await listInstalledGuests({ persistPath })).map((guest) => guest.id)).toEqual(['hello']);
+
+    await fs.rm(path.join(guestRoot, 'panel', 'main.js'));
+    noteGuestPackageChanged(persistPath, 'hello');
+    expect((await listInstalledGuests({ persistPath })).map((guest) => guest.id)).toEqual(['hello']);
+
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+});
+
+describe('session events', () => {
+  test('a service-only subscriber publishes its events and whether it reads their text, and loads no frame', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-session-events-'));
+    try {
+      await fs.writeFile(path.join(dir, 'package.json'), JSON.stringify({ version: '1.0.0', openchamber: {
+        apiVersion: 1, contributes: {
+          panel: { id: 'journal', name: 'Journal', icon: 'book' },
+          service: { entry: 'service/main.js', runtime: 'host' },
+          sessionEvents: { events: ['turn-finished', 'question-asked'], content: true },
+        },
+      } }));
+      await fs.mkdir(path.join(dir, 'service'));
+      await fs.writeFile(path.join(dir, 'service/main.js'), 'console.log("service")');
+      const inspected = await inspectGuestPackage(dir);
+      expect(inspected.ok).toBe(true);
+      expect(inspected.guest.sessionEvents).toEqual({ events: ['turn-finished', 'question-asked'], content: true });
+      const row = toPublicGuest({ ...inspected.guest, capabilityGrants: [] });
+      expect(row).toMatchObject({
+        sessionEvents: { events: ['turn-finished', 'question-asked'], content: true },
+        capabilities: { requested: ['service', 'transcript'], granted: [] },
+      });
+      expect(row).not.toHaveProperty('entry');
+      expect(hasGuestFrame(inspected.guest)).toBe(false);
+    } finally { await fs.rm(dir, { recursive: true, force: true }); }
+  });
+});
+
+describe('usage providers', () => {
+  test('a quota package publishes the providers whose credentials it receives, for the dialog, and loads no frame', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-quota-'));
+    try {
+      await fs.writeFile(path.join(dir, 'package.json'), JSON.stringify({ version: '1.0.0', openchamber: {
+        apiVersion: 1, contributes: {
+          panel: { id: 'teapot-usage', name: 'Teapot Usage', icon: 'cup' },
+          service: { entry: 'service/main.js', runtime: 'host', provides: ['quota'] },
+          quota: { providers: ['teapot', 'openrouter'] },
+        },
+      } }));
+      await fs.mkdir(path.join(dir, 'service'));
+      await fs.writeFile(path.join(dir, 'service/main.js'), 'console.log("service")');
+      const inspected = await inspectGuestPackage(dir);
+      expect(inspected.ok).toBe(true);
+      expect(inspected.guest.quota).toEqual({ providers: ['teapot', 'openrouter'] });
+      const row = toPublicGuest({ ...inspected.guest, capabilityGrants: [] });
+      expect(row).toMatchObject({
+        quota: { providers: ['teapot', 'openrouter'] },
+        service: { provides: ['quota'] },
+        capabilities: { requested: ['service'], granted: [] },
+      });
+      expect(hasGuestFrame(inspected.guest)).toBe(false);
+    } finally { await fs.rm(dir, { recursive: true, force: true }); }
+  });
+});
+
+describe('notification channels', () => {
+  test('a channel package publishes its contribution for the card and the dialog, and loads no frame', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-channel-'));
+    try {
+      await fs.writeFile(path.join(dir, 'package.json'), JSON.stringify({ version: '1.0.0', openchamber: {
+        apiVersion: 1, contributes: {
+          panel: { id: 'slack-bridge', name: 'Slack Bridge', icon: 'notification-3' },
+          service: { entry: 'service/main.js', runtime: 'host', provides: ['notifications'] },
+          notifications: { label: 'Slack', instances: { kind: 'fixed', origin: 'https://slack.com' }, token: { header: 'authorization', scheme: 'bearer', scopes: ['chat:write'] } },
+        },
+      } }));
+      await fs.mkdir(path.join(dir, 'service'));
+      await fs.writeFile(path.join(dir, 'service/main.js'), 'console.log("service")');
+      const inspected = await inspectGuestPackage(dir);
+      expect(inspected.ok).toBe(true);
+      const row = toPublicGuest({ ...inspected.guest, capabilityGrants: [] });
+      expect(row).toMatchObject({
+        notifications: { label: 'Slack', instances: { kind: 'fixed', origin: 'https://slack.com' }, token: { scheme: 'bearer', username: false, scopes: ['chat:write'] } },
+        service: { provides: ['notifications'] },
+        capabilities: { requested: ['service'], granted: [] },
+      });
+      expect(hasGuestFrame(inspected.guest)).toBe(false);
+    } finally { await fs.rm(dir, { recursive: true, force: true }); }
   });
 });

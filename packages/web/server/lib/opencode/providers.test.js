@@ -308,6 +308,58 @@ describe('custom provider config persistence', () => {
     });
   });
 
+  test('a form save keeps the type of a hand-marked image model', () => {
+    const configPath = path.join(projectDir, '.opencode', 'opencode.json');
+    writeJson(configPath, {
+      providers: {
+        wawa: {
+          name: 'Wawa',
+          package: 'aisdk:@ai-sdk/openai-compatible',
+          env: ['WAWA_KEY'],
+          settings: { baseURL: 'https://wawa.example.com/v1' },
+          models: { flare: { modelID: 'flare', name: 'Flare', type: 'image' } },
+        },
+      },
+    });
+
+    // The form manages no model type, so its payload has none.
+    upsertProviderConfig('wawa', {
+      name: 'Wawa',
+      env: ['WAWA_KEY'],
+      settings: { baseURL: 'https://wawa.example.com/v1' },
+      models: { flare: { name: 'Flare' } },
+    }, projectDir, 'project');
+
+    expect(readJson(configPath).providers.wawa.models.flare).toEqual({ modelID: 'flare', name: 'Flare', type: 'image' });
+  });
+
+  test('a form save writes the type it sends, any type OpenCode knows', () => {
+    const configPath = path.join(projectDir, '.opencode', 'opencode.json');
+    writeJson(configPath, {
+      providers: {
+        wawa: {
+          name: 'Wawa',
+          package: 'aisdk:@ai-sdk/openai-compatible',
+          env: ['WAWA_KEY'],
+          settings: { baseURL: 'https://wawa.example.com/v1' },
+          models: { flare: { modelID: 'flare', name: 'Flare', type: 'image' } },
+        },
+      },
+    });
+
+    upsertProviderConfig('wawa', {
+      name: 'Wawa',
+      env: ['WAWA_KEY'],
+      settings: { baseURL: 'https://wawa.example.com/v1' },
+      models: { flare: { name: 'Flare', type: 'chat' }, judge: { name: 'Judge', type: 'decision' } },
+    }, projectDir, 'project');
+
+    expect(readJson(configPath).providers.wawa.models).toEqual({
+      flare: { modelID: 'flare', name: 'Flare', type: 'chat' },
+      judge: { modelID: 'judge', name: 'Judge', type: 'decision' },
+    });
+  });
+
   test('accepts a native v2 payload and keeps the entry in providers', () => {
     const configPath = path.join(projectDir, '.opencode', 'opencode.json');
     writeJson(configPath, {

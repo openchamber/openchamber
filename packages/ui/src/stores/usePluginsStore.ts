@@ -15,7 +15,10 @@ import { runtimeFetch } from '@/lib/runtime-fetch';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 
 export type PluginScope = 'user' | 'project';
-export type PluginParsedKind = 'npm' | 'path' | 'git';
+/** `control` is an OpenCode 2 entry such as `-name` or `*` that turns known plugins off or on. */
+export type PluginParsedKind = 'control' | 'npm' | 'path' | 'git';
+
+export type PluginSwitchState = 'on' | 'off' | 'unavailable' | 'unreadable' | 'overridden';
 
 export interface PluginEntry {
   id: string;
@@ -26,6 +29,12 @@ export interface PluginEntry {
   parsedKind: PluginParsedKind;
   /** The config file that declares the entry; relative path specs resolve against its directory. */
   sourcePath?: string;
+  /** The `plugin:` resource an `integration.use` policy matches; OpenChamber's managed layer denies it. */
+  policyResource?: string;
+  /** OpenChamber's switch state; unavailable when it cannot be applied here, unreadable when its store cannot be read, overridden when a rule in the OpenCode config keeps the plugin loading. */
+  switchState?: PluginSwitchState;
+  /** Host-resolved local target used only to filter duplicate discovery records. */
+  resolvedPath?: string;
 }
 
 export interface PluginFile {
@@ -35,6 +44,12 @@ export interface PluginFile {
   /** `file` is a `.ts`/`.js` OpenChamber can open; `package` is a plugin directory (or a v1 `plugin/` file) OpenCode loads but the page only lists. */
   kind: 'file' | 'package';
   absolutePath?: string;
+  /** The `plugin:` resource an `integration.use` policy matches for this local plugin. */
+  policyResource?: string;
+  /** OpenChamber's switch state; unavailable when it cannot be applied here, unreadable when its store cannot be read, overridden when a rule in the OpenCode config keeps the plugin loading. */
+  switchState?: PluginSwitchState;
+  /** Host-resolved local target used only to filter duplicate discovery records. */
+  resolvedPath?: string;
 }
 
 export interface PluginDraft {
@@ -46,7 +61,7 @@ export interface PluginDraft {
   content: string;
 }
 
-export type PluginMutationResult = {
+type PluginMutationResult = {
   ok: boolean;
   reloadFailed?: boolean;
   message?: string;
@@ -54,6 +69,8 @@ export type PluginMutationResult = {
   requiresManualRestart?: boolean;
   /** The server refused the spec: OpenCode cannot load it. Nothing was written. */
   invalidSpec?: boolean;
+  /** The server refused a switch: a rule in the OpenCode config would beat it. Nothing was written. */
+  switchOverridden?: boolean;
 };
 
 export type RegistryResult =
@@ -96,6 +113,8 @@ interface PluginsStore {
   runtime: PluginRuntimeSnapshot;
   isCheckingUpdates: boolean;
   packageUpdates: Record<string, PluginPackageUpdate>;
+  /** Bumped after a switch writes a policy and on config events, so every policy reader re-reads. */
+  policyRevision: number;
 
   setSelected: (id: string | null) => void;
   setDraft: (draft: PluginDraft | null) => void;
@@ -107,6 +126,9 @@ interface PluginsStore {
   updatePackage: (target: string) => Promise<boolean>;
   createEntry: (input: { spec: string; options?: Record<string, unknown>; scope: PluginScope }) => Promise<PluginMutationResult>;
   updateEntry: (id: string, input: { spec?: string; options?: Record<string, unknown> }) => Promise<PluginMutationResult>;
+  setEntryEnabled: (id: string, enabled: boolean) => Promise<PluginMutationResult>;
+  setFileEnabled: (id: string, enabled: boolean) => Promise<PluginMutationResult>;
+  bumpPolicyRevision: () => void;
   deleteEntry: (id: string) => Promise<PluginMutationResult>;
   readFile: (id: string) => Promise<{ fileName: string; scope: PluginScope; content: string } | null>;
   createFile: (input: { fileName: string; content: string; scope: PluginScope }) => Promise<PluginMutationResult>;
@@ -200,6 +222,7 @@ export const usePluginsStore = create<PluginsStore>()(
         runtime: { kind: 'idle' },
         isCheckingUpdates: false,
         packageUpdates: {},
+        policyRevision: 0,
 
         setSelected: (id) => set({ selectedId: id }),
 
@@ -395,6 +418,38 @@ export const usePluginsStore = create<PluginsStore>()(
           return result;
         },
 
+        setEntryEnabled: async (id, enabled) => {
+          return runPluginMutation(
+            enabled ? 'Enabling plugin…' : 'Disabling plugin…',
+            async (configDirectory) => runtimeFetch(
+              buildPluginsUrl(`/api/config/plugins/entry/${encodeURIComponent(id)}/enabled`, configDirectory),
+              {
+                method: 'PUT',
+                headers: buildJsonHeaders(configDirectory),
+                body: JSON.stringify({ enabled }),
+              },
+            ),
+            get,
+          );
+        },
+
+        setFileEnabled: async (id, enabled) => {
+          return runPluginMutation(
+            enabled ? 'Enabling plugin…' : 'Disabling plugin…',
+            async (configDirectory) => runtimeFetch(
+              buildPluginsUrl(`/api/config/plugins/file/${encodeURIComponent(id)}/enabled`, configDirectory),
+              {
+                method: 'PUT',
+                headers: buildJsonHeaders(configDirectory),
+                body: JSON.stringify({ enabled }),
+              },
+            ),
+            get,
+          );
+        },
+
+        bumpPolicyRevision: () => set((state) => ({ policyRevision: state.policyRevision + 1 })),
+
         deleteEntry: async (id) => {
           const entryToDelete = get().entries.find((plugin) => plugin.id === id);
           const result = await runPluginMutation('Deleting plugin entry…', async (configDirectory) => {
@@ -556,6 +611,7 @@ async function runPluginMutation(
 
     if (!response.ok) {
       if (payload?.code === 'UNLOADABLE_SPEC') return { ok: false, invalidSpec: true };
+      if (payload?.code === 'SWITCH_OVERRIDDEN') return { ok: false, switchOverridden: true };
       throw new Error(payload?.error || 'Failed to update plugin configuration');
     }
 

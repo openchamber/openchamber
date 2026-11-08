@@ -51,6 +51,7 @@ export const resolveBranchIntegrationRef = async ({
   if (target.kind === 'local') return target.branch;
 
   await runPlannedFetch(target);
+  if (!git.getGitLog) throw new BoundGitNetworkOperationError('invalid-terminal-state');
   const fetched = await git.getGitLog(directory, { to: target.destinationRef, maxCount: 1 });
   const sha = fetched.latest?.hash.trim();
   if (!sha || !SHA_PATTERN.test(sha)) {

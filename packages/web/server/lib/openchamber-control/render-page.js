@@ -127,14 +127,21 @@ const ANSWERED_NOTE = "The user answered on the page. summary is their choice in
  */
 export const RENDER_PAGE_CLOSED_IN_CHAT_NOTE = "The user did not answer on the page and wrote in the chat instead; their message follows this result. Continue from that message and don't ask the same question on a page again unless they want it.";
 
+const UI_NOT_DRAWN_NOTE = "The chat could not draw this ui, so the user saw its source instead of fields. Fix the program from the errors below and call again.";
+
+const DECLINED_NOTE = "The user declined to answer on the page. Don't choose for them and don't ask the same question again. Stop here: say in one short line that you left it, and wait for their next message.";
+
+const CHAT_SENT_EARLIER_NOTE = "The page did not wait: the user had already written in the chat before it appeared, and that message follows this result. They wrote it without seeing the page, so it is not an answer to it. Continue from that message; show the page again only if it still fits.";
+
 const pageKey = (sessionId, callId) => `${sessionId}\u0000${callId}`;
 
 /**
  * Pages that wait for the user's answer, keyed by session and tool call. The
  * call's request stays open while its page waits: an answer resolves it, and an
  * aborted request (the user stopped the turn, wrote in the chat, or OpenCode
- * went away) drops it. Nothing is kept once a call ends, so a page answers at
- * most once and a stale answer finds nothing to resolve.
+ * went away) drops it, and so does the end of the session's turn (`release`).
+ * Nothing is kept once a call ends, so a page answers at most once and a stale
+ * answer finds nothing to resolve.
  *
  * `onWaitChange` hears when a page starts and stops waiting, so the server can
  * show the session as waiting for the user the way it does for a form.
@@ -162,8 +169,7 @@ export const createPageAnswers = ({ onWaitChange = () => {} } = {}) => {
       return;
     }
     const onAbort = () => {
-      waiting.delete(key);
-      announce({ type: 'settled', sessionId, callId });
+      if (waiting.delete(key)) announce({ type: 'settled', sessionId, callId });
       reject(new OpenChamberControlError('The page stopped waiting before the user answered', 499));
     };
     signal?.addEventListener('abort', onAbort, { once: true });
@@ -181,6 +187,26 @@ export const createPageAnswers = ({ onWaitChange = () => {} } = {}) => {
     const callId = isString(input.callId) ? input.callId.trim() : '';
     if (!sessionId || !callId) {
       throw new OpenChamberControlError('sessionId and callId are required', 400);
+    }
+    // A client that cannot draw a page's ui reports it, so the agent hears the
+    // parser's errors instead of waiting on fields nobody can see.
+    if (Array.isArray(input.notDrawn)) {
+      const errors = input.notDrawn.filter(isString).map((error) => error.slice(0, 500)).slice(0, 20);
+      const resolveNotDrawn = waiting.get(pageKey(sessionId, callId));
+      if (!resolveNotDrawn) {
+        throw new OpenChamberControlError('This page is no longer waiting for an answer', 404);
+      }
+      resolveNotDrawn({ answered: false, reason: 'ui-not-drawn', errors });
+      return { answered: false };
+    }
+    // The user declined: the call ends without an answer they did not mean.
+    if (input.declined === true) {
+      const resolveDeclined = waiting.get(pageKey(sessionId, callId));
+      if (!resolveDeclined) {
+        throw new OpenChamberControlError('This page is no longer waiting for an answer', 404);
+      }
+      resolveDeclined({ answered: false, reason: 'declined' });
+      return { answered: false };
     }
     const summary = isString(input.summary) ? input.summary.trim() : '';
     if (!summary) {
@@ -202,44 +228,80 @@ export const createPageAnswers = ({ onWaitChange = () => {} } = {}) => {
     return { answered: true };
   };
 
-  return { wait, answer };
+  /**
+   * The session's turn ended, so these pages wait for nobody. In one OpenCode
+   * no call outlives its turn; this finds a call a second OpenCode on the same
+   * database runs (see DOCUMENTATION.md). Its request stays open on purpose:
+   * ending it would wake that OpenCode's turn beside the one the user is in.
+   */
+  const release = (sessionId) => {
+    for (const key of waiting.keys()) {
+      if (!key.startsWith(pageKey(sessionId, ''))) continue;
+      waiting.delete(key);
+      announce({ type: 'settled', sessionId, callId: key.slice(pageKey(sessionId, '').length) });
+    }
+  };
+
+  return { wait, answer, release };
 };
 
 /**
  * `render.page`: the chat draws the page straight from the call's input, so
  * this checks that the input is a page the chat will draw and that the tool is
  * still on (a plugin generated before it was switched off must not keep
- * drawing). With `awaitAnswer` the call then waits for the user's answer.
+ * drawing). With `awaitAnswer` the call then waits for the user's answer,
+ * unless `hasUnreadChat` finds a message the user sent before the page
+ * appeared: OpenCode delivers that message only once this call returns, so
+ * waiting would hold it back and let an answer on the page reach the agent
+ * first. The plugin's prompt hook cannot catch it, since it fired before the
+ * page existed.
  */
-export const createRenderPageAction = ({ isEnabled, pageAnswers }) => async (input, { sessionId, callId, directory, signal } = {}) => {
+export const createRenderPageAction = ({ isEnabled, pageAnswers, hasUnreadChat }) => async (input, { sessionId, callId, directory, signal } = {}) => {
   if (!await isEnabled()) {
     throw new OpenChamberControlError('The render tool is turned off in OpenChamber settings', 403);
   }
+  // A page is an HTML document or a ui program in the UI block language; the
+  // chat draws the program with its own components (packages/ui
+  // components/chat/uiBlocks). The server cannot parse that language: a
+  // client that cannot draw it reports so through the answer route.
   const html = isString(input.html) ? input.html : '';
-  if (!html.trim()) {
-    throw new OpenChamberControlError('html is required: one complete, self-contained HTML document. Send html and title together in one call', 400);
+  const ui = isString(input.ui) ? input.ui : '';
+  if (html.trim() && ui.trim()) {
+    throw new OpenChamberControlError('Send html or ui, not both', 400);
   }
-  if (html.length > RENDER_PAGE_MAX_HTML_LENGTH) {
-    throw new OpenChamberControlError(`html is ${html.length} characters; the limit is ${RENDER_PAGE_MAX_HTML_LENGTH}. Make the page smaller, for example by drawing data with a script instead of writing out every element`, 400);
+  if (!html.trim() && !ui.trim()) {
+    throw new OpenChamberControlError('html or ui is required: one complete, self-contained HTML document, or one complete openui-lang program. Send it and title together in one call', 400);
+  }
+  const [field, content] = ui.trim() ? ['ui', ui] : ['html', html];
+  if (content.length > RENDER_PAGE_MAX_HTML_LENGTH) {
+    throw new OpenChamberControlError(`${field} is ${content.length} characters; the limit is ${RENDER_PAGE_MAX_HTML_LENGTH}. Make the page smaller`, 400);
   }
   const title = (isString(input.title) ? input.title.trim() : '')
-    || renderPageTitleFromHtml(html)
+    || (html ? renderPageTitleFromHtml(html) : '')
     || RENDER_PAGE_FALLBACK_TITLE;
   if (title.length > RENDER_PAGE_MAX_TITLE_LENGTH) {
     throw new OpenChamberControlError(`title is ${title.length} characters; the limit is ${RENDER_PAGE_MAX_TITLE_LENGTH}`, 400);
   }
-  const hidden = await describeHiddenImages(html, directory);
+  const hidden = html ? await describeHiddenImages(html, directory) : null;
+  const withHidden = (result, note) => (hidden
+    ? { ...result, note: `${note} ${hidden.note}`, images: hidden.images }
+    : { ...result, note });
   if (input.awaitAnswer !== true) {
-    return hidden
-      ? { shown: true, title, note: `${SHOWN_NOTE} ${hidden.note}`, images: hidden.images }
-      : { shown: true, title, note: SHOWN_NOTE };
+    return withHidden({ shown: true, title }, SHOWN_NOTE);
   }
   // A plugin generated before pages could wait sends no call id.
   if (!sessionId || !callId) {
     throw new OpenChamberControlError('This connection cannot wait for an answer on a page; show the page without awaitAnswer and ask in text', 400);
   }
+  if (await hasUnreadChat(sessionId)) {
+    return withHidden({ title, answer: { answered: false, reason: 'chat-sent-earlier' } }, CHAT_SENT_EARLIER_NOTE);
+  }
   const answer = await pageAnswers.wait({ sessionId, callId, title, directory, signal });
-  return hidden
-    ? { title, answer, note: `${ANSWERED_NOTE} ${hidden.note}`, images: hidden.images }
-    : { title, answer, note: ANSWERED_NOTE };
+  if (answer.reason === 'ui-not-drawn') {
+    return { title, answer: { answered: false, reason: 'ui-not-drawn' }, note: [UI_NOT_DRAWN_NOTE, ...answer.errors].join('\n') };
+  }
+  if (answer.reason === 'declined') {
+    return { title, answer, note: DECLINED_NOTE };
+  }
+  return withHidden({ title, answer }, ANSWERED_NOTE);
 };

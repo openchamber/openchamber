@@ -1,8 +1,9 @@
 # Small Model
 
 Background LLM calls for OpenChamber's own features — session titles, goal
-distillation, session assist, the changes walkthrough. Every call goes to the
-running OpenCode through `POST /api/experimental/generate`; OpenChamber never talks to a
+distillation, session assist, the changes walkthrough, the dictation
+correction pass. Every call goes to the
+running OpenCode through `POST /api/experimental/generate/text`; OpenChamber never talks to a
 provider directly and never handles a provider credential.
 
 ## Security boundary
@@ -34,9 +35,26 @@ credentials, the provider dispatch and the token refresh. Routes live under
 ## Free tier and the session fallback
 
 OpenCode's free zen models are listed as enabled without a login, but
-`/api/experimental/generate` refuses them ("free tier can only be used in OpenCode") and
-`/api/model/default` answers nothing, so on a fresh install with no provider
-login `generateSmallModelText` throws `404`. What happens next is per feature:
+`/api/experimental/generate/text` refuses every one of them: "free tier can
+only be used in OpenCode" on early 2.x, 429 "Free usage limit reached. Free
+models work in OpenCode" on 2.2.1 (checked 2026-10-29). Without a zen login
+OpenCode puts the placeholder `apiKey: "public"` in those models' `settings`
+on `GET /api/model` and `/api/model/default`; a zen login or key removes the
+placeholder and enables the paid models.
+
+A model carrying the placeholder is never resolved here, at any step of
+*Model resolution*: a saved Small Model, a walkthrough model, an
+`agents.title.model`, the session's own model and OpenCode's default all count
+as unset when they name one. Since 2.2 `/api/model/default` answers a free zen
+model (`big-pickle`) without a login, so this is what keeps the fresh install
+at "no small model" instead of a call that always fails. The pickers leave
+them out for the same reason (*Which providers the pickers may offer*). A
+model is told apart by the placeholder, which is OpenCode's own test in its
+zen plugin (`plugin/provider/opencode.ts`), and never by a `-free` name:
+with a zen login the free models stay listed, without the placeholder.
+
+On a fresh install with no provider login `generateSmallModelText` therefore
+throws `404`. What happens next is per feature:
 
 - Commit message and PR description (`packages/ui/src/lib/gitApi.ts`) fall back
   to `POST /api/session/:id/generate`, which runs on the open session's own
@@ -50,6 +68,8 @@ login `generateSmallModelText` throws `404`. What happens next is per feature:
   is also allowed when Jev checks it instead (`../session-goal`).
 - Session assist is server-side and simply does nothing when
   `describeSmallModel` answers null.
+- The dictation correction pass (`../dictation/transcript-correction.js`)
+  inserts the text as heard; Settings → Voice says so under the option.
 - Notes summarization and spoken summaries keep the original text and silence
   the 404.
 
@@ -84,15 +104,16 @@ Five things are decided here, in order:
    session's, or the composer's for commit messages, PR descriptions, spoken
    summaries, the diff walkthrough and extensions) —
    `source: 'session-provider-small'` — found by `pickSmallModelInProvider`:
-   the newest enabled, active, text-in text-out model of the first family in
-   `SMALL_MODEL_FAMILY_PRIORITY` (`gpt-luna`, `gemini-flash-lite`,
-   `gemini-flash`, `claude-haiku`) that the provider has. This is
-   OpenCode's own list for its session titles (`Catalog.model.small`),
-   repeated here because OpenCode does not expose it over HTTP. Families are
-   models.dev `family` values, not model ids (`gpt-luna` is the family of
-   `gpt-5.6-luna`); a model without one — a custom provider, a subscription
-   outside the catalog — gets its family read from its id (`familyOf`:
-   luna / flash-lite / flash / haiku). A provider with none of these families
+   the newest enabled, active, text-in text-out model of the first tier in
+   `SMALL_MODEL_TIER_PRIORITY` (`flash-lite`, `flash`, `luna`, `haiku`) that
+   the provider has. When the caller's own model is already in one of these
+   tiers, it is used as is (`source: 'session-model'`) and the scan does not
+   run. The tiers are OpenCode's own for its session titles
+   (`Catalog.model.small`), repeated here because OpenCode does not expose
+   them over HTTP. A tier is matched as a name in the models.dev `family` and
+   the model id together (`smallModelTierOf`), so every lab's flash counts:
+   `deepseek-flash`, `glm-flash`, and `mimo-v2.6-flash`, whose catalog family
+   is just `mimo`. A provider with none of these tiers
    takes the caller's own model (`preferredModelID`) — `source:
    'session-model'`: costlier than a small model elsewhere, but never another
    provider's subscription. OpenCode's titles end the same way.
@@ -114,10 +135,18 @@ their provider. Content goes only to the provider the user works with, the
 model they picked, the small model they set for OpenCode, or the default they
 configured.
 
+Inside one provider the tier order differs from OpenCode's, which puts luna
+first. A gateway such as OpenCode Go sells many labs under one provider, with
+a monthly allowance per model: there luna has a small allowance and keeps
+requests at OpenAI for 30 days, while the flash models are open models with
+larger allowances and no retention. A session on DeepSeek V4.1 Flash had its
+goal checks sent to GPT 6 Luna; it now stays on its own model, and a session
+on a large model gets the provider's flash before its luna.
+
 ## Thinking variants
 
 The settings override and OpenCode's `title` agent can each name a thinking
-variant. It travels as the model's `variant` on `/api/experimental/generate`.
+variant. It travels as the model's `variant` on `/api/experimental/generate/text`.
 The variant is kept when the catalog does not know the model, because a
 discovery gap is not evidence against the choice. When the catalog knows the
 model, the variant must be listed; a missing or malformed variant list counts as
@@ -138,7 +167,7 @@ normal family order.
 
 ## Prompt shape
 
-`/api/experimental/generate` takes one prompt and no system message, so `system` leads the
+`/api/experimental/generate/text` takes one prompt and no system message, so `system` leads the
 prompt, separated by a blank line.
 
 Input clamp: the prompt is measured against the resolved model's `limit.context`
@@ -154,7 +183,7 @@ what an oversized prompt means:
   model instead of returning confident nonsense.
 
 Output budget: `maxOutputTokens` is capped at the model's `limit.output`, and
-the **same number** is reserved from the input allowance. `/api/experimental/generate` takes
+the **same number** is reserved from the input allowance. `/api/experimental/generate/text` takes
 no output budget of its own, so this number only shapes the reserve — but the
 two sides must stay equal or a caller that asks for a large answer overruns the
 context and the failure looks like a truncation bug.
@@ -179,9 +208,11 @@ to that message instead of the generic "choose another model" text.
 
 OpenCode 2 can reject an explicit model before its cold catalog finishes loading;
 plugin-provided models (Claude Code) stay unavailable for 20-40 s after OpenCode
-starts because plugins for the global location load lazily. An
-`InvalidRequestError` whose message exactly names the selected model as
-`Model unavailable: provider/model` is retried with exponential backoff (0.5, 1,
+starts because plugins for the global location load lazily. Generation waits up
+to 5 s for those plugins, then answers `ServiceUnavailableError` with
+`service: 'plugin'`; a model still missing after them answers
+`ModelNotFoundError`. Either, the second only when it names the selected model,
+is retried with exponential backoff (0.5, 1,
 2, 4, 8, 16 s, ~31 s in total), with the same model and prompt. The rejection
 precedes provider dispatch, so retries cost no tokens. Cancellation also stops the wait. Other errors are not retried.
 If the model remains unavailable, the route returns 503 with
@@ -190,7 +221,7 @@ generation own their error toast and suppress the shared request toast.
 
 ## Structured output
 
-`/api/experimental/generate` has no structured-output mode. `responseSchema` is therefore
+`/api/experimental/generate/text` has no structured-output mode. `responseSchema` is therefore
 emulated: the schema is appended to the prompt as "Reply with JSON matching this
 schema and nothing else: …", and the reply is parsed here. A ```json fence is
 stripped. An unparseable reply is retried **once** — a model that ignored the
@@ -207,7 +238,9 @@ capability is not knowable before the call, and callers must read `null` as
 `listAuthenticatedProviders(directory)` answers one question for the Small Model and
 Changes Walkthrough pickers: which providers OpenCode can call right now. A
 provider counts when it has at least one enabled model in `GET /api/model` —
-the same test OpenCode applies before letting a chat turn use it. The model
+the same test OpenCode applies before letting a chat turn use it — other than
+zen's free models without a login (*Free tier and the session fallback*). On
+a setup with no login both pickers are therefore empty. The model
 list is directory-scoped, so `directory` scopes this answer the same way
 `describeSmallModel` scopes its own; without one the server default applies,
 and a default directory with no model config would report no providers for

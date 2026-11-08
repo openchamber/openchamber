@@ -12,7 +12,9 @@ import { ChatView } from '@/components/views/ChatView';
 import { PlanView } from '@/components/views/PlanView';
 import { SettingsView } from '@/components/views/SettingsView';
 import { AppLinkConfirmDialog } from '@/components/chat/AppLinkConfirmDialog';
+import { SnippetQuickCreateDialog } from '@/components/snippets/SnippetQuickCreateDialog';
 import { SharedTrustConfirmDialog } from '@/components/projects/SharedTrustConfirmDialog';
+import { OpenCodeTrustDialog } from '@/components/projects/OpenCodeTrustDialog';
 import { SpaceAccessDialog } from '@/components/session/spaces/SpaceAccessDialog';
 import { SpaceActionsSheet, SpaceDeleteDialog } from '@/components/session/spaces/SpaceActions';
 import { SpaceApplyDialog } from '@/components/session/spaces/SpaceApplyDialog';
@@ -32,6 +34,8 @@ import { useWindowTitle } from '@/hooks/useWindowTitle';
 import { useEnterprisePolicySync } from '@/hooks/useEnterprisePolicySync';
 import { useRoutingSync } from '@/hooks/useRoutingSync';
 import { useSourceControlProviderSync } from '@/hooks/useSourceControlProviderSync';
+import { useTrackerProviderSync } from '@/hooks/useTrackerProviderSync';
+import { useQuotaProviderSync } from '@/hooks/useQuotaProviderSync';
 import { useAgentMemorySync } from '@/hooks/useAgentMemorySync';
 import { resolvePlanRequestOwner } from '@/hooks/useProjectContextOwner';
 import { opencodeClient } from '@/lib/opencode/client';
@@ -53,20 +57,13 @@ import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useSourceControlAuthStore } from '@/stores/useSourceControlAuthStore';
 import { useSourceControlProviderRegistry } from '@/lib/source-control/providers/registry';
 import { refreshTrackers } from '@/stores/useTrackerAuthStore';
-import { useGitStore } from '@/stores/useGitStore';
-import { useMcpConfigStore, type McpDraft } from '@/stores/useMcpConfigStore';
-import { useProjectsStore } from '@/stores/useProjectsStore';
-import {
-  listProjectWorktrees,
-  partitionWorktreesByRegisteredProject,
-  worktreeMapsEqual,
-} from '@/lib/worktrees/worktreeManager';
-import { refreshWorktreeTopologyForChange } from '@/lib/worktrees/worktreeTopologyRefresh';
 import { useUIStore } from '@/stores/useUIStore';
 import { closeTopmostBackLayer } from '@/lib/mobileBackLayers';
 import { useUpdateStore } from '@/stores/useUpdateStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
+import { openSessionFromToast } from '@/sync/session-navigation';
 import { SyncProvider } from '@/sync/sync-context';
+import { toast } from '@/components/ui';
 
 import { SyncAppEffects } from './AppEffects';
 import { BusyDots } from '@/components/ui/busy-dots';
@@ -75,6 +72,8 @@ import { MobileHeader } from './MobileHeader';
 import { MobileInstancesSurface } from './MobileInstancesSurface';
 import { MobileSessionsSheet } from './MobileSessionsSheet';
 import { MobileFullscreenSurface } from './MobileFullscreenSurface';
+import { fileNameOf, sessionLineage } from './mobileFileRequest';
+import { connectMobileSettingsNavigation } from './mobileSettingsNavigation';
 import { UsageStatsView } from '@/components/views/usage/UsageStatsView';
 import { ArchiveSessionsView } from '@/components/views/ArchiveView';
 import { MobileSourceBoard } from '@/components/sourceBoard/SourceBoardView';
@@ -84,18 +83,21 @@ import { MobileWorkspaceDrawer } from './MobileWorkspaceDrawer';
 import { shownMobileWorkspaceTabs, type MobileWorkspaceTab } from '@/lib/mobileWorkspaceTabs';
 import { DedicatedMobileAppProvider, type MobileAppActions } from './mobileAppContext';
 import { autoConnectLastInstance, getAutoConnectTargetLabel, logMobileConnectEvent, reprobeActiveConnection, suppressAutoConnectUntilManualConnect, type AutoConnectOutcome } from './mobileConnections';
-import { isCapacitorMobileApp, useNativeAndroidBackButton, useNativeMobileChrome, useNativeMobileLifecycle } from './mobileNativeChrome';
+import { isCapacitorMobileApp, useMobileWebBackButton, useNativeAndroidBackButton, useNativeMobileChrome, useNativeMobileLifecycle } from './mobileNativeChrome';
 import { reconnectAppForTransportSwitch, resetAppForRuntimeEndpointChange } from './runtimeEndpointReset';
 import { useAppFontEffects } from './useAppFontEffects';
 import { useFontsReady } from './useFontsReady';
 import { useDeepLinkHandlers, useDeepLinkSource } from './deepLinkNavigation';
 import { useEdgeSwipe } from './useEdgeSwipe';
+import { useMobileChatInsets } from '@/lib/mobileChatInsets';
 import { useNativePushRegistration } from './useNativePushRegistration';
 import { IpadSidebarResizeHandle } from './IpadSidebarResizeHandle';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import {
   IPAD_LEFT_SIDEBAR_WIDTH,
   IPAD_RIGHT_SIDEBAR_WIDTH,
   IPAD_WORKSPACE_SIDEBAR_MAX_WIDTH,
+  useIpadPanelSlide,
   useIpadSidebarResize,
 } from './ipadSidebarResize';
 
@@ -134,7 +136,7 @@ const NATIVE_RESUME_SYNC_EVENT_THROTTLE_MS = 1_000;
 /** The fullscreen app-level surfaces, reachable from the sessions drawer
     footer. Exactly one can be open at a time — opening another replaces it,
     closing returns to the chat. The sessions drawer and the workspace drawer
-    (Changes / Files / Terminal / Notes / MCP) are separate layers. */
+    (Status / Changes / Files / Terminal / Notes) are separate layers. */
 type MobileSurface = 'archive' | 'board' | 'overview' | 'instances' | 'scheduled' | 'settings' | 'update' | 'usage';
 
 const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onActiveConnectionDeleted }) => {
@@ -158,7 +160,10 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
   // Phone right drawer with the workspace tabs; the tab persists across
   // open/close so the right-edge swipe reopens where the user left off.
   const [workspaceOpen, setWorkspaceOpen] = React.useState(false);
-  const [workspaceTab, setWorkspaceTab] = React.useState<MobileWorkspaceTab>('changes');
+  const [workspaceTab, setWorkspaceTab] = React.useState<MobileWorkspaceTab>(() => {
+    const { mobileWorkspaceTabOrder, mobileWorkspaceHiddenTabs } = useUIStore.getState();
+    return shownMobileWorkspaceTabs(mobileWorkspaceTabOrder, mobileWorkspaceHiddenTabs)[0];
+  });
   // Opening the drawer itself lands on the last tab, unless the user has since
   // hidden it in Settings; then on their first tab. A trigger that asks for a
   // tab (a changed file in the chat) sets it on its own and opens it hidden or not.
@@ -173,15 +178,12 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
   const [openPlan, setOpenPlan] = React.useState<{ id: string; title: string; projectRef: ProjectRef } | null>(null);
   const [settingsInitialMobileStage, setSettingsInitialMobileStage] = React.useState<'nav' | 'page-content'>('nav');
   // When set, the Changes surface opens directly into the per-file diff for this path.
-  const [pendingChangesDiff, setPendingChangesDiff] = React.useState<{ path: string; staged: boolean } | null>(null);
+  const [pendingChangesDiff, setPendingChangesDiff] = React.useState<{ path: string; staged: boolean; scope?: 'turn' } | null>(null);
   const setSettingsPage = useUIStore((state) => state.setSettingsPage);
   const wideChatLayoutEnabled = useUIStore((state) => state.wideChatLayoutEnabled);
   const updateAvailable = useUpdateStore((state) => state.available);
   const updateRuntimeType = useUpdateStore((state) => state.runtimeType);
   const showCapacitorOnlyFeatures = React.useMemo(() => isCapacitorMobileApp(), []);
-  const mcpServers = useMcpConfigStore((state) => state.mcpServers);
-  const setMcpDraft = useMcpConfigStore((state) => state.setMcpDraft);
-  const setSelectedMcp = useMcpConfigStore((state) => state.setSelectedMcp);
 
   // NOTE: pendingChangesDiff is intentionally NOT cleared on close — it keys
   // the persistent Changes pane in the workspace drawer, and clearing it would
@@ -203,6 +205,11 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
     setSettingsInitialMobileStage(stage);
     openSurface('settings');
   }, [openSurface]);
+
+  React.useEffect(
+    () => connectMobileSettingsNavigation(MOBILE_SETTINGS_PAGES, openSettingsSurface),
+    [openSettingsSurface],
+  );
 
   // Tablet: sessions live in a persistent full-height left sidebar instead of
   // the phone's drawer. Everything else — the workspace drawer, the header, the
@@ -233,14 +240,56 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
   }, []);
 
   // The agent asked for a file to be shown: open the files drawer and stage
-  // the path the way a chat file link does, so the surface routes to it.
+  // the path the way a chat file link does, so the surface routes to it. A
+  // session the user is not looking at only announces the file, and staging
+  // waits for the tap: a stored path would send the files drawer of the session
+  // on screen to that file the next time it opens.
   React.useEffect(() => subscribeOpenchamberEvents((event) => {
     if (event.type !== 'file-open-request') return;
     const directory = event.directory ?? useDirectoryStore.getState().currentDirectory;
     if (!directory) return;
-    useUIStore.getState().openContextFile(directory, event.path);
-    openFilesSurface();
-  }), [openFilesSurface]);
+    const showFile = () => {
+      useUIStore.getState().openContextFile(directory, event.path);
+      openFilesSurface();
+    };
+    const { sessionId } = event;
+    if (!sessionId) {
+      showFile();
+      return;
+    }
+    // A subagent can ask before its session reaches the global list, so a
+    // session the list does not know is read from the server.
+    const readSession = async (id: string) => useGlobalSessionsStore.getState().entityById.get(id)
+      ?? await opencodeClient.getSession(id).catch(() => null);
+    void sessionLineage(sessionId, readSession).then((lineage) => {
+      const isViewed = () => {
+        const { currentSessionId } = useSessionUIStore.getState();
+        return currentSessionId === sessionId || lineage.some((session) => session.id === currentSessionId);
+      };
+      if (isViewed()) {
+        showFile();
+        return;
+      }
+      const title = lineage[0]?.title;
+      toast.info(fileNameOf(event.path), {
+        id: `file-open-${sessionId}:${event.path}`,
+        description: title
+          ? t('chat.fileOpenRequest.toast.description', { session: title })
+          : t('chat.fileOpenRequest.toast.descriptionUntitled'),
+        action: {
+          label: t('chat.fileOpenRequest.toast.openSession'),
+          onClick: () => {
+            openSessionFromToast(sessionId, directory);
+            closeSurface();
+            setSessionsSheetOpen(false);
+            // A folder waiting for the user's trust switches later or never, and
+            // the drawer of the session still on screen must not get the file.
+            if (isViewed()) showFile();
+          },
+        },
+      });
+    });
+  }), [closeSurface, openFilesSurface, t]);
 
   // The agent asked for a saved plan to be shown: the plan opens the way a tap
   // on it in the Project knowledge drawer opens it.
@@ -251,7 +300,7 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
     setOpenPlan({ id: event.planId, title: event.title, projectRef });
   }), []);
 
-  const openChangesSurface = React.useCallback((diff: { path: string; staged: boolean } | null = null) => {
+  const openChangesSurface = React.useCallback((diff: { path: string; staged: boolean; scope?: 'turn' } | null = null) => {
     setPendingChangesDiff(diff);
     setWorkspaceTab('changes');
     setWorkspaceOpen(true);
@@ -270,21 +319,23 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
   // side is barely wider than a tablet's short one — it stays the full-cover
   // drawer, which is the layout that actually works at that width.
   const workspaceAsPanel = roomyForPanels;
-  const workspacePanelWidth = workspaceAsPanel && workspaceOpen ? rightResize.width : 0;
-  const sidebarWidth = isTabletLayout && sidebarOpen ? leftResize.width : 0;
+  const leftSlide = useIpadPanelSlide(isTabletLayout && sidebarOpen);
+  const workspaceSlide = useIpadPanelSlide(workspaceAsPanel && workspaceOpen);
+  // A layout that loses the panel (a tablet folded to a phone, a panel turned
+  // into the drawer) drops its width at once; only a close slides it out.
+  const workspacePanelWidth = workspaceAsPanel && workspaceSlide.placed ? rightResize.width : 0;
+  const sidebarWidth = isTabletLayout && leftSlide.placed ? leftResize.width : 0;
+  // Where a side panel waits while it is off its edge: the start one beyond
+  // the start edge, the end one beyond the end edge.
+  const offStart = direction === 'rtl' ? '100%' : '-100%';
+  const offEnd = direction === 'rtl' ? '-100%' : '100%';
 
   // Publish the chat column's insets so overlays portaled to <body> (model
   // picker, directory picker, every MobileOverlayPanel) can center on the CHAT
   // rather than on the window. Zero on phones, where the two are the same.
   React.useEffect(() => {
-    if (typeof document === 'undefined') return;
-    const root = document.documentElement;
-    root.style.setProperty('--oc-chat-inset-left', `${sidebarWidth}px`);
-    root.style.setProperty('--oc-chat-inset-right', `${workspacePanelWidth}px`);
-    return () => {
-      root.style.removeProperty('--oc-chat-inset-left');
-      root.style.removeProperty('--oc-chat-inset-right');
-    };
+    useMobileChatInsets.setState({ left: sidebarWidth, right: workspacePanelWidth });
+    return () => useMobileChatInsets.setState({ left: 0, right: 0 });
   }, [sidebarWidth, workspacePanelWidth]);
 
   // Wide chat layout: the shared chat columns key off this root class, but only
@@ -313,14 +364,13 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
 
   const mobileActions = React.useMemo<MobileAppActions>(
     () => ({
-      openChanges: ({ diffPath, staged } = {}) => {
-        openChangesSurface(diffPath ? { path: diffPath, staged: staged === true } : null);
+      openChanges: ({ diffPath, staged, scope } = {}) => {
+        openChangesSurface(diffPath ? { path: diffPath, staged: staged === true, scope } : null);
       },
       openFiles: () => openFilesSurface(),
-      openSettings: () => openSettingsSurface('nav'),
       openSourceBoard: () => openSurface('board'),
     }),
-    [openChangesSurface, openFilesSurface, openSettingsSurface, openSurface],
+    [openChangesSurface, openFilesSurface, openSurface],
   );
 
   // Expose the shell's panel-opening actions to the deep-link layer so openchamber:// URLs
@@ -337,8 +387,9 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
           openFilesSurface();
           return;
         }
+        // MCP lives in the Status tab now; old links to it land there.
         if (target === 'mcp') {
-          setWorkspaceTab('mcp');
+          setWorkspaceTab('status');
           setWorkspaceOpen(true);
           return;
         }
@@ -411,6 +462,10 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
 
   useNativeAndroidBackButton(handleNativeBack);
 
+  // Mobile web has no back button event: the same ladder runs from the
+  // browser's Back, off a history guard held while a layer is open.
+  useMobileWebBackButton(handleNativeBack, Boolean(openPlan || activeSurface || workspaceOpen || sessionsSheetOpen));
+
   // The footer update item follows the shared update store, which in the
   // Capacitor shell tracks the app build (store updates), not the server. The
   // native app reaches server updates through Settings → About instead.
@@ -469,43 +524,6 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
     if (isTabletLayout && !roomyForPanels) setSidebarOpen(false);
   }, [closeSurface, isTabletLayout, roomyForPanels]);
 
-  const openMcpCreateSettings = React.useCallback(() => {
-    const baseName = 'new-mcp-server';
-    let newName = baseName;
-    let counter = 1;
-    while (mcpServers.some((server) => server.name === newName)) {
-      newName = `${baseName}-${counter}`;
-      counter += 1;
-    }
-
-    const draft: McpDraft = {
-      name: newName,
-      scope: 'user',
-      type: 'local',
-      command: [],
-      url: '',
-      environment: [],
-      headers: [],
-      oauthEnabled: true,
-      oauthClientId: '',
-      oauthClientSecret: '',
-      oauthScope: '',
-      oauthRedirectUri: '',
-      oauthCallbackPort: '',
-      oauthAuthServerMetadataUrl: '',
-      protocol: 'legacy',
-      timeoutStartup: '',
-      timeoutCatalog: '',
-      timeoutExecution: '',
-      codemode: 'default',
-      disabled: false,
-    };
-
-    setMcpDraft(draft);
-    setSelectedMcp(newName);
-    setSettingsPage('mcp');
-    openSettingsSurface('page-content');
-  }, [mcpServers, openSettingsSurface, setMcpDraft, setSelectedMcp, setSettingsPage]);
 
   return (
     <DedicatedMobileAppProvider actions={mobileActions}>
@@ -515,7 +533,7 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
       >
         {/* iPad: persistent full-height sessions sidebar; the chat column and
             its header butt against it (iPadOS-style split layout). Always
-            mounted so open/close animates width, same as the desktop Sidebar. */}
+            mounted, so it slides in and out (useIpadPanelSlide). */}
         {isTabletLayout ? (
           <aside
             ref={leftResize.asideRef}
@@ -524,34 +542,33 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
               // rows are opaque bg-background (the swipe actions live under
               // them), so a tinted sidebar would show through as row-shaped
               // bands. Same surface as the phone drawer.
-              'relative flex h-full shrink-0 flex-col overflow-hidden border-e border-border/70 bg-background will-change-[width] motion-reduce:transition-none',
-              !sidebarOpen && 'border-e-0',
+              // The aside only holds the space; the surface and its edge are
+              // on the panel inside, which slides as one piece.
+              'oc-ipad-sidebar relative flex h-full shrink-0 flex-col overflow-hidden',
             )}
             style={{
-              width: sidebarOpen ? leftResize.width : 0,
-              minWidth: sidebarOpen ? leftResize.width : 0,
-              maxWidth: sidebarOpen ? leftResize.width : 0,
+              width: sidebarWidth,
+              minWidth: sidebarWidth,
+              maxWidth: sidebarWidth,
               ['--oc-ipad-sidebar-width' as string]: `${leftResize.width}px`,
               overflowX: 'clip',
-              paddingTop: 'var(--oc-safe-area-top, 0px)',
-              transitionProperty: leftResize.isResizing ? 'none' : 'width, min-width, max-width',
-              transitionDuration: '200ms',
-              transitionTimingFunction: 'cubic-bezier(0.22, 1, 0.36, 1)',
             }}
             aria-hidden={!sidebarOpen}
             data-page-scroll-lock="true"
           >
             <div
               className={cn(
-                'flex h-full shrink-0 flex-col transition-opacity duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none',
+                'flex h-full shrink-0 flex-col border-e border-edge bg-background transition-[translate] duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none',
                 leftResize.isResizing && 'pointer-events-none',
-                !sidebarOpen && 'pointer-events-none select-none opacity-0',
+                !sidebarOpen && 'pointer-events-none select-none',
               )}
-              style={{ width: 'var(--oc-ipad-sidebar-width)', overflowX: 'hidden' }}
+              style={{ width: 'var(--oc-ipad-sidebar-width)', overflowX: 'hidden', paddingTop: 'var(--oc-safe-area-top, 0px)', translate: leftSlide.inPlace ? undefined : offStart }}
             >
               <ErrorBoundary>
                 <MobileSessionsSheet
-                  open
+                  // Through the closing slide too: the list stays on screen
+                  // until it has slid away.
+                  open={leftSlide.placed}
                   variant="sidebar"
                   // The surface asks to close after picking a session/project
                   // or creating a worktree: give the space back to the chat
@@ -610,8 +627,7 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
         <aside
           ref={rightResize.asideRef}
           className={cn(
-            'relative flex h-full shrink-0 flex-col overflow-hidden border-s border-border/70 bg-background will-change-[width] motion-reduce:transition-none',
-            !workspacePanelWidth && 'border-s-0',
+            'relative flex h-full shrink-0 flex-col overflow-hidden',
           )}
           style={{
             width: workspacePanelWidth,
@@ -619,36 +635,33 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
             maxWidth: workspacePanelWidth,
             ['--oc-ipad-sidebar-width' as string]: `${rightResize.width}px`,
             overflowX: 'clip',
-            paddingTop: 'var(--oc-safe-area-top, 0px)',
-            transitionProperty: rightResize.isResizing ? 'none' : 'width, min-width, max-width',
-            transitionDuration: '200ms',
-            transitionTimingFunction: 'cubic-bezier(0.22, 1, 0.36, 1)',
           }}
           aria-hidden={!workspacePanelWidth}
           data-page-scroll-lock="true"
         >
           <div
             className={cn(
-              'flex h-full min-h-0 shrink-0 flex-col transition-opacity duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none',
+              'flex h-full min-h-0 shrink-0 flex-col transition-[translate] duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none',
+              workspaceAsPanel && 'border-s border-edge bg-background',
               rightResize.isResizing && 'pointer-events-none',
-              !workspacePanelWidth && 'pointer-events-none select-none opacity-0',
+              !workspaceSlide.inPlace && 'pointer-events-none select-none',
             )}
-            style={{ width: 'var(--oc-ipad-sidebar-width)', overflowX: 'hidden' }}
+            style={{ width: 'var(--oc-ipad-sidebar-width)', overflowX: 'hidden', paddingTop: 'var(--oc-safe-area-top, 0px)', translate: workspaceSlide.inPlace ? undefined : offEnd }}
           >
             <ErrorBoundary>
               <MobileWorkspaceDrawer
-                open={workspaceOpen}
+                // As a panel it stays open through its closing slide.
+                open={workspaceAsPanel ? workspaceSlide.placed : workspaceOpen}
                 onClose={closeWorkspace}
                 tab={workspaceTab}
                 onTabChange={setWorkspaceTab}
                 pendingChangesDiff={pendingChangesDiff}
                 onOpenPlan={setOpenPlan}
-                onOpenMcpSettings={openMcpCreateSettings}
                 variant={workspaceAsPanel ? 'panel' : 'drawer'}
               />
             </ErrorBoundary>
           </div>
-          {workspacePanelWidth ? (
+          {workspaceAsPanel && workspaceOpen ? (
             <IpadSidebarResizeHandle
               side="right"
               isResizing={rightResize.isResizing}
@@ -804,9 +817,9 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
             title={t('mobile.menu.update')}
           >
             <ErrorBoundary>
-              <div className="h-full overflow-auto px-5 py-4">
+              <ScrollableOverlay outerClassName="h-full" className="px-5 py-4" disableHorizontal>
                 <AboutSettings initialUpdateDialogOpen />
-              </div>
+              </ScrollableOverlay>
             </ErrorBoundary>
           </MobileFullscreenSurface>
         ) : null}
@@ -832,18 +845,15 @@ function MobileAppContent({ apis }: MobileAppProps) {
   const setIsMobile = useUIStore((state) => state.setIsMobile);
   const refreshSourceControlAuth = useSourceControlAuthStore((state) => state.refreshAll);
   const refreshSourceControlProviders = useSourceControlProviderRegistry((state) => state.refresh);
-  const projects = useProjectsStore((state) => state.projects);
   // The mobile shell has no layout-level session list sync, so a lost
   // `session.deleted` is reconciled here from the same complete global
   // active+archived snapshots, refreshed whenever the sessions sheet opens.
-  const globalActiveSessions = useGlobalSessionsStore((state) => state.activeSessions);
-  const globalArchivedSessions = useGlobalSessionsStore((state) => state.archivedSessions);
-  const hasAuthoritativeGlobalSessions = useGlobalSessionsStore((state) => state.status === 'ready');
-  const cleanupSessions = React.useMemo(
-    () => [...globalActiveSessions, ...globalArchivedSessions],
-    [globalActiveSessions, globalArchivedSessions],
-  );
-  useAuthoritativeSessionCleanup({ hasAuthoritativeGlobalSessions, sessions: cleanupSessions });
+  const authoritativeSessions = useGlobalSessionsStore((state) => state.authoritativeSessions);
+  const cleanupSessions = React.useMemo(() => authoritativeSessions ?? [], [authoritativeSessions]);
+  useAuthoritativeSessionCleanup({
+    hasAuthoritativeGlobalSessions: authoritativeSessions != null,
+    sessions: cleanupSessions,
+  });
   const [connectionEpoch, setConnectionEpoch] = React.useState(0);
   const [runtimeEndpointEpoch, setRuntimeEndpointEpoch] = React.useState(0);
   const [showConnectionRecovery, setShowConnectionRecovery] = React.useState(false);
@@ -1249,76 +1259,9 @@ function MobileAppContent({ apis }: MobileAppProps) {
     void refreshTrackers(apis.trackers);
   }, [apis.sourceControl, apis.trackers, isConnected, refreshSourceControlAuth, refreshSourceControlProviders]);
 
-  // Discover all worktrees for every known project so the draft session's
-  // worktree/branch dropdown can list every available branch — not only the
-  // current one. Mirrors ElectronMiniChatApp + desktop SessionSidebar.
-  // Gated on isConnected: running before the runtime is reachable made every
-  // per-project probe fail silently, leaving the map empty until some later
-  // projects-store update happened to re-run this effect (the "switch projects
-  // back and forth to see worktrees" bug).
-  React.useEffect(() => {
-    if (!isConnected || projects.length === 0) return;
-    let cancelled = false;
-
-    const run = async () => {
-      const worktreesByProject = new Map(useSessionUIStore.getState().availableWorktreesByProject);
-
-      await Promise.all(
-        projects.map(async (project) => {
-          const projectPath = project.path.replace(/\\/g, '/').replace(/\/+$/, '');
-          if (!projectPath) return;
-          try {
-            const cachedIsGitRepo = useGitStore.getState().directories.get(projectPath)?.isGitRepo;
-            const isGitRepo =
-              cachedIsGitRepo ?? (await import('@/lib/gitApi').then((m) => m.checkIsGitRepository(projectPath)));
-            if (!isGitRepo) return;
-            const worktrees = await listProjectWorktrees({ id: project.id, path: projectPath });
-            if (cancelled) return;
-            worktreesByProject.set(projectPath, worktrees);
-          } catch {
-            // Worktree discovery is best-effort per project: a failed probe keeps
-            // that project's previously known (persisted) worktrees instead of
-            // wiping the whole map.
-          }
-        }),
-      );
-
-      if (cancelled) return;
-
-      const partitionedWorktreesByProject = partitionWorktreesByRegisteredProject(projects, worktreesByProject);
-
-      // Skip update if nothing changed — see worktreeMapsEqual JSDoc.
-      const currentByProject = useSessionUIStore.getState().availableWorktreesByProject;
-      if (!worktreeMapsEqual(partitionedWorktreesByProject, currentByProject)) {
-        useSessionUIStore.setState({
-          availableWorktrees: [...partitionedWorktreesByProject.values()].flat(),
-          availableWorktreesByProject: partitionedWorktreesByProject,
-        });
-      }
-    };
-
-    void run();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [isConnected, projects]);
-
-  // A worktree added or removed anywhere (another window, an agent, a
-  // terminal) arrives as a server control event; refresh only the projects it
-  // names so the draft's worktree picker stays current without polling.
-  React.useEffect(() => {
-    if (!isConnected) return;
-    let cancelled = false;
-    const unsubscribe = subscribeOpenchamberEvents((event) => {
-      if (event.type !== 'worktree-changed') return;
-      void refreshWorktreeTopologyForChange(projects, event.directories, () => cancelled);
-    });
-    return () => {
-      cancelled = true;
-      unsubscribe();
-    };
-  }, [isConnected, projects]);
+  // Worktree discovery for every project, and its refresh on the server's
+  // worktree and session events, run in the sessions drawer's list, which is
+  // the desktop sidebar's and stays mounted while the drawer is closed.
 
   React.useEffect(() => {
     if (!error) return;
@@ -1351,6 +1294,8 @@ function MobileAppContent({ apis }: MobileAppProps) {
   useRoutingSync();
   useEnterprisePolicySync();
   useSourceControlProviderSync(apis.sourceControl);
+  useTrackerProviderSync(apis.trackers);
+  useQuotaProviderSync();
   // Same as App.tsx: the session's memory index and the Memory tab both read
   // this snapshot, and without it the phone showed no memory at all.
   useAgentMemorySync(currentDirectory || null);
@@ -1495,7 +1440,9 @@ function MobileAppContent({ apis }: MobileAppProps) {
                 setConnectionEpoch((value) => value + 1);
               }} />
               <AppLinkConfirmDialog />
+              <SnippetQuickCreateDialog />
               <SharedTrustConfirmDialog />
+              <OpenCodeTrustDialog />
               {isolatedSpacesEnabled ? <><SpaceAccessDialog /><SpaceActionsSheet /><SpaceApplyDialog /><SpaceDeleteDialog /><SpaceSetupOutputDialog /></> : null}
               <MobileToaster />
               {isInitialized ? <ConfigUpdateOverlay /> : null}

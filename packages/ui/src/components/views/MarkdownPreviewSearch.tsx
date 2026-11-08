@@ -2,10 +2,13 @@ import React from 'react';
 
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { ButtonTooltip } from '@/components/ui/action-toolbar';
 import { Icon } from '@/components/icon/Icon';
+import type { IconName } from '@/components/icon/icons';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { findPreviewRanges, scrollPreviewRangeIntoView } from './markdownPreviewFind';
+import { holdMarkdownBlocks } from '@/components/chat/markdown/markdownWindow';
 
 /**
  * In-preview text search for the rendered Markdown file preview.
@@ -33,6 +36,27 @@ type MarkdownPreviewSearchProps = {
   /** Layout overrides for the floating bar (position, offsets). */
   className?: string;
 };
+
+const FindBarButton: React.FC<{
+  label: string;
+  icon: IconName;
+  onClick: () => void;
+  disabled?: boolean;
+}> = ({ label, icon, onClick, disabled }) => (
+  <ButtonTooltip label={label} side="bottom">
+    <Button
+      type="button"
+      variant="ghost"
+      size="sm"
+      className="size-6 p-0 text-muted-foreground"
+      onClick={onClick}
+      aria-label={label}
+      disabled={disabled}
+    >
+      <Icon name={icon} className="size-3.5" />
+    </Button>
+  </ButtonTooltip>
+);
 
 export const MarkdownPreviewSearch: React.FC<MarkdownPreviewSearchProps> = ({
   containerRef,
@@ -112,6 +136,10 @@ export const MarkdownPreviewSearch: React.FC<MarkdownPreviewSearchProps> = ({
     if (!open || !container) {
       return;
     }
+    // A long document mounts only its blocks near the view; the search reads
+    // all of them, mounted while the bar is open (the observer below rescans
+    // once they are).
+    const releaseBlocks = holdMarkdownBlocks(container);
     runSearch(queryRef.current, true);
     const observer = new MutationObserver(() => {
       if (!queryRef.current.trim()) {
@@ -125,6 +153,7 @@ export const MarkdownPreviewSearch: React.FC<MarkdownPreviewSearchProps> = ({
     observer.observe(container, { childList: true, subtree: true, characterData: true });
     return () => {
       observer.disconnect();
+      releaseBlocks();
       if (debounceRef.current) clearTimeout(debounceRef.current);
       debounceRef.current = null;
     };
@@ -209,7 +238,7 @@ export const MarkdownPreviewSearch: React.FC<MarkdownPreviewSearchProps> = ({
   }
 
   return (
-    <div className={cn('absolute inset-e-3 top-3 z-10 flex items-center gap-1 rounded-lg border border-border/60 bg-[var(--surface-elevated)] px-1.5 py-1 shadow-lg', className)}>
+    <div className={cn('absolute inset-e-3 top-3 z-10 flex items-center gap-1 rounded-lg border border-edge bg-[var(--surface-elevated)] px-1.5 py-1 shadow-lg', className)}>
       <Icon name="search" className="ms-0.5 size-3.5 text-muted-foreground" />
       <Input
         ref={inputRef}
@@ -236,41 +265,9 @@ export const MarkdownPreviewSearch: React.FC<MarkdownPreviewSearchProps> = ({
             ? `${index + 1}/${total}`
             : ''}
       </span>
-      <Button
-        type="button"
-        variant="ghost"
-        size="sm"
-        className="size-6 p-0 text-muted-foreground"
-        onClick={goToPrevious}
-        title={t('filesView.preview.find.previousAria')}
-        aria-label={t('filesView.preview.find.previousAria')}
-        disabled={total === 0}
-      >
-        <Icon name="arrow-up" className="size-3.5" />
-      </Button>
-      <Button
-        type="button"
-        variant="ghost"
-        size="sm"
-        className="size-6 p-0 text-muted-foreground"
-        onClick={goToNext}
-        title={t('filesView.preview.find.nextAria')}
-        aria-label={t('filesView.preview.find.nextAria')}
-        disabled={total === 0}
-      >
-        <Icon name="arrow-down" className="size-3.5" />
-      </Button>
-      <Button
-        type="button"
-        variant="ghost"
-        size="sm"
-        className="size-6 p-0 text-muted-foreground"
-        onClick={close}
-        title={t('filesView.preview.find.closeAria')}
-        aria-label={t('filesView.preview.find.closeAria')}
-      >
-        <Icon name="close" className="size-3.5" />
-      </Button>
+      <FindBarButton label={t('filesView.preview.find.previousAria')} icon="arrow-up" onClick={goToPrevious} disabled={total === 0} />
+      <FindBarButton label={t('filesView.preview.find.nextAria')} icon="arrow-down" onClick={goToNext} disabled={total === 0} />
+      <FindBarButton label={t('filesView.preview.find.closeAria')} icon="close" onClick={close} />
     </div>
   );
 };

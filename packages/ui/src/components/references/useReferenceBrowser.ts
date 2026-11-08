@@ -13,7 +13,7 @@ import { useDebouncedValue } from '@/hooks/useDebouncedValue';
 import { useMinuteTickerNow } from '@/hooks/useDurationTicker';
 import type { ChangeRequestListStatus, RepositoryReference, RepositoryReferenceKind, RepositoryReferenceFilter } from '@/lib/api/types';
 import { isIMECompositionEvent } from '@/lib/ime';
-import { useSourceControlProvider } from '@/lib/source-control/providers/registry';
+import { useSourceControlProvider, useSourceControlProviderRegistry } from '@/lib/source-control/providers/registry';
 import { useTrackedItems } from '@/lib/trackedItems/interest';
 import type { TrackedItem } from '@/lib/trackedItems/model';
 
@@ -29,6 +29,7 @@ import {
     type TrackerReferenceFilter,
 } from './referencePickerItems';
 import {
+    useRepositoryAcrossProvider,
     useRepositoryAcrossReferenceList,
     useRepositoryPullStatuses,
     useRepositoryPullStatusesAcross,
@@ -92,8 +93,8 @@ export function useReferenceBrowser({
     pinnedItem = null,
     onScreen = true,
 }: ReferenceBrowserOptions) {
-    const [repositoryKind, setRepositoryKind] = React.useState<RepositoryReferenceKind>(initialGitHubKind ?? lastRepositoryKind);
-    const [repositoryFilter, setRepositoryFilter] = React.useState<RepositoryReferenceFilter>(lastRepositoryFilter.get(initialGitHubKind ?? lastRepositoryKind) ?? DEFAULT_REPOSITORY_FILTER);
+    const [chosenRepositoryKind, setRepositoryKind] = React.useState<RepositoryReferenceKind>(initialGitHubKind ?? lastRepositoryKind);
+    const [chosenRepositoryFilter, setRepositoryFilter] = React.useState<RepositoryReferenceFilter>(lastRepositoryFilter.get(initialGitHubKind ?? lastRepositoryKind) ?? DEFAULT_REPOSITORY_FILTER);
     const tracker = trackerOfSource(source);
     const trackerDescriptor = useTrackerDescriptor(tracker);
     // A filter the tracker no longer offers reads as its default.
@@ -115,6 +116,21 @@ export function useReferenceBrowser({
     const searchRef = React.useRef<HTMLInputElement>(null);
 
     const across = directories !== null;
+    // Who hosts the items, for their wording and mark: the project's provider,
+    // or across repositories the one the search asks.
+    const projectProvider = useRepositoryReferenceProvider(across ? null : directory);
+    const acrossProvider = useRepositoryAcrossProvider(across ? directories : null);
+    const descriptor = useSourceControlProvider(across ? acrossProvider : projectProvider);
+    const term = descriptor.terminology.changeRequest;
+    // Discussions were the last tab on a host that keeps them; on one that says
+    // it keeps none the list shows issues. Until the host is known it waits on
+    // Discussions instead of showing issues and switching.
+    const providersHeld = useSourceControlProviderRegistry((state) => state.holdsList);
+    const hostKnown = providersHeld && (across ? acrossProvider : projectProvider) !== null;
+    const awaitingHost = chosenRepositoryKind === 'discussion' && !hostKnown;
+    const repositoryKind: RepositoryReferenceKind = chosenRepositoryKind === 'discussion' && hostKnown && !descriptor.features.discussions ? 'issue' : chosenRepositoryKind;
+    const repositoryFilter = repositoryKind === chosenRepositoryKind ? chosenRepositoryFilter : lastRepositoryFilter.get(repositoryKind) ?? DEFAULT_REPOSITORY_FILTER;
+
     // Across repositories the folders answer for themselves: the list reports
     // those it cannot read, so no single project's status gates it.
     const repositoryStatus = useRepositorySourceStatus(across ? null : directory);
@@ -122,14 +138,14 @@ export function useReferenceBrowser({
     const sourceStatus = source === 'repository' ? repositoryStatus : trackerStatus;
 
     const repositoryList = useRepositoryReferenceList({
-        enabled: source === 'repository' && repositoryStatus === 'ready' && !across,
+        enabled: source === 'repository' && repositoryStatus === 'ready' && !across && !awaitingHost,
         directory,
         kind: repositoryKind,
         filter: repositoryFilter,
         query: debouncedQuery,
     });
     const acrossList = useRepositoryAcrossReferenceList({
-        enabled: source === 'repository' && repositoryStatus === 'ready' && across,
+        enabled: source === 'repository' && repositoryStatus === 'ready' && across && !awaitingHost,
         directories: directories ?? NO_DIRECTORIES,
         kind: repositoryKind,
         filter: repositoryFilter,
@@ -142,13 +158,8 @@ export function useReferenceBrowser({
         query: debouncedQuery,
         containerId: trackerContainerId,
     });
-    // Who hosts the items, for their wording and mark: the project's provider,
-    // or across repositories the one the search asks.
-    const projectProvider = useRepositoryReferenceProvider(across ? null : directory);
-    const descriptor = useSourceControlProvider(across ? acrossList.contexts.provider : projectProvider);
-    const term = descriptor.terminology.changeRequest;
-
-    // The other repository tab loads in the background, so switching to it is instant.
+    // The other of issues and change requests loads in the background, so
+    // switching to it is instant; discussions load only once their tab is open.
     const otherRepositoryKind: RepositoryReferenceKind = repositoryKind === 'issue' ? 'pull' : 'issue';
     useRepositoryReferenceList({
         enabled: source === 'repository' && repositoryStatus === 'ready' && !across,
@@ -295,6 +306,8 @@ export function useReferenceBrowser({
         across,
         /** Across repositories, the provider the search asks; null otherwise or while unknown. */
         acrossProvider: across ? acrossList.contexts.provider : null,
+        /** Whether the host keeps discussions, so the repository source offers their tab. */
+        discussions: descriptor.features.discussions,
         leftOut,
         isMobile,
         descriptor,

@@ -7,10 +7,11 @@ import path from 'node:path';
 
 import {
   getProviderSources,
+  getStoredProviderConfig,
   removeProviderConfig,
   upsertProviderConfig,
-  validateCustomProviderConfig,
 } from './opencodeConfig';
+import { validateCustomProviderConfig } from '../../web/server/lib/opencode/providers.js';
 import { OPENCODE_CONFIG_DIR } from './opencodeConfigPaths';
 
 let projectDir: string;
@@ -135,6 +136,36 @@ describe('custom provider config persistence (VS Code parity)', () => {
     const sources = getProviderSources('campus-llm', projectDir);
     assert.equal(sources.project.exists, true);
     assert.equal(sources.project.path, result.path);
+  });
+
+  test('upsertProviderConfig keeps model limits, capabilities and variants like the web server', () => {
+    const base = {
+      name: 'Campus LLM',
+      settings: { baseURL: 'https://llm.example.edu/v1' },
+      env: ['CAMPUS_KEY'],
+    };
+    const result = upsertProviderConfig('campus-llm', {
+      ...base,
+      models: {
+        m: {
+          name: 'M',
+          limit: { context: 200_000, output: 32_000 },
+          capabilities: { input: ['text', 'image'] },
+          variants: [{ id: 'low' }, { id: 'high' }],
+        },
+      },
+    }, projectDir, 'project');
+
+    assert.deepEqual(readJson(result.path).providers['campus-llm'].models.m, {
+      modelID: 'm',
+      name: 'M',
+      limit: { context: 200_000, output: 32_000 },
+      capabilities: { tools: true, input: ['text', 'image'], output: ['text'] },
+      variants: [{ id: 'low' }, { id: 'high' }],
+    });
+
+    upsertProviderConfig('campus-llm', { ...base, models: { m: { name: 'M', variants: [] } } }, projectDir, 'project');
+    assert.equal(readJson(result.path).providers['campus-llm'].models.m.variants, undefined);
   });
 
   test('round-trips non-default protocol adapters through project config', () => {
@@ -289,6 +320,57 @@ describe('custom provider config persistence (VS Code parity)', () => {
       env: ['PROXY_KEY'],
       settings: { baseURL: 'https://proxy.example.com/v1' },
       models: { 'gpt-5': { modelID: 'gpt-5', name: 'GPT-5', compatibility } },
+    });
+  });
+
+  test('a form save keeps the type of a hand-marked image model', () => {
+    const configPath = path.join(projectDir, '.opencode', 'opencode.json');
+    writeJson(configPath, {
+      providers: {
+        wawa: {
+          name: 'Wawa',
+          package: 'aisdk:@ai-sdk/openai-compatible',
+          env: ['WAWA_KEY'],
+          settings: { baseURL: 'https://wawa.example.com/v1' },
+          models: { flare: { modelID: 'flare', name: 'Flare', type: 'image' } },
+        },
+      },
+    });
+
+    upsertProviderConfig('wawa', {
+      name: 'Wawa',
+      env: ['WAWA_KEY'],
+      settings: { baseURL: 'https://wawa.example.com/v1' },
+      models: { flare: { name: 'Flare' } },
+    }, projectDir, 'project');
+
+    assert.deepEqual(readJson(configPath).providers.wawa.models.flare, { modelID: 'flare', name: 'Flare', type: 'image' });
+  });
+
+  test('a form save writes the type it sends, any type OpenCode knows', () => {
+    const configPath = path.join(projectDir, '.opencode', 'opencode.json');
+    writeJson(configPath, {
+      providers: {
+        wawa: {
+          name: 'Wawa',
+          package: 'aisdk:@ai-sdk/openai-compatible',
+          env: ['WAWA_KEY'],
+          settings: { baseURL: 'https://wawa.example.com/v1' },
+          models: { flare: { modelID: 'flare', name: 'Flare', type: 'image' } },
+        },
+      },
+    });
+
+    upsertProviderConfig('wawa', {
+      name: 'Wawa',
+      env: ['WAWA_KEY'],
+      settings: { baseURL: 'https://wawa.example.com/v1' },
+      models: { flare: { name: 'Flare', type: 'chat' }, judge: { name: 'Judge', type: 'decision' } },
+    }, projectDir, 'project');
+
+    assert.deepEqual(readJson(configPath).providers.wawa.models, {
+      flare: { modelID: 'flare', name: 'Flare', type: 'chat' },
+      judge: { modelID: 'judge', name: 'Judge', type: 'decision' },
     });
   });
 
@@ -464,6 +546,45 @@ describe('custom provider config persistence (VS Code parity)', () => {
       } else {
         process.env.OPENCODE_CONFIG = previousEnv;
       }
+    }
+  });
+
+  test('finds, edits and removes a provider from a global opencode.jsonc next to opencode.json in place', () => {
+    const jsonPath = path.join(OPENCODE_CONFIG_DIR, 'opencode.json');
+    const jsoncPath = path.join(OPENCODE_CONFIG_DIR, 'opencode.jsonc');
+    const jsonConfig = { autoupdate: true };
+    // Settings turned dots3 off, which it records in the primary file.
+    writeJson(jsonPath, { ...jsonConfig, disabled_providers: ['dots3', 'other'] });
+    fs.writeFileSync(jsoncPath, [
+      '{',
+      '  // providers live only in the jsonc file',
+      '  "providers": { "dots3": { "name": "dots3", "package": "aisdk:@ai-sdk/openai-compatible",',
+      '    "settings": { "baseURL": "https://old.example.com/v1" }, "models": { "m": { "modelID": "m", "name": "M" } } } }',
+      '}',
+    ].join('\n'), 'utf8');
+
+    try {
+      assert.deepEqual(getProviderSources('dots3', projectDir).user, { exists: true, path: jsoncPath });
+      assert.deepEqual(getProviderSources('new-llm', projectDir).user, { exists: false, path: jsonPath });
+
+      const result = upsertProviderConfig('dots3', {
+        name: 'dots3',
+        npm: '@ai-sdk/openai-compatible',
+        settings: { baseURL: 'https://new.example.com/v1' },
+        models: { m: { name: 'M' } },
+      }, projectDir, 'user', { hasStoredAuth: true });
+
+      assert.equal(result.path, jsoncPath);
+      assert.match(fs.readFileSync(jsoncPath, 'utf8'), /\/\/ providers live only in the jsonc file/);
+      assert.equal(getStoredProviderConfig('dots3', projectDir)?.settings?.baseURL, 'https://new.example.com/v1');
+      assert.deepEqual(readJson(jsonPath), { ...jsonConfig, disabled_providers: ['other'] });
+
+      assert.equal(removeProviderConfig('dots3', projectDir, 'user'), true);
+      assert.equal(getProviderSources('dots3', projectDir).user.exists, false);
+      assert.deepEqual(readJson(jsonPath), { ...jsonConfig, disabled_providers: ['other'] });
+    } finally {
+      fs.rmSync(jsonPath, { force: true });
+      fs.rmSync(jsoncPath, { force: true });
     }
   });
 });

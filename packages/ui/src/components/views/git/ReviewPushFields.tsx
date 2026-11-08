@@ -7,6 +7,7 @@ import { Input } from '@/components/ui/input';
 import { useI18n } from '@/lib/i18n';
 
 import type { ChangeIdPreflight } from './changeIdPreflight';
+import { ButtonTooltip } from '@/components/ui/action-toolbar';
 
 /**
  * The push-for-review form of a review host, in place of a pull request's
@@ -41,9 +42,11 @@ export const ReviewPushFields: React.FC<{
       <>
         <span className="min-w-0 flex-1 text-[var(--status-warning)]">{t('gitView.change.changeId.missingTip')}</span>
         {onAddChangeId ? (
-          <Button size="xs" variant="outline" className="shrink-0" onClick={onAddChangeId} disabled={disabled}>
-            {t('gitView.change.changeId.add')}
-          </Button>
+          <ButtonTooltip sideOffset={8} label={t('contextTooltips.git.addChangeId')} className="shrink-0">
+            <Button size="xs" variant="outline" className="shrink-0" onClick={onAddChangeId} disabled={disabled}>
+              {t('gitView.change.changeId.add')}
+            </Button>
+          </ButtonTooltip>
         ) : null}
       </>
     );

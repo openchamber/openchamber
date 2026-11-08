@@ -81,6 +81,20 @@ const walkthroughOutputTokens = ({ contextTokens, outputTokenLimit }) => {
   return Number(outputTokenLimit) > 0 ? Math.min(wanted, Number(outputTokenLimit)) : wanted;
 };
 
+/**
+ * The reader's preferences for walkthroughs, from the Walkthrough Magic Prompt.
+ * They change what the model writes, so a file that cannot be read fails the
+ * generation instead of quietly sending none.
+ */
+async function readInstructions(directory, deps) {
+  if (!deps.readWalkthroughInstructions) return '';
+  try {
+    return String((await deps.readWalkthroughInstructions(directory)) ?? '').trim();
+  } catch (error) {
+    throw fail(`Walkthrough instructions could not be read: ${error instanceof Error ? error.message : String(error)}`, 500, { code: 'instructions-unreadable' });
+  }
+}
+
 const fail = (message, statusCode, extra = {}) =>
   Object.assign(new Error(message), { statusCode, ...extra });
 
@@ -198,6 +212,9 @@ const modelLabel = (model) => `${model.providerID}/${model.modelID}`;
  * Resolve the model for this feature. An explicit per-review choice outranks the
  * saved setting, which in turn outranks the small-model chain — the user picking
  * a roomier model for a risky change is the most specific intent there is.
+ * A free zen model without a login counts as unset here, and the small-model
+ * chain decides (`../small-model/DOCUMENTATION.md`, *Free tier and the
+ * session fallback*).
  */
 // `providerID` / `modelID` are the user's composer: without a model of its
 // own choosing, the walkthrough stays on that provider rather than on
@@ -291,13 +308,16 @@ export async function getWalkthrough({ directory, source: rawSource, model: expl
   // One diff, one model lookup, both answers. These used to be separate
   // endpoints the client called in parallel, which meant every panel open ran
   // the whole git pipeline twice.
-  const [built, model] = await Promise.all([
+  const [built, model, instructions] = await Promise.all([
     loadCurrentDiff(directory, source, deps, readContext),
     resolveModel(directory, explicitModel, providerID, modelID).catch(() => null),
+    // Readiness only measures the prompt; an unreadable preference fails the
+    // generation that would send it, not the read.
+    readInstructions(directory, deps).catch(() => ''),
   ]);
   const { files } = built;
   const hunkIndex = indexHunks(files);
-  const readiness = computeReadiness({ ...built, model, source, language });
+  const readiness = computeReadiness({ ...built, model, source, language, instructions });
 
   const base = {
     source,
@@ -370,7 +390,7 @@ export async function getWalkthrough({ directory, source: rawSource, model: expl
  * answers need the same diff, and computing it twice doubled the git work on
  * every panel open.
  */
-function computeReadiness({ model, digest, files, fileCount, hunkCount, generatedFileCount, source, language }) {
+function computeReadiness({ model, digest, files, fileCount, hunkCount, generatedFileCount, source, language, instructions }) {
   if (!model) return { ready: false, reason: 'no-model' };
 
   if (hunkCount === 0) {
@@ -391,7 +411,7 @@ function computeReadiness({ model, digest, files, fileCount, hunkCount, generate
   // Built with the same language the generation would use: the instruction is
   // part of the prompt, so a readiness answer computed without it would be
   // measuring a request nobody is going to send.
-  const { prompt, system } = buildPrompt({ digest, fileCount, hunkCount, source, language });
+  const { prompt, system } = buildPrompt({ digest, fileCount, hunkCount, source, language, instructions });
   const requiredChars = prompt.length + system.length;
 
   if (model.structuredOutput === false) {
@@ -503,16 +523,27 @@ async function runGeneration({ directory, source, repoRoot, key, force, explicit
   // A forced regeneration hands the model its own previous narrative so it can
   // keep what is still true instead of starting from a blank page. The old
   // anchors are deliberately not included — they belong to code that has moved.
+  // Only the same model writing in the same language counts as "its own": a
+  // review asked of another model or language is a fresh one, and handing it
+  // the last entry would have it copy that entry while the prompt claims the
+  // code moved on.
   let previousWalkthrough = null;
   const pointer = readPointer(repoRoot, key, readContext);
   if (pointer) {
     const previousEntry = readCachedWalkthrough(pointer.cacheKey);
-    if (previousEntry && previousEntry.cacheKey !== cacheKey) {
+    if (
+      previousEntry
+      && previousEntry.cacheKey !== cacheKey
+      && previousEntry.model?.providerID === model.providerID
+      && previousEntry.model?.modelID === model.modelID
+      && normalizeLanguage(previousEntry.language) === language
+    ) {
       previousWalkthrough = previousEntry.walkthrough;
     }
   }
 
-  const { prompt, system } = buildPrompt({ digest, fileCount, hunkCount, source, previousWalkthrough, language });
+  const instructions = await readInstructions(directory, deps);
+  const { prompt, system } = buildPrompt({ digest, fileCount, hunkCount, source, previousWalkthrough, language, instructions });
 
   if (model.structuredOutput === false) {
     throw fail(
@@ -604,7 +635,7 @@ async function runGeneration({ directory, source, repoRoot, key, force, explicit
 
   let walkthrough;
   try {
-    walkthrough = normalizeWalkthrough(parseModelJson(raw.text), idByAlias);
+    walkthrough = normalizeWalkthrough(parseModelJson(raw.text), idByAlias, digest.files);
   } catch (error) {
     // Without schema support the model was asked for JSON in prose and did not
     // deliver: that is a capability problem the user can fix by switching model,

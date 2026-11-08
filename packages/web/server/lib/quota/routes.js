@@ -3,7 +3,10 @@ import { deleteManagedCredential, getManagedCredentialStatus, normalizers, readM
 import { importCursorCredential, validateCursorCredential } from './providers/cursor.js';
 import { fetchExeDevUsage } from './providers/exe-dev.js';
 import { aliases as zaiAliases, giftResetTypes as zaiGiftResetTypes, useZaiGiftReset } from './providers/zai.js';
+import { asNonEmptyString } from '../shared/guards.js';
 import { fetchQuota as fetchZenmuxQuota } from './providers/zenmux.js';
+import { listExtensionQuotaProviders } from './extension-registry.js';
+import { QuotaRouteError } from './route-error.js';
 
 // Keyed by the same provider ids as `normalizers`: a provider with a normalizer
 // but no validator would be stored without ever being checked.
@@ -31,6 +34,13 @@ const credentialError = (res, error) => res.status(400).json({
 });
 
 export function registerQuotaRoutes(app, { getQuotaProviders }) {
+  // The usage providers installed extensions serve right now (id, name, icon,
+  // extension), which the UI draws beside its built-in list. Every client reads
+  // this on each stream connect, so it answers from memory and asks OpenCode nothing.
+  app.get('/api/quota/extensions', (_req, res) => {
+    res.json({ extensions: listExtensionQuotaProviders() });
+  });
+
   app.get('/api/quota/providers', async (_req, res) => {
     try {
       const { listConfiguredQuotaProviders } = await getQuotaProviders();
@@ -97,6 +107,8 @@ export function registerQuotaRoutes(app, { getQuotaProviders }) {
       const { fetchQuotaForProvider } = await getQuotaProviders();
       res.json(await fetchQuotaForProvider(providerId));
     } catch (error) {
+      // An extension's answer OpenChamber cannot use (`extension-quota.js`): the UI shows the message as the refresh failure, never an empty result.
+      if (error instanceof QuotaRouteError) return res.status(error.status).json({ code: error.code, error: error.message });
       console.error('Failed to fetch quota:', error);
       res.status(500).json({ error: error.message || 'Failed to fetch quota' });
     }
@@ -108,11 +120,13 @@ export function registerQuotaRoutes(app, { getQuotaProviders }) {
       if (!zaiAliases.includes(providerId)) {
         return res.status(404).json({ code: 'UNSUPPORTED_PROVIDER', error: 'Unsupported quota provider' });
       }
-      const { recordId, resetType } = req.body ?? {};
-      if (!Number.isFinite(recordId) || !zaiGiftResetTypes.includes(resetType)) {
+      const { recordId, resetType, grantType } = req.body ?? {};
+      if (!Number.isFinite(recordId)
+        || !zaiGiftResetTypes.includes(resetType)
+        || (grantType !== undefined && asNonEmptyString(grantType) === null)) {
         return res.status(400).json({ code: 'INVALID_REQUEST', error: 'Invalid gift reset request' });
       }
-      await useZaiGiftReset({ recordId, resetType });
+      await useZaiGiftReset({ recordId, resetType, grantType });
       res.json({ success: true });
     } catch (error) {
       const message = error instanceof Error ? error.message : '';

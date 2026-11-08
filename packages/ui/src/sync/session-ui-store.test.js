@@ -1,10 +1,11 @@
 import { ensureChatsRootDirectory } from '@/lib/chatDirectories';
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
+import * as gitHttp from '@/lib/gitApiHttp';
 import { opencodeClient } from '@/lib/opencode/client';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useSessionWorktreeStore } from './session-worktree-store';
-import { expandSlashCommandGoalObjective, resolveSendSelection, routeMessage, useSessionUIStore } from './session-ui-store';
+import { expandSlashCommandGoalObjective, materializeOpenDraftSession, resolveSendSelection, routeMessage, useSessionUIStore } from './session-ui-store';
 import { ChildStoreManager } from './child-store';
 import { setSyncRefs } from './sync-refs';
 import { setActionRefs, setOptimisticRefs } from './session-actions';
@@ -14,12 +15,15 @@ import { useCommandsStore } from '@/stores/useCommandsStore';
 import { useSessionGoalArmStore } from '@/stores/useSessionGoalArmStore';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useSelectionStore } from './selection-store';
-import { getRuntimeKey } from '@/lib/runtime-switch';
+import { getRuntimeApiBaseUrl, getRuntimeKey, initializeRuntimeEndpoint, switchRuntimeEndpoint } from '@/lib/runtime-switch';
 import { getDeferredSafeStorage } from '@/stores/utils/safeStorage';
 import { CHAT_DRAFT_PROJECT_ID } from '@/lib/chatDirectories';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
+import { useUIStore } from '@/stores/useUIStore';
 import { createContextPart } from '@/lib/messages/contextParts';
+import { useSpacesStore } from '@/lib/spaces/spaces-store';
+import { subscribeSpaceSessionProject } from './space-session-project';
 
 /**
  * Unit tests for session worktree routing through the authoritative store.
@@ -210,7 +214,9 @@ describe('session-worktree-store worktree routing', () => {
 });
 
 describe('draft materialization transition identity', () => {
+  const projectsBefore = useProjectsStore.getState().projects;
   beforeEach(() => {
+    useProjectsStore.setState({ projects: [{ id: 'alpha', path: '/projects/alpha' }] });
     useSessionUIStore.setState({
       currentSessionId: null,
       currentSessionDirectory: null,
@@ -218,12 +224,13 @@ describe('draft materialization transition identity', () => {
       newSessionDraft: { open: true, target: 'project', directoryOverride: '/projects/alpha' },
     });
   });
+  afterEach(() => useProjectsStore.setState({ projects: projectsBefore }));
 
   test('marks and consumes only the submitted draft session', () => {
     useSessionUIStore.getState().setCurrentSession(
       'session-created',
       '/projects/alpha',
-      'submitted-draft',
+      { transition: 'submitted-draft' },
     );
 
     expect(useSessionUIStore.getState().materializedDraftSessionId).toBe('session-created');
@@ -239,7 +246,7 @@ describe('draft materialization transition identity', () => {
     useSessionUIStore.getState().setCurrentSession(
       'session-created',
       '/projects/alpha',
-      'submitted-draft',
+      { transition: 'submitted-draft' },
     );
     useSessionUIStore.setState({
       newSessionDraft: { open: true, target: 'project', directoryOverride: '/projects/alpha' },
@@ -279,6 +286,37 @@ describe('routeMessage directory scoping', () => {
     expect(calls[0].sessionId).toBe('session-a');
     expect(calls[0].directory).toBe('/session/project');
   });
+
+  // OpenCode records a shell command past a staged revert's boundary, where the
+  // next prompt's commit deletes it (#6319).
+  test('commits a staged revert before running a shell command, and only then', async () => {
+    const childStores = new ChildStoreManager();
+    const store = childStores.ensureChild('/session/project', { bootstrap: false });
+    setActionRefs(childStores, () => '/session/project');
+    const requests = [];
+    let committed = () => undefined;
+    const commit = spyOn(opencodeClient, 'commitRevert').mockImplementation((sessionId, directory) => new Promise((resolve) => {
+      committed = () => { requests.push(['committed', sessionId, directory]); resolve(); };
+    }));
+    const shell = spyOn(opencodeClient, 'shellSession').mockImplementation(async (params) => { requests.push(['shell', params.sessionId]); return 'msg'; });
+    const runShell = () => routeMessage({ sessionId: 'session-a', directory: '/session/project', content: 'pwd', providerID: 'provider-a', modelID: 'model-a', inputMode: 'shell' });
+    try {
+      store.setState({ session: [{ id: 'session-a', revert: { messageID: 'msg_reverted' } }] });
+      const staged = runShell();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(requests).toEqual([]);
+      committed();
+      await staged;
+      store.setState({ session: [{ id: 'session-a' }] });
+      await runShell();
+    } finally {
+      commit.mockRestore();
+      shell.mockRestore();
+      setActionRefs(new ChildStoreManager(), () => '');
+    }
+
+    expect(requests).toEqual([['committed', 'session-a', '/session/project'], ['shell', 'session-a'], ['shell', 'session-a']]);
+  });
 });
 
 describe('resolveSendSelection thinking level', () => {
@@ -296,30 +334,91 @@ describe('resolveSendSelection thinking level', () => {
 
   // An explicit Default is `null` in UI state; OpenCode rejects a null
   // variant, so it has to switch the session off its effort without one.
-  test('Default on a session with an effort switches it to the model without a variant', () => {
+  test('Default on a session with an effort switches it to the model without a variant', async () => {
     seedSession({ ...MODEL, variant: 'high' });
-    expect(desire(null).model).toEqual(MODEL);
+    expect((await desire(null)).model).toEqual(MODEL);
   });
 
-  test('Default on a session without an effort sends no switch', () => {
+  test('Default on a session without an effort sends no switch', async () => {
     seedSession(MODEL);
-    expect(desire(null).model).toBeUndefined();
-    expect(desire(undefined).model).toBeUndefined();
+    expect((await desire(null)).model).toBeUndefined();
+    expect((await desire(undefined)).model).toBeUndefined();
   });
 
   // OpenCode records a switch without a variant as variant "default"; reading
   // that back as a difference would switch again before every prompt.
-  test('Default on a session OpenCode recorded as "default" sends no switch', () => {
+  test('Default on a session OpenCode recorded as "default" sends no switch', async () => {
     seedSession({ ...MODEL, variant: 'default' });
-    expect(desire(null).model).toBeUndefined();
-    expect(desire(undefined).model).toBeUndefined();
-    expect(desire('high').model).toEqual({ ...MODEL, variant: 'high' });
+    expect((await desire(null)).model).toBeUndefined();
+    expect((await desire(undefined)).model).toBeUndefined();
+    expect((await desire('high')).model).toEqual({ ...MODEL, variant: 'high' });
   });
 
-  test('a chosen effort switches only when it differs', () => {
+  test('a chosen effort switches only when it differs', async () => {
     seedSession({ ...MODEL, variant: 'high' });
-    expect(desire('high').model).toBeUndefined();
-    expect(desire('low').model).toEqual({ ...MODEL, variant: 'low' });
+    expect((await desire('high')).model).toBeUndefined();
+    expect((await desire('low')).model).toEqual({ ...MODEL, variant: 'low' });
+  });
+});
+
+describe('routeMessage agent the folder lacks (#5522)', () => {
+  const DIRECTORY = '/repo/agent-check';
+  const agent = (id) => ({ id, name: id, displayName: id, mode: 'primary' });
+  let previousConfig;
+  let getSession;
+
+  beforeEach(() => {
+    getSession = spyOn(opencodeClient, 'getSession').mockResolvedValue({ agent: 'stock' });
+    previousConfig = useConfigStore.getState();
+    const childStores = new ChildStoreManager();
+    childStores.ensureChild(DIRECTORY, { bootstrap: false }).setState({
+      session: [{ id: 'ses_stuck', agent: 'stock', model: { providerID: 'provider-a', id: 'model-a' } }],
+    });
+    setSyncRefs({}, childStores, DIRECTORY);
+  });
+
+  afterEach(() => {
+    getSession.mockRestore();
+    useConfigStore.setState(previousConfig, true);
+    setSyncRefs({}, new ChildStoreManager(), '');
+  });
+
+  const sendCommandWith = async (catalog) => {
+    useConfigStore.setState({
+      activeDirectoryKey: '/elsewhere',
+      directoryScoped: { [DIRECTORY]: { ...catalog, providers: [], agentModelSelections: {}, defaultProviders: {}, selectedProviderId: '', currentProviderId: '', currentModelId: '' } },
+    });
+    const calls = [];
+    const originalListCommands = opencodeClient.listCommands;
+    const originalSendCommand = opencodeClient.sendCommand;
+    opencodeClient.listCommands = async () => [{ name: 'agent-check-test' }];
+    opencodeClient.sendCommand = async (params) => {
+      calls.push(params);
+    };
+    try {
+      await routeMessage({
+        sessionId: 'ses_stuck',
+        directory: DIRECTORY,
+        content: '/agent-check-test',
+        providerID: 'provider-a',
+        modelID: 'model-a',
+        agent: 'stock',
+      });
+    } finally {
+      opencodeClient.listCommands = originalListCommands;
+      opencodeClient.sendCommand = originalSendCommand;
+    }
+    return calls[0];
+  };
+
+  test('a session already on an agent the loaded catalog lacks sends it for the check', async () => {
+    const call = await sendCommandWith({ agents: [agent('build'), agent('plan')], agentsLoaded: true });
+    expect(call.agent).toBe('stock');
+  });
+
+  test('no switch travels while the catalog lists the agent or has not loaded', async () => {
+    expect((await sendCommandWith({ agents: [agent('stock')], agentsLoaded: true })).agent).toBeUndefined();
+    expect((await sendCommandWith({ agents: [], agentsLoaded: false })).agent).toBeUndefined();
   });
 });
 
@@ -355,6 +454,8 @@ describe('routeMessage inline skills', () => {
 
 describe('sendMessage captured target', () => {
   let originalSendMessage;
+  let originalGetSession;
+  let originalFetch;
   const calls = [];
 
   beforeEach(() => {
@@ -378,6 +479,16 @@ describe('sendMessage captured target', () => {
     });
 
     originalSendMessage = opencodeClient.sendMessage;
+    originalGetSession = opencodeClient.getSession;
+    opencodeClient.getSession = async () => ({ agent: 'build' });
+    originalFetch = globalThis.fetch;
+    globalThis.fetch = async (input) => {
+      const url = input?.href ?? input?.url ?? String(input);
+      if (url.includes('/api/config/settings')) {
+        return Response.json({ responseStyleEnabled: true, responseStylePreset: 'concise' });
+      }
+      return Response.json({});
+    };
     opencodeClient.sendMessage = async (params) => {
       calls.push(params);
       return 'msg';
@@ -386,6 +497,8 @@ describe('sendMessage captured target', () => {
 
   afterEach(() => {
     opencodeClient.sendMessage = originalSendMessage;
+    opencodeClient.getSession = originalGetSession;
+    globalThis.fetch = originalFetch;
   });
 
   const sendToTarget = (target) => useSessionUIStore.getState().sendMessage(
@@ -430,6 +543,249 @@ describe('sendMessage captured target', () => {
     expect(error.message).toContain('runtime changed');
     expect(calls).toHaveLength(0);
   });
+
+  const sendWithEffort = (variant, recordEffort) => useSessionUIStore.getState().sendMessage(
+    'message',
+    'provider-a',
+    'model-a',
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    variant,
+    'normal',
+    {
+      target: { runtimeKey: getRuntimeKey(), sessionId: 'session-captured', directory: '/captured/project' },
+      recordEffort,
+    },
+  );
+
+  test('records the level a composer send carried', async () => {
+    useUIStore.setState({ lastUsedEfforts: {} });
+
+    await sendWithEffort('high', true);
+
+    expect(useUIStore.getState().lastUsedEfforts).toEqual({ 'provider-a/model-a': 'high' });
+  });
+
+  test('records an explicit Default as a real choice', async () => {
+    useUIStore.setState({ lastUsedEfforts: {} });
+
+    await sendWithEffort(null, true);
+
+    expect(useUIStore.getState().lastUsedEfforts).toEqual({ 'provider-a/model-a': null });
+  });
+
+  test('background and queued sends leave the remembered level alone', async () => {
+    useUIStore.setState({ lastUsedEfforts: { 'provider-a/model-a': 'low' } });
+
+    await sendWithEffort('high', false);
+
+    expect(useUIStore.getState().lastUsedEfforts).toEqual({ 'provider-a/model-a': 'low' });
+  });
+
+  test('a pending send preserves newer picker choices, including a return to the same value', async () => {
+    const { rememberEffort } = await import('../lib/modelEfforts');
+    for (const choices of [['high'], ['high', 'low']]) {
+      rememberEffort('provider-a', 'model-a', 'low');
+      let finish;
+      let started;
+      const pending = new Promise((resolve) => { started = resolve; });
+      opencodeClient.sendMessage = () => new Promise((resolve) => {
+        finish = resolve;
+        started();
+      });
+      const sending = sendWithEffort(null, true);
+      await pending;
+      for (const choice of choices) rememberEffort('provider-a', 'model-a', choice);
+      finish('msg');
+      await sending;
+      expect(useUIStore.getState().lastUsedEfforts['provider-a/model-a']).toBe(choices.at(-1));
+    }
+  });
+
+  test.each([false, true])('a completed send cannot record effort after a runtime switch, round trip %s', async (roundTrip) => {
+    const apiBaseUrl = getRuntimeApiBaseUrl();
+    const runtimeKey = getRuntimeKey();
+    useUIStore.setState({ lastUsedEfforts: { 'provider-a/model-a': 'low' } });
+    let finish;
+    let started;
+    const pending = new Promise((resolve) => { started = resolve; });
+    opencodeClient.sendMessage = () => new Promise((resolve) => {
+      finish = resolve;
+      started();
+    });
+    try {
+      const sending = sendWithEffort(null, true);
+      await pending;
+      switchRuntimeEndpoint({ apiBaseUrl: 'https://effort-other.test', runtimeKey: 'effort-other' });
+      if (roundTrip) switchRuntimeEndpoint({ apiBaseUrl, runtimeKey });
+      finish('msg');
+      await sending;
+      expect(useUIStore.getState().lastUsedEfforts['provider-a/model-a']).toBe('low');
+    } finally {
+      switchRuntimeEndpoint({ apiBaseUrl, runtimeKey });
+    }
+  });
+
+  test('a failed composer send preserves the last chosen level', async () => {
+    useUIStore.setState({ lastUsedEfforts: { 'provider-a/model-a': 'low' } });
+    opencodeClient.sendMessage = async () => { throw new Error('offline'); };
+
+    await expect(sendWithEffort('high', true)).rejects.toThrow('offline');
+
+    expect(useUIStore.getState().lastUsedEfforts).toEqual({ 'provider-a/model-a': 'low' });
+  });
+
+  const sendWithAgent = (agent, inputMode = 'normal') => useSessionUIStore.getState().sendMessage(
+    'message',
+    'provider-a',
+    'model-a',
+    agent,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    inputMode,
+    { target: { runtimeKey: getRuntimeKey(), sessionId: 'session-captured', directory: '/captured/project' } },
+  );
+
+  test('the send that switches the session to a picked agent settles the pick; a failed one gives it back', async () => {
+    const selection = useSelectionStore.getState();
+    selection.clearSessionSelections('session-captured');
+    selection.pickSessionAgent('session-captured', 'plan');
+
+    opencodeClient.sendMessage = async () => { throw new Error('offline'); };
+    await expect(sendWithAgent('plan')).rejects.toThrow('offline');
+    expect(selection.getSessionAgentPick('session-captured')).toBe('plan');
+
+    // Picking the session's own agent while a send is out is newer than the
+    // send, so its failure does not bring the pick back.
+    selection.followSessionAgent('session-captured', 'build');
+    let fail;
+    let out;
+    const failing = new Promise((resolve) => { out = resolve; });
+    opencodeClient.sendMessage = () => new Promise((_resolve, reject) => {
+      fail = reject;
+      out();
+    });
+    const failedSend = sendWithAgent('plan');
+    await failing;
+    selection.pickSessionAgent('session-captured', 'build');
+    fail(new Error('offline'));
+    await expect(failedSend).rejects.toThrow('offline');
+    expect(selection.getSessionAgentPick('session-captured')).toBeNull();
+    expect(selection.getSessionAgentSelection('session-captured')).toBe('build');
+    selection.pickSessionAgent('session-captured', 'plan');
+
+    opencodeClient.sendMessage = async (params) => {
+      calls.push(params);
+      return 'msg';
+    };
+    const shell = spyOn(opencodeClient, 'shellSession').mockResolvedValue(undefined);
+    try {
+      await sendWithAgent('plan', 'shell');
+    } finally {
+      shell.mockRestore();
+    }
+    expect(selection.getSessionAgentPick('session-captured')).toBe('plan');
+
+    // Settled as the send leaves, so a switch another client makes while it
+    // is out shows in the composer even if its events arrive merged.
+    let finish;
+    let started;
+    const leaving = new Promise((resolve) => { started = resolve; });
+    opencodeClient.sendMessage = (params) => new Promise((resolve) => {
+      calls.push(params);
+      finish = resolve;
+      started();
+    });
+    const sending = sendWithAgent('plan');
+    await leaving;
+    expect(selection.getSessionAgentPick('session-captured')).toBeNull();
+    expect(selection.followSessionAgent('session-captured', 'review')).toBe(true);
+    finish('msg');
+    await sending;
+    expect(calls.at(-1).agent).toBe('plan');
+    expect(selection.getSessionAgentSelection('session-captured')).toBe('review');
+    selection.clearSessionSelections('session-captured');
+  });
+
+  test.each(['agent', 'model'])('a successful send preserves a followed %s round trip while it was out', async (field) => {
+    const selection = useSelectionStore.getState();
+    selection.clearSessionSelections('session-captured');
+    selection.followSessionAgent('session-captured', 'build');
+    selection.markSessionModelFollowed('session-captured', 'provider-a/original#');
+    selection.pickSessionAgent('session-captured', 'plan');
+    let finish;
+    let started;
+    const leaving = new Promise((resolve) => { started = resolve; });
+    opencodeClient.sendMessage = () => new Promise((resolve) => {
+      finish = resolve;
+      started();
+    });
+
+    const sending = sendWithAgent('plan');
+    await leaving;
+    if (field === 'agent') {
+      selection.followSessionAgent('session-captured', 'plan');
+      selection.followSessionAgent('session-captured', 'build');
+    } else {
+      selection.markSessionModelFollowed('session-captured', 'provider-a/model-a#');
+      selection.markSessionModelFollowed('session-captured', 'provider-a/original#');
+    }
+    finish('msg');
+    await sending;
+
+    expect(selection.getSessionAgentSelection('session-captured')).toBe(field === 'agent' ? 'build' : 'plan');
+    expect(selection.isSessionModelSwitched('session-captured', field === 'model'
+      ? 'provider-a/original#' : 'provider-a/model-a#')).toBe(false);
+    selection.clearSessionSelections('session-captured');
+  });
+
+  test('a successful send preserves a model followed while it was out', async () => {
+    const selection = useSelectionStore.getState();
+    selection.clearSessionSelections('session-captured');
+    selection.markSessionModelFollowed('session-captured', 'provider-a/original#');
+    selection.pickSessionModel('session-captured', 'provider-a', 'model-a');
+    let finish;
+    let started;
+    const leaving = new Promise((resolve) => { started = resolve; });
+    opencodeClient.sendMessage = () => new Promise((resolve) => {
+      finish = resolve;
+      started();
+    });
+
+    const sending = sendWithAgent('plan');
+    await leaving;
+    selection.markSessionModelFollowed('session-captured', 'provider-b/external#high');
+    finish('msg');
+    await sending;
+
+    expect(selection.getSessionModelPick('session-captured')).toBeNull();
+    expect(selection.isSessionModelSwitched('session-captured', 'provider-b/external#high')).toBe(false);
+    expect(selection.isSessionModelSwitched('session-captured', 'provider-a/model-a#')).toBe(true);
+    expect(selection.getSessionAgentSelection('session-captured')).toBe('plan');
+    selection.clearSessionSelections('session-captured');
+  });
+
+  test('only a successful model-carrying send consumes a live model pick', async () => {
+    const selection = useSelectionStore.getState();
+    selection.pickSessionModel('session-captured', 'provider-a', 'model-a');
+    opencodeClient.sendMessage = async () => { throw new Error('offline'); };
+    await expect(sendWithAgent('plan')).rejects.toThrow('offline');
+    expect(selection.getSessionModelPick('session-captured')).toEqual({ providerId: 'provider-a', modelId: 'model-a' });
+    const shell = spyOn(opencodeClient, 'shellSession').mockResolvedValue(undefined);
+    try {
+      await sendWithAgent('plan', 'shell');
+      expect(selection.getSessionModelPick('session-captured')).not.toBeNull();
+    } finally {
+      shell.mockRestore();
+    }
+    opencodeClient.sendMessage = async () => 'msg';
+    await sendWithAgent('plan');
+    expect(selection.getSessionModelPick('session-captured')).toBeNull();
+  });
 });
 
 describe('slash-command goal objectives', () => {
@@ -458,6 +814,68 @@ describe('slash-command goal objectives', () => {
 });
 
 describe('runtime worktree topology', () => {
+  test('resumes a pending start folder after A -> B -> A and rejects the old completion', async () => {
+    const originalUI = useSessionUIStore.getState();
+    const originalProjects = useProjectsStore.getState();
+    const originalConfig = useConfigStore.getState();
+    const originalDirectory = useDirectoryStore.getState();
+    const originalRuntime = { apiBaseUrl: getRuntimeApiBaseUrl(), runtimeKey: getRuntimeKey() };
+    const project = { id: 'runtime-folder-project', path: '/runtime-project/ai' };
+    const root = '/runtime-worktree';
+    const a = 'https://draft-a.test';
+    const b = 'https://draft-b.test';
+    const prefixResolvers = [];
+    const prefixes = spyOn(gitHttp, 'resolveGitRepositoryPrefix').mockImplementation(() => new Promise((resolve) => prefixResolvers.push(resolve)));
+    const validation = spyOn(gitHttp, 'validateWorktreeDirectory').mockImplementation(async (directory, worktreeRoot) => ({
+      valid: true, insideWorktreeRoot: true, resolvedWorktreeRoot: worktreeRoot, resolvedCwd: directory,
+    }));
+    const fetch = spyOn(globalThis, 'fetch').mockImplementation(async () => new Response(null, { status: 404 }));
+    const activated = [];
+    const flush = async () => { await Bun.sleep(0); };
+    try {
+      initializeRuntimeEndpoint({ apiBaseUrl: a });
+      useProjectsStore.setState({ projects: [project], activeProjectId: project.id });
+      useDirectoryStore.setState({ currentDirectory: root, homeDirectory: '/home', isHomeReady: true });
+      useConfigStore.setState({ activateDirectory: async (directory) => { activated.push(directory); } });
+      useSessionUIStore.setState({
+        currentSessionId: null,
+        newSessionDraft: { ...originalUI.newSessionDraft, open: false },
+        availableWorktreesByProject: new Map([[project.path, [{ path: root, projectDirectory: project.path, branch: 'test', label: 'test' }]]]),
+      });
+      useSessionUIStore.getState().openNewSessionDraft({ selectedProjectId: project.id, directoryOverride: root });
+      const draftId = useSessionUIStore.getState().newSessionDraft.draftId;
+      expect(useSessionUIStore.getState().newSessionDraft.worktreeStartDirectory).toEqual({ worktreeRoot: root, directory: null });
+      expect(prefixResolvers).toHaveLength(1);
+      useSessionUIStore.getState().prepareForRuntimeSwitch(a);
+      switchRuntimeEndpoint({ apiBaseUrl: b });
+      useSessionUIStore.getState().restoreForRuntimeSwitch(b, `url:${a}`);
+      prefixResolvers[0]('ai');
+      await flush();
+      expect(activated).toEqual([]);
+      useSessionUIStore.getState().prepareForRuntimeSwitch(b);
+      switchRuntimeEndpoint({ apiBaseUrl: a });
+      useSessionUIStore.getState().restoreForRuntimeSwitch(a, `url:${b}`);
+      expect(useSessionUIStore.getState().newSessionDraft.draftId).toBe(draftId);
+      expect(prefixResolvers).toHaveLength(2);
+      expect(activated).toEqual([]);
+      prefixResolvers[1]('ai');
+      await flush();
+      expect(useSessionUIStore.getState().newSessionDraft.worktreeStartDirectory).toEqual({ worktreeRoot: root, directory: `${root}/ai` });
+      expect(activated).toEqual([`${root}/ai`]);
+    } finally {
+      for (const resolve of prefixResolvers) resolve('ai');
+      await flush();
+      prefixes.mockRestore();
+      validation.mockRestore();
+      switchRuntimeEndpoint(originalRuntime);
+      fetch.mockRestore();
+      useSessionUIStore.setState(originalUI);
+      useProjectsStore.setState(originalProjects);
+      useConfigStore.setState(originalConfig);
+      useDirectoryStore.setState(originalDirectory);
+    }
+  });
+
   test('restores independent in-memory maps across A -> B -> A', () => {
     const topologyA = new Map([['/repo', [{ path: '/repo/a', branch: 'a' }]]]);
     const topologyB = new Map([['/repo', [{ path: '/repo/b', branch: 'b' }]]]);
@@ -1082,6 +1500,28 @@ describe('createSession draft lifecycle', () => {
     expect(createSessionCalls).toEqual(['/private/deleted-worktree']);
   });
 
+  test('never moves a draft in an isolated space to the project, pinned or not', async () => {
+    const createSessionCalls = [];
+    const spaceDirectory = '/spaces/0123456789ab/main';
+    useProjectsStore.setState({
+      projects: [{ id: 'project-main', path: '/projects/main', label: 'Main' }],
+      activeProjectId: 'project-main',
+    });
+    // The host's probe cannot see inside a space and calls its directory missing.
+    opencodeClient.getDirectoryAvailability = async () => 'missing';
+    opencodeClient.createSession = async (_params, directory) => {
+      createSessionCalls.push(directory);
+      return { id: 'session-space', directory, time: { created: 1, updated: 1 } };
+    };
+    useSessionUIStore.getState().openNewSessionDraft({ selectedProjectId: 'project-main', directoryOverride: spaceDirectory });
+    expect(useSessionUIStore.getState().newSessionDraft.preserveDirectoryOverride).toBe(true);
+    useSessionUIStore.getState().setDraftPreserveDirectoryOverride(false);
+
+    await useSessionUIStore.getState().createSession('Draft title', spaceDirectory);
+
+    expect(createSessionCalls).toEqual([spaceDirectory]);
+  });
+
   test('keeps a ChatInput-style current-directory draft recoverable when that path is missing', async () => {
     const createSessionCalls = [];
     useProjectsStore.setState({
@@ -1207,9 +1647,10 @@ describe('sendMessage draft snapshot (issues #2222 / #2315)', () => {
       sendMessageCalls.push(params);
       return 'msg';
     };
-    opencodeClient.createSession = async (_params, directory) => {
+    opencodeClient.createSession = async (params, directory) => {
       createSessionCalls.push(directory);
-      return { id: 'session-materialized', directory: directory ?? '/projects/alpha', time: { created: 1, updated: 1 } };
+      // A draft's first send mints the id and OpenCode creates the session under it.
+      return { id: params?.id ?? 'session-materialized', directory: directory ?? '/projects/alpha', time: { created: 1, updated: 1 } };
     };
   });
 
@@ -1223,6 +1664,68 @@ describe('sendMessage draft snapshot (issues #2222 / #2315)', () => {
     });
     useProjectsStore.setState({ projects: [], activeProjectId: null });
     useSessionDisplayStore.setState({ singleProjectId: null });
+  });
+
+  test.each([
+    { recordEffort: true, fails: false, expected: 'high' },
+    { recordEffort: true, fails: true, expected: 'low' },
+    { recordEffort: false, fails: false, expected: 'low' },
+  ])('draft effort recording $recordEffort with send failure $fails', async ({ recordEffort, fails, expected }) => {
+    useUIStore.setState({ lastUsedEfforts: { 'provider-a/model-a': 'low' } });
+    const draftSnapshot = {
+      draftId: `effort-${recordEffort}-${fails}`,
+      open: true,
+      directoryOverride: '/projects/alpha',
+      parentID: null,
+    };
+    useSessionUIStore.setState({
+      currentSessionId: null,
+      currentSessionDirectory: null,
+      newSessionDraft: draftSnapshot,
+    });
+    if (fails) opencodeClient.sendMessage = async () => { throw new Error('offline'); };
+
+    const send = useSessionUIStore.getState().sendMessage(
+      'message', 'provider-a', 'model-a', undefined, undefined, undefined, undefined,
+      'high', 'normal', { draftSnapshot, recordEffort },
+    );
+    if (fails) {
+      await expect(send).rejects.toThrow('offline');
+    } else {
+      await send;
+    }
+
+    expect(createSessionCalls).toHaveLength(1);
+    expect(useUIStore.getState().lastUsedEfforts).toEqual({ 'provider-a/model-a': expected });
+  });
+
+  test.each([false, true])('a completed draft send cannot record effort after a runtime switch, round trip %s', async (roundTrip) => {
+    const apiBaseUrl = getRuntimeApiBaseUrl();
+    const runtimeKey = getRuntimeKey();
+    const draftSnapshot = { draftId: `runtime-effort-${roundTrip}`, open: true, directoryOverride: '/projects/alpha', parentID: null };
+    useSessionUIStore.setState({ currentSessionId: null, currentSessionDirectory: null, newSessionDraft: draftSnapshot });
+    useUIStore.setState({ lastUsedEfforts: { 'provider-a/model-a': 'low' } });
+    let finish;
+    let started;
+    const pending = new Promise((resolve) => { started = resolve; });
+    opencodeClient.sendMessage = () => new Promise((resolve) => {
+      finish = resolve;
+      started();
+    });
+    try {
+      const sending = useSessionUIStore.getState().sendMessage(
+        'message', 'provider-a', 'model-a', undefined, undefined, undefined, undefined,
+        'high', 'normal', { draftSnapshot, recordEffort: true },
+      );
+      await pending;
+      switchRuntimeEndpoint({ apiBaseUrl: 'https://effort-other.test', runtimeKey: 'effort-other' });
+      if (roundTrip) switchRuntimeEndpoint({ apiBaseUrl, runtimeKey });
+      finish('msg');
+      await sending;
+      expect(useUIStore.getState().lastUsedEfforts['provider-a/model-a']).toBe('low');
+    } finally {
+      switchRuntimeEndpoint({ apiBaseUrl, runtimeKey });
+    }
   });
 
   test('draft send snapshots the draft; switching to another project mid-flight still targets the materialized session', async () => {
@@ -1268,9 +1771,35 @@ describe('sendMessage draft snapshot (issues #2222 / #2315)', () => {
     expect(createSessionCalls).toHaveLength(1);
     expect(createSessionCalls[0]).toBe('/projects/alpha');
     expect(sendMessageCalls).toHaveLength(1);
-    expect(sendMessageCalls[0].id).toBe('session-materialized');
+    expect(sendMessageCalls[0].id.startsWith('ses_')).toBe(true);
     expect(sendMessageCalls[0].directory).toBe('/projects/alpha');
     expect(useSessionDisplayStore.getState().singleProjectId).toBe('project-alpha');
+  });
+
+  test('a session opened from a chat draft in the app directory reads its own catalog again (#6283)', () => {
+    const originalConfig = useConfigStore.getState();
+    const originalDirectory = useDirectoryStore.getState();
+    const originalProjects = useProjectsStore.getState();
+    const activated = [];
+    try {
+      useProjectsStore.setState({ projects: [{ id: 'alpha', path: '/projects/alpha' }] });
+      useDirectoryStore.setState({ currentDirectory: '/projects/alpha' });
+      useConfigStore.setState({ activateDirectory: async (directory) => { activated.push(directory); } });
+
+      useSessionUIStore.setState({ newSessionDraft: { open: false, directoryOverride: null, parentID: null } });
+      useSessionUIStore.getState().setCurrentSession('session-alpha', '/projects/alpha');
+      expect(useSessionUIStore.getState().currentSessionId).toBe('session-alpha');
+      expect(activated).toEqual([]);
+
+      useSessionUIStore.setState({ currentSessionId: null, newSessionDraft: { open: true, target: 'chat', draftId: 1, directoryOverride: null, parentID: null } });
+      useSessionUIStore.getState().setCurrentSession('session-alpha', '/projects/alpha');
+      expect(useSessionUIStore.getState().currentSessionId).toBe('session-alpha');
+      expect(activated).toEqual(['/projects/alpha']);
+    } finally {
+      useConfigStore.setState(originalConfig);
+      useDirectoryStore.setState(originalDirectory);
+      useProjectsStore.setState(originalProjects);
+    }
   });
 
   test('existing-session send keeps the submit-time target even when selection changes', async () => {
@@ -1300,6 +1829,64 @@ describe('sendMessage draft snapshot (issues #2222 / #2315)', () => {
     expect(sendMessageCalls).toHaveLength(1);
     expect(sendMessageCalls[0].id).toBe('session-project-a');
     expect(sendMessageCalls[0].directory).toBe('/projects/alpha');
+  });
+});
+
+describe('setCurrentSession and the one-project picker', () => {
+  beforeEach(() => {
+    useProjectsStore.setState({
+      projects: [
+        { id: 'project-alpha', path: '/projects/alpha', label: 'Alpha' },
+        { id: 'project-beta', path: '/projects/beta', label: 'Beta' },
+      ],
+      activeProjectId: 'project-beta',
+    });
+    useSessionDisplayStore.setState({ singleProjectId: 'project-beta' });
+    useSessionUIStore.setState({ currentSessionId: null, currentSessionDirectory: null });
+    useDirectoryStore.setState({ currentDirectory: '/projects/alpha' });
+  });
+
+  afterEach(() => {
+    useSpacesStore.getState().applyMarks([]);
+    useProjectsStore.setState({ projects: [], activeProjectId: null });
+    useSessionDisplayStore.setState({ singleProjectId: null });
+    useSessionUIStore.setState({ currentSessionId: null, currentSessionDirectory: null });
+  });
+
+  test('following a session the user opened moves the picker to its project', () => {
+    useSessionUIStore.getState().setCurrentSession('session-alpha', '/projects/alpha');
+
+    expect(useSessionDisplayStore.getState().singleProjectId).toBe('project-alpha');
+  });
+
+  test('a launch restore keeps the remembered picker and still makes its project active', () => {
+    useSessionUIStore.getState().setCurrentSession('session-alpha', '/projects/alpha', { keepSingleProject: true });
+
+    expect(useProjectsStore.getState().activeProjectId).toBe('project-alpha');
+    expect(useSessionDisplayStore.getState().singleProjectId).toBe('project-beta');
+  });
+
+  test.each([
+    ['launch restore', true, false, 'project-beta'],
+    ['user navigation', false, false, 'project-alpha'],
+    ['explicitly reopening the restored session', true, true, 'project-alpha'],
+  ])('late space metadata follows the picker policy after %s', (_name, keepSingleProject, reopen, expectedProject) => {
+    const spaceId = 'a1b2c3d4e5f6';
+    const directory = `/spaces/${spaceId}/app`;
+    useSpacesStore.getState().applyMarks([]);
+    useSessionUIStore.getState().setCurrentSession('session-picker-space', directory, { keepSingleProject });
+    if (reopen) useSessionUIStore.getState().setCurrentSession('session-picker-space', directory);
+    const unsubscribe = subscribeSpaceSessionProject(getRuntimeKey());
+    try {
+      useSpacesStore.getState().applyMarks([{
+        id: spaceId, name: 'test-space', state: 'complete',
+        projectDirectory: '/projects/alpha', directory,
+      }]);
+      expect(useProjectsStore.getState().activeProjectId).toBe('project-alpha');
+      expect(useSessionDisplayStore.getState().singleProjectId).toBe(expectedProject);
+    } finally {
+      unsubscribe();
+    }
   });
 });
 
@@ -1558,6 +2145,83 @@ describe('routeMessage skill invocation', () => {
     expect(sendMessageCalls).toHaveLength(1);
     expect(sendMessageCalls[0].skills.names).toEqual(['grill-with-docs']);
     expect(sendMessageCalls[0].context).toEqual([{ id: expect.stringMatching(/^msg_/), text: additionalParts[0].text, metadata: additionalParts[0].metadata }]);
+  });
+
+  describe('a command with attached context in a session with a revert', () => {
+    const originalCommitRevert = opencodeClient.commitRevert;
+    const commitRevertCalls = [];
+    const part = () => createContextPart({
+      kind: 'code-comment',
+      source: 'file',
+      fileLabel: 'src/auth.ts',
+      startLine: 4,
+      endLine: 4,
+      language: 'ts',
+      code: 'auth();',
+      text: 'check this',
+    });
+    const seedSession = (session) => {
+      const childStores = new ChildStoreManager();
+      childStores.ensureChild('/skills/project', { bootstrap: false }).setState({ session: [session] });
+      setSyncRefs({}, childStores, '/skills/project');
+    };
+    const sendCommandWithContext = () => routeMessage({
+      sessionId: 'session-command',
+      directory: '/skills/project',
+      content: '/inspect auth flow',
+      providerID: 'provider-a',
+      modelID: 'model-a',
+      additionalParts: [part()],
+    });
+
+    beforeEach(() => {
+      commitRevertCalls.length = 0;
+      opencodeClient.commitRevert = async (...args) => { commitRevertCalls.push(args); };
+      useCommandsStore.setState({
+        commandsByDirectory: { '/skills/project': [{ name: 'inspect', template: 'Inspect $ARGUMENTS carefully.' }] },
+      });
+    });
+
+    afterEach(() => {
+      opencodeClient.commitRevert = originalCommitRevert;
+      setSyncRefs({}, new ChildStoreManager(), '');
+    });
+
+    test('hands sendCommand the commit of the staged revert, aimed at the session and its directory', async () => {
+      seedSession({ id: 'session-command', directory: '/skills/project', revert: { messageID: 'msg_boundary' } });
+
+      expect(await sendCommandWithContext()).toBe('command');
+
+      await sendCommandCalls[0].commitRevert();
+      expect(commitRevertCalls).toEqual([['session-command', '/skills/project']]);
+    });
+
+    test('reads the marker where the session lives when the send names another directory', async () => {
+      seedSession({ id: 'session-command', directory: '/skills/project', revert: { messageID: 'msg_boundary' } });
+      useCommandsStore.setState({
+        commandsByDirectory: { '/skills/other': [{ name: 'inspect', template: 'Inspect $ARGUMENTS carefully.' }] },
+      });
+
+      await routeMessage({
+        sessionId: 'session-command',
+        directory: '/skills/other',
+        content: '/inspect auth flow',
+        providerID: 'provider-a',
+        modelID: 'model-a',
+        additionalParts: [part()],
+      });
+
+      await sendCommandCalls[0].commitRevert();
+      expect(commitRevertCalls).toEqual([['session-command', '/skills/project']]);
+    });
+
+    test('hands over no commit when nothing is staged', async () => {
+      seedSession({ id: 'session-command', directory: '/skills/project' });
+
+      await sendCommandWithContext();
+
+      expect(sendCommandCalls[0].commitRevert).toBeUndefined();
+    });
   });
 
   test('a command with a quoted selection still runs as a command', async () => {
@@ -1990,6 +2654,7 @@ describe('deleteSessions option forwarding', () => {
 
 describe('sendMessage effort record', () => {
   let originalSendMessage;
+  let getSession;
 
   const SESSION = 'session-effort';
   const PROVIDER = 'provider-a';
@@ -2001,6 +2666,7 @@ describe('sendMessage effort record', () => {
     .getAgentModelVariantForSession(SESSION, AGENT, PROVIDER, MODEL);
 
   beforeEach(() => {
+    getSession = spyOn(opencodeClient, 'getSession').mockResolvedValue({ agent: AGENT });
     const childStore = {
       getState: () => ({ session: [], message: {}, part: {}, session_status: {} }),
       setState: () => {},
@@ -2030,6 +2696,7 @@ describe('sendMessage effort record', () => {
   });
 
   afterEach(() => {
+    getSession.mockRestore();
     opencodeClient.sendMessage = originalSendMessage;
     useSelectionStore.getState().saveAgentModelVariantForSession(SESSION, AGENT, PROVIDER, MODEL, undefined);
   });
@@ -2037,6 +2704,47 @@ describe('sendMessage effort record', () => {
   const send = (variant) => useSessionUIStore.getState().sendMessage(
     'hello', PROVIDER, MODEL, AGENT, undefined, undefined, undefined, variant, 'normal',
   );
+
+  test('a successful send settles its captured runtime pick after a runtime switch', async () => {
+    const apiBaseUrl = getRuntimeApiBaseUrl();
+    const runtimeKey = getRuntimeKey();
+    const selection = useSelectionStore.getState();
+    selection.pickSessionModel(SESSION, PROVIDER, MODEL);
+    opencodeClient.sendMessage = async () => {
+      switchRuntimeEndpoint({ apiBaseUrl: 'https://send-other.test', runtimeKey: 'send-other' });
+      selection.pickSessionModel(SESSION, PROVIDER, MODEL);
+      return 'msg';
+    };
+    try {
+      await send(undefined);
+      expect(selection.getSessionModelPick(SESSION)).toEqual({ providerId: PROVIDER, modelId: MODEL });
+      switchRuntimeEndpoint({ apiBaseUrl, runtimeKey });
+      expect(selection.getSessionModelPick(SESSION)).toBeNull();
+    } finally {
+      switchRuntimeEndpoint({ apiBaseUrl, runtimeKey });
+    }
+  });
+
+  test('a successful send leaves a newer pick of the same model unsent', async () => {
+    const selection = useSelectionStore.getState();
+    selection.pickSessionModel(SESSION, PROVIDER, MODEL);
+    opencodeClient.sendMessage = async () => {
+      selection.pickSessionModel(SESSION, PROVIDER, MODEL);
+      return 'msg';
+    };
+    await send(undefined);
+    expect(selection.getSessionModelPick(SESSION)).toEqual({ providerId: PROVIDER, modelId: MODEL });
+    selection.clearSessionSelections(SESSION);
+  });
+
+  test('a failed send leaves its model pick unsent', async () => {
+    const selection = useSelectionStore.getState();
+    selection.pickSessionModel(SESSION, PROVIDER, MODEL);
+    opencodeClient.sendMessage = async () => { throw new Error('send refused'); };
+    await expect(send(undefined)).rejects.toThrow('send refused');
+    expect(selection.getSessionModelPick(SESSION)).toEqual({ providerId: PROVIDER, modelId: MODEL });
+    selection.clearSessionSelections(SESSION);
+  });
 
   test('keeps an explicit Default across the send that follows it', async () => {
     // What the picker leaves behind: `null` recorded, and a send that carries
@@ -2184,8 +2892,10 @@ describe('missing session directory recovery', () => {
 describe('send does not wait for session knowledge before showing the message', () => {
   let originalSendMessage;
   let originalFetch;
+  let getSession;
 
   beforeEach(() => {
+    getSession = spyOn(opencodeClient, 'getSession').mockResolvedValue({ agent: 'build' });
     originalSendMessage = opencodeClient.sendMessage;
     originalFetch = globalThis.fetch;
     useConfigStore.setState({ isConnected: true });
@@ -2193,6 +2903,7 @@ describe('send does not wait for session knowledge before showing the message', 
   });
 
   afterEach(() => {
+    getSession.mockRestore();
     opencodeClient.sendMessage = originalSendMessage;
     globalThis.fetch = originalFetch;
   });
@@ -2216,6 +2927,9 @@ describe('send does not wait for session knowledge before showing the message', 
     const writes = [];
     globalThis.fetch = async (input, init) => {
       const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      if (url.includes('/api/config/settings')) {
+        return Response.json({ responseStyleEnabled: true, responseStylePreset: 'concise' });
+      }
       if (url.includes('/api/session-knowledge/sync')) {
         writes.push(JSON.parse(init.body));
         return new Promise((resolve) => {
@@ -2243,7 +2957,8 @@ describe('send does not wait for session knowledge before showing the message', 
 
     // The bubble is already there; the prompt request waits for the write.
     expect(added.map((message) => message.role)).toEqual(['user']);
-    expect(writes).toEqual([{ directory: '/repo', sessionId: 'session-knowledge' }]);
+    expect(writes).toHaveLength(1);
+    expect(JSON.stringify(writes[0])).toContain('Keep replies short.');
     expect(sendCalls).toHaveLength(0);
 
     finishWrite();
@@ -2254,5 +2969,144 @@ describe('send does not wait for session knowledge before showing the message', 
     expect(sendCalls).toHaveLength(1);
     expect(sendCalls[0].messageId).toBe(added[0].id);
     expect(sendCalls[0].context).toBeUndefined();
+  });
+
+  test('does not send when the runtime changes during the knowledge write', async () => {
+    let state = { session: [], message: {}, part: {}, session_status: {} };
+    const childStore = {
+      getState: () => state,
+      setState: (patch) => { state = { ...state, ...patch }; },
+    };
+    setActionRefs({ children: new Map(), ensureChild: () => childStore, getChild: () => childStore }, () => '/repo');
+    setOptimisticRefs(() => {}, () => {});
+
+    const originalSendMessage = opencodeClient.sendMessage;
+    const originalApiBaseUrl = getRuntimeApiBaseUrl();
+    const originalRuntimeKey = getRuntimeKey();
+    let finishKnowledge;
+    const knowledgeSync = new Promise((resolve) => { finishKnowledge = resolve; });
+    const sendCalls = [];
+    opencodeClient.sendMessage = async (params) => {
+      sendCalls.push(params);
+      return 'msg';
+    };
+
+    try {
+      const sending = routeMessage({
+        runtimeKey: originalRuntimeKey,
+        sessionId: 'session-knowledge',
+        directory: '/repo',
+        content: 'hello',
+        providerID: 'provider-a',
+        modelID: 'model-a',
+        ready: knowledgeSync,
+      });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      switchRuntimeEndpoint({ apiBaseUrl: 'https://runtime-change.invalid', runtimeKey: 'runtime-changed' });
+      finishKnowledge();
+      await expect(sending).rejects.toThrow('runtime changed');
+      expect(sendCalls).toHaveLength(0);
+    } finally {
+      opencodeClient.sendMessage = originalSendMessage;
+      switchRuntimeEndpoint({ apiBaseUrl: originalApiBaseUrl, runtimeKey: originalRuntimeKey });
+    }
+  });
+
+  test('keeps the draft open when the runtime changes during materialisation', async () => {
+    const originalCreateSession = opencodeClient.createSession;
+    const originalGetSdkClient = opencodeClient.getSdkClient;
+    const originalGetScopedSdkClient = opencodeClient.getScopedSdkClient;
+    const originalFetch = globalThis.fetch;
+    const originalApiBaseUrl = getRuntimeApiBaseUrl();
+    const originalRuntimeKey = getRuntimeKey();
+    const previousDraft = useSessionUIStore.getState().newSessionDraft;
+    const removedSessions = [];
+    switchRuntimeEndpoint({ apiBaseUrl: 'https://cleanup-owner.test', runtimeKey: originalRuntimeKey });
+    opencodeClient.reconnectToRuntimeBaseUrl();
+    const oldSdkClient = {};
+    let currentSdkClient = oldSdkClient;
+    opencodeClient.getSdkClient = () => currentSdkClient;
+    opencodeClient.getScopedSdkClient = () => currentSdkClient;
+    globalThis.fetch = async (input, init) => {
+      const method = init?.method ?? (input instanceof Request ? input.method : 'GET');
+      if (method === 'DELETE') removedSessions.push(String(input instanceof Request ? input.url : input).split('/').pop());
+      return new Response(null, { status: 204 });
+    };
+    let finishCreate;
+    opencodeClient.createSession = async () => {
+      await new Promise((resolve) => { finishCreate = resolve; });
+      return { id: 'session-created-on-old-runtime', directory: '/repo', metadata: {} };
+    };
+    useSessionUIStore.setState({
+      newSessionDraft: {
+        ...previousDraft,
+        open: true,
+        target: 'project',
+        directoryOverride: '/repo',
+        preserveDirectoryOverride: true,
+      },
+    });
+
+    try {
+      const materialising = materializeOpenDraftSession({ providerID: 'provider-a', modelID: 'model-a' }, undefined, originalRuntimeKey);
+      for (let tick = 0; tick < 50 && !finishCreate; tick += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
+      switchRuntimeEndpoint({ apiBaseUrl: 'https://runtime-change.invalid', runtimeKey: 'runtime-changed' });
+      currentSdkClient = { session: { remove: async () => undefined } };
+      finishCreate();
+      await expect(materialising).rejects.toThrow('runtime changed');
+      expect(useSessionUIStore.getState().newSessionDraft.open).toBe(true);
+      expect(removedSessions).toEqual(['session-created-on-old-runtime']);
+    } finally {
+      opencodeClient.createSession = originalCreateSession;
+      opencodeClient.getSdkClient = originalGetSdkClient;
+      opencodeClient.getScopedSdkClient = originalGetScopedSdkClient;
+      globalThis.fetch = originalFetch;
+      useSessionUIStore.setState({ newSessionDraft: previousDraft });
+      switchRuntimeEndpoint({ apiBaseUrl: originalApiBaseUrl, runtimeKey: originalRuntimeKey });
+      opencodeClient.reconnectToRuntimeBaseUrl();
+    }
+  });
+});
+
+describe('setSessionDirectory and the model list', () => {
+  const originalLoaded = useConfigStore.getState().providersLoaded;
+  const originalProjects = useProjectsStore.getState().projects;
+  const originalDirectory = useDirectoryStore.getState().currentDirectory;
+  const originalClientDirectory = opencodeClient.getDirectory();
+
+  beforeEach(() => {
+    useDirectoryStore.setState({ currentDirectory: '/projects/gone' });
+    useProjectsStore.setState({ projects: [{ id: 'gone', path: '/projects/gone' }, { id: 'hortai', path: '/projects/hortai' }] });
+    useSessionUIStore.setState({ currentSessionId: 'session-a', currentSessionDirectory: '/projects/gone' });
+  });
+
+  afterEach(() => {
+    useConfigStore.setState({ providersLoaded: originalLoaded });
+    useProjectsStore.setState({ projects: originalProjects });
+    useDirectoryStore.setState({ currentDirectory: originalDirectory });
+    opencodeClient.setDirectory(originalClientDirectory);
+    useSessionUIStore.setState({ currentSessionId: null, currentSessionDirectory: null });
+  });
+
+  test('a session that never loaded the model list takes the new folder for it', () => {
+    useConfigStore.setState({ providersLoaded: false });
+    useSessionUIStore.getState().setSessionDirectory('session-a', '/projects/hortai');
+    expect(useDirectoryStore.getState().currentDirectory).toBe('/projects/hortai');
+    expect(useSessionUIStore.getState().currentSessionDirectory).toBe('/projects/hortai');
+  });
+
+  test('a loaded model list stays, and with it the model of the session', () => {
+    useConfigStore.setState({ providersLoaded: true });
+    useSessionUIStore.getState().setSessionDirectory('session-a', '/projects/hortai');
+    expect(useDirectoryStore.getState().currentDirectory).toBe('/projects/gone');
+    expect(useSessionUIStore.getState().currentSessionDirectory).toBe('/projects/hortai');
+  });
+
+  test('another session changes nothing', () => {
+    useConfigStore.setState({ providersLoaded: false });
+    useSessionUIStore.getState().setSessionDirectory('session-b', '/projects/hortai');
+    expect(useDirectoryStore.getState().currentDirectory).toBe('/projects/gone');
   });
 });

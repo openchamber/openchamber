@@ -184,6 +184,7 @@ const planOperation = async (
 };
 
 export const runBoundRemoteBranchDelete = async ({
+  beforePlan,
   branch,
   directory,
   git,
@@ -191,6 +192,12 @@ export const runBoundRemoteBranchDelete = async ({
   runtimeKey = getRuntimeKey,
   sourceControl,
 }: {
+  /**
+   * Runs once the remote is known ready and before anything is planned; a
+   * throw stops the delete. A plan left unexecuted would block the
+   * repository's next network operation, so nothing is planned before it.
+   */
+  beforePlan?: () => Promise<void>;
   branch: string;
   directory: string;
   git: Pick<GitAPI, 'planNetworkOperation' | 'executeNetworkOperation' | 'getNetworkOperation'>;
@@ -206,6 +213,10 @@ export const runBoundRemoteBranchDelete = async ({
   if (remote.mode === 'anonymous') fail('anonymous-read-only');
   const branchName = branch.trim().replace(/^refs\/heads\//, '');
   if (!branchName || branchName === 'HEAD') fail('branch-required');
+  if (beforePlan) {
+    await beforePlan();
+    requireCurrentRuntime(runtimeKey, capturedRuntime);
+  }
   const request: GitNetworkOperationRequest = {
     operation: 'delete-remote-branch',
     directory,

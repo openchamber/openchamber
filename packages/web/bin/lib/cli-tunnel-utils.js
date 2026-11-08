@@ -1,4 +1,5 @@
 import { EXIT_CODE, TunnelCliError } from './cli-errors.js';
+import { shellQuote } from './cli-shell.js';
 import { canPrompt, select as clackSelect, text as clackText, cancel as clackCancel, isCancel as clackIsCancel } from '../cli-output.js';
 
 const TUNNEL_BOOTSTRAP_TTL_DEFAULT_MS = 30 * 60 * 1000;
@@ -104,14 +105,6 @@ function formatDurationForCli(ms) {
   if (value % (60 * 1000) === 0) return `${value / (60 * 1000)}m`;
   if (value % 1000 === 0) return `${value / 1000}s`;
   return `${value}ms`;
-}
-
-function shellQuote(value) {
-  const text = String(value);
-  if (/^[A-Za-z0-9._\-/:=]+$/.test(text)) {
-    return text;
-  }
-  return `'${text.replace(/'/g, `'"'"'`)}'`;
 }
 
 function buildTunnelStartReplayCommand({

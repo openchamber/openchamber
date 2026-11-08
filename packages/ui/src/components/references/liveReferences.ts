@@ -13,6 +13,7 @@
 import * as React from 'react';
 
 import type {
+    RepositoryDiscussionReference,
     RepositoryIssueReference,
     RepositoryChangeRequestReference,
     ChangeRequestListStatus,
@@ -81,9 +82,10 @@ const trackedWorkItemOf = (item: TrackerItemSummary): TrackedWorkItem | null => 
 
 type PullPatch = Partial<Pick<RepositoryChangeRequestReference, 'state' | 'draft' | 'title' | 'headSha'>>;
 type IssuePatch = Partial<Pick<RepositoryIssueReference, 'state' | 'title'>>;
+type DiscussionPatch = Partial<Pick<RepositoryDiscussionReference, 'state' | 'title' | 'answered'>>;
 
 /** What the followed state changes on a listed item; null when nothing. */
-function referencePatch(reference: RepositoryReference, record: TrackedItemState): PullPatch | IssuePatch | null {
+function referencePatch(reference: RepositoryReference, record: TrackedItemState): PullPatch | IssuePatch | DiscussionPatch | null {
     if (reference.kind === 'pull' && record.type === 'pull' && record.state) {
         const { state, draft, title } = record.state;
         const headSha = record.state.headSha ?? reference.headSha;
@@ -94,6 +96,11 @@ function referencePatch(reference: RepositoryReference, record: TrackedItemState
         const { state, title } = record.state;
         if (state === reference.state && title === reference.title) return null;
         return { state, title };
+    }
+    if (reference.kind === 'discussion' && record.type === 'discussion' && record.state) {
+        const { state, title, answered } = record.state;
+        if (state === reference.state && title === reference.title && answered === reference.answered) return null;
+        return { state, title, answered };
     }
     return null;
 }
@@ -139,7 +146,7 @@ export type LiveItems<T> = { items: T[]; followed: TrackedItem[] };
 export type LivePullStatus = { status: ChangeRequestListStatus; fetchedAt: number };
 
 /**
- * Listed issues and PRs with their followed state. `contextOf` names the read
+ * Listed issues, PRs and discussions with their followed state. `contextOf` names the read
  * context an item came through; `pageReads` says when each page was read.
  */
 export function useLiveReferences<T extends RepositoryReference>(

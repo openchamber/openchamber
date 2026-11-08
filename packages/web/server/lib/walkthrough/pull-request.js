@@ -64,8 +64,9 @@ export async function getPullRequestFileContents(_directory, number, readContext
   status,
   sourceRepo = null,
   revision,
+  binary = false,
   readChangeRequestFile,
 }) {
   if (!(readChangeRequestFile instanceof Function)) throw unavailable();
-  return readChangeRequestFile(withRevision({ context: readContext, number, sourceRepo, path, previousPath, status }, revision));
+  return readChangeRequestFile(withRevision({ context: readContext, number, sourceRepo, path, previousPath, status, binary: binary || undefined }, revision));
 }

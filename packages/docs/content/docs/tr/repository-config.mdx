@@ -37,6 +37,9 @@ Depodan gelen öğeler **In repo** rozeti taşır. Depo eylemleri **Hide for me*
     "bun install"
   ],
   "setupWorktreeWait": true,
+  "teardownWorktree": [
+    "docker compose down"
+  ],
   "projectActions": [
     {
       "id": "dev",
@@ -62,6 +65,8 @@ Depodan gelen öğeler **In repo** rozeti taşır. Depo eylemleri **Hide for me*
 Yalnızca `version` zorunludur. Diğer tüm anahtarlar isteğe bağlıdır ve OpenChamber yalnızca içinde bir şey olanları yazar.
 
 `setupWorktree`, OpenChamber'ın yeni bir worktree oluşturduktan hemen sonra içinde sırayla çalıştırdığı kabuk komutlarının listesidir. Ana checkout yolu için `$ROOT_PROJECT_PATH` kullan. `setupWorktreeWait: true`, OpenChamber'ın worktree'de oturum başlatmadan önce bu komutları beklemesini sağlar.
+
+`teardownWorktree`, OpenChamber'ın bir worktree'yi silmeden veya arşivlemeden hemen önce içinde sırayla çalıştırdığı kabuk komutlarının listesidir. Örneğin worktree'nin başlattığı bir yığın için `docker compose down`. Biri başarısız olursa worktree kalır ve OpenChamber komutun hatasını gösterir. Önce depodakiler, sonra seninkiler çalışır; yalnızca kendi kurulum komutlarını kullandığında da böyledir. Kurulum komutlarıyla aynı güven sorusundan geçerler.
 
 `projectActions`, projenin eylem listesidir: Work Status'tan, proje eylemleri penceresinden ve komut paletinden çalıştırdığınız eylemler. `id`, `name` ve `command` zorunludur. `icon` isteğe bağlıdır ve verilmezse play simgesi kullanılır; OpenChamber'ın bildiği adlar `play`, `build`, `lint`, `terminal`, `tools`, `bug`, `flask`, `rocket`, `code`, `server`, `branch`, `search`, `settings`, `brain`, `stack`, `robot`, `command` ve `file`. `autoOpenUrl: true`, komutun yazdırdığı adresi açar; bkz. [Önizleme ve geliştirme sunucuları](/preview/). `platforms`, eylemi `macos`, `linux` veya `windows` ile sınırlar. `runIn: "parent"`, eylemi geçerli worktree yerine ana checkout'ta çalıştırır.
 

@@ -1,3 +1,4 @@
+import { documentDataUrl } from '../source-control/document-versions.js';
 import assert from 'node:assert/strict';
 import { markGitHubAuthAccountInvalid } from './auth.js';
 import { getOctokitForAccountId, getOctokitForHost } from './octokit.js';
@@ -28,9 +29,10 @@ const sameRepository = (left, right) => left.owner.toLowerCase() === right.owner
  * upstream it was forked from, which is exactly what the bound pull request
  * list reads with the same account. So every listed pull request can be
  * opened, and a name outside that network fails instead of reaching a
- * repository the binding never covered.
+ * repository the binding never covered, unless the read says `linked`: a link
+ * named that pull request, and only reads carry it.
  */
-async function resolvePullRequestRepo({ session, directory, remote, number, sourceRepo = null }, dependencies) {
+async function resolvePullRequestRepo({ session, directory, remote, number, sourceRepo = null, linked = false }, dependencies) {
   const resolveRepository = dependencies.resolveGitHubRepoFromDirectory ?? resolveGitHubRepoFromDirectory;
   const { repo } = await resolveRepository(directory, remote);
   if (!repo?.owner || !repo?.repo) {
@@ -60,6 +62,8 @@ async function resolvePullRequestRepo({ session, directory, remote, number, sour
       code: 'github-not-connected',
     });
   }
+
+  if (linked && sourceRepo) return { octokit: account.octokit, repo: { owner: sourceRepo.owner, repo: sourceRepo.repo } };
 
   let target = repo;
   if (sourceRepo && !sameRepository(sourceRepo, repo)) {
@@ -108,7 +112,7 @@ const MAX_FULL_FILE_BYTES = 5 * 1024 * 1024;
  * base repository (`refs/pull/<n>/head`), so every read goes to one repo.
  */
 export async function readGitHubChangeRequestFile(input, dependencies = {}) {
-  const { path, previousPath, status } = input;
+  const { path, previousPath, status, binary } = input;
   const { octokit, repo } = await resolvePullRequestRepo(input, dependencies);
   const pull = await octokit.request('GET /repos/{owner}/{repo}/pulls/{pull_number}', {
     owner: repo.owner, repo: repo.repo, pull_number: input.number,
@@ -123,7 +127,17 @@ export async function readGitHubChangeRequestFile(input, dependencies = {}) {
   const mergeBaseSha = compare.data?.merge_base_commit?.sha;
   assert.match(String(mergeBaseSha), /^[0-9a-f]{40}$/, 'GitHub returned an invalid merge base');
 
+  // The raw media type arrives decoded as text, and the contents API leaves
+  // `content` out past 1 MB; a blob comes back whole, as base64.
+  const readDocument = async (filePath, ref) => {
+    const entry = await octokit.request('GET /repos/{owner}/{repo}/contents/{path}', { owner: repo.owner, repo: repo.repo, path: filePath, ref });
+    const blob = await octokit.request('GET /repos/{owner}/{repo}/git/blobs/{file_sha}', { owner: repo.owner, repo: repo.repo, file_sha: entry.data?.sha });
+    assert.ok(blob.data?.encoding === 'base64', 'GitHub returned invalid file contents');
+    return documentDataUrl(Buffer.from(blob.data.content, 'base64'));
+  };
+
   const readFile = async (filePath, ref) => {
+    if (binary) return readDocument(filePath, ref);
     const response = await octokit.request('GET /repos/{owner}/{repo}/contents/{path}', {
       owner: repo.owner, repo: repo.repo, path: filePath, ref,
       headers: { accept: 'application/vnd.github.raw+json' },

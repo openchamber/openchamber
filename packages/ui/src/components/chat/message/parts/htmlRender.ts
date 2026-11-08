@@ -4,6 +4,7 @@ import type { FrameScrollDirection } from '@/components/chat/lib/scroll/timeline
 import { PREVIEW_BRIDGE_CHANNEL } from '@/lib/browser/previewFrameHost';
 import type { ChatQuoteAnchor } from '@/lib/chatQuoteAnchor';
 import type { JsonValue } from '@/lib/opencode/model';
+import { chartSeriesColors, KIT_SHARED_CSS, kitVariables } from '@/components/chat/lib/visualKit';
 import { getReadableThemeColors } from '@/lib/theme/readableColors';
 import type { Theme } from '@/types/theme';
 
@@ -40,6 +41,10 @@ const SIZE_MESSAGE = `${MESSAGE_PREFIX}size`;
 const OPEN_LINK_MESSAGE = `${MESSAGE_PREFIX}open-link`;
 const KEY_MESSAGE = `${MESSAGE_PREFIX}key`;
 const ANSWER_STATE_MESSAGE = `${MESSAGE_PREFIX}answer-state`;
+// The page's Decline was clicked, and where the answer script put it: beside
+// the page's last button, or nowhere when the page has none.
+const DECLINE_MESSAGE = `${MESSAGE_PREFIX}decline`;
+const DECLINE_PLACED_MESSAGE = `${MESSAGE_PREFIX}decline-placed`;
 const SELECTION_MESSAGE = `${MESSAGE_PREFIX}selection`;
 // Escape pressed in the page while it has a reported selection: the host
 // closes the selection menu, as Escape does for a selection in the chat.
@@ -65,29 +70,16 @@ export interface HtmlRenderTheme {
     variables: Record<string, string>;
 }
 
-interface HtmlRenderMetrics {
+export interface HtmlRenderMetrics {
     /** The app's rem in px: the interface size setting scales it, and the controls with it. */
     rem: number;
-    /** The chat's body text size in px: the page's root font size, so the page's rem follows the interface size. */
+    /** The chat's body text size in px: the page's root font size, so the page's rem follows the interface and chat sizes. */
     text: number;
     sans: string;
     mono: string;
 }
 
-/**
- * Chart series after the accent, the same in every theme. A theme's syntax
- * colors were used here first, but they are picked for reading code: in the
- * default theme they made near-twins (the accent orange beside the string
- * salmon, two teals, two greens), and the first two series of almost every
- * chart blurred together. These hues stay apart from each other and from any
- * accent; the light set is darker so it holds on a light background.
- */
-const CHART_SERIES = {
-    dark: ['#60a5fa', '#2dd4bf', '#a78bfa', '#f472b6', '#a3e635'],
-    light: ['#2563eb', '#0d9488', '#7c3aed', '#db2777', '#65a30d'],
-} as const;
-
-const darkLift = (foreground: string) => `inset 0 1px 0 0 color-mix(in srgb,${foreground} 1.5%,transparent), 0 1px 1px 0 rgb(0 0 0 / 0.28), 0 2px 3px -2px rgb(0 0 0 / 0.2)`;
+const darkLift = (foreground: string) => `inset 0 0.5px 0 0 color-mix(in srgb,${foreground} 8%,transparent), 0 1px 2px 0 rgb(0 0 0 / 0.4)`;
 
 /**
  * The variables a page styles against. The names follow the shadcn
@@ -121,10 +113,19 @@ export function htmlRenderTheme(theme: Theme, metrics: HtmlRenderMetrics): HtmlR
             '--info': status.info,
             '--code-background': syntax.base.background,
             '--code-foreground': syntax.base.foreground,
-            // The first series is the theme's accent, so the main one reads
-            // as the app's own; the rest are a fixed set (CHART_SERIES).
-            '--chart-1': primary.base,
-            ...Object.fromEntries(CHART_SERIES[theme.metadata.variant].map((color, index) => [`--chart-${index + 2}`, color])),
+            // The first series is the theme's accent, so the main one reads as
+            // the app's own; the rest are a fixed set. UI blocks use the same
+            // colours (../../lib/visualKit.ts), under --oc-series-N.
+            ...Object.fromEntries(chartSeriesColors(theme).map((color, index) => [`--chart-${index + 1}`, color])),
+            ...kitVariables(theme),
+            // On a page the kit reads the public names, so a page that sets
+            // its own --chart-1 or --success recolours the kit's dots, bars and
+            // badges with them.
+            ...Object.fromEntries(chartSeriesColors(theme).map((_, index) => [`--oc-series-${index + 1}`, `var(--chart-${index + 1})`])),
+            '--oc-tone-success': 'var(--success)',
+            '--oc-tone-warning': 'var(--warning)',
+            '--oc-tone-error': 'var(--destructive)',
+            '--oc-tone-info': 'var(--info)',
             '--oc-button-text': readable.tinted.primary,
             '--oc-button-bg': dark ? tint(16, 'transparent') : tint(10, surface.background),
             '--oc-button-hover': dark ? tint(22, 'transparent') : tint(16, surface.background),
@@ -135,7 +136,7 @@ export function htmlRenderTheme(theme: Theme, metrics: HtmlRenderMetrics): HtmlR
             // shadow, plus a faint sheen in dark themes.
             '--oc-button-shadow': dark
                 ? `inset 0 1px 0 0 color-mix(in srgb,${surface.foreground} 6%,transparent), 0 1px 1px 0 rgb(0 0 0 / 0.31), 0 2px 5px -2px rgb(0 0 0 / 0.4)`
-                : 'inset 0 1px 0 0 rgb(255 255 255 / 0.45), 0 1px 2px 0 rgb(0 0 0 / 0.08)',
+                : 'inset 0 1px 0 0 rgb(255 255 255 / 0.2), 0 1px 1.5px 0 rgb(0 0 0 / 0.1)',
             '--oc-button-sheen': dark ? `linear-gradient(180deg,color-mix(in srgb,${surface.foreground} 1%,transparent),transparent 50%)` : 'none',
             // The destructive button (TINT_DESTRUCTIVE): the same light with
             // a fainter error tint, mixed into transparent in dark themes like
@@ -155,19 +156,16 @@ export function htmlRenderTheme(theme: Theme, metrics: HtmlRenderMetrics): HtmlR
             // into the page and a pill lifts on a short shadow; in dark themes
             // both take a lit top line, and a field's fill is washed halfway
             // toward the canvas so it sits a tone below the pills.
-            '--oc-edge': `color-mix(in srgb,${surface.foreground} ${dark ? 6 : 10}%,transparent)`,
+            '--oc-edge': `color-mix(in srgb,${surface.foreground} ${dark ? 14 : 16}%,transparent)`,
+            // Half a pixel at rest; a focused or invalid field takes a full one.
+            '--oc-edge-width': '0.5px',
             '--oc-field-bg': dark ? `color-mix(in srgb,${surface.background} 50%,${surface.elevated})` : surface.elevated,
             '--oc-field-lift': dark ? darkLift(surface.foreground) : 'inset 0 1px 2px 0 rgb(0 0 0 / 0.04)',
             '--oc-raised-bg': dark ? surface.elevated : surface.background,
-            '--oc-raised-lift': dark ? darkLift(surface.foreground) : '0 1px 2px 0 rgb(0 0 0 / 0.06)',
+            '--oc-raised-lift': dark ? darkLift(surface.foreground) : '0 1px 1.5px 0 rgb(0 0 0 / 0.08)',
             '--oc-recessed': `inset 0 1px 2px 0 rgb(0 0 0 / ${dark ? 0.4 : 0.05})`,
             '--oc-hover': interactive.hover,
             '--oc-active': interactive.active,
-            // Status text that stays readable on its own pale tint (a badge).
-            '--oc-success-text': readable.tinted.success,
-            '--oc-warning-text': readable.tinted.warning,
-            '--oc-error-text': readable.tinted.error,
-            '--oc-info-text': readable.tinted.info,
             '--oc-rem': `${metrics.rem}px`,
             // Not listed for agents: the page's root font size (see BASE_CSS).
             '--oc-text': `${metrics.text}px`,
@@ -193,8 +191,8 @@ const OPTION_CSS = '.oc-options{display:grid;gap:12px;grid-template-columns:repe
     // Option cards are the app's flat tiles (`.oc-tile`, `.oc-tile-hover` in
     // styles/design-system.css): no border, set off by tone, a tone step more
     // on hover, and the selection fill once chosen, like a pressed chip.
-    + '.oc-option{display:flex;flex-direction:column;justify-content:flex-start;align-items:flex-start;gap:4px;box-sizing:border-box;width:100%;padding:16px;border:0;border-radius:var(--radius);background-color:color-mix(in srgb,var(--foreground) 4%,transparent);color:var(--foreground);font:inherit;text-align:start;cursor:pointer;transition:background-color .15s,color .15s}'
-    + '.oc-option:hover,.oc-option:focus-visible{background-color:color-mix(in srgb,var(--foreground) 7%,transparent)}'
+    + '.oc-option{display:flex;flex-direction:column;justify-content:flex-start;align-items:flex-start;gap:4px;box-sizing:border-box;width:100%;padding:16px;border:0;border-radius:var(--radius);background-color:color-mix(in srgb,var(--foreground) var(--oc-tile-tone),transparent);color:var(--foreground);font:inherit;text-align:start;cursor:pointer;transition:background-color .15s,color .15s}'
+    + '.oc-option:hover,.oc-option:focus-visible{background-color:color-mix(in srgb,var(--foreground) var(--oc-tile-hover-tone),transparent)}'
     + '.oc-option[aria-pressed=true]{background-color:var(--oc-selection);color:var(--oc-selection-foreground)}'
     // Sized in the app's rem like its Button (h-8 px-3 rounded-md, the UI
     // label size), so it follows the interface size setting.
@@ -203,10 +201,14 @@ const OPTION_CSS = '.oc-options{display:grid;gap:12px;grid-template-columns:repe
     + '.oc-button:disabled{opacity:.5;cursor:default;pointer-events:none}'
     // Two more of the app's Button variants: outline for a secondary action
     // (raised and neutral, canvas-coloured in light themes) and destructive.
-    + '.oc-button[data-variant=outline]{--oc-button-bg:var(--oc-raised-bg);--oc-button-hover:var(--oc-raised-bg);--oc-button-active:var(--oc-raised-bg);--oc-button-border:transparent;--oc-button-text:var(--card-foreground);--oc-button-shadow:inset 0 0 0 1px var(--oc-edge),var(--oc-raised-lift)}'
+    + '.oc-button[data-variant=outline]{--oc-button-bg:var(--oc-raised-bg);--oc-button-hover:var(--oc-raised-bg);--oc-button-active:var(--oc-raised-bg);--oc-button-border:transparent;--oc-button-text:var(--card-foreground);--oc-button-shadow:inset 0 0 0 0.5px var(--oc-edge),var(--oc-raised-lift)}'
     + '.oc-button[data-variant=outline]:hover,.oc-button[data-variant=outline]:focus-visible{background-image:linear-gradient(var(--oc-hover),var(--oc-hover))}'
-    + '.oc-button[data-variant=outline]:active{background-image:linear-gradient(var(--oc-active),var(--oc-active));box-shadow:inset 0 0 0 1px var(--oc-edge)}'
+    + '.oc-button[data-variant=outline]:active{background-image:linear-gradient(var(--oc-active),var(--oc-active));box-shadow:inset 0 0 0 0.5px var(--oc-edge)}'
     + '.oc-button[data-variant=destructive]{--oc-button-bg:var(--oc-destructive-bg);--oc-button-hover:var(--oc-destructive-hover);--oc-button-active:var(--oc-destructive-active);--oc-button-border:var(--oc-destructive-border);--oc-button-text:var(--oc-destructive-text)}'
+    // The chat's own Decline, which the answer script puts beside the page's
+    // last button while it waits: the app's secondary Button, a flat muted fill.
+    + '.oc-button[data-oc-decline]{margin-inline-start:calc(var(--oc-rem) * .5);--oc-button-bg:var(--muted);--oc-button-hover:var(--muted);--oc-button-active:var(--muted);--oc-button-border:transparent;--oc-button-text:var(--foreground);--oc-button-shadow:none;--oc-button-sheen:none}'
+    + '.oc-button[data-oc-decline]:hover,.oc-button[data-oc-decline]:focus-visible{background-image:linear-gradient(var(--oc-hover),var(--oc-hover))}'
     // Focus draws no ring in the app: a focused control takes its hover fill.
     + '.oc-option:focus-visible,.oc-button:focus-visible{outline:none}';
 
@@ -217,35 +219,29 @@ const OPTION_CSS = '.oc-options{display:grid;gap:12px;grid-template-columns:repe
 // write plain HTML; the classes only spare them the styling. The
 // agent-facing description in packages/web/server/lib/agent-tool/runtime.js
 // names them; change both together.
-const badgeTone = (tone: 'success' | 'warning' | 'error' | 'info', color: string) => `.oc-badge[data-tone=${tone}]{--oc-tone:${color};--oc-tone-text:var(--oc-${tone}-text)}`;
 const CHEVRON = 'linear-gradient(45deg,transparent 50%,var(--muted-foreground) 50%),linear-gradient(135deg,var(--muted-foreground) 50%,transparent 50%)';
-const KIT_CSS = '.oc-box{box-sizing:border-box;padding:16px;border-radius:var(--radius);background-color:color-mix(in srgb,var(--foreground) 4%,transparent)}'
-    + '.oc-box .oc-box{background-color:color-mix(in srgb,var(--foreground) 6%,transparent)}'
+// Boxes, badges, legend dots and bars come from the kit UI blocks share
+// (../../lib/visualKit.ts), so both draw them alike.
+const KIT_CSS = KIT_SHARED_CSS
     + '.oc-muted{color:var(--muted-foreground)}'
     + '.oc-num{font-variant-numeric:tabular-nums;text-align:end}'
     // The chat's own Markdown table (chat/markdown/MarkdownTable.tsx): a framed
     // block that scrolls sideways when wider than the column, rows apart by
     // a hairline.
-    + '.oc-table{overflow-x:auto;overscroll-behavior-x:none;border:1px solid color-mix(in srgb,var(--border) 80%,transparent);border-radius:calc(var(--oc-rem) * .5);background-color:var(--card)}'
+    + '.oc-table{overflow-x:auto;overscroll-behavior-x:none;border:1px solid color-mix(in srgb,var(--border) 70%,transparent);border-radius:calc(var(--oc-rem) * .5);background-color:var(--card)}'
     + '.oc-table table{width:100%;border-collapse:collapse}'
-    + '.oc-table th,.oc-table td{padding:.625em 1em;text-align:start;vertical-align:middle;border-bottom:1px solid color-mix(in srgb,var(--border) 60%,transparent)}'
+    + '.oc-table th,.oc-table td{padding:.625em 1em;text-align:start;vertical-align:middle;border-bottom:1px solid color-mix(in srgb,var(--border) 40%,transparent)}'
     + '.oc-table th{font-weight:600}.oc-table td{color:color-mix(in srgb,var(--foreground) 90%,transparent)}'
     + '.oc-table tr:last-child>td{border-bottom:0}.oc-table .oc-num{text-align:end}'
-    + '.oc-badge{display:inline-flex;align-items:center;padding:.0625em .5em;border-radius:999px;background-color:color-mix(in srgb,var(--foreground) 6%,transparent);color:var(--muted-foreground);font-size:.8125em;font-weight:500;line-height:1.45;white-space:nowrap}'
-    + '.oc-badge[data-tone]{background-color:color-mix(in srgb,var(--oc-tone) 15%,transparent);color:var(--oc-tone-text)}'
-    + badgeTone('success', 'var(--success)') + badgeTone('warning', 'var(--warning)') + badgeTone('error', 'var(--destructive)') + badgeTone('info', 'var(--info)')
-    + '.oc-dot{display:inline-block;width:.5em;height:.5em;border-radius:50%;background-color:var(--color,var(--chart-1));vertical-align:.1em}'
-    + '.oc-bar{display:block;height:8px;border-radius:999px;overflow:hidden;background-color:color-mix(in srgb,var(--foreground) 8%,transparent)}'
-    + '.oc-bar::before{content:"";display:block;width:var(--value,0%);max-width:100%;height:100%;border-radius:inherit;background-color:var(--color,var(--chart-1))}'
     // A field is the app's Input (components/ui/input.tsx): sized in the
     // app's rem like .oc-button, its edge brightening on focus.
     + '.oc-field{display:flex;flex-direction:column;gap:6px;min-width:0;font-size:calc(var(--oc-rem) * .8125);font-weight:500}'
     + '.oc-field .oc-muted{font-weight:400}'
-    + '.oc-input{box-sizing:border-box;width:100%;min-width:0;height:calc(var(--oc-rem) * 2);margin:0;padding:0 calc(var(--oc-rem) * .625);border:0;border-radius:calc(var(--oc-rem) * .4375);background-color:var(--oc-field-bg);box-shadow:inset 0 0 0 1px var(--oc-edge),var(--oc-field-lift);color:var(--card-foreground);font:inherit;font-size:calc(var(--oc-rem) * .84375);font-weight:400;line-height:1.45;outline:none;transition:background-color .15s}'
+    + '.oc-input{box-sizing:border-box;width:100%;min-width:0;height:calc(var(--oc-rem) * 2);margin:0;padding:0 calc(var(--oc-rem) * .625);border:0;border-radius:calc(var(--oc-rem) * .4375);background-color:var(--oc-field-bg);box-shadow:inset 0 0 0 var(--oc-edge-width) var(--oc-edge),var(--oc-field-lift);color:var(--card-foreground);font:inherit;font-size:calc(var(--oc-rem) * .84375);font-weight:400;line-height:1.45;outline:none;transition:background-color .15s}'
     + '.oc-input::placeholder{color:var(--muted-foreground)}'
     + '.oc-input:hover:not(:focus){background-image:linear-gradient(var(--oc-hover),var(--oc-hover))}'
-    + '.oc-input:focus{--oc-edge:color-mix(in srgb,var(--foreground) 26%,transparent)}'
-    + '.oc-input[aria-invalid=true]{--oc-edge:var(--destructive)}'
+    + '.oc-input:focus{--oc-edge:color-mix(in srgb,var(--foreground) 26%,transparent);--oc-edge-width:1px}'
+    + '.oc-input[aria-invalid=true]{--oc-edge:var(--destructive);--oc-edge-width:1px}'
     + '.oc-input:disabled{opacity:.5;cursor:default}'
     + 'textarea.oc-input{height:auto;min-height:calc(var(--oc-rem) * 4);padding:calc(var(--oc-rem) * .5) calc(var(--oc-rem) * .625);resize:vertical}'
     // A native select draws its own box in some engines, so it gets the
@@ -357,7 +353,17 @@ const ANNOTATION_BRIDGE = `(function(C){window.addEventListener("message",functi
 // with every bar's height added under it, up to the height cap. The bar then
 // sits over the bottom of that content. The bar comes and goes with the
 // page's width without resizing the root, so the tooltip check below also
-// sizes the page again when the bar's height changed.
+// sizes the page again when the bar's height changed. While the bar stays, the
+// page keeps the tallest height it saw for it: both heights it is read from
+// are rounded, so at a fractional display scale the 10 px bar read as 9 in a
+// 515 frame and 10 in a 514 frame, the frame swung between the two, and the
+// chat under the page moved with it.
+//
+// A height less than 1 px off the frame's is the frame's own. At a fractional
+// display scale (175%) the browser snaps the frame to device pixels, so
+// content sized to the frame (`min-height:100vh`) measures a fraction above
+// it (387.43 in a 387 frame), and rounding that up grew the frame by 1 px on
+// every frame, with the chat under the page moving along.
 //
 // A page built as an app screen scrolls itself: the body, or a box spanning
 // the whole frame from its top to its bottom (`height:100vh` or `100%` with
@@ -366,7 +372,10 @@ const ANNOTATION_BRIDGE = `(function(C){window.addEventListener("message",functi
 // inside a 48 px strip. Such a box adds what it hides below its own edge.
 // Each box is grown that way once per height: a box of a fixed height that
 // only happened to span the frame does not follow, and growing it again would
-// swing the frame between two heights.
+// swing the frame between two heights. Until the page reports anything past
+// the grown height, though, the box adds what it added: the page is measured
+// again before the host resizes the frame (on load, say), and skipping the
+// box there shrank the frame back to its minimum for good.
 //
 // A page that fits its frame cannot scroll at all. A document that can scroll
 // keeps a touch that starts on it: on a phone, a swipe over a page that fit
@@ -427,12 +436,12 @@ const BOOTSTRAP_SCRIPT = `(function(){var s=document.getElementById("oc-html-ren
     + `window.addEventListener("message",function(e){var d=e.data;if(e.source!==window.parent||!d||d.type!==${JSON.stringify(POINTER_MESSAGE)})return;if(d.over===true)document.documentElement.setAttribute("data-oc-pointer","");else document.documentElement.removeAttribute("data-oc-pointer");});`
     + `document.addEventListener("click",function(e){var t=e.target,a=t&&t.closest?t.closest("a[href]"):null,u;if(!a)return;try{u=new URL(a.getAttribute("href"),document.baseURI);}catch(x){return;}if(!/^https?:$/.test(u.protocol))return;e.preventDefault();window.parent.postMessage({type:${JSON.stringify(OPEN_LINK_MESSAGE)},url:u.href},"*");},true);`
     + ANNOTATION_BRIDGE
-    + `var h,G=0,HF=new WeakMap(),z=function(){var r=document.documentElement,d=document.body,v=r.scrollHeight>r.clientHeight?r.scrollHeight:r.getBoundingClientRect().height,i,b,k;`
+    + `var h,G=0,HN=0,HF=new WeakMap(),Y=function(){var i=window.innerHeight-document.documentElement.clientHeight;return i&&Math.max(i,G);},z=function(){var r=document.documentElement,d=document.body,v=r.scrollHeight>r.clientHeight?r.scrollHeight:r.getBoundingClientRect().height,i,b,k,g;`
     + `if(d&&!/^(?:hidden|clip|scroll|auto)$/.test(getComputedStyle(d).overflowY)){b=d.getBoundingClientRect();b=b.top+window.scrollY+(d.clientTop+d.scrollHeight)*(d.offsetHeight?b.height/d.offsetHeight:1);if(b>v)v=b;}if(N){N=0;W();}`
     + `for(i=0;i<P.length;i++){b=P[i].getBoundingClientRect();if(getComputedStyle(P[i]).position==="absolute"&&(b.width||b.height)&&b.bottom+window.scrollY>v)v=b.bottom+window.scrollY;}`
     + `for(i=-1;i<SC.length;i++){b=i<0?d:SC[i];if(!b||b.scrollHeight<=b.clientHeight+1||i<0&&!/^(?:scroll|auto)$/.test(getComputedStyle(b).overflowY))continue;k=b.getBoundingClientRect();`
-    + `if(k.top>1||Math.abs(k.bottom-window.innerHeight)>1||Math.abs((HF.get(b)||-9)-k.height)<.5)continue;HF.set(b,k.height);k=window.innerHeight+b.scrollHeight-b.clientHeight;if(k>v)v=k;}`
-    + `i=window.innerHeight-r.clientHeight;v=Math.ceil(v);if(i&&!(i===G&&v===window.innerHeight))v+=i;G=i;r.style.overflowY=v>window.innerHeight+1?"auto":"hidden";if(v===h)return;h=v;window.parent.postMessage({type:${JSON.stringify(SIZE_MESSAGE)},height:v},"*");};window.addEventListener("resize",z);`
+    + `if(k.top>1||Math.abs(k.bottom-window.innerHeight)>1)continue;g=HF.get(b);if(g&&Math.abs(g[0]-k.height)<.5){if(HN>g[2]+1)continue;k=g[1];}else{g=k.height;k=window.innerHeight+b.scrollHeight-b.clientHeight;HF.set(b,[g,k,HN]);}if(k>v)v=k;}`
+    + `i=Y();v=Math.abs(v-window.innerHeight)<1?window.innerHeight:Math.ceil(v);if(i&&!(i===G&&v===window.innerHeight))v+=i;G=i;r.style.overflowY=v>window.innerHeight+1?"auto":"hidden";if(v===h)return;h=v;HN++;window.parent.postMessage({type:${JSON.stringify(SIZE_MESSAGE)},height:v},"*");};window.addEventListener("resize",z);`
     + `if(window.ResizeObserver){var o=new ResizeObserver(z);o.observe(document.documentElement);document.addEventListener("DOMContentLoaded",function(){if(document.body)o.observe(document.body);});}`
     + `document.addEventListener("DOMContentLoaded",z);window.addEventListener("load",z);`
     + `window.addEventListener("keydown",function(e){var t=e.composedPath()[0],f;if(!e.isTrusted||e.isComposing||!(e.metaKey||e.ctrlKey)||/^[acvxyz]$/i.test(e.key)&&!e.altKey||t&&(t.isContentEditable||/^(?:INPUT|TEXTAREA|SELECT)$/.test(t.tagName)))return;`
@@ -473,7 +482,7 @@ const BOOTSTRAP_SCRIPT = `(function(){var s=document.getElementById("oc-html-ren
     + `if(!e.isTrusted||e.defaultPrevented||Math.abs(dy)<=Math.abs(dx))return;if(dy<0)GS("down");else if(!GU(e.target))GS("up");},{passive:true});`
     + `var P=[],SC=[],Q=0,N=1,C=function(e){for(var a=e.parentElement;a&&a!==document.body;a=a.parentElement){var o=getComputedStyle(a);if(o.overflowX!=="visible"||o.overflowY!=="visible")return 1;}return 0;},`
     + `W=function(){P=[];SC=[];var a=document.body?document.body.getElementsByTagName("*"):[];for(var i=0;i<a.length&&i<5000;i++){var o=getComputedStyle(a[i]),p=o.position;if((p==="absolute"||p==="fixed")&&!C(a[i]))P.push(a[i]);if(/^(?:scroll|auto)$/.test(o.overflowY))SC.push(a[i]);}},`
-    + `F=function(){Q=0;if(window.innerHeight-document.documentElement.clientHeight!==G)z();if(N){N=0;W();}var w=document.documentElement.clientWidth;for(var i=0;i<P.length;i++){var e=P[i],x=e.__ocx||0,y=e.__ocy||0,r=e.getBoundingClientRect(),l=r.left-x,g=r.right-x,t=r.top-y,b=r.bottom-y,nx=0,ny=0;if(!r.width&&!r.height)continue;`
+    + `F=function(){Q=0;if(Y()!==G)z();if(N){N=0;W();}var w=document.documentElement.clientWidth;for(var i=0;i<P.length;i++){var e=P[i],x=e.__ocx||0,y=e.__ocy||0,r=e.getBoundingClientRect(),l=r.left-x,g=r.right-x,t=r.top-y,b=r.bottom-y,nx=0,ny=0;if(!r.width&&!r.height)continue;`
     + `if(g>0&&l<w&&r.width<=w){if(g>w)nx=w-g;if(l+nx<0)nx=-l;}if(t<0&&b>0)ny=-t;if(nx!==x||ny!==y){e.__ocx=nx;e.__ocy=ny;e.style.translate=nx||ny?nx+"px "+ny+"px":"";}}},`
     + `U=function(r){if(r)N=1;if(!Q)Q=requestAnimationFrame(F);};`
     + `new MutationObserver(function(m){for(var i=0;i<m.length;i++)if(m[i].type==="childList"||m[i].attributeName==="class")N=1;U(0);}).observe(document.documentElement,{subtree:true,childList:true,attributes:true,attributeFilter:["style","class"]});`
@@ -495,21 +504,34 @@ export interface HtmlRenderAnswerState {
 // The host's reply settles the promise; a state message from the host ends
 // the wait when it ended elsewhere (another device answered, or the user
 // wrote in the chat).
-const ANSWER_SCRIPT = `(function(){if(window.parent===window)return;var S=JSON.parse(document.getElementById("oc-html-render-answer").textContent),I=0,R={};`
+//
+// While the page waits, the script also puts the chat's Decline beside the
+// page's last `.oc-button`, the class the tool description gives agents for
+// their send button, so it sits with the page's own actions however long the
+// page is. It reports whether it found one; without one the host draws its
+// Decline under the page. Decline is off while an answer is on its way.
+const ANSWER_SCRIPT = `(function(){if(window.parent===window)return;var S=JSON.parse(document.getElementById("oc-html-render-answer").textContent),I=0,R={},DL=S.declineLabel||"Decline",D=null;`
+    + `var DP=function(){var a,b;if(!S.waiting){if(D&&D.parentNode)D.parentNode.removeChild(D);return;}`
+    + `a=document.querySelectorAll(".oc-button:not([data-oc-decline])");b=a[a.length-1];`
+    + `if(!b){if(D&&D.parentNode)D.parentNode.removeChild(D);window.parent.postMessage({type:${JSON.stringify(DECLINE_PLACED_MESSAGE)},placed:false},"*");return;}`
+    + `if(!D){D=document.createElement("button");D.type="button";D.className="oc-button";D.setAttribute("data-oc-decline","");D.textContent=DL;`
+    + `D.addEventListener("click",function(){if(!S.waiting||D.disabled)return;D.disabled=true;window.parent.postMessage({type:${JSON.stringify(DECLINE_MESSAGE)}},"*");});}`
+    + `D.disabled=Object.keys(R).length>0;if(b.nextElementSibling!==D)b.insertAdjacentElement("afterend",D);window.parent.postMessage({type:${JSON.stringify(DECLINE_PLACED_MESSAGE)},placed:true},"*");};`
     + `var o=window.openchamber={answer:S.answer===null?undefined:S.answer,submit:function(data,summary){return new Promise(function(res,rej){`
     + `if(!S.waiting)return rej(new Error("This page is not waiting for an answer"));`
     + `if(navigator.userActivation&&!navigator.userActivation.isActive)return rej(new Error("openchamber.submit works only from a click"));`
     + `if(typeof summary!=="string"||!summary.trim())return rej(new Error("summary is required: the choice in a few words"));`
-    + `var id=++I,v=data===undefined?null:data;R[id]={res:res,rej:rej,data:v};`
-    + `try{window.parent.postMessage({jsonrpc:"2.0",id:id,method:"ui/message",params:{role:"user",content:[{type:"text",text:summary}],_meta:{"openchamber/data":v}}},"*");}catch(x){delete R[id];rej(x);}});}};`
+    + `var id=++I,v=data===undefined?null:data;R[id]={res:res,rej:rej,data:v};if(D)D.disabled=true;`
+    + `try{window.parent.postMessage({jsonrpc:"2.0",id:id,method:"ui/message",params:{role:"user",content:[{type:"text",text:summary}],_meta:{"openchamber/data":v}}},"*");}catch(x){delete R[id];DP();rej(x);}});}};`
     + `window.addEventListener("message",function(e){var d=e.data,r;if(e.source!==window.parent||!d)return;`
-    + `if(d.type===${JSON.stringify(ANSWER_STATE_MESSAGE)}){S={waiting:d.waiting===true,answer:d.answer===undefined?null:d.answer};o.answer=S.answer===null?undefined:S.answer;return;}`
+    + `if(d.type===${JSON.stringify(ANSWER_STATE_MESSAGE)}){S={waiting:d.waiting===true,answer:d.answer===undefined?null:d.answer};o.answer=S.answer===null?undefined:S.answer;DP();return;}`
     + `if(d.jsonrpc!=="2.0"||!R[d.id])return;r=R[d.id];delete R[d.id];`
-    + `if(d.error)r.rej(new Error(String(d.error.message||"The answer was not sent")));else{S={waiting:false,answer:r.data};o.answer=r.data;r.res();}});})();`;
+    + `if(d.error)r.rej(new Error(String(d.error.message||"The answer was not sent")));else{S={waiting:false,answer:r.data};o.answer=r.data;r.res();}DP();});`
+    + `if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",DP);else DP();window.addEventListener("load",DP);})();`;
 
 // JSON inside a script element: "<" is escaped so no "</script>" in the data
 // can close it.
-const scriptJson = (value: HtmlRenderAnswerState): string => JSON.stringify(value).replace(/</g, '\\u003c');
+const scriptJson = (value: HtmlRenderAnswerState & { declineLabel: string }): string => JSON.stringify(value).replace(/</g, '\\u003c');
 
 // Comments and raw-text elements are blanked to the same length before the
 // head is located, so a "<head>" written inside a script or comment is never
@@ -524,12 +546,17 @@ const blankNonMarkup = (html: string): string => html.replace(
  * its head. `contained` is for a frame with nothing around it to scroll (the
  * full-screen view): the page's own scrolling stops at its edges without the
  * elastic bounce. `answerState` is where the page stands on its answer when
- * it loads; later changes reach it as messages.
+ * it loads; later changes reach it as messages. `declineLabel` is the chat's
+ * word for the Decline the page shows while it waits.
  */
 export function buildHtmlRenderDocument(
     html: string,
     theme: HtmlRenderTheme,
-    { contained = false, answerState = { waiting: false, answer: null } }: { contained?: boolean; answerState?: HtmlRenderAnswerState } = {},
+    { contained = false, answerState = { waiting: false, answer: null }, declineLabel = 'Decline' }: {
+        contained?: boolean;
+        answerState?: HtmlRenderAnswerState;
+        declineLabel?: string;
+    } = {},
 ): string {
     const scan = blankNonMarkup(html);
     const bootstrap = [
@@ -539,7 +566,7 @@ export function buildHtmlRenderDocument(
         // Its own element: a theme switch rewrites the theme style whole.
         contained ? '<style>html{overscroll-behavior:none}</style>' : '',
         `<script>${BOOTSTRAP_SCRIPT}</script>`,
-        `<script type="application/json" id="oc-html-render-answer">${scriptJson(answerState)}</script>`,
+        `<script type="application/json" id="oc-html-render-answer">${scriptJson({ ...answerState, declineLabel })}</script>`,
         `<script>${ANSWER_SCRIPT}</script>`,
     ].join('');
     const headOpen = /<head(?:\s[^>]*)?>/i.exec(scan);
@@ -631,7 +658,9 @@ type HtmlRenderFrameMessage =
     // An empty id is a click on no mark; the rect is then the click's point.
     | { kind: 'selection-escape' }
     | { kind: 'mark-click'; id: string; rect: z.infer<typeof selectionRectSchema> }
-    | { kind: 'scroll'; direction: FrameScrollDirection };
+    | { kind: 'scroll'; direction: FrameScrollDirection }
+    | { kind: 'decline' }
+    | { kind: 'decline-placed'; placed: boolean };
 
 /** A quote mark the host asks a page to paint. */
 export interface HtmlRenderMark {
@@ -655,6 +684,8 @@ const frameMessageSchema = z.discriminatedUnion('type', [
     z.object({ type: z.literal(SELECTION_ESCAPE_MESSAGE) }),
     z.object({ type: z.literal(MARK_CLICK_MESSAGE), id: z.string().max(200), rect: selectionRectSchema }),
     z.object({ type: z.literal(SCROLL_MESSAGE), direction: z.enum(['up', 'down']) }),
+    z.object({ type: z.literal(DECLINE_MESSAGE) }),
+    z.object({ type: z.literal(DECLINE_PLACED_MESSAGE), placed: z.boolean() }),
 ]);
 
 // MCP Apps `ui/message`. Only text content is read; the summary is its text.
@@ -698,6 +729,8 @@ export function readHtmlRenderFrameMessage(event: Pick<MessageEvent, 'data'>): H
     if (message.type === SELECTION_ESCAPE_MESSAGE) return { kind: 'selection-escape' };
     if (message.type === MARK_CLICK_MESSAGE) return { kind: 'mark-click', id: message.id, rect: message.rect };
     if (message.type === SCROLL_MESSAGE) return { kind: 'scroll', direction: message.direction };
+    if (message.type === DECLINE_MESSAGE) return { kind: 'decline' };
+    if (message.type === DECLINE_PLACED_MESSAGE) return { kind: 'decline-placed', placed: message.placed };
     // Only a chord with Cmd or Ctrl: the page never passes plain typing on,
     // and a page that tried to must not reach the app's single-key handling.
     if (!message.metaKey && !message.ctrlKey) return null;

@@ -69,6 +69,7 @@ mock.module('./quotaCredentials', () => ({
 mock.module('./sessionActivityWatcher', () => ({ getSessionActivitySnapshot: mock() }));
 
 const { handleSystemBridgeMessage } = await import('./bridge-system-runtime.ts');
+const { openCodeTrust } = await import('./opencodeTrust.ts');
 
 const deps = {
   resolveUserPath: (value) => value,
@@ -119,6 +120,18 @@ describe('VS Code system bridge api:workspace:addFolder', () => {
   beforeEach(() => {
     updateWorkspaceFolders.mockClear();
     currentWorkspaceFolders = [];
+  });
+
+  test('refuses untrusted OpenCode configuration before changing workspace folders', async () => {
+    const original = openCodeTrust.assess;
+    openCodeTrust.assess = async () => ({ trusted: false });
+    try {
+      const response = await handleSystemBridgeMessage({
+        id: 'untrusted-folder', type: 'api:workspace:addFolder', payload: { path: '/untrusted/project' },
+      }, undefined, deps);
+      expect(response.success).toBe(false);
+      expect(updateWorkspaceFolders).not.toHaveBeenCalled();
+    } finally { openCodeTrust.assess = original; }
   });
 
   test('adds a folder to the workspace and returns the folder list', async () => {
@@ -235,7 +248,7 @@ describe('VS Code system bridge api:quota:giftReset:use', () => {
     const response = await handleSystemBridgeMessage({
       id: 'gift-use',
       type: 'api:quota:giftReset:use',
-      payload: { providerId: 'zai-coding-plan', recordId: 462029, resetType: 'FIVE_HOUR' },
+      payload: { providerId: 'zai-coding-plan', recordId: 462029, resetType: 'FIVE_HOUR', grantType: 'GLOBAL' },
     }, undefined, deps);
 
     expect(response).toEqual({
@@ -247,7 +260,55 @@ describe('VS Code system bridge api:quota:giftReset:use', () => {
     expect(activateQuotaGiftReset).toHaveBeenCalledWith('zai-coding-plan', {
       recordId: 462029,
       resetType: 'FIVE_HOUR',
+      grantType: 'GLOBAL',
     });
+  });
+
+  test('passes the record grantType through unchanged', async () => {
+    await handleSystemBridgeMessage({
+      id: 'gift-activity',
+      type: 'api:quota:giftReset:use',
+      payload: { providerId: 'zai-coding-plan', recordId: 1, resetType: 'WEEK', grantType: 'ACTIVITY' },
+    }, undefined, deps);
+
+    expect(activateQuotaGiftReset).toHaveBeenCalledWith('zai-coding-plan', {
+      recordId: 1,
+      resetType: 'WEEK',
+      grantType: 'ACTIVITY',
+    });
+  });
+
+  test('keeps an omitted grantType omitted', async () => {
+    const response = await handleSystemBridgeMessage({
+      id: 'gift-no-grant',
+      type: 'api:quota:giftReset:use',
+      payload: { providerId: 'zai-coding-plan', recordId: 1, resetType: 'FIVE_HOUR' },
+    }, undefined, deps);
+
+    expect(response.success).toBe(true);
+    expect(activateQuotaGiftReset).toHaveBeenCalledWith('zai-coding-plan', {
+      recordId: 1,
+      resetType: 'FIVE_HOUR',
+      grantType: undefined,
+    });
+  });
+
+  test.each([[''], ['   '], [null], [7]])('leaves grantType %j for the provider to reject', async (grantType) => {
+    activateQuotaGiftReset.mockRejectedValueOnce(new Error('Invalid gift reset request'));
+
+    const response = await handleSystemBridgeMessage({
+      id: 'gift-bad-grant',
+      type: 'api:quota:giftReset:use',
+      payload: { providerId: 'zai-coding-plan', recordId: 1, resetType: 'FIVE_HOUR', grantType },
+    }, undefined, deps);
+
+    expect(response).toEqual({
+      id: 'gift-bad-grant',
+      type: 'api:quota:giftReset:use',
+      success: false,
+      error: 'Invalid gift reset request',
+    });
+    expect(activateQuotaGiftReset).toHaveBeenCalledWith('zai-coding-plan', { recordId: 1, resetType: 'FIVE_HOUR', grantType });
   });
 
   test('rejects a payload without a recordId', async () => {
@@ -306,21 +367,7 @@ describe('VS Code system bridge api:sessions/metadata:set', () => {
   const failingWith = (error) => ({ ...deps, sessionState: { setMetadata: async () => { throw error; } } });
   const message = { id: 'meta', type: 'api:sessions/metadata:set', payload: { sessionId: 'ses_a', patch: { openchamber: { work: { state: 'done' } } } } };
 
-  test('codes a write OpenCode refused because the session folder is gone', async () => {
-    const locationNotFound = Object.assign(new Error('Location not found: /repo/wt-gone'), { name: 'LocationNotFoundError' });
-
-    const response = await handleSystemBridgeMessage(message, { manager }, failingWith(locationNotFound));
-
-    expect(response).toEqual({
-      id: 'meta',
-      type: 'api:sessions/metadata:set',
-      success: false,
-      error: 'Location not found: /repo/wt-gone',
-      code: 'SESSION_DIRECTORY_MISSING',
-    });
-  });
-
-  test('leaves any other failed write uncoded', async () => {
+  test('reports a failed write', async () => {
     const response = await handleSystemBridgeMessage(message, { manager }, failingWith(new Error('OpenCode is down')));
 
     expect(response).toEqual({ id: 'meta', type: 'api:sessions/metadata:set', success: false, error: 'OpenCode is down' });

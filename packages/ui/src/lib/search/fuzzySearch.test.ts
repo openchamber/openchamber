@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { matchesRankQuery, rankByQuery } from './fuzzySearch';
+import { matchesRankQuery, rankByQuery, SIDEBAR_SEARCH } from './fuzzySearch';
 
 const rank = (items: string[], query: string) => rankByQuery(items, query, (item) => [item]);
 
@@ -75,5 +75,19 @@ describe('matchesRankQuery', () => {
   test('rejects a punctuation-only query instead of matching everything', () => {
     expect(matchesRankQuery(['alpha'], '...')).toBe(false);
     expect(matchesRankQuery(['alpha'], '... alpha')).toBe(false);
+  });
+
+  test('the sidebar matches each word from the start of a word, in any script', () => {
+    expect(matchesRankQuery(['Fix login'], 'fix', SIDEBAR_SEARCH)).toBe(true);
+    expect(matchesRankQuery(['bugfix/fix-relay'], 'relay fix', SIDEBAR_SEARCH)).toBe(true);
+    expect(matchesRankQuery(['Prefix cleanup'], 'fix', SIDEBAR_SEARCH)).toBe(false);
+    expect(matchesRankQuery(['Prefix cleanup'], 'fix')).toBe(true);
+    expect(matchesRankQuery(['Розбір бенчу'], 'бенч', SIDEBAR_SEARCH)).toBe(true);
+    expect(matchesRankQuery(['Перебір'], 'бір', SIDEBAR_SEARCH)).toBe(false);
+  });
+
+  test('the sidebar still lets punctuation go from a word start on', () => {
+    expect(matchesRankQuery(['openchamber/sidebar-custom-sections'], 'sidebarcustom', SIDEBAR_SEARCH)).toBe(true);
+    expect(matchesRankQuery(['openchamber/sidebar-custom-sections'], 'barcustom', SIDEBAR_SEARCH)).toBe(false);
   });
 });

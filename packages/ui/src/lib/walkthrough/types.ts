@@ -17,8 +17,10 @@ export type WalkthroughSource =
   /**
    * `revision`: a full commit SHA naming an earlier revision (a patchset) on
    * a host that keeps them; absent, the change request's current one.
+   * `linked`: a link named it outside the bound repository network, so it is
+   * read wherever it is and offers no review.
    */
-  | { kind: 'pr'; number: number; sourceRepo?: { owner: string; repo: string }; revision?: string };
+  | { kind: 'pr'; number: number; sourceRepo?: { owner: string; repo: string }; revision?: string; linked?: true };
 
 type WalkthroughLocalSource = Exclude<WalkthroughSource, { kind: 'pr' }>;
 type WalkthroughPullRequestSource = Extract<WalkthroughSource, { kind: 'pr' }>;
@@ -29,6 +31,13 @@ export type WalkthroughTarget =
 
 export type WalkthroughChapterIcon = 'bug' | 'wrench' | 'path' | 'flask' | 'doc' | 'gear';
 export type WalkthroughStopImportance = 'critical' | 'normal' | 'context';
+export type WalkthroughObservationKind = 'decision' | 'cost' | 'limitation' | 'asymmetry' | 'unproven';
+
+/** A fact the reader agrees to by accepting the change; never a finding. */
+export interface WalkthroughObservation {
+  kind: WalkthroughObservationKind;
+  note: string;
+}
 
 export interface WalkthroughStop {
   id: string;
@@ -36,6 +45,8 @@ export interface WalkthroughStop {
   hunkIds: string[];
   importance: WalkthroughStopImportance;
   prose: string;
+  /** Absent on entries written before observations existed. */
+  observations?: WalkthroughObservation[];
 }
 
 export interface WalkthroughChapter {
@@ -46,10 +57,18 @@ export interface WalkthroughChapter {
   stops: WalkthroughStop[];
 }
 
+/** One line on a file the stops left out, shown where the reader meets it. */
+export interface WalkthroughRoutineNote {
+  path: string;
+  note: string;
+}
+
 export interface Walkthrough {
   title: string;
   focus: string;
   chapters: WalkthroughChapter[];
+  /** Absent on entries written before routine notes existed. */
+  routine?: WalkthroughRoutineNote[];
 }
 
 export interface WalkthroughHunk {

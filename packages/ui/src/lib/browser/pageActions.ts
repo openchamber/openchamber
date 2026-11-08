@@ -242,7 +242,10 @@ export const buildSnapshotScript = ({ selector }: { selector?: string } = {}): s
     if (!accessibleName(element)) entry.missingAccessibleName = true;
     elements.push(entry);
   }
-  var body = document.body ? (document.body.innerText || '') : '';
+  // The text follows the scope too: a dialog's snapshot that carried the page
+  // under it gave no way to tell which lines were in the dialog.
+  var textRoot = root === document ? document.body : root;
+  var body = textRoot ? (textRoot.innerText || '') : '';
   var text = body.replace(/\\n{3,}/g, '\\n\\n').trim();
   var docEl = document.documentElement;
   var result = {
@@ -475,6 +478,72 @@ export const buildScrollScript = ({ selector, direction }: { selector?: string; 
   else if (direction === 'bottom') window.scrollTo({ top: bottom, behavior: 'instant' });
   else return { ok: false, error: 'Unknown scroll direction: ' + direction };
   return settle({ direction: direction });
+`);
+
+/**
+ * Resolves once the page has gone quiet: no new resource and no change to the
+ * DOM tree or its text for `quietMs`, or `maxMs` after it started.
+ *
+ * The load event says only that the document and its static imports arrived.
+ * An app then fetches its lazy chunks and replaces its splash screen, and a
+ * screenshot taken in between shows the splash as if it were the page.
+ * Attribute changes are left out: hover classes and live styles change on a
+ * finished page all the time and would hold every wait to its limit. A
+ * running animation that will finish counts as a change: a splash fades out
+ * by style alone, and a hidden tab, which gets no frames, starts that fade
+ * only once a capture shows it.
+ */
+export const buildQuietScript = ({ quietMs, maxMs }: { quietMs: number; maxMs: number }): string => wrap(`
+  var quietMs = ${JSON.stringify(quietMs)};
+  var maxMs = ${JSON.stringify(maxMs)};
+  return new Promise(function (resolve) {
+    var startedAt = performance.now();
+    var lastChange = startedAt;
+    var bump = function () { lastChange = performance.now(); };
+    var mutations = new MutationObserver(bump);
+    mutations.observe(document, { subtree: true, childList: true, characterData: true });
+    var resources = null;
+    try {
+      resources = new PerformanceObserver(bump);
+      resources.observe({ type: 'resource' });
+    } catch (error) {
+      resources = null;
+    }
+    // A fade or slide that will end is the page still changing. One that
+    // loops forever (a spinner, a pulsing logo) or follows scrolling never
+    // ends on its own and is ignored, and so is a page whose own
+    // getAnimations throws: the wait must still end.
+    var animating = function () {
+      try {
+        if (typeof document.getAnimations !== 'function') return false;
+        var list = document.getAnimations();
+        for (var i = 0; i < list.length; i += 1) {
+          var animation = list[i];
+          if (animation.playState !== 'running' && !animation.pending) continue;
+          if (animation.timeline && animation.timeline !== document.timeline) continue;
+          var timing = animation.effect && animation.effect.getTiming ? animation.effect.getTiming() : null;
+          if (timing && timing.iterations === Infinity) continue;
+          return true;
+        }
+      } catch (error) {
+        return false;
+      }
+      return false;
+    };
+    var check = function () {
+      var now = performance.now();
+      if (animating()) lastChange = now;
+      var quiet = now - lastChange >= quietMs;
+      if (quiet || now - startedAt >= maxMs) {
+        mutations.disconnect();
+        if (resources) resources.disconnect();
+        resolve({ ok: true, quiet: quiet });
+        return;
+      }
+      setTimeout(check, Math.max(16, Math.min(quietMs - (now - lastChange), maxMs - (now - startedAt))));
+    };
+    setTimeout(check, quietMs);
+  });
 `);
 
 /** Properties that answer "how does this look", without dumping the whole cascade. */

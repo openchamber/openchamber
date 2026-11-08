@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
-import { buildReferenceSearchQuery, fetchReferenceDetail, parseReferenceLookup, readPullStatusRefs, readReferencePeople, readReferenceState, searchGitHubReferencesAcross, toReference } from './reference-search.js';
+import {
+  buildReferenceSearchQuery, fetchDiscussionDetail, fetchReferenceDetail, parseReferenceLink, parseReferenceLookup, readPullStatusRefs,
+  readReferencePeople, readReferenceState, reviewCommentExcerpt, searchGitHubReferences, searchGitHubReferencesAcross, toReference,
+} from './reference-search.js';
 
 const origin = { owner: 'acme', repo: 'app', source: 'origin' };
 const upstream = { owner: 'Upstream', repo: 'App', source: 'upstream' };
@@ -46,9 +49,22 @@ describe('buildReferenceSearchQuery', () => {
       .toBe('repo:acme/app is:issue assignee:@me is:closed sort:created-asc');
   });
 
+  it('searches discussions as their own type: no kind, unanswered as open questions, no assignee', () => {
+    expect(buildReferenceSearchQuery({ repos: [origin], kind: 'discussion', state: 'unanswered', people: 'assigned', text: '' }))
+      .toBe('repo:acme/app is:open is:unanswered sort:updated-desc');
+    expect(buildReferenceSearchQuery({ repos: [origin], kind: 'discussion', state: 'closed', people: 'created', text: 'category:Ideas' }))
+      .toBe('repo:acme/app is:closed sort:updated-desc author:@me category:Ideas');
+    // Only a discussion is unanswered; elsewhere that reads as open.
+    expect(buildReferenceSearchQuery({ repos: [origin], kind: 'issue', state: 'unanswered', people: 'any', text: '' }))
+      .toBe('repo:acme/app is:issue is:open sort:updated-desc');
+    expect(buildReferenceSearchQuery({ repos: [origin], kind: 'discussion', state: 'open', people: 'any', text: 'is:answered' }))
+      .toBe('repo:acme/app sort:updated-desc is:answered');
+  });
+
   it('reads unknown values as open and anyone', () => {
     expect(readReferenceState('everything')).toBe('open');
     expect(readReferenceState('merged')).toBe('merged');
+    expect(readReferenceState('unanswered')).toBe('unanswered');
     expect(readReferencePeople('everyone')).toBe('any');
     expect(readReferencePeople('created')).toBe('created');
   });
@@ -184,16 +200,39 @@ describe('searchGitHubReferencesAcross', () => {
 });
 
 
+describe('parseReferenceLink', () => {
+  it('names the repository and number of a link on the host', () => {
+    expect(parseReferenceLink('https://github.com/dotnet/runtime/issues/118826', 'github.com')).toEqual({ owner: 'dotnet', repo: 'runtime', number: 118826 });
+    expect(parseReferenceLink('https://www.github.com/dotnet/runtime/pull/7/files', 'github.com')).toEqual({ owner: 'dotnet', repo: 'runtime', number: 7 });
+    expect(parseReferenceLink('https://ghe.example.com/a/b/issues/1', 'ghe.example.com')).toEqual({ owner: 'a', repo: 'b', number: 1 });
+  });
+
+  it('refuses another host and anything that is no link to an item', () => {
+    expect(parseReferenceLink('https://ghe.example.com/a/b/issues/1', 'github.com')).toBeNull();
+    expect(parseReferenceLink('#12', 'github.com')).toBeNull();
+    expect(parseReferenceLink('https://github.com/a/b', 'github.com')).toBeNull();
+  });
+});
+
 describe('parseReferenceLookup', () => {
   it('looks a number up in every repo of the network', () => {
-    expect(parseReferenceLookup('#42', repos)).toEqual({ number: 42, repos });
-    expect(parseReferenceLookup(' 42 ', repos)).toEqual({ number: 42, repos });
+    expect(parseReferenceLookup('#42', repos)).toEqual({ number: 42, repos, family: 'item' });
+    expect(parseReferenceLookup(' 42 ', repos)).toEqual({ number: 42, repos, family: 'item' });
+    // The discussions list reads a number as a discussion.
+    expect(parseReferenceLookup('#42', repos, 'discussion')).toEqual({ number: 42, repos, family: 'discussion' });
   });
 
   it('looks a link up only in its own repo, whatever its kind', () => {
-    expect(parseReferenceLookup('https://github.com/upstream/app/pull/7/files', repos)).toEqual({ number: 7, repos: [upstream] });
-    expect(parseReferenceLookup('github.com/acme/app/issues/3', repos)).toEqual({ number: 3, repos: [origin] });
-    expect(parseReferenceLookup('https://github.com/other/repo/issues/3', repos)).toEqual({ number: 3, repos: [] });
+    expect(parseReferenceLookup('https://github.com/upstream/app/pull/7/files', repos)).toEqual({ number: 7, repos: [upstream], family: 'item' });
+    expect(parseReferenceLookup('github.com/acme/app/issues/3', repos)).toEqual({ number: 3, repos: [origin], family: 'item' });
+    expect(parseReferenceLookup('https://github.com/other/repo/issues/3', repos)).toEqual({ number: 3, repos: [], family: 'item' });
+  });
+
+  it('looks a discussion link up only in the discussions list, and searches a link of the other family as text', () => {
+    expect(parseReferenceLookup('https://github.com/acme/app/discussions/5#discussioncomment-1', repos, 'discussion'))
+      .toEqual({ number: 5, repos: [origin], family: 'discussion' });
+    expect(parseReferenceLookup('https://github.com/acme/app/discussions/5', repos)).toBeNull();
+    expect(parseReferenceLookup('https://github.com/acme/app/issues/5', repos, 'discussion')).toBeNull();
   });
 
   it('treats anything else as search text', () => {
@@ -261,6 +300,39 @@ describe('toReference', () => {
     const issue = toReference({ __typename: 'Issue', ...common(4), body: 'x'.repeat(25_000), state: 'OPEN', stateReason: null }, repos);
     expect(issue?.body).toHaveLength(20_000);
     expect(issue?.bodyTruncated).toBe(true);
+  });
+
+  it('maps a discussion with its category, close reason and answer', () => {
+    const node = (number, overrides = {}) => ({
+      __typename: 'Discussion',
+      ...common(number),
+      url: `https://github.com/acme/app/discussions/${number}`,
+      closed: false,
+      stateReason: null,
+      isAnswered: false,
+      locked: false,
+      upvoteCount: 3,
+      category: { name: 'Q&A', emojiHTML: '<div>🙏</div>', isAnswerable: true },
+      ...overrides,
+    });
+    expect(toReference(node(5), repos)).toMatchObject({
+      kind: 'discussion',
+      number: 5,
+      url: 'https://github.com/acme/app/discussions/5',
+      state: 'open',
+      answered: false,
+      upvotes: 3,
+      locked: false,
+      category: { name: 'Q&A', emoji: '🙏', answerable: true },
+      commentCount: 4,
+    });
+    // A category that takes no answers says nothing about one, and HTML that is no emoji is dropped.
+    expect(toReference(node(6, { isAnswered: null, category: { name: 'Ideas', emojiHTML: '<div><img src=x></div>', isAnswerable: false } }), repos))
+      .toMatchObject({ answered: null, category: { name: 'Ideas', emoji: null, answerable: false } });
+    expect(toReference(node(7, { closed: true, stateReason: 'OUTDATED' }), repos)?.state).toBe('outdated');
+    expect(toReference(node(8, { closed: true, stateReason: 'DUPLICATE' }), repos)?.state).toBe('duplicate');
+    // Closed before GitHub kept reasons: resolved, GitHub's default.
+    expect(toReference(node(9, { closed: true, stateReason: null }), repos)?.state).toBe('resolved');
   });
 
   it('rejects nodes from other repos and malformed nodes', () => {
@@ -395,7 +467,102 @@ describe('fetchReferenceDetail', () => {
     expect(detail?.comments.some((comment) => comment.url === 'c2')).toBe(false);
   });
 
+  it('carries the lines a review comment sits on, read from the end of its hunk', async () => {
+    const diffHunk = '@@ -10,4 +10,5 @@ export function run() {\n   const a = 1;\n-  const b = 2;\n+  const b = 3;\n+  const c = 4;\n   return a;';
+    const detail = await fetchReferenceDetail({ octokit: graphqlReturning(pull([], [{
+      id: 'PRRT_three', isResolved: false, viewerCanResolve: true, viewerCanUnresolve: false, viewerCanReply: true,
+      comments: { nodes: [
+        { author, body: '```suggestion\n  const c = 5;\n```', createdAt: '2026-10-01T09:00:00Z', url: 'c1', path: 'src/a.ts', line: 13, originalLine: 13, startLine: 12, originalStartLine: 12, diffHunk },
+      ] },
+    }])), owner: 'acme', repo: 'app', number: 9 });
+    expect(detail?.comments.find((comment) => comment.url === 'c1')?.excerpt).toEqual({ startLine: 12, lines: ['  const c = 4;', '  return a;'] });
+  });
+
+  it('leaves the excerpt out where the hunk does not cover the comment', () => {
+    const base = { line: 5, originalLine: 5, startLine: null, originalStartLine: null };
+    expect(reviewCommentExcerpt({ ...base, diffHunk: null })).toBeUndefined();
+    expect(reviewCommentExcerpt({ ...base, startLine: 1, diffHunk: '@@ -1 +1 @@\n+only' })).toBeUndefined();
+    expect(reviewCommentExcerpt({ ...base, diffHunk: 'not a hunk' })).toBeUndefined();
+    // An outdated comment reads its original range.
+    expect(reviewCommentExcerpt({ line: null, originalLine: 2, startLine: null, originalStartLine: null, diffHunk: '@@ -1,2 +1,2 @@\n one\n+two' }))
+      .toEqual({ startLine: 2, lines: ['two'] });
+  });
+
   it('answers null for a missing number', async () => {
     expect(await fetchReferenceDetail({ octokit: graphqlReturning(null), owner: 'acme', repo: 'app', number: 9 })).toBeNull();
+  });
+});
+
+describe('discussions', () => {
+  const author = { login: 'octo', avatarUrl: 'https://avatars/octo' };
+  const comment = (id, overrides = {}) => ({
+    id, author, body: `comment ${id}`, createdAt: '2026-10-01T10:00:00Z', url: `u-${id}`,
+    isAnswer: false, viewerCanMarkAsAnswer: true, viewerCanUnmarkAsAnswer: false, replies: { nodes: [] }, ...overrides,
+  });
+  const discussion = (overrides = {}) => ({
+    number: 5, locked: false, viewerCanUpdate: false, viewerCanClose: true, viewerCanReopen: true,
+    category: { isAnswerable: true },
+    comments: { totalCount: 2, nodes: [
+      comment('DC_1', { isAnswer: true, viewerCanMarkAsAnswer: false, viewerCanUnmarkAsAnswer: true, replies: { nodes: [{ author: null, body: 'thanks', createdAt: null, url: 'r1' }] } }),
+      comment('DC_2'),
+    ] },
+    ...overrides,
+  });
+  const graphqlReturning = (value) => ({ graphql: async () => ({ repository: { discussion: value } }) });
+
+  it('reads each comment as a thread of its replies, with whether it is the answer and may be changed', async () => {
+    const detail = await fetchDiscussionDetail({ octokit: graphqlReturning(discussion()), owner: 'acme', repo: 'app', number: 5 });
+    expect(detail).toEqual({
+      number: 5,
+      comments: [
+        {
+          author, body: 'comment DC_1', createdAt: '2026-10-01T10:00:00Z', url: 'u-DC_1', path: null, line: null, review: null,
+          thread: { id: 'DC_1', resolved: false, canResolve: false, canReply: true, replies: [
+            { author: null, body: 'thanks', createdAt: null, url: 'r1', path: null, line: null, review: null },
+          ] },
+          answer: { chosen: true, canChange: true },
+        },
+        {
+          author, body: 'comment DC_2', createdAt: '2026-10-01T10:00:00Z', url: 'u-DC_2', path: null, line: null, review: null,
+          thread: { id: 'DC_2', resolved: false, canResolve: false, canReply: true, replies: [] },
+          answer: { chosen: false, canChange: true },
+        },
+      ],
+      commentTotal: 2,
+      pull: null,
+      discussion: { canComment: true, canClose: true, canReopen: true },
+    });
+  });
+
+  it('takes no answers outside a Q&A category and no comments on a locked one from who may not update it', async () => {
+    const detail = await fetchDiscussionDetail({
+      octokit: graphqlReturning(discussion({ locked: true, category: { isAnswerable: false } })), owner: 'acme', repo: 'app', number: 5,
+    });
+    expect(detail.comments.every((entry) => entry.answer === undefined && entry.thread.canReply === false)).toBe(true);
+    expect(detail.discussion.canComment).toBe(false);
+    await expect(fetchDiscussionDetail({ octokit: graphqlReturning(null), owner: 'acme', repo: 'app', number: 5 })).resolves.toBeNull();
+  });
+
+  it('lists discussions with the discussion search, and looks a number up as a discussion', async () => {
+    const queries = [];
+    const node = { __typename: 'Discussion', ...common(5), closed: false, stateReason: null, isAnswered: null, locked: false, upvoteCount: 0,
+      category: { name: 'Ideas', emojiHTML: '<div>💡</div>', isAnswerable: false } };
+    const octokit = {
+      graphql: async (query, variables) => {
+        queries.push({ query, variables });
+        if (query.includes('ReferenceLookup')) return { a0: { discussion: node }, a1: { discussion: null } };
+        return { search: { discussionCount: 41, pageInfo: { hasNextPage: true, endCursor: 'c1' }, nodes: [node] } };
+      },
+    };
+    const page = await searchGitHubReferences({ octokit, repos, kind: 'discussion', state: 'open', people: 'any', text: '', cursor: null });
+    expect(page).toMatchObject({ cursor: 'c1', hasMore: true, total: 41 });
+    expect(page.items.map((item) => [item.kind, item.number])).toEqual([['discussion', 5]]);
+    expect(queries[0].query).toContain('type: DISCUSSION');
+    expect(queries[0].query).not.toContain('IssueReference');
+
+    const lookup = await searchGitHubReferences({ octokit, repos, kind: 'discussion', state: 'open', people: 'any', text: '#5', cursor: null });
+    expect(lookup.items.map((item) => item.number)).toEqual([5]);
+    expect(queries[1].query).toContain('discussion(number: $number)');
+    expect(queries[1].query).not.toContain('issueOrPullRequest');
   });
 });

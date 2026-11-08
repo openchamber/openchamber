@@ -34,8 +34,8 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 const isGoalStatus = (value: unknown): value is SessionGoalStatus =>
   typeof value === 'string' && (SESSION_GOAL_STATUSES as string[]).includes(value);
 
-export function getSessionGoal(session: Session | null | undefined): SessionGoalPayload | null {
-  const metadata = (session as { metadata?: unknown } | null | undefined)?.metadata;
+export function getSessionGoal(session: Pick<Session, 'metadata'> | null | undefined): SessionGoalPayload | null {
+  const metadata = session?.metadata;
   if (!isRecord(metadata)) return null;
   const namespace = metadata.openchamber;
   if (!isRecord(namespace)) return null;

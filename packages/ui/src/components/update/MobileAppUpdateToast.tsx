@@ -46,12 +46,14 @@ export const MobileAppUpdateToast: React.FC = () => {
           void openExternalUrl(downloadUrl);
         },
       },
-      cancel: {
-        label: t('mobileUpdate.toast.actions.dismiss'),
-        onClick: () => {
+      // Closing it with the cross, or swiping it away, skips this version.
+      // The app takes it away too once the update is gone; that is not the
+      // user's answer, and sonner reports both the same way.
+      onDismiss: () => {
+        const current = useUpdateStore.getState();
+        if (current.available && current.info?.version === version) {
           getDeferredSafeStorage().setItem(DISMISSED_VERSION_KEY, version);
-          toast.dismiss(TOAST_ID);
-        },
+        }
       },
     });
   }, [available, downloadUrl, runtimeType, t, version]);

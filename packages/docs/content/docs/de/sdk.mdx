@@ -38,7 +38,7 @@ Binde `main.js` in `index.html` mit einem normalen `<script src="main.js"></scri
 
 OpenChamber liest das Manifest und zeigt einen Dialog mit allem, was die Erweiterung anfordert (siehe [Berechtigungen](#berechtigungen)). Bestätige ihn, und dein Icon erscheint in der Leiste. Klick darauf, und deine Seite lädt.
 
-Du kannst auch eine lokale `.zip`-Datei oder einen https-Link zu einem Git-Repository oder einer Zip-Datei hinzufügen. Nur eine Git-Installation kann sich aktualisieren: erhöhe `version` in `package.json` und pushe, dann bietet OpenChamber das Update an, wenn der Nutzer das nächste Mal Einstellungen → Erweiterungen öffnet. Ein `#tag` oder `#branch` in der URL legt fest, welchem es folgt. Die werden in den Datenordner von OpenChamber kopiert und aus dieser Kopie ausgeführt. Liefere also die gebauten Dateien aus, nicht `node_modules` oder TypeScript-Quellen. Beim Entfernen der Erweiterung wird die Kopie gelöscht. Eine Installation aus einem Ordner läuft direkt aus deinem Ordner, du kannst also bearbeiten, neu bauen und neu laden.
+Du kannst auch eine lokale `.zip`-Datei oder einen https-Link zu einem Git-Repository oder einer Zip-Datei hinzufügen. Nur eine Git-Installation kann sich aktualisieren: erhöhe `version` in `package.json` und pushe, dann prüft OpenChamber kurz nach dem Start und alle paar Stunden, sagt dem Nutzer einmal Bescheid und bietet das Update in Einstellungen → Erweiterungen an. Ein Link auf `openchamber://extensions/install?url=<encoded repository URL>` auf einer beliebigen Seite öffnet die Desktop-App mit diesem Repository im Hinzufügen-Dialog, du kannst also einen Installations-Button anbieten. Ein `#tag` oder `#branch` in der URL legt fest, welchem es folgt. Die werden in den Datenordner von OpenChamber kopiert und aus dieser Kopie ausgeführt. Liefere also die gebauten Dateien aus, nicht `node_modules` oder TypeScript-Quellen. Beim Entfernen der Erweiterung wird die Kopie gelöscht. Eine Installation aus einem Ordner läuft direkt aus deinem Ordner, du kannst also bearbeiten, neu bauen und neu laden.
 
 ## Manifest
 
@@ -49,13 +49,11 @@ Du kannst auch eine lokale `.zip`-Datei oder einen https-Link zu einem Git-Repos
   "openchamber": {
     "apiVersion": 1,
     "engines": { "openchamber": ">=1.24.0" },
+    "id": "acme-hello",
+    "name": "Hello",
+    "icon": "window",
     "contributes": {
-      "panel": {
-        "id": "acme-hello",
-        "name": "Hello",
-        "icon": "window",
-        "entry": "panel/index.html"
-      },
+      "panel": { "entry": "panel/index.html" },
       "attach": "dialog",
       "page": true,
       "capabilities": ["prompt", "sessions"],
@@ -80,7 +78,7 @@ Du kannst auch eine lokale `.zip`-Datei oder einen https-Link zu einem Git-Repos
 
 `engines.openchamber` ist optional. Trag die älteste OpenChamber-Version ein, mit der deine Erweiterung funktioniert, als `1.24.0` oder `>=1.24.0`. Ältere Builds verweigern dann die Installation, statt später zu scheitern.
 
-`contributes.panel` beschreibt den Eintrag in der Leiste. `id` ist kebab-case und muss unter den installierten Erweiterungen eindeutig sein. `icon` ist ein Remixicon-Name (aus `RiWindowLine` wird `window`) oder eine SVG-Datei in deinem Ordner, etwa `icon.svg`. `entry` ist die HTML-Datei in deinem Ordner; lass es weg, wenn deine Erweiterung nur `tools` deklariert (siehe [Deine Tools im Chat](#deine-tools-im-chat)).
+`id`, `name` und `icon` benennen die Erweiterung. `id` ist kebab-case und muss unter den installierten Erweiterungen eindeutig sein. `icon` ist ein Remixicon-Name (aus `RiWindowLine` wird `window`) oder eine SVG-Datei in deinem Ordner, etwa `icon.svg`. `contributes.panel` ist das Panel der Erweiterung in der Leiste: Sein `entry` ist die HTML-Datei in deinem Ordner. Eine Erweiterung ohne Panel in der Leiste lässt `panel` weg. Ältere Pakete behalten `id`, `name` und `icon` in `panel`, und das funktioniert weiterhin.
 
 `contributes.attach` ist optional. Es nimmt deine Erweiterung ins +-Menü neben dem Chatfeld auf, damit der Nutzer eine Aufgabe auswählen und an eine Session anhängen kann.
 
@@ -89,7 +87,7 @@ Du kannst auch eine lokale `.zip`-Datei oder einen https-Link zu einem Git-Repos
 - `{ "mode": "dialog", "entry": "panel/attach.html" }` öffnet eine separate Seite von dir im Fenster, damit die Auswahl keinen Code mit dem Panel in der Leiste teilen muss
 - lässt du es weg, bleibt die Erweiterung aus diesem Menü draußen
 
-`ctx.surface` ist `panel`, `dialog`, `page` oder `status`. Beim Klick auf einen angehängten Eintrag enthält `ctx.item` dessen Daten, sonst `null`.
+`ctx.surface` ist `panel`, `dialog`, `page`, `status` oder `block`. Beim Klick auf einen angehängten Eintrag enthält `ctx.item` dessen Daten, sonst `null`.
 
 `contributes.page: true` bietet die Panel-Seite im Menü Erweiterungsseiten über der Sitzungsliste an. `{ "entry": "panel/page.html", "title": "Board" }` verwendet eigene HTML-Dateien und einen optionalen Titel. `panel.entry` bleibt erforderlich; Sandbox und Berechtigungen bleiben gleich. Nur der Nutzer öffnet die Seite. Neuladen, Pause, Entfernen oder Serverwechsel schließen sie.
 
@@ -97,7 +95,7 @@ Für Boards gibt es `host.storage` sowie Projekt-, Worktree- und Sitzungslisten 
 
 `contributes.integration` ist optional. Es fügt unter Einstellungen → Integrationen eine Karte hinzu, auf der der Nutzer ein Konto verbindet. Siehe [Konten und Netzwerk](#konten-und-netzwerk).
 
-`contributes.service` ist optional. Es deklariert einen lokalen Dienst (einen Prozess, den OpenChamber neben der Erweiterung startet) für Dinge, an die eine Webseite nicht herankommt, etwa einen Docker-Socket. Dieser Prozess läuft mit dem vollen Zugriff des Nutzers und ohne Sandbox, deshalb warnt der Bestätigungsdialog davor; deklariere einen nur, wenn die Seite die Aufgabe nicht selbst erledigen kann. Siehe die Paketdatei `GUEST_SERVICES.md`. Ein Service mit `provides: ["browser"]` kann außerdem den Browser des Agenten vertreten: Er beantwortet die `browser.*`-Aktionen auf dem Server, sodass Agenten ohne geöffnete Desktop-App browsen, und der Nutzer wählt ihn unter Einstellungen → OpenChamber-Werkzeuge. Ein solcher Service braucht kein Panel.
+`contributes.service` ist optional. Es deklariert einen lokalen Dienst (einen Prozess, den OpenChamber neben der Erweiterung startet) für Dinge, an die eine Webseite nicht herankommt, etwa einen Docker-Socket. Dieser Prozess läuft mit dem vollen Zugriff des Nutzers und ohne Sandbox, deshalb warnt der Bestätigungsdialog davor; deklariere einen nur, wenn die Seite die Aufgabe nicht selbst erledigen kann. Siehe die Paketdatei `GUEST_SERVICES.md`. Ein Service mit `provides: ["browser"]` kann außerdem den Browser des Agenten vertreten: Er beantwortet die `browser.*`-Aktionen auf dem Server, sodass Agenten ohne geöffnete Desktop-App browsen, und der Nutzer wählt ihn unter Einstellungen → OpenChamber-Werkzeuge. Ein solcher Service braucht kein Panel. Ein Service kann außerdem erfahren, was in den Sitzungen des Nutzers passiert: Deklariere `contributes.sessionEvents` daneben, und OpenChamber schickt dem Service jeden Zug, der endet oder fehlschlägt, und jede Bitte um Erlaubnis und jede Frage des Agenten, aus jedem Projekt und ohne geöffnetes Fenster. Siehe [Sitzungsereignisse](/sdk/host/#sitzungsereignisse). Und ein Service mit `provides: ["notifications"]` stellt die Benachrichtigungen des Nutzers neben Desktop und Telefon zu, an Slack, Matrix oder einen eigenen Server; der Nutzer verbindet das Konto unter Einstellungen → Integrationen, und das Token bleibt in OpenChamber. Siehe [Benachrichtigungskanäle](/sdk/host/#benachrichtigungskanäle). Ein Dienst mit `provides: ["tracker"]` ist ein Tracker für Arbeitselemente neben Linear, mit seiner Kontokarte unter Erweiterungskonten; siehe [Tracker](/sdk/host/#tracker). Und ein Dienst mit `provides: ["quota"]` meldet die Nutzung neben den eingebauten Anbietern und liest dafür die Zugangsdaten, die OpenCode für die im Manifest aufgezählten Anbieter hält; siehe [Nutzungsanbieter](/sdk/host/#nutzungsanbieter).
 
 ## Berechtigungen
 
@@ -110,9 +108,28 @@ Ein Panel zeichnen und die aktuelle Session lesen braucht keine Berechtigung. Al
 | `files` | Dateien innerhalb des offenen Projekts lesen und schreiben (`readFile`, `writeFile`, `listDir`, `stat` mit einem relativen Pfad) |
 | `model` | einmalige Textgenerierung mit dem Small Model des Nutzers (`generate`), außerhalb jeder Session |
 
-Fünf weitere kommen automatisch dazu: `network`, wenn du eine `integration` deklarierst, `service`, wenn du einen `service` deklarierst, `filesystem`, wenn du `filesystem`-Muster deklarierst, `origins`, wenn du `origins` deklarierst, und `conversation`, wenn eine Session-Aktion die Nachrichten anfordert (siehe [Aktionen, Befehle und das Badge](#aktionen-befehle-und-das-badge)).
+Elf weitere kommen automatisch dazu: `network`, wenn du eine `integration` deklarierst, `service`, wenn du einen `service` deklarierst, `filesystem`, wenn du `filesystem`-Muster deklarierst, `origins`, wenn du `origins` deklarierst, `conversation`, wenn eine Session-Aktion die Nachrichten anfordert (siehe [Aktionen, Befehle und das Badge](#aktionen-befehle-und-das-badge)), `transcript`, wenn `sessionEvents` oder `sessionControl` `content` anfordert (siehe [Sitzungsereignisse](/sdk/host/#sitzungsereignisse)), `sessionControl`, wenn dein Dienst auf Sitzungen einwirkt (siehe [OpenChamber aufrufen](/sdk/host/#openchamber-aus-deinem-dienst-aufrufen)), `sessionAnswers`, wenn er im Namen des Nutzers die Berechtigungsanfragen und Formulare des Agenten beantwortet (`sessionControl: { answers: true }`), `instructions`, wenn er ergänzt, was Agenten lesen, und `skills`, wenn du `contributes.skills` deklarierst, einen Paketordner mit Skills, die jeden Agenten erreichen, solange die Erweiterung aktiv ist, und `opencodePlugin`, wenn du `contributes.opencodePlugin` deklarierst (siehe unten).
 
 Der Nutzer sieht die vollständige Liste einmal, bei der Installation der Erweiterung, und bestätigt sie oder entfernt die Erweiterung. Fordert eine neue Version mehr an, erscheint der Dialog erneut. Ein Aufruf, der eine nicht bestätigte Berechtigung braucht, schlägt mit `NOT_GRANTED` fehl.
+
+## Ein OpenCode-Plugin in deinem Paket
+
+Eine Erweiterung kann ein OpenCode-Plugin mitliefern, sodass die Leute eine Sache installieren statt zwei. Deklariere `"opencodePlugin": "plugin"`, einen Ordner im Paket mit `index.js` oder `server.js` auf oberster Ebene. OpenCode liest `main` nicht, für einen Einstieg an anderer Stelle setze also `name` und `exports` in der `package.json` des Ordners. Der Einstieg exportiert per Default `{ id, setup }`, die Form, die OpenCode lädt; er importiert nichts, weil OpenCode ihn mit einem bloßen `import()` aus deinem Ordner lädt, wo nichts installiert ist. Das `input` eines Tools ist reines JSON Schema, und sein `execute` antwortet mit `{ content }`.
+
+```json
+{
+  "contributes": {
+    "panel": { "id": "teapot-tools", "name": "Teapot Tools", "icon": "cup" },
+    "opencodePlugin": "plugin"
+  }
+}
+```
+
+Der Freigabedialog bekommt eine weitere Zeile, **Ein Plugin zu OpenCode hinzufügen**, die klar sagt, dass Plugin-Code innerhalb von OpenCode mit dem vollen Zugriff des Nutzers läuft. Nach der Freigabe trägt OpenChamber deinen Ordner in die OpenCode-Konfiguration ein, die es verwaltet, dieselbe Datei wie bei `contributes.skills`; das von OpenChamber gestartete OpenCode beobachtet diese Datei und lädt das Plugin innerhalb weniger Sekunden. Deaktivieren oder Entfernen der Erweiterung nimmt es auf demselben Weg wieder heraus. In die eigene `opencode.json` des Nutzers wird nichts geschrieben: Diese Datei gehört dem Nutzer, und ein Plugin darin würde deine Erweiterung überleben und in jedem OpenCode auf dem Rechner laufen.
+
+Wo diese Datei OpenCode nicht erreicht, sagt die Seite der Erweiterung das und bietet **Zur globalen Konfiguration hinzufügen** an, was deinen Ordner als Eintrag, der dem Nutzer gehört, in die globale OpenCode-Konfiguration schreibt. Das ist der Fall, wenn OpenChamber das OpenCode, mit dem es spricht, nicht gestartet hat, oder wenn die Umgebung des Servers ein eigenes `OPENCODE_CONFIG` setzt (das Plugin lädt dann beim nächsten Start von OpenCode). Ein OpenCode auf einem anderen Rechner kann keinen Ordner von diesem laden; die Seite sagt das und bietet nichts an. Ein Plugin, das nicht lädt, meldet OpenCode unter Einstellungen → Plugins, sobald es dort einen Eintrag hat; deine Erweiterung funktioniert in jedem Fall weiter. Die Installation lehnt ein Paket ab, dessen Plugin-Ordner fehlt oder dessen `package.json` keine Einstiegsdatei nennt.
+
+VS Code und die Mobile-Apps laden keine Erweiterungen, also erreicht sie kein Plugin. Eine Sitzung in einem isolierten Space läuft mit einem eigenen OpenCode, das die Konfiguration des Hosts nie liest. Der Enterprise-Modus behandelt das Plugin wie einen lokalen Dienst: Es installiert sich nur aus einem Repository, das der Administrator freigegeben hat. Das SDK hat ein lauffähiges Beispiel, `examples/opencode-plugin`.
 
 ## Text erzeugen
 
@@ -156,7 +173,7 @@ Was jedes `scheme` sendet:
 | `"bearer"` | `Authorization: Bearer <token>` | die API dokumentiert einen Bearer- oder Personal-Access-Token |
 | `"basic"` | `Authorization: Basic base64(username:token)` | die API dokumentiert HTTP Basic Auth mit Benutzername (oft eine E-Mail) und API-Token; die Karte fragt nach beidem, und `usernameLabel` beschriftet das erste Feld |
 
-`settings` fügt der Karte einfache Textfelder hinzu. Ihre Werte kommen in `ctx.settings` an.
+`settings` fügt der Karte einfache Textfelder hinzu. Ihre Werte kommen in `ctx.settings` an. Ein Feld mit `"secret": true` wird auf der Karte maskiert und erreicht nie eine Seite; dein Dienst liest es mit `readSettings()`.
 
 ## Dateien
 
@@ -264,6 +281,8 @@ Neben der Leiste und dem +-Menü kann eine Erweiterung an drei weiteren Stellen 
 ]
 ```
 
+`where` nimmt auch `selection` (markierter Text in einer Nachricht), `file` (eine Zeile in Files) und `diff` (markierte Zeilen einer Datei oder eines Diffs). Ihre Einträge tragen ein gleichnamiges `kind`: `selection` enthält den Text, `file` den Pfad, `diff` den Pfad und den Zeilenbereich. Bei einer Auswahl legt `display` fest, wie die Aktion erscheint: `label` (der Standard), `icon` mit dem Label als Tooltip oder `both`.
+
 Eine Nachrichtenaktion öffnet deine Erweiterung mit einem `ctx.item` der Art `kind: "message"`: Session-ID und -Titel, Projektordner, Nachrichten-ID, ihre Rolle und ihr Text. Eine Session-Aktion öffnet sie mit `kind: "session"` sowie Session-ID, Titel und Ordner. Füge `"payload": ["messages"]` hinzu, und der Eintrag trägt außerdem das ganze Gespräch, älteste Nachricht zuerst, derselbe Text, den der Markdown-Export erzeugt. Dafür braucht es die Berechtigung `conversation`, die der Nutzer als eigene Zeile im Freigabedialog sieht. `item.action` sagt dir, welcher Eintrag angeklickt wurde.
 
 **Slash-Befehle, die anhängen.** Deklariere einen Befehl und behandle ihn in der Seite:
@@ -281,7 +300,7 @@ host.onResolve(async ({ command, args }) => {
 
 Wenn der Nutzer `/task ABC-12` ins Chatfeld tippt, bittet OpenChamber deine Erweiterung, das aufzulösen, und hängt das Ergebnis als Chip an, ohne etwas zu öffnen. Gib `null` zurück für "nichts gefunden". Ist dein Panel geschlossen, lädt OpenChamber es für den Aufruf im Hintergrund. Ein Name, den OpenChamber oder OpenCode schon verwendet, wird ignoriert.
 
-**Badge auf dem Symbol in der Leiste.** `host.setBadge(3)` zeigt eine Zahl auf deinem Symbol, zum Beispiel offene Aufgaben; `host.setBadge(null)` entfernt sie. Das Öffnen des Panels entfernt sie ebenfalls.
+**Badge auf dem Symbol in der Leiste.** `host.setBadge(3)` setzt einen Punkt auf dein Symbol und zeigt die Zahl im Tooltip, zum Beispiel offene Aufgaben; `host.setBadge(null)` entfernt sie. Das Öffnen des Panels entfernt sie ebenfalls.
 
 ## Deine Tools im Chat
 

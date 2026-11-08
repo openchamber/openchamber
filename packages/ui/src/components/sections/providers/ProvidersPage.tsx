@@ -4,7 +4,7 @@ import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLay
 import { SettingsSection } from '@/components/sections/shared/SettingsSection';
 import { SettingsInfoHint } from '@/components/sections/shared/SettingsInfoHint';
 import { ProviderLogo } from '@/components/ui/ProviderLogo';
-import { selectProvidersForDirectory, useConfigStore } from '@/stores/useConfigStore';
+import { selectSettingsOnlyProvidersForDirectory, selectProvidersForDirectory, useConfigStore } from '@/stores/useConfigStore';
 import { useSettingsDirectory } from '@/hooks/useSettingsDirectory';
 import { useUIStore } from '@/stores/useUIStore';
 import { Button } from '@/components/ui/button';
@@ -20,12 +20,13 @@ import { formatCompactNumber } from '@/lib/numberFormat';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { updateDesktopSettings } from '@/lib/persistence';
 import { opencodeClient } from '@/lib/opencode/client';
-import { loadIntegrationCatalog, peekIntegrationCatalog, subscribeCredentialChanges, type IntegrationCatalog } from '@/lib/opencode/integration-catalog';
+import { getIntegrationClient, loadIntegrationCatalog, peekIntegrationCatalog, subscribeCredentialChanges, type IntegrationCatalog } from '@/lib/opencode/integration-catalog';
 import { fetchDisabledProviders, setProviderDisabled as setProviderDisabledRequest } from '@/lib/disabledProviders';
 import { listConnectableProviders } from './connectableProviders';
 import { ProviderConnectPicker } from './ProviderConnectPicker';
 import {
   providerHasCredentials,
+  providerHoldsStoredLogin,
   shouldShowApiKeyAuth,
   shouldShowModelsSection,
   usesMachineCredentials,
@@ -79,7 +80,7 @@ const formatTokens = (value?: number | null) => {
 // OpenCode owns the credential and announces the catalog change itself
 // (`credential.updated` → catalog refresh); nothing to reload after it.
 const connectIntegrationKey = async (request: IntegrationKeyRequest): Promise<void> => {
-  await opencodeClient.getSdkClient().integration.connect.key(request);
+  await getIntegrationClient().integration.connect.key(request);
 };
 
 const ADD_PROVIDER_ID = '__add_provider__';
@@ -103,7 +104,8 @@ export const ProvidersPage: React.FC = () => {
   // Settings browses whichever project its own selector points at; the app
   // stays where it is.
   const settingsDirectory = useSettingsDirectory();
-  const providers = useConfigStore((state) => selectProvidersForDirectory(state, settingsDirectory));
+  const chatProviders = useConfigStore((state) => selectProvidersForDirectory(state, settingsDirectory));
+  const settingsOnlyProviders = useConfigStore((state) => selectSettingsOnlyProvidersForDirectory(state, settingsDirectory));
   // Which provider the page shows is its own state. The config store's
   // selectedProviderId belongs to the chat's model selection; sharing it made
   // Settings open on the chat's provider and marked the chat selection manual.
@@ -151,6 +153,20 @@ export const ProvidersPage: React.FC = () => {
   const [catalog, setCatalog] = React.useState<IntegrationCatalog | null>(() => peekIntegrationCatalog());
   const [integrationsLoadFailed, setIntegrationsLoadFailed] = React.useState(false);
   const integrations = catalog?.integrations ?? null;
+  // A provider with no model at all gets a card only while it holds a stored
+  // login: without one there is nothing on its page to act on. Joined so a
+  // re-read of the integrations that changes no card keeps the same array.
+  const storedLoginIds = settingsOnlyProviders
+    .filter((provider) => providerHoldsStoredLogin(integrations, provider))
+    .map((provider) => provider.id)
+    .join('\n');
+  const providers = React.useMemo(() => {
+    const loginIds = new Set(storedLoginIds.split('\n'));
+    const manageable = settingsOnlyProviders.filter(
+      (provider) => provider.models.length > 0 || loginIds.has(provider.id),
+    );
+    return manageable.length > 0 ? [...chatProviders, ...manageable] : chatProviders;
+  }, [chatProviders, settingsOnlyProviders, storedLoginIds]);
   // Null until read, and where the runtime has no OpenChamber server (VS Code).
   const [disabledProviders, setDisabledProviders] = React.useState<string[] | null>(null);
   React.useEffect(() => {
@@ -404,7 +420,7 @@ export const ProvidersPage: React.FC = () => {
       }
       if (keyRequest) {
         try {
-          await storeKeyAfterConfigWrite(() => opencodeClient.getSdkClient().integration.connect.key(keyRequest));
+          await storeKeyAfterConfigWrite(() => getIntegrationClient().integration.connect.key(keyRequest));
         } catch (error) {
           setCustomAuthFailureHint(t('settings.providers.page.custom.authFailure.keyAfterConfig'));
           throw error;
@@ -668,6 +684,8 @@ export const ProvidersPage: React.FC = () => {
   }
 
   const providerModels = Array.isArray(selectedProvider.models) ? selectedProvider.models : [];
+  // Hiding a model only takes it out of the chat pickers, which never list image models.
+  const canHideModels = !settingsOnlyProviders.includes(selectedProvider);
   const selectedIntegration = findIntegrationForProvider(integrations ?? [], selectedProvider.id);
   const signInMethods = getSignInMethods(
     findIntegrationForProvider(integrations ?? [], getSignInIntegrationId(selectedProvider.id)),
@@ -733,6 +751,12 @@ export const ProvidersPage: React.FC = () => {
       {configSources.length > 0
         ? <> · {t('settings.providers.page.configuredIn', { sources: configSources.join(', ') })}</>
         : null}
+    </span>
+  );
+
+  const modelCountAccessory = (
+    <span className="typography-micro text-muted-foreground font-normal">
+      ({providerModels.length})
     </span>
   );
 
@@ -870,15 +894,21 @@ export const ProvidersPage: React.FC = () => {
         ) : null}
       </SettingsSection>
 
+      {providerModels.length === 0 ? (
+        <SettingsSection
+          title={t('settings.providers.page.models.title')}
+          titleAccessory={modelCountAccessory}
+          settingsItem="providers.models"
+        >
+          <p className="typography-meta text-muted-foreground">{t('settings.providers.page.models.none')}</p>
+        </SettingsSection>
+      ) : null}
+
       {showModelsSection ? (
       <SettingsSection
         title={t('settings.providers.page.models.title')}
-        titleAccessory={
-          <span className="typography-micro text-muted-foreground font-normal">
-            ({providerModels.length})
-          </span>
-        }
-        headerAction={(
+        titleAccessory={modelCountAccessory}
+        headerAction={canHideModels ? (
           <div className="flex items-center gap-1">
             <Button
               variant="outline"
@@ -902,7 +932,7 @@ export const ProvidersPage: React.FC = () => {
               {t('settings.providers.page.actions.showAll')}
             </Button>
           </div>
-        )}
+        ) : undefined}
         settingsItem="providers.models"
       >
             <div className="relative mb-2">
@@ -923,7 +953,7 @@ export const ProvidersPage: React.FC = () => {
                   const modelId = typeof model?.id === 'string' ? model.id : '';
                   const modelName = typeof model?.name === 'string' ? model.name : modelId;
                   const metadata = modelId ? getModelMetadata(selectedProvider.id, modelId) as ModelMetadata | undefined : undefined;
-                  const isHidden = hiddenModels.some(
+                  const isHidden = canHideModels && hiddenModels.some(
                     (item) => item.providerID === selectedProvider.id && item.modelID === modelId
                   );
 
@@ -990,6 +1020,7 @@ export const ProvidersPage: React.FC = () => {
                         )}
                           </>
                         )}
+                        {canHideModels ? (
                         <button
                           type="button"
                           onClick={() => toggleHiddenModel(selectedProvider.id, modelId)}
@@ -999,6 +1030,7 @@ export const ProvidersPage: React.FC = () => {
                         >
                           {isHidden ? <Icon name="eye-off" className="h-3.5 w-3.5" /> : <Icon name="eye" className="h-3.5 w-3.5" />}
                         </button>
+                        ) : null}
                       </div>
                       </div>
                     </div>

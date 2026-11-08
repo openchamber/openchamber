@@ -107,6 +107,7 @@ export const InstallSkillDialog: React.FC<InstallSkillDialogProps> = ({ open, on
     }
     return projects[0]?.id ?? null;
   }, [activeProjectId, projects, targetProjectId]);
+  const selectedTargetProject = projects.find((p) => p.id === resolvedTargetProjectId);
 
   const directoryOverride = React.useMemo(() => {
     if (scope !== 'project') {
@@ -247,7 +248,9 @@ export const InstallSkillDialog: React.FC<InstallSkillDialogProps> = ({ open, on
                     disabled={projects.length === 1}
                   >
                     <SelectTrigger className="w-fit">
-                      <SelectValue placeholder={t('settings.skills.catalog.installSkill.field.chooseProjectPlaceholder')} />
+                      <SelectValue placeholder={t('settings.skills.catalog.installSkill.field.chooseProjectPlaceholder')}>
+                        {selectedTargetProject ? (selectedTargetProject.label || selectedTargetProject.path) : undefined}
+                      </SelectValue>
                     </SelectTrigger>
                     <SelectContent align="start" portalToBody>
                       {projects.map((p) => (

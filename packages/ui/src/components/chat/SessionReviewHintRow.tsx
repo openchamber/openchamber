@@ -1,6 +1,7 @@
 import React from 'react';
 import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/lib/i18n';
 import { isReviewSuggested } from '@/lib/sessionWorkMetadata';
 import { useSession, useSessionStatus } from '@/sync/sync-context';
@@ -38,29 +39,39 @@ export const SessionReviewHintRow: React.FC<SessionReviewHintRowProps> = React.m
   };
 
   return (
-    <div className="flex oc-composer-row items-center gap-2 border-b border-border/60 ps-3 pe-1.5">
+    <div className="flex oc-composer-row items-center gap-2 border-b border-edge ps-3 pe-1.5">
       <Icon name="file-edit" className="size-3.5 shrink-0 text-muted-foreground" />
       <span className="min-w-0 flex-1 truncate text-sm text-muted-foreground">{t('chat.work.reviewHint.text')}</span>
-      <Button
-        type="button"
-        variant="ghost"
-        size="sm"
-        onClick={onAIReview}
-        onMouseDown={(event) => event.preventDefault()}
-        className="shrink-0 text-foreground/80 hover:bg-transparent hover:text-foreground"
-      >
-        {t('chat.work.reviewHint.aiReview')}
-      </Button>
-      <Button
-        type="button"
-        variant="ghost"
-        size="sm"
-        onClick={handleWalkthrough}
-        onMouseDown={(event) => event.preventDefault()}
-        className="shrink-0 text-status-info/80 hover:bg-transparent hover:text-status-info"
-      >
-        {t('walkthrough.action.open')}
-      </Button>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={onAIReview}
+            onMouseDown={(event) => event.preventDefault()}
+            className="shrink-0 text-foreground/80 hover:bg-transparent hover:text-foreground"
+          >
+            {t('chat.work.reviewHint.aiReview')}
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent side="top" sideOffset={6}>{t('contextTooltips.chat.aiReview')}</TooltipContent>
+      </Tooltip>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={handleWalkthrough}
+            onMouseDown={(event) => event.preventDefault()}
+            className="shrink-0 text-status-info/80 hover:bg-transparent hover:text-status-info"
+          >
+            {t('walkthrough.action.open')}
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent side="top" sideOffset={6}>{t('contextTooltips.chat.walkthrough')}</TooltipContent>
+      </Tooltip>
     </div>
   );
 });

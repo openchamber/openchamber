@@ -4,6 +4,7 @@ import { SortableContext, arrayMove, sortableKeyboardCoordinates, useSortable, v
 import { CSS } from '@dnd-kit/utilities';
 import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { SettingsCheckboxRow } from './SettingsSection';
@@ -14,6 +15,8 @@ interface SortableVisibilityItem {
   visible: boolean;
   /** Its checkbox cannot change, such as the last item that must stay shown. */
   locked?: boolean;
+  /** Opens a new group: a divider sits above it. */
+  groupStart?: boolean;
 }
 
 const SortableVisibilityRow: React.FC<{
@@ -29,17 +32,24 @@ const SortableVisibilityRow: React.FC<{
       style={{ transform: CSS.Translate.toString(transform), transition }}
       className={cn('relative flex items-center gap-2', isDragging && 'z-10 opacity-60')}
     >
-      <Button
-        ref={setActivatorNodeRef}
-        variant="ghost"
-        size="icon"
-        {...attributes}
-        {...listeners}
-        aria-label={t('contextRail.configure.reorder', { label: item.label })}
-        className="shrink-0 touch-none select-none cursor-grab text-muted-foreground hover:bg-transparent active:cursor-grabbing"
-      >
-        <Icon name="draggable" className="size-4" />
-      </Button>
+      {item.groupStart ? <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 -top-px h-px bg-edge-muted" /> : null}
+      {/* Closed during a drag: an open tooltip takes Escape, which cancels a keyboard drag. */}
+      <Tooltip open={isDragging ? false : undefined}>
+        <TooltipTrigger asChild>
+          <Button
+            ref={setActivatorNodeRef}
+            variant="ghost"
+            size="icon"
+            {...attributes}
+            {...listeners}
+            aria-label={t('contextRail.configure.reorder', { label: item.label })}
+            className="shrink-0 touch-none select-none cursor-grab text-muted-foreground hover:bg-transparent active:cursor-grabbing"
+          >
+            <Icon name="draggable" className="size-4" />
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>{t('contextRail.configure.reorder', { label: item.label })}</TooltipContent>
+      </Tooltip>
       <SettingsCheckboxRow
         settingsItem={settingsItem}
         checked={item.visible}

@@ -12,6 +12,8 @@ Object.assign(globalThis, {
   document: browser.document,
   navigator: browser.navigator,
   HTMLElement: browser.HTMLElement,
+  requestAnimationFrame: browser.requestAnimationFrame.bind(browser),
+  cancelAnimationFrame: browser.cancelAnimationFrame.bind(browser),
   IS_REACT_ACT_ENVIRONMENT: true,
 });
 

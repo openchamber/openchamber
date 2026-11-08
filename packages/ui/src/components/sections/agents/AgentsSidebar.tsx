@@ -427,7 +427,7 @@ export const AgentsSidebar: React.FC<AgentsSidebarProps> = ({ onItemSelect }) =>
                 <div className="min-w-0 flex-1">
                   <div className="typography-ui-label truncate text-muted-foreground">{agent.name}</div>
                   {agent.description ? (
-                    <div className="typography-micro truncate leading-tight text-muted-foreground/60">{agent.description}</div>
+                    <div className="typography-micro truncate leading-tight text-muted-foreground">{agent.description}</div>
                   ) : null}
                 </div>
                 <Button
@@ -586,14 +586,14 @@ const AgentListItem: React.FC<AgentListItemProps> = ({
             </span>
             {getAgentModeIcon(agent.mode)}
             {(extAgent.scope || isAgentBuiltIn(agent)) && (
-              <span className="typography-micro text-muted-foreground bg-muted px-1 rounded flex-shrink-0 leading-none pb-px border border-border/50">
+              <span className="typography-micro text-muted-foreground bg-muted px-1 rounded flex-shrink-0 leading-none pb-px border border-edge">
                 {isAgentBuiltIn(agent) ? t('settings.agents.sidebar.badge.system') : extAgent.scope}
               </span>
             )}
           </div>
 
           {agent.description && (
-            <div className="typography-micro text-muted-foreground/60 truncate leading-tight">
+            <div className="typography-micro text-muted-foreground truncate leading-tight">
               {agent.description}
             </div>
           )}
@@ -605,7 +605,7 @@ const AgentListItem: React.FC<AgentListItemProps> = ({
               variant="ghost"
               className="h-6 w-6 px-0 flex-shrink-0 -me-1 opacity-100 transition-opacity md:opacity-0 md:group-hover:opacity-100"
             >
-              <Icon name="more-2" className="h-3.5 w-3.5" />
+              <Icon name="more" className="h-3.5 w-3.5" />
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-fit min-w-20">

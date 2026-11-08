@@ -10,16 +10,21 @@
  *
  * Writes are debounced while typing but forced at every edge where the page
  * may stop running — tab hidden, frozen, unloading, unmounting — because a
- * pending timer is not a saved draft.
+ * pending timer is not a saved draft. The one identity that is never written
+ * is a `/btw` fork still being created: it is a placeholder, not a session.
  */
 
 import React from 'react';
 import { useInputStore } from '@/sync/input-store';
+import { isBtwPendingComposerKey } from '@/lib/btw';
+import { isMentionEntryInText } from '../language/mentions';
+import { useLinkedReferenceDrafts } from '../linkedReferenceDrafts';
 
 import {
-    clearChatDraft,
     getChatDraftIdentityKey,
+    isNewSessionDraftIdentity,
     readChatDraft,
+    readChatDraftClaimingFolderDraft,
     subscribeChatDraftDeletion,
     writeChatDraft,
     type ChatDraftIdentity,
@@ -58,8 +63,6 @@ export interface ComposerDraftOptions {
      * receiving app-wide attachments meanwhile.
      */
     selectAttachmentsOnIdentityChange?: boolean;
-    /** User setting: when off, drafts stay in memory without durable writes. */
-    persistEnabled: boolean;
     /** The draft restored on mount, if any. */
     initialDraft: { text: string; identity: ChatDraftIdentity | null };
     /**
@@ -96,7 +99,6 @@ export function useComposerDraft(options: ComposerDraftOptions): ComposerDraftCo
         confirmedMentionsRef,
         identity,
         selectAttachmentsOnIdentityChange = true,
-        persistEnabled,
         initialDraft,
         newSessionDraftId = null,
         onIdentityChange,
@@ -110,7 +112,7 @@ export function useComposerDraft(options: ComposerDraftOptions): ComposerDraftCo
     const draftMemoryRef = React.useRef(new Map<string, ChatDraftSnapshot>());
     const skipOutgoingDraftRef = React.useRef(false);
     const initialKey = initialDraft.identity ? getChatDraftIdentityKey(initialDraft.identity) : null;
-    if (persistEnabled && initialKey && !draftMemoryRef.current.has(initialKey) && initialDraft.text) {
+    if (initialKey && !draftMemoryRef.current.has(initialKey) && initialDraft.text) {
         draftMemoryRef.current.set(initialKey, {
             text: initialDraft.text,
             confirmedMentions: new Set(confirmedMentionsRef.current),
@@ -134,29 +136,29 @@ export function useComposerDraft(options: ComposerDraftOptions): ComposerDraftCo
         currentIdentityRef.current = identity;
     }, [identity]);
 
-    React.useEffect(() => {
-        // Persistence off keeps in-memory drafts, but must not retain old disk copies.
-        if (!persistEnabled && identity) clearChatDraft(identity);
-    }, [identity, persistEnabled]);
-
     const persistNow = React.useCallback((target: ChatDraftIdentity | null, draft: string) => {
-        if (!persistEnabled || !target) return;
+        if (!target) return;
         const key = getChatDraftIdentityKey(target);
 
         // Only keep confirmed mentions the draft still contains: a mention the
         // user deleted must not resurrect as a file reference on restore.
         const activeMentions = new Set<string>();
         for (const mention of confirmedMentionsRef.current) {
-            if (draft.includes(`@${mention}`)) activeMentions.add(mention);
+            if (isMentionEntryInText(mention, draft)) activeMentions.add(mention);
         }
         confirmedMentionsRef.current = activeMentions;
+
+        if (isBtwPendingComposerKey(target.sessionId)) {
+            draftMemoryRef.current.set(key, { text: draft, confirmedMentions: activeMentions });
+            return;
+        }
 
         const signature = draftSignature(draft, activeMentions);
         if (lastPersistedRef.current.get(key) === signature) return;
 
         writeChatDraft(target, draft, activeMentions);
         lastPersistedRef.current.set(key, signature);
-    }, [confirmedMentionsRef, persistEnabled]);
+    }, [confirmedMentionsRef]);
 
     const clearPending = React.useCallback(() => {
         if (!persistTimerRef.current) return;
@@ -164,24 +166,16 @@ export function useComposerDraft(options: ComposerDraftOptions): ComposerDraftCo
         persistTimerRef.current = null;
     }, []);
 
-    // Mount: a restored draft is selected so typing replaces it; with the
-    // setting off it is discarded instead of silently kept.
+    // Mount: a restored draft is selected so typing replaces it.
     const handledInitialRef = React.useRef(false);
     React.useEffect(() => {
         if (handledInitialRef.current) return;
         handledInitialRef.current = true;
         if (!initialDraft.text) return;
-
-        if (!persistEnabled) {
-            messageRef.current = '';
-            confirmedMentionsRef.current = new Set();
-            setMessage('');
-            return;
-        }
         requestAnimationFrame(() => callbacksRef.current.onDraftRestored?.('saved'));
         // Runs once; the initial draft is captured at mount by design.
         // oxlint-disable-next-line react-hooks/exhaustive-deps
-    }, [persistEnabled]);
+    }, []);
 
     // Identity switch: save the outgoing draft, load the incoming one.
     const previousIdentityRef = React.useRef<ChatDraftIdentity | null>(initialDraft.identity);
@@ -214,22 +208,27 @@ export function useComposerDraft(options: ComposerDraftOptions): ComposerDraftCo
             && previous !== null
             && identity !== null
             && previous.runtimeKey === identity.runtimeKey
-            && (previous.sessionId === null
-                ? sameNewSessionDraft && identity.sessionId === null
+            && (isNewSessionDraftIdentity(previous)
+                ? sameNewSessionDraft && isNewSessionDraftIdentity(identity)
                 : previous.sessionId === identity.sessionId);
         const carriesText = sameDraftMoved && outgoing.text.length > 0;
-        if (sameDraftMoved) useInputStore.getState().moveAttachedFiles(previous, identity);
+        if (sameDraftMoved) {
+            useInputStore.getState().moveAttachedFiles(previous, identity);
+            useLinkedReferenceDrafts.getState().move(previous, identity);
+        }
         if (carriesText && previousKey) {
             draftMemoryRef.current.set(previousKey, { text: '', confirmedMentions: new Set() });
-            if (persistEnabled) persistNow(previous, '');
+            persistNow(previous, '');
         } else if (!skipOutgoingDraftRef.current && previousKey) {
             draftMemoryRef.current.set(previousKey, outgoing);
-            if (persistEnabled) persistNow(previous, outgoing.text);
+            persistNow(previous, outgoing.text);
         }
         skipOutgoingDraftRef.current = false;
 
         const saved = (currentKey && draftMemoryRef.current.get(currentKey))
-            || (persistEnabled ? readChatDraft(identity) : { text: '', confirmedMentions: new Set<string>() });
+            || (identity && isBtwPendingComposerKey(identity.sessionId)
+                ? { text: '', confirmedMentions: new Set<string>() }
+                : readChatDraftClaimingFolderDraft(identity));
         // Mentions name files of the old directory, so only the text travels.
         // A draft already saved for the new directory is kept above it.
         const restored = carriesText
@@ -244,11 +243,11 @@ export function useComposerDraft(options: ComposerDraftOptions): ComposerDraftCo
         if (carriesText) {
             // The text is the one the user is typing, so it is neither
             // selected as a restored draft nor left to the skipped debounce.
-            if (persistEnabled) persistNow(identity, restored.text);
+            persistNow(identity, restored.text);
         } else if (restored.text) {
             requestAnimationFrame(() => callbacksRef.current.onDraftRestored?.('saved'));
         }
-    }, [clearPending, confirmedMentionsRef, identity, messageRef, newSessionDraftId, persistEnabled, persistNow, setMessage]);
+    }, [clearPending, confirmedMentionsRef, identity, messageRef, newSessionDraftId, persistNow, setMessage]);
 
     // The chat column can still show the source after navigation selects a fork.
     // Apply its replay only after the destination's draft has been loaded above.
@@ -264,7 +263,7 @@ export function useComposerDraft(options: ComposerDraftOptions): ComposerDraftCo
         confirmedMentionsRef.current = new Set();
         setMessage(pending.text);
         // Equal source/replay text need not trigger another render to persist.
-        if (persistEnabled) persistNow(pending.target, pending.text);
+        persistNow(pending.target, pending.text);
         input.clearAttachedFiles();
         for (const file of pending.files) input.addRestoredAttachment(file);
         requestAnimationFrame(() => {
@@ -273,7 +272,7 @@ export function useComposerDraft(options: ComposerDraftOptions): ComposerDraftCo
                 callbacksRef.current.onDraftRestored?.('fork');
             }
         });
-    }, [clearPending, confirmedMentionsRef, identity, messageRef, pendingComposerRestore, persistEnabled, persistNow, setMessage]);
+    }, [clearPending, confirmedMentionsRef, identity, messageRef, pendingComposerRestore, persistNow, setMessage]);
 
     // A draft deleted elsewhere (session deleted, drafts cleared) clears the
     // composer if it is the one on screen.
@@ -295,8 +294,6 @@ export function useComposerDraft(options: ComposerDraftOptions): ComposerDraftCo
 
     // Debounced write while typing.
     React.useEffect(() => {
-        if (!persistEnabled) return;
-
         if (skipNextPersistRef.current) {
             skipNextPersistRef.current = false;
             return;
@@ -311,13 +308,13 @@ export function useComposerDraft(options: ComposerDraftOptions): ComposerDraftCo
         }, PERSIST_DEBOUNCE_MS);
 
         return clearPending;
-    }, [clearPending, identity, message, persistEnabled, persistNow]);
+    }, [clearPending, identity, message, persistNow]);
 
     // Force a write wherever the page may stop running before the timer fires.
     React.useEffect(() => {
         const flush = () => {
             clearPending();
-            if (persistEnabled) persistNow(currentIdentityRef.current, messageRef.current);
+            persistNow(currentIdentityRef.current, messageRef.current);
         };
         const onVisibilityChange = () => {
             if (document.visibilityState === 'hidden') flush();
@@ -332,7 +329,7 @@ export function useComposerDraft(options: ComposerDraftOptions): ComposerDraftCo
             window.removeEventListener('pagehide', flush);
             flush();
         };
-    }, [clearPending, messageRef, persistEnabled, persistNow]);
+    }, [clearPending, messageRef, persistNow]);
 
     const restoreDraft = React.useCallback((target: ChatDraftIdentity | null, draft: string, confirmedMentions: Set<string>) => {
         const targetKey = target ? getChatDraftIdentityKey(target) : null;
@@ -340,7 +337,8 @@ export function useComposerDraft(options: ComposerDraftOptions): ComposerDraftCo
         const isCurrent = target && current && getChatDraftIdentityKey(target) === getChatDraftIdentityKey(current);
         const existing = isCurrent
             ? { text: messageRef.current, confirmedMentions: confirmedMentionsRef.current }
-            : (targetKey && draftMemoryRef.current.get(targetKey)) || (persistEnabled ? readChatDraft(target) : null);
+            : (targetKey && draftMemoryRef.current.get(targetKey))
+                || (isBtwPendingComposerKey(target?.sessionId) ? null : readChatDraft(target));
         const text = existing?.text && existing.text !== draft ? `${existing.text}\n\n${draft}` : draft;
         const mentions = new Set([...(existing?.confirmedMentions ?? []), ...confirmedMentions]);
         if (targetKey) draftMemoryRef.current.set(targetKey, { text, confirmedMentions: mentions });
@@ -349,11 +347,11 @@ export function useComposerDraft(options: ComposerDraftOptions): ComposerDraftCo
             confirmedMentionsRef.current = new Set(mentions);
             setMessage(text);
         }
-        if (persistEnabled && target) {
+        if (target && !isBtwPendingComposerKey(target.sessionId)) {
             writeChatDraft(target, text, mentions);
             lastPersistedRef.current.set(getChatDraftIdentityKey(target), draftSignature(text, mentions));
         }
-    }, [confirmedMentionsRef, messageRef, persistEnabled, setMessage]);
+    }, [confirmedMentionsRef, messageRef, setMessage]);
 
     const handoffDraft = React.useCallback((target: ChatDraftIdentity | null, draft: string | null) => {
         const targetKey = target ? getChatDraftIdentityKey(target) : null;
@@ -382,14 +380,21 @@ export function useComposerDraft(options: ComposerDraftOptions): ComposerDraftCo
         const draft = from && current && getChatDraftIdentityKey(from) === getChatDraftIdentityKey(current)
             ? { text: messageRef.current, confirmedMentions: new Set(confirmedMentionsRef.current) }
             : (from && draftMemoryRef.current.get(getChatDraftIdentityKey(from)))
-            || (persistEnabled ? readChatDraft(from) : null);
-        if (!draft) return;
+            || (isBtwPendingComposerKey(from?.sessionId)
+                ? { text: '', confirmedMentions: new Set<string>() }
+                : readChatDraft(from));
         draftMemoryRef.current.set(getChatDraftIdentityKey(to), { text: draft.text, confirmedMentions: new Set(draft.confirmedMentions) });
-        if (persistEnabled) {
-            writeChatDraft(to, draft.text, draft.confirmedMentions);
-            lastPersistedRef.current.set(getChatDraftIdentityKey(to), draftSignature(draft.text, draft.confirmedMentions));
+        writeChatDraft(to, draft.text, draft.confirmedMentions);
+        lastPersistedRef.current.set(getChatDraftIdentityKey(to), draftSignature(draft.text, draft.confirmedMentions));
+        if (from) draftMemoryRef.current.set(getChatDraftIdentityKey(from), { text: '', confirmedMentions: new Set() });
+        if (from && current && getChatDraftIdentityKey(from) === getChatDraftIdentityKey(current)) {
+            clearPending();
+            skipOutgoingDraftRef.current = true;
+            messageRef.current = '';
+            confirmedMentionsRef.current = new Set();
+            setMessage('');
         }
-    }, [confirmedMentionsRef, messageRef, persistEnabled]);
+    }, [clearPending, confirmedMentionsRef, messageRef, setMessage]);
 
     return { persistNow, handoffDraft, restoreDraft, migrateDraft };
 }

@@ -223,7 +223,7 @@ function ReferencePickerSurface({
                 onClose={() => onOpenChange(false)}
                 contentMaxHeightClassName="max-h-[calc(100dvh-12rem)]"
                 renderHeader={(closeButton) => (
-                    <div className="flex flex-col gap-2 border-b border-border/40 px-3 py-2">
+                    <div className="flex flex-col gap-2 border-b border-edge-muted px-3 py-2">
                         <div className="flex items-center justify-between gap-2">
                             {inPreview ? (
                                 <Button variant="ghost" size="sm" onClick={browser.closeMobilePreview} className="-ms-1">
@@ -267,7 +267,7 @@ function ReferencePickerSurface({
     return (
         <Dialog open onOpenChange={onOpenChange}>
             <DialogContent className="h-[min(90vh,58rem)] w-[min(72rem,calc(100vw-1.5rem))] max-w-6xl gap-0 overflow-hidden p-0">
-                <div className="flex shrink-0 flex-col gap-3 border-b border-border/60 px-5 pb-3 pt-4">
+                <div className="flex shrink-0 flex-col gap-3 border-b border-edge px-5 pb-3 pt-4">
                     <div className="flex flex-wrap items-center gap-3 pe-8">
                         <DialogTitle className="flex shrink-0 items-center gap-2 typography-ui-header">
                             {browser.tracker
@@ -283,12 +283,12 @@ function ReferencePickerSurface({
                     </div>
                 </div>
                 <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,5fr)_minmax(0,7fr)]">
-                    <ScrollableOverlay outerClassName="min-h-0 border-e border-border/60" disableHorizontal>
+                    <ScrollableOverlay outerClassName="min-h-0 border-e border-edge" disableHorizontal>
                         {listBody}
                     </ScrollableOverlay>
                     <div className="min-h-0">{preview}</div>
                 </div>
-                <div className="flex shrink-0 items-center gap-3 border-t border-border/60 px-5 py-3">
+                <div className="flex shrink-0 items-center gap-3 border-t border-edge px-5 py-3">
                     <div className="min-w-0 flex-1">{footerStatus}</div>
                     <Button size="sm" variant="outline" onClick={() => onOpenChange(false)}>
                         {t('references.picker.actions.cancel')}

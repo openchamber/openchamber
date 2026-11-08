@@ -15,6 +15,7 @@ import type {
   TrackerAuthOrigin,
   TrackerAuthStart,
   TrackerAuthStatus,
+  TrackerConnectResult,
   TrackerDescriptor,
   TrackerItemResult,
   TrackerListOptions,
@@ -40,6 +41,7 @@ import {
   mappingResultSchema,
   preferencesSchema,
   sessionStatusResultSchema,
+  connectResultOf,
   failureOf,
   requestJson,
   statesResultSchema,
@@ -139,9 +141,34 @@ export const createWebTrackerAPI = ({
       return call(provider, '/auth/status', GET, authStatusSchema, 'Failed to load tracker status');
     },
 
-    async authStart(provider, origin?: TrackerAuthOrigin): Promise<TrackerAuthStart> {
+    async authStart(provider, origin?: TrackerAuthOrigin, options?: { instance?: string }): Promise<TrackerAuthStart> {
       if (await onLegacyWire()) return legacy.authStart(provider, origin);
-      return call(provider, '/auth/start', { method: 'POST', body: JSON.stringify({ origin }) }, authStartSchema, 'Failed to start tracker sign-in');
+      const body = options?.instance ? { origin, instance: options.instance } : { origin };
+      return call(provider, '/auth/start', { method: 'POST', body: JSON.stringify(body) }, authStartSchema, 'Failed to start tracker sign-in');
+    },
+
+    async authConnectToken(provider, input): Promise<TrackerConnectResult> {
+      if (await onLegacyWire()) return legacy.authConnectToken(provider, input);
+      try {
+        const response = await fetch(trackerPath(provider, '/auth/token'), {
+          method: 'POST', headers: { Accept: 'application/json', 'Content-Type': 'application/json' }, body: JSON.stringify(input),
+        });
+        return await connectResultOf(response);
+      } catch {
+        return { ok: false, code: 'failed', message: null };
+      }
+    },
+
+    async authSaveOAuthClient(provider, input): Promise<TrackerConnectResult> {
+      if (await onLegacyWire()) return legacy.authSaveOAuthClient(provider, input);
+      try {
+        const response = await fetch(trackerPath(provider, '/auth/oauth-client'), {
+          method: 'PUT', headers: { Accept: 'application/json', 'Content-Type': 'application/json' }, body: JSON.stringify(input),
+        });
+        return await connectResultOf(response);
+      } catch {
+        return { ok: false, code: 'failed', message: null };
+      }
     },
 
     async authDisconnect(provider): Promise<{ removed: boolean }> {

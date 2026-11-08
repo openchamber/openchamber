@@ -12,6 +12,7 @@ import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useProjectContextStore } from '@/stores/useProjectContextStore';
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { useAutoReviewStore } from '@/stores/useAutoReviewStore';
+import { resetPrWatchesForRuntimeSwitch } from '@/sync/pr-watch';
 import { usePermissionStore } from '@/stores/permissionStore';
 import { useMessageQueueStore } from '@/stores/messageQueueStore';
 import { useFileSearchStore } from '@/stores/useFileSearchStore';
@@ -32,6 +33,7 @@ import { useSkillsStore } from '@/stores/useSkillsStore';
 import { useCommandsStore } from '@/stores/useCommandsStore';
 import { useAgentsStore } from '@/stores/useAgentsStore';
 import { useAgentMemoryStore } from '@/stores/useAgentMemoryStore';
+import { useWorkflowRunsStore } from '@/lib/workflows/store';
 import { useUIStore } from '@/stores/useUIStore';
 import { useFilesViewTabsStore } from '@/stores/useFilesViewTabsStore';
 import { useTerminalStore } from '@/stores/useTerminalStore';
@@ -41,7 +43,9 @@ import { resetStreamingState } from '@/sync/streaming';
 import { replaceGlobalSessionStatusById } from '@/sync/global-session-status';
 import { resetGlobalBlockingRequests } from '@/sync/global-blocking-requests';
 import { resetPendingSessionAssists } from '@/sync/pending-session-assists';
+import { resetRecoverableQuestions } from '@/sync/recoverable-questions';
 import { resetBackgroundShells } from '@/sync/background-shells';
+import { resetBackgroundImages } from '@/sync/background-images';
 import { useMultiRunStore } from '@/stores/useMultiRunStore';
 import { resetSessionOrdering } from '@/sync/session-ordering';
 import { resetSessionActivityTiming } from '@/sync/session-activity-timing';
@@ -64,9 +68,9 @@ export const reconnectAppForTransportSwitch = (): void => {
 
 export const resetAppForRuntimeEndpointChange = (detail: RuntimeEndpointChangedDetail): void => {
   useSessionUIStore.getState().prepareForRuntimeSwitch(detail.previousRuntimeKey);
-  if (detail.previousRuntimeKey) {
-    useAutoReviewStore.getState().stopRunningRunsForRuntime(detail.previousRuntimeKey);
-  }
+  // The previous server keeps its runs going; this window shows the new one's.
+  useAutoReviewStore.getState().resetForRuntimeSwitch();
+  resetPrWatchesForRuntimeSwitch();
   disposeTerminalInputTransport();
   useTerminalStore.getState().clearAll();
   opencodeClient.reconnectToRuntimeBaseUrl();
@@ -96,7 +100,9 @@ export const resetAppForRuntimeEndpointChange = (detail: RuntimeEndpointChangedD
   replaceGlobalSessionStatusById(new Map());
   resetGlobalBlockingRequests();
   resetPendingSessionAssists();
+  resetRecoverableQuestions();
   resetBackgroundShells();
+  resetBackgroundImages();
   resetSessionOrdering();
   // Turn timings belong to the previous instance's sessions, and the reset also
   // restarts the resume window so the switch is treated as a fresh load.
@@ -137,6 +143,7 @@ export const resetAppForRuntimeEndpointChange = (detail: RuntimeEndpointChangedD
   useMcpStore.getState().resetForRuntimeSwitch();
   useSkillsStore.getState().resetForRuntimeSwitch();
   useAgentMemoryStore.getState().reset();
+  useWorkflowRunsStore.getState().reset();
   useSessionUIStore.getState().restoreForRuntimeSwitch(detail.runtimeKey, detail.previousRuntimeKey);
   useSessionUIStore.setState({ worktreeDiscoveryByProject: new Map() });
   useUIStore.getState().setOpenGuestPage(null);
@@ -159,8 +166,8 @@ export const isSameRuntimeEndpoint = (detail: RuntimeEndpointChangedDetail): boo
 // mounts against the new runtime with an SDK that still calls the old one, so
 // initialization never completes and the startup overlay never lifts.
 // A same-runtime credential change stays with App, which resets only while
-// mounted: a sign-in on the login screen must keep the terminal tabs and
-// auto-review runs of the host being unlocked. Mobile keeps its own subscriber
+// mounted: a sign-in on the login screen must keep the terminal tabs of the
+// host being unlocked. Mobile keeps its own subscriber
 // because it tells transport switches apart from runtime switches.
 export const installRuntimeEndpointReset = (): (() => void) => (
   subscribeRuntimeEndpointChanged((detail) => {

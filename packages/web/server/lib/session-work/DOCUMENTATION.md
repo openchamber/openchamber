@@ -80,6 +80,19 @@ starts one). Each message id is handled once; a session
 already in work reads nothing from OpenCode. No Jev: until 2026-10, Jev judged
 whether a message started work, and every session now counts instead.
 
+The open a message owes stays pending in this runtime until it is settled:
+the session opened or was already open, the user closed it after the message,
+it can never be in work, OpenCode no longer has it, or In work is off. A failed
+metadata read, session read or write is tried again after 2s, 10s and 60s,
+then given up with a warning. A session archived when the message arrived
+waits for OpenCode's `session.unarchived` and is tried again then; sending to
+an archived session restores it right after the send, so this is the usual
+order there. One open is pending per session, the newest message's, and a
+retry never moves the turn counter: the message id is taken once, and only
+taking it starts a turn. Recovery is local because nothing delivers the same
+message again: the hub hands each event to a server subscriber once and does
+not retry a subscriber that failed.
+
 ## When Jev is asked
 
 - A turn ended: session assist calls `evaluateTurnEnd` before it arms its quiet
@@ -122,26 +135,6 @@ the wording or thresholds without re-running this measurement.
 Both are read at every use. A session in work also stays under its project
 group and folders: In work is an extra view of it, not a move.
 
-## When the session's folder is gone
-
-OpenCode (2.0.32, 2.1.0) refuses every metadata write for a session whose
-folder no longer exists, once that folder is not loaded, with
-`LocationNotFoundError`, though the session still reads.
-The metadata route, and the VS Code bridge, answer that with the code
-`SESSION_DIRECTORY_MISSING`; Track / Done then shows "This session's folder was
-deleted" with an Archive button that archives the session and its subagents at
-once, without the archive confirmation; the success toast offers Undo
-(`sessionWorkFailure.ts` in the sidebar sessions). Any other failure keeps the
-generic toast.
-
-### Why offer archive and not keep the work state somewhere else
-
-Work state lives on the OpenCode record, the single authority every client
-reads. A second store for sessions OpenCode refuses would have to be merged
-into every read and cleaned up when the folder returns. Archive is already
-OpenChamber's own record, works without the folder, and takes the session out
-of In work, which is what the user wanted from Done.
-
 ## Runtime parity
 
 - Web, desktop, hosted mobile, Capacitor: all of it; the server opens
@@ -154,7 +147,8 @@ of In work, which is what the user wanted from Done.
 
 `state.test.js` (patches, reopen rule, hint lifecycle), `runtime.test.js`
 (open on a sent message without Jev, the reopen rule, one handling per
-message, ineligible sessions, the combined turn-end
+message, ineligible sessions, an open recovered after a failed read or write
+and after a restore, the retry bound, a retry that keeps the turn's hint, the combined turn-end
 call, the review offer with and without In work and looks done winning over
 it, a late answer after the next turn started, never closing, failure as
 unknown), plus the gate cases in

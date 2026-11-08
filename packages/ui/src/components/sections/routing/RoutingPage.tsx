@@ -417,7 +417,7 @@ export const RoutingPage: React.FC = () => {
           <SettingsSection title={t('settings.routing.categories.title')}>
             <div className={SETTINGS_FIELDS_STACK_CLASS}>
               <p className={SETTINGS_HELPER_CLASS}>{t('settings.routing.categories.description')}</p>
-              <div className="divide-y divide-border/40 border-y border-border/40">
+              <div className="divide-y divide-edge-muted border-y border-edge-muted">
                 {draft.categories.map((category) => (
                   <CategoryRow
                     key={category.id}

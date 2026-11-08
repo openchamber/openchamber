@@ -1,0 +1,52 @@
+---
+title: Seitenleiste
+description: Was die Seitenleiste auflistet und wie sie aufgebaut ist.
+---
+
+# Seitenleiste
+
+Von oben nach unten zeigt die Seitenleiste **Chats**, **Angeheftet**, falls du etwas angeheftet hast, **In Arbeit** und dann deine Projekte. Um alles in einer Liste nach Zeit zu sehen, wähle im Anzeigemenü der Seitenleiste unter **Sitzungen** die Option **Nach Zeit**. **Nach Projekt** bringt die Projekte zurück.
+
+## Eine Zeile ist eine Arbeit
+
+- **Eine Sitzung im Ordner des Projekts** ist eine Zeile. Was aus ihr entstanden ist, etwa Subagenten, automatische Reviews und Nebenfragen, liegt darunter hinter dem Pfeil links davon. Ein einfacher Fork ist eine eigene Zeile.
+- **Ein Worktree** ist eine Zeile unter seinem Projekt, mit all seinen Sitzungen darunter. Klicke auf die Zeile, um die Sitzung zu öffnen, in der du dort zuletzt gearbeitet hast, oder auf den Pfeil, um alle zu sehen. Siehe [Worktree-Sitzungen](/de/worktrees/).
+- **Ein isolierter Bereich** funktioniert wie ein Worktree.
+
+## Was eine Zeile zeigt
+
+Die linke Seite einer Zeile zeigt, was sie ist:
+
+- ein Branch-Symbol: ein Worktree
+- das Bereichssymbol: ein isolierter Bereich
+- nichts oder ein Pfeil: eine Sitzung im Ordner des Projekts
+
+Die rechte Seite zeigt, was gerade passiert: läuft, neue Antwort oder wartet auf dich. Eine farbige Markierung am Ende ist der Pull Request oder das Issue, dem die Arbeit folgt.
+
+## Namen von Worktrees
+
+Eine Worktree-Zeile zeigt den Namen der Aufgabe, den der Agent vergibt, sobald die Aufgabe klar ist. Bis dahin zeigt sie den Branch. Benennst du sie selbst um, bleibt dein Name. Eine Sitzung, die du in einen neuen Worktree verschiebst, nimmt den Namen ihrer Aufgabe mit.
+
+Um Worktrees nach Branch zu lesen, schalte im Anzeigemenü **Worktrees nach Branch benennen** ein. Der Branch wird zum Namen der Zeile, und der Name der Aufgabe rückt in ausführlichen Zeilen darunter.
+
+## In Arbeit und Angeheftet
+
+**In Arbeit** enthält die Arbeit, die du noch nicht abgeschlossen hast; siehe [Sitzungen in Arbeit](/de/sessions-in-work/). Eine Arbeit dort verlässt ihr Projekt; schalte **In Arbeit auch unter Projekten zeigen** ein, um sie an beiden Stellen zu behalten. **Angeheftet** enthält die Sitzungen und Worktrees, die du über das Menü der Zeile angeheftet hast.
+
+## Das Anzeigemenü
+
+- **Sitzungen**: nach Projekt oder nach Zeit
+- **Projekte sortieren**: manuell, A → Z, Z → A oder neueste
+- **Chat-Bereich anzeigen**, **Bereich Angeheftet anzeigen**, **Bereich In Arbeit anzeigen**
+- **In Arbeit auch unter Projekten zeigen**
+- **Ausführliche Zeilen**: eine zweite Zeile mit dem Branch oder dem Namen der Aufgabe, dem Pull Request oder Issue und dem Projekt, wenn die Liste Projekte mischt
+- **Worktrees nach Branch benennen**
+- **Alle einklappen** und **Alle ausklappen**
+
+Eine lange Liste endet mit **Mehr anzeigen**. **Weniger anzeigen** klappt sie wieder ein.
+
+## Auf dem Handy
+
+Liste und Menü sind dieselben. Zeilen sind zweizeilig, solange du **Ausführliche Zeilen** nicht ausschaltest, und für die Aktionen einer Zeile wischst du sie zur Seite.
+
+VS Code behält die Liste, die es vor diesem Layout hatte.

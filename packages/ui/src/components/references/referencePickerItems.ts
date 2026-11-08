@@ -1,7 +1,10 @@
 import type { IconName } from '@/components/icon/icons';
 import type {
     ChangeRequestListStatus,
+    DiscussionState,
+    RepositoryDiscussionReference,
     RepositoryReference,
+    RepositoryReferenceDetail,
     RepositoryReferenceFilter,
     RepositoryReferencePeople,
     RepositoryReferenceState,
@@ -49,12 +52,14 @@ export type TrackerReferenceFilter = {
 
 export const DEFAULT_TRACKER_FILTER: TrackerReferenceFilter = { state: 'open', people: 'any', priority: 'all' };
 
-/** How the item's provider writes its number: `#12` for an issue or a pull request, `!12` for a merge request. */
+/** How the item's provider writes its number: `#12` for an issue, a discussion or a pull request, `!12` for a merge request. */
 export const referenceNumberLabel = (reference: RepositoryReference, descriptor: SourceControlProviderDescriptor): string => (
     reference.kind === 'pull'
         ? formatChangeRequestReference(descriptor, reference.number)
         : `${descriptor.terminology.issuePrefix}${reference.number}`
 );
+
+const KEY_MARKERS = { pull: '!', issue: '#', discussion: '~' } as const satisfies Record<RepositoryReferenceKind, string>;
 
 /**
  * An item's key on the picker and the board. In memory only. The kind is
@@ -65,28 +70,61 @@ export const referenceNumberLabel = (reference: RepositoryReference, descriptor:
 export const referencePickerItemKey = (item: ReferencePickerItem | ReferencePickerSelection): string => {
     if (item.source === 'tracker') return `${item.provider}:${item.item.identifier.toUpperCase()}`;
     const { sourceRepo, number, kind, provider } = item.reference;
-    const marker = kind === 'pull' ? '!' : '#';
-    return `${provider}:${sourceRepo.owner.toLowerCase()}/${sourceRepo.repo.toLowerCase()}${marker}${number}`;
+    return `${provider}:${sourceRepo.owner.toLowerCase()}/${sourceRepo.repo.toLowerCase()}${KEY_MARKERS[kind]}${number}`;
 };
 
+/** Each repository tab's icon, the same wherever a kind is named. */
+export const REPOSITORY_KIND_ICONS = {
+    issue: 'record-circle',
+    pull: 'git-pull-request',
+    discussion: 'discuss',
+} as const satisfies Record<RepositoryReferenceKind, IconName>;
+
 /** The change-request tab, named by the provider's term. */
-export const CHANGE_REQUEST_TAB_KEYS = {
+const CHANGE_REQUEST_TAB_KEYS = {
     pullRequest: 'references.picker.tab.pulls',
     mergeRequest: 'references.picker.tab.mergeRequests',
     change: 'references.picker.tab.changes',
 } as const satisfies Record<ChangeRequestTerm, I18nKey>;
 
+/**
+ * The tabs of the repository kinds a provider offers: issues, change requests
+ * named by its term, and discussions where it keeps them.
+ */
+export const repositoryKindTabs = (
+    t: (key: I18nKey) => string,
+    term: ChangeRequestTerm,
+    discussions: boolean,
+): Array<{ id: RepositoryReferenceKind; label: string; icon: IconName }> => {
+    const tabs: Array<{ id: RepositoryReferenceKind; label: string; icon: IconName }> = [
+        { id: 'issue', label: t('references.picker.tab.issues'), icon: REPOSITORY_KIND_ICONS.issue },
+        { id: 'pull', label: t(CHANGE_REQUEST_TAB_KEYS[term]), icon: REPOSITORY_KIND_ICONS.pull },
+    ];
+    if (discussions) tabs.push({ id: 'discussion', label: t('references.picker.tab.discussions'), icon: REPOSITORY_KIND_ICONS.discussion });
+    return tabs;
+};
+
+/** The repository kind a tab names; anything else is issues. */
+export const repositoryKindOfTab = (id: string): RepositoryReferenceKind => (id === 'pull' || id === 'discussion' ? id : 'issue');
+
 export const DEFAULT_REPOSITORY_FILTER: RepositoryReferenceFilter = { state: 'open', people: 'any' };
 
-/** What each kind can be narrowed to: only change requests merge and get review requests. */
+/**
+ * What each kind can be narrowed to: only change requests merge and get
+ * review requests, only discussions wait for an answer, and nobody is
+ * assigned a discussion.
+ */
 export const REPOSITORY_STATES = {
     issue: ['open', 'closed', 'all'],
     pull: ['open', 'merged', 'closed', 'all'],
+    discussion: ['open', 'unanswered', 'closed', 'all'],
 } as const satisfies Record<RepositoryReferenceKind, readonly RepositoryReferenceState[]>;
 export const REPOSITORY_PEOPLE = {
     issue: ['any', 'assigned', 'created'],
     pull: ['any', 'assigned', 'created', 'reviewRequested'],
+    discussion: ['any', 'created'],
 } as const satisfies Record<RepositoryReferenceKind, readonly RepositoryReferencePeople[]>;
+
 
 // A tracker's state filters are its descriptor's, in its menu order; people
 // and priority are offered where its `filters` capabilities say so.
@@ -133,6 +171,7 @@ export const REPOSITORY_STATE_LABEL_KEYS = {
     closed: 'references.picker.filter.state.closed',
     merged: 'references.picker.filter.state.merged',
     all: 'references.picker.filter.state.all',
+    unanswered: 'references.picker.filter.state.unanswered',
 } as const satisfies Record<RepositoryReferenceState, I18nKey>;
 
 export const REPOSITORY_PEOPLE_LABEL_KEYS = {
@@ -151,6 +190,7 @@ type StateLook = { icon: IconName; color: string; labelKey: I18nKey };
  * (`prVisualStateOf`); until then, and while checks run, it reads as open.
  */
 export const repositoryStateLook = (reference: RepositoryReference, status: ChangeRequestListStatus | null): StateLook => {
+    if (reference.kind === 'discussion') return discussionStateLook(reference.state, reference.answered);
     if (reference.kind === 'issue') {
         switch (reference.state) {
             case 'open':
@@ -173,6 +213,36 @@ export const repositoryStateLook = (reference: RepositoryReference, status: Chan
     });
     return { icon: 'git-pull-request', color: `var(--pr-${visual})`, labelKey: 'references.picker.state.open' };
 };
+
+/**
+ * A discussion's state in the same colours: open is open, and an open
+ * question with its answer chosen says so; resolved is done; outdated and
+ * duplicate are dropped.
+ */
+const discussionStateLook = (state: DiscussionState, answered: boolean | null): StateLook => {
+    switch (state) {
+        case 'open':
+            return answered
+                ? { icon: 'chat-check', color: 'var(--pr-open)', labelKey: 'references.picker.state.answered' }
+                : { icon: 'discuss', color: 'var(--pr-open)', labelKey: 'references.picker.state.open' };
+        case 'resolved':
+            return { icon: 'chat-check', color: 'var(--pr-merged)', labelKey: 'references.picker.state.resolved' };
+        case 'outdated':
+            return { icon: 'chat-off', color: 'var(--pr-closed)', labelKey: 'references.picker.state.outdated' };
+        case 'duplicate':
+            return { icon: 'chat-off', color: 'var(--pr-closed)', labelKey: 'references.picker.state.duplicate' };
+    }
+};
+
+/**
+ * Whether a discussion's state can be changed: closed by someone who may
+ * close it, reopened by someone who may reopen it. Until its detail says, it
+ * may, and the host's own refusal explains a write it does not allow.
+ */
+export const canChangeDiscussionState = (
+    discussion: RepositoryDiscussionReference,
+    permissions: RepositoryReferenceDetail['discussion'],
+): boolean => (!permissions ? true : discussion.state === 'open' ? permissions.canClose : permissions.canReopen);
 
 /** The label of an item's priority; `none` has no label of its own on an item. */
 export const TRACKER_PRIORITY_KEYS = {
@@ -218,7 +288,7 @@ export const relativeTimeOf = (iso: string | null | undefined, now: number): Rel
  * Ids, people, times and labels around an item. One step quieter than the
  * usual muted text, so titles and bodies stay the brightest thing on screen.
  */
-export const REFERENCE_META_TEXT = 'text-muted-foreground/60';
+export const REFERENCE_META_TEXT = 'text-muted-foreground';
 
 /** GitHub label colours come as bare hex; anything else gets the neutral chip. */
 export const labelColor = (color: string | null | undefined): string | null => {

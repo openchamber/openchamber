@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 
-import { clearDesktopSessionNotifications, isBrowserClientRuntime, isDesktopLocalOriginActive, openSessionInOwningHostWindow, takePendingDesktopSessionLinks } from './desktop';
+import { clearDesktopSessionNotifications, createDesktopClipboardAPI, isBrowserClientRuntime, isDesktopLocalOriginActive, openSessionInOwningHostWindow, takePendingDesktopSessionLinks } from './desktop';
 
 describe('clearing session notifications', () => {
   const originalWindow = globalThis.window;
@@ -33,6 +33,38 @@ describe('clearing session notifications', () => {
     const calls = desktopWindow('win32');
     clearDesktopSessionNotifications('ses_1');
     expect(calls).toEqual([]);
+  });
+});
+
+describe('desktop selection clipboard', () => {
+  afterEach(() => {
+    Reflect.deleteProperty(globalThis, 'window');
+  });
+
+  test('is absent where the preload exposes no native clipboard', () => {
+    globalThis.window = Object.assign(Object.create(null), {
+      __OPENCHAMBER_DESKTOP__: { invoke: async () => null },
+    });
+    expect(createDesktopClipboardAPI()).toBeUndefined();
+  });
+
+  test('forwards the local Linux clipboard bridge', async () => {
+    const calls: Array<{ command: string; text: string }> = [];
+    globalThis.window = Object.assign(Object.create(null), {
+      __OPENCHAMBER_DESKTOP__: {
+        clipboard: {
+          readSelection: async () => 'primary text',
+          writeSelection: async (text: string) => { calls.push({ command: 'selection', text }); return true; },
+        },
+      },
+    });
+    const clipboard = createDesktopClipboardAPI();
+    expect(clipboard).toBeDefined();
+    expect(await clipboard?.selection.readText()).toBe('primary text');
+    await clipboard?.selection.writeText('new primary');
+    expect(calls).toEqual([
+      { command: 'selection', text: 'new primary' },
+    ]);
   });
 });
 
@@ -90,7 +122,7 @@ describe('desktop local origin', () => {
 });
 
 describe('pending desktop session links', () => {
-  type PendingLink = { sessionId: string; messageId?: string; runtimeKey?: string };
+  type PendingLink = { sessionId: string; messageId?: string; runtimeKey?: string; requireKnownSession?: boolean };
 
   const installWindow = (pending: PendingLink[]) => {
     Object.defineProperty(globalThis, 'window', {
@@ -115,8 +147,15 @@ describe('pending desktop session links', () => {
       { sessionId: 'ses_b', messageId: 'msg_1' },
     ]);
     expect(await takePendingDesktopSessionLinks()).toEqual([
-      { sessionId: 'ses_a', messageId: null, runtimeKey: 'host:h1' },
-      { sessionId: 'ses_b', messageId: 'msg_1', runtimeKey: null },
+      { sessionId: 'ses_a', messageId: null, runtimeKey: 'host:h1', requireKnownSession: false },
+      { sessionId: 'ses_b', messageId: 'msg_1', runtimeKey: null, requireKnownSession: false },
+    ]);
+  });
+
+  test('keeps the known-session requirement of a cold jump-list launch', async () => {
+    installWindow([{ sessionId: 'ses_jump', requireKnownSession: true }]);
+    expect(await takePendingDesktopSessionLinks()).toEqual([
+      { sessionId: 'ses_jump', messageId: null, runtimeKey: null, requireKnownSession: true },
     ]);
   });
 });

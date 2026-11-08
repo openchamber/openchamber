@@ -13,9 +13,11 @@ const QUOTE_FIELDS = new Map([
   ['terminal', 'output'],
 ]);
 // Linked items whose message text is the whole context: the current kinds
-// (`repository-issue`, `change-request`, `tracker-item`) and the legacy names
-// older messages carry.
-const LINK_KINDS = new Set(['repository-issue', 'change-request', 'tracker-item', 'github-issue', 'github-pr', 'linear-issue']);
+// (`repository-issue`, `repository-discussion`, `change-request`,
+// `tracker-item`) and the legacy names older messages carry.
+const LINK_KINDS = new Set([
+  'repository-issue', 'repository-discussion', 'change-request', 'tracker-item', 'github-issue', 'github-pr', 'linear-issue',
+]);
 
 export function excerpt(text, limit) {
   if (text.length <= limit) return text;

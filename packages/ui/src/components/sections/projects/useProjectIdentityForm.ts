@@ -3,7 +3,7 @@ import { toast } from '@/components/ui';
 import { parseModelIdentifier, type ParsedModelIdentifier } from '@/lib/modelIdentifier';
 import { useI18n } from '@/lib/i18n';
 import type { ProjectEntry } from '@/lib/api/types';
-import { useProjectsStore } from '@/stores/useProjectsStore';
+import { useProjectsStore, resolveUploadMime } from '@/stores/useProjectsStore';
 
 const HEX_COLOR_PATTERN = /^#(?:[\da-fA-F]{3}|[\da-fA-F]{6})$/;
 
@@ -201,6 +201,20 @@ export const useProjectIdentityForm = (project: EditableProject | null) => {
       return;
     }
 
+    const mime = resolveUploadMime(file);
+    if (!mime) {
+      toast.error(t('settings.projects.page.toast.iconUnsupportedFormat'));
+      return;
+    }
+    if (!Number.isFinite(file.size) || file.size <= 0) {
+      toast.error(t('settings.projects.page.toast.iconEmpty'));
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error(t('settings.projects.page.toast.iconTooLarge'));
+      return;
+    }
+
     setPendingRemoveImageIcon(false);
     setPreviewImageFailed(false);
     setPendingUploadIconFile(file);
@@ -210,7 +224,7 @@ export const useProjectIdentityForm = (project: EditableProject | null) => {
       }
       return URL.createObjectURL(file);
     });
-  }, [isUploadingIcon, project]);
+  }, [isUploadingIcon, project, t]);
 
   const handleRemoveImageIcon = React.useCallback(() => {
     if (!project || !hasRemovableImageIcon || isRemovingCustomIcon) {
@@ -261,7 +275,7 @@ export const useProjectIdentityForm = (project: EditableProject | null) => {
     }
   }, [clearPendingUploadIcon, discoverProjectIcon, isDiscoveringIcon, project, t]);
 
-  const prepareSaveData = React.useCallback(async (options?: { silent?: boolean }): Promise<ProjectIdentitySaveData | null> => {
+  const prepareSaveData = React.useCallback(async (options?: { silent?: boolean; skipIconChanges?: boolean }): Promise<ProjectIdentitySaveData | null> => {
     const silent = options?.silent === true;
     if (!project) {
       return null;
@@ -272,7 +286,7 @@ export const useProjectIdentityForm = (project: EditableProject | null) => {
       return null;
     }
 
-    if (pendingUploadIconFile) {
+    if (pendingUploadIconFile && !options?.skipIconChanges) {
       setIsUploadingIcon(true);
       const uploadResult = await uploadProjectIcon(project.id, pendingUploadIconFile);
       setIsUploadingIcon(false);
@@ -289,7 +303,7 @@ export const useProjectIdentityForm = (project: EditableProject | null) => {
 
     const willRemoveImageIcon = pendingRemoveImageIcon && Boolean(project.iconImage);
 
-    if (willRemoveImageIcon) {
+    if (willRemoveImageIcon && !options?.skipIconChanges) {
       setIsRemovingCustomIcon(true);
       const removeResult = await removeProjectIcon(project.id);
       setIsRemovingCustomIcon(false);

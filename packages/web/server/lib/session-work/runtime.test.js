@@ -31,8 +31,17 @@ const stubOpenCode = ({ session = {}, records = answeredTurn } = {}) => {
   return fetchMock;
 };
 
-const makeRuntime = ({ metadata = {}, answers = {}, askError = null, settings = {}, endpoint = ENDPOINT, lineage = null } = {}) => {
+const makeRuntime = ({
+  metadata = {},
+  answers = {},
+  askError = null,
+  settings = {},
+  endpoint = ENDPOINT,
+  lineage = null,
+  isSessionArchived = async () => false,
+} = {}) => {
   const records = new Map([['ses_1', metadata]]);
+  const readMetadata = vi.fn(async (id) => records.get(id) ?? {});
   const updateMetadata = vi.fn(async (id, decide) => {
     const current = records.get(id) ?? {};
     const patch = decide(current);
@@ -49,14 +58,20 @@ const makeRuntime = ({ metadata = {}, answers = {}, askError = null, settings = 
     getSettings: () => ({ enabled: true, reviewOffer: true, ...settings }),
     classifierEndpoint: async () => endpoint,
     jev,
-    readMetadata: async (id) => records.get(id) ?? {},
+    readMetadata,
     updateMetadata,
+    isSessionArchived,
     chatRoots: ['/home/me/.config/openchamber/chats'],
     lineage,
     now: () => time++,
+    openRetryDelaysMs: [5, 5],
   });
-  return { runtime, jev, updateMetadata, records };
+  return { runtime, jev, readMetadata, updateMetadata, records };
 };
+
+const restored = { type: 'session.unarchived', properties: { sessionID: 'ses_1' } };
+const busy = { type: 'session.status', properties: { sessionID: 'ses_1', status: { type: 'busy' } } };
+const workState = (records) => records.get('ses_1').openchamber?.work?.state;
 
 const sent = (id = 'msg_new', text = 'Now fix the header') => ({
   type: 'message.updated',
@@ -177,6 +192,133 @@ describe('session work runtime: a message was sent', () => {
       expect(updateMetadata).not.toHaveBeenCalled();
       vi.unstubAllGlobals();
     }
+  });
+});
+
+describe('session work runtime: recovering an open that failed', () => {
+  it('opens after a failed metadata read, session read or write, with no second delivery', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    for (const fail of ['metadata', 'session', 'write']) {
+      const fetchMock = stubOpenCode();
+      const { runtime, readMetadata, updateMetadata, records } = makeRuntime();
+      if (fail === 'metadata') readMetadata.mockRejectedValueOnce(new Error('store unreadable'));
+      if (fail === 'session') fetchMock.mockRejectedValueOnce(new Error('ECONNRESET'));
+      if (fail === 'write') updateMetadata.mockRejectedValueOnce(new Error('write failed'));
+
+      runtime.processPayload(sent('msg_retry'));
+      await settle(() => workState(records) === 'open');
+      expect(workState(records), fail).toBe('open');
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('gives up after its bounded retries', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    stubOpenCode();
+    const { runtime, updateMetadata } = makeRuntime();
+    updateMetadata.mockRejectedValue(new Error('write failed'));
+
+    runtime.processPayload(sent('msg_retry'));
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    // The first try and one per retry delay.
+    expect(updateMetadata).toHaveBeenCalledTimes(3);
+    expect(warn).toHaveBeenLastCalledWith(expect.stringContaining('gave up'), 'write failed');
+  });
+
+  it('does not retry a session OpenCode no longer has', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const fetchMock = vi.fn(async () => new Response(
+      JSON.stringify({ _tag: 'SessionNotFoundError', sessionID: 'ses_1', message: 'Session not found' }),
+      { status: 404, headers: { 'content-type': 'application/json' } },
+    ));
+    vi.stubGlobal('fetch', fetchMock);
+    const { runtime } = makeRuntime();
+
+    runtime.processPayload(sent('msg_gone'));
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('opens a session a message reached while archived once it is restored', async () => {
+    stubOpenCode();
+    let archived = true;
+    const { runtime, updateMetadata, records } = makeRuntime({ isSessionArchived: async () => archived });
+
+    runtime.processPayload(sent('msg_archived'));
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(updateMetadata).not.toHaveBeenCalled();
+
+    archived = false;
+    runtime.processPayload(restored);
+    await settle(() => workState(records) === 'open');
+    expect(workState(records)).toBe('open');
+
+    // A later restore owes nothing more.
+    runtime.processPayload(restored);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(updateMetadata).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps a session closed when the user closed it after the message, even once restored', async () => {
+    stubOpenCode();
+    let archived = true;
+    const { runtime, records } = makeRuntime({ isSessionArchived: async () => archived });
+
+    runtime.processPayload(sent('msg_archived'));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    // The user marks it done after the message was sent (`sent()` is created at 50).
+    records.set('ses_1', { openchamber: { work: { state: 'done', doneAt: 60 } } });
+    archived = false;
+    runtime.processPayload(restored);
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(workState(records)).toBe('done');
+  });
+
+  it('opens nothing on a restore once In work was turned off', async () => {
+    stubOpenCode();
+    let archived = true;
+    const settings = { enabled: true };
+    const { runtime, records } = makeRuntime({ settings, isSessionArchived: async () => archived });
+    runtime.processPayload(sent('msg_archived'));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    archived = false;
+    settings.enabled = false;
+    runtime.processPayload(restored);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(workState(records)).toBeUndefined();
+  });
+
+  it('writes nothing once stopped while it read the archive state', async () => {
+    stubOpenCode();
+    let answerArchived;
+    const { runtime, updateMetadata } = makeRuntime({
+      isSessionArchived: () => new Promise((resolve) => { answerArchived = resolve; }),
+    });
+    runtime.processPayload(sent('msg_stop'));
+    await settle(() => answerArchived !== undefined);
+    runtime.stop();
+    answerArchived(false);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(updateMetadata).not.toHaveBeenCalled();
+  });
+
+  it('does not start another turn when it retries: the current turn still gets its hint', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    stubOpenCode();
+    const { runtime, jev, updateMetadata, records } = makeRuntime({ settings: { enabled: true, reviewOffer: true } });
+    let answer;
+    jev.ask.mockImplementation(() => new Promise((resolve) => { answer = resolve; }));
+    updateMetadata.mockRejectedValueOnce(new Error('write failed'));
+
+    runtime.processPayload(sent('msg_turn'));
+    runtime.processPayload(busy);
+    const pending = runtime.evaluateTurnEnd({ sessionId: 'ses_1', directory: '/repo', assist: { recap: false, suggestion: false } });
+    await settle(() => answer !== undefined && workState(records) === 'open');
+    expect(workState(records)).toBe('open');
+
+    answer({ answers: { review_ready: { noul: 0.9 } }, ms: 5 });
+    await pending;
+    expect(records.get('ses_1').openchamber.reviewOffer.at).toBeTypeOf('number');
   });
 });
 

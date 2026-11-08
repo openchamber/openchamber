@@ -7,9 +7,9 @@
  * caller, and a contributor fork gets its named remote, provenance and no
  * upstream.
  */
-
 import { forkRemoteName } from './contributor-remote.js';
 import { sourceControlProviderDescriptors } from '../source-control/provider-descriptors.js';
+import { asNonEmptyString } from '../shared/guards.js';
 
 /** A refusal with the HTTP status and body fields the route answers with. */
 export class WorktreeCreationError extends Error {
@@ -168,7 +168,7 @@ export const createWorktreeCreation = ({
 
   /** Creates a worktree; with `input.changeRequestSource`, from that change request's head. */
   const create = async (directory, requestInput) => {
-    const { createWorktree, validateWorktreeCreate } = await getGitLibraries();
+    const { createWorktree, markGeneratedBranchName, seedBranchTaskTitle, validateWorktreeCreate } = await getGitLibraries();
     if (!(createWorktree instanceof Function) || !(validateWorktreeCreate instanceof Function)) {
       throw new WorktreeCreationError('Worktree creation is not available', 501);
     }
@@ -202,12 +202,25 @@ export const createWorktreeCreation = ({
       repositoryAuthority,
     });
     try {
-      return await createWorktree(directory, input, {
+      const result = await createWorktree(directory, input, {
         contributorProvenance,
         contributorSource: source,
         hydrateCheckout,
         bootstrapStore: worktreeBootstrapStore,
       });
+      // Made for a pull request or an issue: its title names the task until
+      // the agent names it (`seedBranchTaskTitle`).
+      const taskTitle = asNonEmptyString(requestInput?.taskTitle);
+      if (taskTitle && seedBranchTaskTitle instanceof Function) {
+        await seedBranchTaskTitle(directory, result?.branch, taskTitle);
+      }
+      // The client says when it generated the branch's name; the agent may
+      // then rename it after the task (`readRenameableGeneratedBranch`).
+      const generatedName = asNonEmptyString(requestInput?.generatedBranchName);
+      if (generatedName && generatedName === result?.branch && markGeneratedBranchName instanceof Function) {
+        await markGeneratedBranchName(directory, generatedName, asNonEmptyString(requestInput?.generatedBranchPrefix));
+      }
+      return result;
     } catch (error) {
       if (error?.code === 'CONTRIBUTOR_REMOTE_COLLISION') {
         throw new WorktreeCreationError('Contributor remote name is already used by a different endpoint', 409, 'CONTRIBUTOR_REMOTE_COLLISION', { remoteName: error.remoteName });

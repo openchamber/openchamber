@@ -1,7 +1,11 @@
 import React from 'react';
 import { createPortal } from 'react-dom';
 
+import { useEmojiPicker } from '@/components/emoji/useEmojiPicker';
 import { Icon } from '@/components/icon/Icon';
+import { useCommentEnterSubmit } from '@/components/comments/useCommentEnterSubmit';
+import { toast } from '@/components/ui';
+import { HoverTooltip } from '@/components/ui/row-tooltip';
 import { useI18n } from '@/lib/i18n';
 import { isIMECompositionEvent } from '@/lib/ime';
 import { cn } from '@/lib/utils';
@@ -25,7 +29,7 @@ export interface ChatQuoteMarkPopoverProps {
     comment: string;
     editing: boolean;
     onEditingChange: (editing: boolean) => void;
-    onSave: (text: string) => void;
+    onSave: (text: string) => boolean;
     onRemove: () => void;
     /** Where to render: the open modal dialog for a quote in a full-screen page; the body otherwise. */
     portalTarget?: HTMLElement | null;
@@ -44,6 +48,8 @@ export function ChatQuoteMarkPopover({
     const { t } = useI18n();
     const [draft, setDraft] = React.useState(comment);
     const inputRef = React.useRef<HTMLTextAreaElement>(null);
+    const emojiPicker = useEmojiPicker(inputRef, editing);
+    const commentKeys = useCommentEnterSubmit();
 
     const resizeInput = React.useCallback(() => {
         const element = inputRef.current;
@@ -67,15 +73,18 @@ export function ChatQuoteMarkPopover({
     }, [editing]);
 
     const save = () => {
-        onSave(draft.trim());
+        if (!onSave(draft.trim())) {
+            toast.error(t('inlineComment.toast.noRoom'));
+            return;
+        }
         onEditingChange(false);
     };
 
     const placeBelow = anchorRect.top < PLACE_BELOW_THRESHOLD_PX;
-    const left = Math.min(
-        Math.max(anchorRect.left + anchorRect.width / 2, VIEWPORT_MARGIN_PX),
-        window.innerWidth - VIEWPORT_MARGIN_PX,
-    );
+    const left = anchorRect.left + anchorRect.width / 2;
+    // Percentages in translate use the popover's own width, so both the short
+    // preview and the wider editor stay inside the viewport without measuring.
+    const translateX = `clamp(${VIEWPORT_MARGIN_PX - left}px, -50%, calc(100vw - ${left + VIEWPORT_MARGIN_PX}px - 100%))`;
 
     return createPortal(
         <div
@@ -83,13 +92,13 @@ export function ChatQuoteMarkPopover({
             // The glass card's shadow lives here, off its backdrop-filter
             // element; this box hugs the card, so the radius matches it.
             className={cn(
-                'app-region-no-drag fixed z-50',
+                'app-region-no-drag fixed z-50 w-max max-w-[calc(100vw-24px)]',
                 editing ? 'rounded-3xl' : 'rounded-2xl',
             )}
             style={{
                 left,
                 top: placeBelow ? anchorRect.bottom + POPOVER_GAP_PX : anchorRect.top - POPOVER_GAP_PX,
-                transform: placeBelow ? 'translate(-50%, 0)' : 'translate(-50%, -100%)',
+                transform: `translate(${translateX}, ${placeBelow ? '0' : '-100%'})`,
             }}
         >
             {editing ? (
@@ -104,7 +113,7 @@ export function ChatQuoteMarkPopover({
                         }}
                         onKeyDown={(event) => {
                             if (isIMECompositionEvent(event)) return;
-                            if (event.key === 'Enter' && !event.shiftKey) {
+                            if (event.key === 'Enter' && commentKeys.shouldSubmit(event)) {
                                 event.preventDefault();
                                 save();
                             } else if (event.key === 'Escape') {
@@ -112,19 +121,22 @@ export function ChatQuoteMarkPopover({
                                 onEditingChange(false);
                             }
                         }}
+                        enterKeyHint={commentKeys.returnKeySends ? 'send' : undefined}
                         placeholder={t('chat.textSelection.comment.placeholder')}
-                        className="w-64 max-w-[70vw] flex-1 resize-none bg-transparent py-1.5 text-sm leading-5 text-foreground outline-none placeholder:text-muted-foreground placeholder:opacity-60"
+                        className="min-w-0 w-64 max-w-[70vw] flex-1 resize-none bg-transparent py-1.5 text-sm leading-5 text-foreground outline-none placeholder:text-muted-foreground placeholder:opacity-60"
                         style={{ minHeight: 0, height: 'auto' }}
                     />
-                    <button
-                        type="button"
-                        onClick={save}
-                        className="mb-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[var(--primary-base)] text-[var(--primary-foreground)] transition-opacity duration-150 hover:opacity-90"
-                        aria-label={t('chat.textSelection.comment.save')}
-                        title={t('chat.textSelection.comment.save')}
-                    >
-                        <Icon name="check" className="h-4 w-4" />
-                    </button>
+                    {emojiPicker}
+                    <HoverTooltip label={t('chat.textSelection.comment.save')}>
+                        <button
+                            type="button"
+                            onClick={save}
+                            className="mb-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[var(--primary-base)] text-[var(--primary-foreground)] transition-opacity duration-150 hover:opacity-90"
+                            aria-label={t('chat.textSelection.comment.save')}
+                        >
+                            <Icon name="check" className="h-4 w-4" />
+                        </button>
+                    </HoverTooltip>
                 </div>
             ) : (
                 <div className="oc-glass-popover oc-glass-floating flex max-w-[min(360px,80vw)] items-start gap-1 rounded-2xl py-1 ps-3 pe-1">
@@ -132,26 +144,28 @@ export function ChatQuoteMarkPopover({
                         <div className="min-w-0 flex-1 whitespace-pre-wrap break-words py-1 text-sm text-foreground">{comment}</div>
                     ) : null}
                     <div className={cn('flex shrink-0 items-center', !comment && '-ms-2')}>
-                        <button
-                            type="button"
-                            className={ACTION_CLASS}
-                            style={{ minHeight: 0, minWidth: 0 }}
-                            onClick={() => onEditingChange(true)}
-                            aria-label={t('chat.chatInput.contextPreview.edit')}
-                            title={t('chat.chatInput.contextPreview.edit')}
-                        >
-                            <Icon name="pencil" className="h-3.5 w-3.5" />
-                        </button>
-                        <button
-                            type="button"
-                            className={ACTION_CLASS}
-                            style={{ minHeight: 0, minWidth: 0 }}
-                            onClick={onRemove}
-                            aria-label={t('chat.chatInput.contextPreview.remove')}
-                            title={t('chat.chatInput.contextPreview.remove')}
-                        >
-                            <Icon name="delete-bin" className="h-3.5 w-3.5" />
-                        </button>
+                        <HoverTooltip label={t('chat.chatInput.contextPreview.edit')}>
+                            <button
+                                type="button"
+                                className={ACTION_CLASS}
+                                style={{ minHeight: 0, minWidth: 0 }}
+                                onClick={() => onEditingChange(true)}
+                                aria-label={t('chat.chatInput.contextPreview.edit')}
+                            >
+                                <Icon name="pencil" className="h-3.5 w-3.5" />
+                            </button>
+                        </HoverTooltip>
+                        <HoverTooltip label={t('chat.chatInput.contextPreview.remove')}>
+                            <button
+                                type="button"
+                                className={ACTION_CLASS}
+                                style={{ minHeight: 0, minWidth: 0 }}
+                                onClick={onRemove}
+                                aria-label={t('chat.chatInput.contextPreview.remove')}
+                            >
+                                <Icon name="delete-bin" className="h-3.5 w-3.5" />
+                            </button>
+                        </HoverTooltip>
                     </div>
                 </div>
             )}

@@ -43,6 +43,7 @@ description: 自定义 OpenChamber 自动化流程背后的内置提示词。
 | --- | --- | --- |
 | 提交信息生成 | git 视图提交框中的生成按钮，以及移动端 Changes 页面 | 你生成提交信息时。会填入选中的文件和分支最近的提交主题，让提交信息符合仓库的现有风格。 |
 | PR 生成 | git 视图 PR 标签页中的创建 pull request 表单 | 你生成 PR 标题和正文时。会填入 base 和 head 分支、两者之间的提交和变更文件、你补充的附加上下文，以及仓库的 PR 模板（如果存在）。 |
+| 改动导读 | 改动导读面板 | 你生成导读时。默认为空。你写下的内容会作为语气、重点和详写什么的偏好加进导读的提示词，但不会改变导读的格式。 |
 | merge/rebase 冲突解决 | git 视图中的冲突对话框，当 merge 或 rebase 因冲突停止时 | 你选择 "Resolve in current session" 或 "Resolve in new session"。智能体会阅读冲突文件，为每个文件提出解决策略，并等你确认后才编辑、暂存或继续操作。 |
 | cherry-pick 冲突解决 | worktree 会话的 "Re-integrate commits" 区域 | 把会话的提交迁移到目标分支时遇到冲突并交给智能体。智能体在临时 worktree 中解决冲突、暂存文件并继续 cherry-pick。 |
 

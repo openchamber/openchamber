@@ -12,8 +12,6 @@ description: Use when creating or modifying OpenChamber Settings pages, dialogs,
 - Load `locale-ui-patterns` for every visible string, tooltip, placeholder, and accessible label.
 - Load `ui-api-decoupling` when a setting reads/writes runtime data or adds a capability, and write the surface list from its *Name The Surfaces Before Editing* step before adding or moving a settings page: a page that exists on desktop and is unreachable on a phone is the common way this goes wrong.
 
-When examples conflict, shared component/theme and localization contracts win. Stop on unresolved material conflicts.
-
 ## Canonical Direction
 
 Settings are built from the shared primitives in
@@ -27,7 +25,7 @@ shape is genuinely missing.
 - Secondary helper text is hidden behind an info icon (`info` prop) by default; the default view stays quiet.
 - Controls have one standard size (`h-9` / select `size="settings"`) and capped widths — no full-bleed inputs.
 - Layouts respond to the settings pane width via container queries (`@xl:` / `@3xl:`), never viewport `sm:`/`lg:` breakpoints (the pane is much narrower than the viewport inside the dialog).
-- Checkbox/radio state comes before labels; selected states are subtle and never shift layout.
+- Checkbox/radio state comes before labels; selected states are subtle.
 
 ## Keep A Page From Turning Into A List
 
@@ -73,12 +71,12 @@ Load each reference whose task branch applies; reference loading is complete whe
 | Two-column area on wide panes | `SettingsTwoColumn` |
 | Helper text on demand (hover + tap) | `info` prop or `SettingsInfoHint` |
 
-Do not introduce raw `<Tooltip>`-based info icons, direct Remixicon components, hardcoded user-facing strings, or one-off color/button systems. New icons: reference a Remix icon name in code, then run `bun run icons:generate` to add it to the sprite.
+Do not introduce raw `<Tooltip>`-based info icons.
 
 ## Description Policy (info hints)
 
 - Explanatory prose goes behind the info icon via the `info` prop by default.
-- An info hint is one or two short sentences that add what the label or summary does not say. It names no list of every action and carries no caveat that stopped being true (for example "applies after OpenCode restarts" for tools that now apply live).
+- An info hint is one or two short sentences that add what the label or summary does not say. It names no list of every action and carries no caveat that stopped being true.
 - When labels alone cannot explain the differences, consequences, or conditions needed to choose a setting, use a title, a visible description, then checkbox or radio controls. Option lists whose labels already read as complete choices (large-text paste modes, send shortcut) keep the explanation behind `info` even when it carries an exception. Having multiple options or a group title alone does not require a description; see `references/controls.md` for composition.
 - Stays visible: security/data-loss warnings, destructive consequences, required syntax/placeholder lists the user reads while typing, dynamic status, empty states, validation errors, active-flow wizard instructions.
 - Mixed text: keep the warning sentence visible, move the explanation to `info`.
@@ -86,6 +84,8 @@ Do not introduce raw `<Tooltip>`-based info icons, direct Remixicon components, 
 ## Save Feedback
 
 `SettingsPageLayout showSaveStatus` renders the shared quiet indicator: success is silent, "Saving…" appears only past ~500 ms, failures show "Save failed". Anything persisted through `updateDesktopSettings` reports automatically; page-specific APIs must call `reportSettingsSaveState` from `@/lib/persistence`. Never add per-page save badges or success toasts for ordinary setting writes.
+
+The OpenCode configuration pages autosave by their own contract (`components/sections/DOCUMENTATION.md`, *Autosave*) and never use this indicator.
 
 ## Settings Search Contract
 
@@ -105,6 +105,5 @@ Dynamic entity rows normally are not indexed. Load `references/search.md` for ex
 - Description placement follows the policy above; warnings/syntax/status remain visible.
 - Container-query (`@xl:`/`@3xl:`) responsiveness — no viewport breakpoints in pane content.
 - Controls use the standard size and width caps; no stretched full-width inputs.
-- Localized visible and accessibility text everywhere.
 - Search registry, anchor, page, localization, and availability agree.
 - Nearby Settings precedent and relevant tests remain consistent.

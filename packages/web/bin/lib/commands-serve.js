@@ -10,7 +10,7 @@ import { rotateLogFile } from './cli-log-files.js';
 import { discoverOpenChamberInstanceOnPort, isDesktopRuntimeForPort } from './cli-lifecycle.js';
 import { getPidFilePath, getInstanceFilePath, writePidFile, writeInstanceOptions, removePidFile, removeInstanceFile, isProcessRunning, terminateProcessTree } from './cli-process.js';
 import { isNetworkExposedBindHost } from '../../server/lib/security/bind-host.js';
-import { assignInjectedEnv } from '../../server/lib/injected-env.js';
+import { assignInjectedEnv, injectedEnvKeys, withoutInjectedEnv } from '../../server/lib/injected-env.js';
 import {
   intro as clackIntro,
   outro as clackOutro,
@@ -26,9 +26,8 @@ const DAEMON_READY_TIMEOUT_MS = 30000;
 
 function createServeCommand({
   serverPath,
-  bunBin,
   checkOpenCodeCLI,
-  getPreferredServerRuntime,
+  getServerRuntimeBinary,
   setForegroundServerActive,
   setForegroundShutdown,
 }) {
@@ -102,8 +101,7 @@ async function serveCommand(options) {
     }
 
     const opencodeBinary = await checkOpenCodeCLI(emitNotice);
-    const preferredRuntime = getPreferredServerRuntime();
-    const runtimeBin = preferredRuntime === 'bun' ? bunBin : process.execPath;
+    const runtimeBin = getServerRuntimeBinary();
 
     ensureLogsDir();
     const initialLogPort = targetPort === 0 ? 'auto' : String(targetPort);
@@ -161,6 +159,9 @@ async function serveCommand(options) {
       if (opencodeBinary) {
         process.env.OPENCODE_BINARY = opencodeBinary;
       }
+      // Started from a shell OpenChamber opened, this is a server of its own:
+      // the other instance's web assets, runtime and OpenCode wiring go.
+      for (const key of injectedEnvKeys(process.env)) delete process.env[key];
       assignInjectedEnv(process.env, {
         OPENCHAMBER_UI_PASSWORD: effectiveUiPassword || undefined,
         OPENCHAMBER_HOST: effectiveHost,
@@ -283,9 +284,10 @@ async function serveCommand(options) {
       detached: true,
       windowsHide: true,
       stdio: ['ignore', logFd, logFd, 'ipc'],
-      // Same marking as the foreground path above: the server's own settings
-      // are recorded as OpenChamber's, the binary path is not.
-      env: assignInjectedEnv({ ...process.env, OPENCODE_BINARY: opencodeBinary }, {
+      // Same as the foreground path above: what the shell's own OpenChamber
+      // put there goes, the server's own settings are recorded as
+      // OpenChamber's, the binary path is not.
+      env: assignInjectedEnv({ ...withoutInjectedEnv(process.env), OPENCODE_BINARY: opencodeBinary }, {
         OPENCHAMBER_PORT: String(targetPort),
         OPENCHAMBER_RUNTIME: 'web',
         OPENCHAMBER_HOST: effectiveHost,

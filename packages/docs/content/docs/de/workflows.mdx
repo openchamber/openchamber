@@ -1,0 +1,54 @@
+---
+title: Workflows
+description: Lass einen Agenten eine große Aufgabe auf viele Agenten verteilen, die im Hintergrund laufen.
+---
+
+# Workflows
+
+Ein Workflow teilt eine große Aufgabe in viele kleine Teile und gibt jedem Teil einen eigenen Agenten. Der Agent in deiner Sitzung schreibt ein kurzes Skript, das festlegt, welche Agenten starten und was jeder gefragt wird. OpenChamber führt das Skript im Hintergrund aus, sodass deine Sitzung frei bleibt, während die Agenten arbeiten. Wenn der Lauf endet, kommt sein Bericht in die Sitzung zurück.
+
+Workflows passen zu Arbeit mit vielen ähnlichen, voneinander unabhängigen Teilen: ein Review jeder geänderten Datei, ein Audit jeder API-Route, eine Migration über viele Dateien oder eine Recherche, bei der jede Quelle einzeln geprüft wird. Ein einzelnes Feature oder ein paar Schritte gehen in einer Sitzung schneller.
+
+## Einschalten
+
+Das Workflow-Werkzeug ist standardmäßig aus. Öffne **Einstellungen → Allgemein → OpenChamber-Werkzeuge** und schalte **Workflow-Werkzeug** ein. Laufende Sitzungen erhalten es beim nächsten Zug. Schaltest du es wieder aus, verschwinden das Werkzeug und die Anweisungen dazu aus jeder Sitzung, und das Workflows-Panel wird ausgeblendet. Vorhandene Läufe sind wieder da, sobald du es einschaltest.
+
+Workflows brauchen den eigenen OpenCode-Server von OpenChamber. Sie sind nicht verfügbar, wenn OpenChamber über `OPENCODE_HOST` oder skip-start mit einem externen OpenCode-Server verbunden ist, und nicht in der VS-Code-Erweiterung.
+
+## Einen Workflow ausführen
+
+1. Bitte in natürlicher Sprache um einen, zum Beispiel: "Führe einen Workflow aus, der jede auf diesem Branch geänderte Datei prüft und die gefundenen Bugs auflistet."
+2. Der Agent schlägt einen Plan und für jede Phase ein Modell vor. Einigt euch auf die Modelle, bevor der Lauf startet: siehe [Modelle und Kosten](#modelle-und-kosten).
+3. Im Chat erscheint eine Karte mit dem Plan. Wähle **Workflow ausführen**, um ihn zu starten, oder **Nicht ausführen**, um ihn zu verwerfen. Nichts läuft, bevor du dich entscheidest.
+4. Während er läuft, zeigt die Karte jede Phase und jeden Agenten. Die Zeile der Sitzung in der Seitenleiste zeigt **Workflow läuft**, und der Abschnitt **Workflows** im Arbeitsstatus-Panel listet den Lauf auf. Wähle **Stoppen**, um ihn vorzeitig zu beenden.
+5. Wenn der Lauf endet, kommt sein Bericht als Nachricht in die Sitzung. Ein fertiger oder fehlgeschlagener Lauf weckt den Agenten, damit er auf das Ergebnis reagieren kann. Ein Lauf, den du gestoppt oder abgelehnt hast, tut das nicht.
+
+Ein gestoppter oder fehlgeschlagener Lauf lässt sich mit **Fortsetzen** weiterführen. Agenten, die bereits geantwortet haben, behalten ihre Antworten, und nur die übrigen laufen erneut.
+
+Agenten eines laufenden Workflows können keinen eigenen Workflow starten.
+
+## Modelle und Kosten
+
+Jeder Agent in einem Workflow läuft mit dem Modell deiner Sitzung, sofern das Skript kein anderes nennt. Dutzende Agenten auf einem Spitzenmodell kosten ein Vielfaches dessen, was dieselbe Arbeit auf einem kleinen Modell kostet. Deshalb schlägt der Agent ein Modell pro Phase vor: ein günstiges zum Lesen und zum Prüfen gegen eine feste Liste, ein stärkeres dort, wo eine Phase abwägen muss oder schreibt, was in deinem Projekt landet. Passt dir die Wahl nicht, ändere sie, bevor du den Lauf freigibst.
+
+Höchstens 8 Agenten arbeiten gleichzeitig, und ein Lauf startet über alle seine Versuche hinweg höchstens 200 Agenten.
+
+## Das Workflows-Panel
+
+Das Panel **Workflows** in der rechten Leiste zeigt die Läufe des Projekts: ihre Agenten, das Protokoll, das Ergebnis und das Skript, mit Modell und Token-Verbrauch jedes Agenten. Von dort oder von der Karte im Chat öffnest du die Sitzung jedes Agenten, um sein vollständiges Gespräch zu lesen. Das Symbol erscheint, sobald das Projekt einen Lauf oder einen gespeicherten Workflow hat.
+
+Workflow-Agenten erscheinen nicht in der Sitzungs-Seitenleiste, da ein Lauf hundert davon starten kann. Sie bleiben über die Karte des Laufs und das Workflows-Panel erreichbar.
+
+**Lauf löschen** entfernt einen beendeten Lauf aus dem Panel. Die Sitzungen der Agenten bleiben erhalten.
+
+## Gespeicherte Workflows
+
+Bitte den Agenten, einen Workflow zu speichern, den du erneut ausführen willst. Er wird als `.openchamber/workflows/<name>.js` im Projekt abgelegt, sodass du ihn mit dem Rest des Repositorys committen kannst.
+
+Starte einen gespeicherten Workflow über **Gespeicherte Workflows** in der Laufauswahl des Panels. Er startet sofort, in der geöffneten Sitzung oder in einer neuen, und sein Bericht kommt in diese Sitzung zurück. Du kannst den Agenten auch bitten, ihn über seinen Namen auszuführen.
+
+## Verwandt
+
+- [Agenten-Steuerungswerkzeug](/de/agent-control-tool/): die anderen OpenChamber-Werkzeuge, die Agenten erhalten
+- [Projektnotizen, Todos & Pläne](/de/notes-todos-plans/): die Werkzeuge für Projektwissen und Gedächtnis
+- [Nutzung & Kontingente](/de/usage/): was deine Sitzungen kosten

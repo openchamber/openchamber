@@ -244,6 +244,69 @@ describe('session image assets', () => {
     ]);
   });
 
+  it('authorizes the files a finished openchamber_image call saved, and no others', async () => {
+    const fixture = await createFixture({ sources: [] });
+    const madePath = path.join(fixture.directory, 'made.png');
+    const failedPath = path.join(fixture.directory, 'failed.png');
+    await Promise.all([madePath, failedPath].map((file) => fs.writeFile(file, PNG)));
+    const envelope = (ok, file) => JSON.stringify({ schemaVersion: 1, ok, action: 'image.generate', data: { images: [{ path: file }] } });
+    fixture.fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+      id: 'msg_1',
+      type: 'assistant',
+      content: [
+        { type: 'tool', name: 'openchamber_image', id: 'call_1', state: { status: 'completed', input: {}, content: [{ type: 'text', text: envelope(true, madePath) }] } },
+        { type: 'tool', name: 'openchamber_image', id: 'call_2', state: { status: 'completed', input: {}, content: [{ type: 'text', text: envelope(false, failedPath) }] } },
+      ],
+    }), { status: 200, headers: { 'content-type': 'application/json' } }));
+
+    const response = await prepare(fixture.app, fixture.directory, [madePath, failedPath]);
+    expect(response.body.results).toEqual([
+      { source: madePath, status: 'ready', path: madePath },
+      { source: failedPath, status: 'error' },
+    ]);
+  });
+
+  it('authorizes the screenshot a browser.capture call saved, behind Code Mode too, and no others', async () => {
+    const fixture = await createFixture({ sources: [] });
+    const shots = ['direct', 'script', 'quoted', 'failed', 'other'].map((name) => `.openchamber/screenshots/${name}.png`);
+    await fs.mkdir(path.join(fixture.directory, '.openchamber', 'screenshots'), { recursive: true });
+    await Promise.all(shots.map((file) => fs.writeFile(path.join(fixture.directory, file), PNG)));
+    const envelope = (ok, file, action = 'browser.capture') => JSON.stringify({ schemaVersion: 1, ok, action, data: { path: file } });
+    const tool = (name, id, text) => ({ type: 'tool', name, id, state: { status: 'completed', input: {}, content: [{ type: 'text', text }] } });
+    fixture.fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+      id: 'msg_1',
+      type: 'assistant',
+      content: [
+        tool('openchamber_web', 'call_1', envelope(true, shots[0])),
+        tool('execute', 'call_2', envelope(true, shots[1])),
+        tool('execute', 'call_3', JSON.stringify(envelope(true, shots[2]))),
+        tool('execute', 'call_4', envelope(false, shots[3])),
+        tool('execute', 'call_5', envelope(true, shots[4], 'browser.snapshot')),
+      ],
+    }), { status: 200, headers: { 'content-type': 'application/json' } }));
+
+    const response = await prepare(fixture.app, fixture.directory, shots);
+    expect(response.body.results.map((result) => result.status)).toEqual(['ready', 'ready', 'ready', 'error', 'error']);
+  });
+
+  it('matches a generated file with spaces or other letters however Markdown encoded it', async () => {
+    const fixture = await createFixture({ sources: [] });
+    const folder = path.join(fixture.directory, 'my images');
+    await fs.mkdir(folder, { recursive: true });
+    const madePath = path.join(folder, 'маяк.png');
+    await fs.writeFile(madePath, PNG);
+    const text = JSON.stringify({ schemaVersion: 1, ok: true, action: 'image.generate', data: { images: [{ path: madePath }] } });
+    fixture.fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+      id: 'msg_1',
+      type: 'assistant',
+      content: [{ type: 'tool', name: 'openchamber_image', id: 'call_1', state: { status: 'completed', input: {}, content: [{ type: 'text', text }] } }],
+    }), { status: 200, headers: { 'content-type': 'application/json' } }));
+
+    const encoded = encodeURI(madePath);
+    const response = await prepare(fixture.app, fixture.directory, [encoded]);
+    expect(response.body.results).toEqual([expect.objectContaining({ source: encoded, status: 'ready' })]);
+  });
+
   it('prepares every image a page or a text names in one request, past twelve', async () => {
     const fixture = await createFixture({ sources: [] });
     const files = Array.from({ length: 19 }, (_, index) => path.join(fixture.directory, `poster-${index + 1}.png`));

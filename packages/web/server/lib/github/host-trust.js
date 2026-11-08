@@ -19,22 +19,13 @@ import yaml from 'yaml';
 import { z } from 'zod';
 
 import { createSourceControlAuthStore } from '../source-control/auth-storage.js';
+import { ghConfigDir } from './gh-config.js';
 
 const dataDir = () => process.env.OPENCHAMBER_DATA_DIR
   ? resolve(process.env.OPENCHAMBER_DATA_DIR)
   : join(homedir(), '.config', 'openchamber');
 
 const normalizeHost = (value) => String(value ?? '').trim().toLowerCase();
-
-// hosts.yml lives in the gh config dir: $GH_CONFIG_DIR when set, otherwise
-// ~/.config/gh — exactly the one directory gh itself reads (gh never falls
-// back to the default when GH_CONFIG_DIR is set, so neither do we: an
-// explicitly set config dir without a login is "not trusted", not a reason to
-// consult the default).
-const hostsYamlPath = () => {
-  const configDir = process.env.GH_CONFIG_DIR?.trim() || join(homedir(), '.config', 'gh');
-  return join(configDir, 'hosts.yml');
-};
 
 // The YAML arrives untyped, so it is validated at its I/O boundary. The
 // document is a map of host -> entry; each entry is validated on its own so
@@ -57,7 +48,7 @@ const hostsDocSchema = z.record(z.string(), z.unknown()).nullable();
 
 const loadHostsYaml = () => {
   try {
-    const parsed = yaml.parse(readFileSync(hostsYamlPath(), 'utf8'));
+    const parsed = yaml.parse(readFileSync(join(ghConfigDir(), 'hosts.yml'), 'utf8'));
     const result = hostsDocSchema.safeParse(parsed);
     if (!result.success) {
       return null;

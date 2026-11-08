@@ -91,12 +91,17 @@ function requestIssueNumber(value) {
   return Number.isSafeInteger(number) ? number : null;
 }
 
-/** A list's state and whose items, from the query; unknown values read as open and anyone. */
+/**
+ * A list's state and whose items, from the query; unknown values read as open
+ * and anyone. `unanswered` narrows a list of discussions to open questions
+ * without an answer; no other list has it.
+ */
 function readListFilter(query) {
   const state = requestText(query?.state);
   const people = requestText(query?.people);
+  const states = requestText(query?.kind) === 'discussion' ? ['open', 'closed', 'all', 'unanswered'] : ['open', 'closed', 'merged', 'all'];
   return {
-    state: ['open', 'closed', 'merged', 'all'].includes(state) ? state : 'open',
+    state: states.includes(state) ? state : 'open',
     people: ['any', 'assigned', 'created', 'reviewRequested'].includes(people) ? people : 'any',
   };
 }
@@ -238,6 +243,14 @@ const MUTATION_ROUTES = [
   ['/issues/labels', 'labels'],
   ['/pr/reviewers', 'reviewers'],
   ['/pr/review', 'reviews'],
+  ['/pr/review/comment', 'reviewDrafts'],
+  ['/pr/review/comment/update', 'reviewDrafts'],
+  ['/pr/review/comment/delete', 'reviewDrafts'],
+  ['/pr/review/discard', 'reviewDrafts'],
+  ['/discussions/comment', 'discussions'],
+  ['/discussions/state', 'discussions'],
+  ['/discussions/answer', 'discussions'],
+  ['/discussions/labels', 'discussions'],
 ];
 
 /**
@@ -250,6 +263,8 @@ export function registerProviderRoutes(app, {
   validateReadContext,
   validateMutationContext,
   mutationExecutor,
+  onMutationSucceeded = async () => {},
+  onMutationStarting = () => null,
   oauthFlowRegistry = createOAuthFlowRegistry(),
 }) {
   const statusCaches = new Map();
@@ -396,15 +411,23 @@ export function registerProviderRoutes(app, {
       return kind === 'unreachable' || kind === 'temporarily-unavailable';
     };
 
-    const readContextOf = (req, instance, directory) => validateReadContext?.({
-      directory,
-      repositoryId: req.query?.repositoryId,
-      provider: id,
-      instance,
-      accountId: req.query?.accountId,
-      bindingRevision: Number(req.query?.bindingRevision),
-      primaryRemote: req.query?.primaryRemote,
-    });
+    /**
+     * `linked=1` asks to read an item a link names wherever its repository
+     * is, with the bound account. Only these reads honour it: writes validate
+     * their own context, so the network still decides what can be changed.
+     */
+    const readContextOf = async (req, instance, directory) => {
+      const context = await validateReadContext?.({
+        directory,
+        repositoryId: req.query?.repositoryId,
+        provider: id,
+        instance,
+        accountId: req.query?.accountId,
+        bindingRevision: Number(req.query?.bindingRevision),
+        primaryRemote: req.query?.primaryRemote,
+      });
+      return context && req.query?.linked === '1' ? { ...context, linked: true } : context;
+    };
 
     /**
      * A bound read: validates the context before any credential lookup, then
@@ -600,6 +623,30 @@ export function registerProviderRoutes(app, {
       }
     });
 
+    const takesSshUrl = descriptor.settings.some((field) => field.key === 'sshUrl');
+    target.post(authPaths('/auth/ssh-url'), async (req, res) => {
+      let impl;
+      try {
+        impl = await loadImplementation(id);
+        if (!takesSshUrl || !(impl.auth.setSshUrl instanceof Function)) return unsupportedCapability(res);
+        let instance;
+        try { instance = requestInstance(req); }
+        catch (error) { return res.status(400).json({ error: error.message }); }
+        const value = req.body?.sshUrl;
+        if (value !== undefined && value !== null && !isString(value)) {
+          return res.status(400).json({ error: 'sshUrl must be a string' });
+        }
+        return res.json(await impl.auth.setSshUrl({ instance, sshUrl: isString(value) ? value : null }));
+      } catch (error) {
+        const lockResponse = sendAuthStorageError(res, error);
+        if (lockResponse) return lockResponse;
+        const answered = sendProviderResponse(res, error);
+        if (answered) return answered;
+        const kind = impl ? impl.classifyFailure(error) : 'provider-error';
+        return res.status(errorStatus(kind)).json({ error: error?.message || `Failed to save ${label} SSH URL` });
+      }
+    });
+
     target.post(authPaths('/auth/activate'), async (req, res) => {
       try {
         const impl = await loadImplementation(id);
@@ -719,31 +766,48 @@ export function registerProviderRoutes(app, {
       const record = (target) => ({ key: context.idempotencyKey, inputDigest: prepared.digest(target), kind, actor, target });
       const classifyError = impl.mutations.classifyError ?? classifyMutationError;
       let execution;
-      if (existing) {
-        requireReplayMatch(existing, kind, actor, context);
-        let replayResolution;
-        const resolveReplay = async () => {
-          replayResolution ??= await impl.mutations.resolveTarget({ session, context, kind, input, replayOf: existing });
-          return replayResolution;
-        };
-        execution = await mutationExecutor.execute({
-          record: record(existing.target),
-          providerAccountId: session.providerUserId,
-          perform: () => { throw mutationConflict(); },
-          reconcile: async () => impl.mutations.reconcile({ session, route, kind, input, resolved: await resolveReplay() }),
-          classifyError,
-        });
-      } else {
-        const resolved = await impl.mutations.resolveTarget({ session, context, kind, input });
-        execution = await mutationExecutor.execute({
-          record: record(resolved.target),
-          providerAccountId: session.providerUserId,
-          perform: () => impl.mutations.perform({ session, route, kind, input, resolved }),
-          reconcile: () => impl.mutations.reconcile({ session, route, kind, input, resolved }),
-          classifyError,
-        });
+      let settleStarted = null;
+      const starting = (target) => {
+        try { settleStarted = onMutationStarting({ context, kind, input, target }) ?? null; }
+        catch { settleStarted = null; }
+      };
+      try {
+        if (existing) {
+          starting(existing.target);
+          requireReplayMatch(existing, kind, actor, context);
+          let replayResolution;
+          const resolveReplay = async () => {
+            replayResolution ??= await impl.mutations.resolveTarget({ session, context, kind, input, replayOf: existing });
+            return replayResolution;
+          };
+          execution = await mutationExecutor.execute({
+            record: record(existing.target),
+            providerAccountId: session.providerUserId,
+            perform: () => { throw mutationConflict(); },
+            reconcile: async () => impl.mutations.reconcile({ session, route, kind, input, resolved: await resolveReplay() }),
+            classifyError,
+          });
+        } else {
+          const resolved = await impl.mutations.resolveTarget({ session, context, kind, input });
+          starting(resolved.target);
+          execution = await mutationExecutor.execute({
+            record: record(resolved.target),
+            providerAccountId: session.providerUserId,
+            perform: () => impl.mutations.perform({ session, route, kind, input, resolved }),
+            reconcile: () => impl.mutations.reconcile({ session, route, kind, input, resolved }),
+            classifyError,
+          });
+        }
+        statusCache.invalidate({ instance: context.instance, accountId: context.accountId, repositoryId: context.repositoryId });
+        try { await onMutationSucceeded({ context, kind, input, record: execution.record, replayed: execution.replayed }); }
+        catch (error) {
+          // The provider write is already durable. Notification bookkeeping
+          // cannot turn an accepted merge into an apparent failed mutation.
+          console.warn('[source-control] post-mutation follow failed:', error?.code ?? 'FOLLOW_FAILED');
+        }
+      } finally {
+        settleStarted?.();
       }
-      statusCache.invalidate({ instance: context.instance, accountId: context.accountId, repositoryId: context.repositoryId });
       // Cache invalidation after the write is durable and best effort: the write
       // landed, and a stale cache must not turn that into an error.
       if (impl.mutations.afterSuccess instanceof Function) {
@@ -802,19 +866,23 @@ export function registerProviderRoutes(app, {
     // The reference picker: a searched page of issues or change requests, the
     // same search across several folders, an item's detail, and what colours
     // the change requests a page shows.
+    // Discussions are one more kind where the host keeps them; elsewhere asking for them is unsupported.
+    const discussions = descriptor.capabilities.discussions === true;
     boundRead('referencePicker', '/references', async ({ req, res, impl, instance, directory, trustedContext }) => {
+      const kind = requestText(req.query?.kind);
+      if (kind === 'discussion' && !discussions) return unsupportedCapability(res);
       const read = requireResource(impl, 'references');
       const session = await sessionFor(impl, instance, trustedContext.accountId);
       return res.json(await read({
         session, directory, context: trustedContext, remote: trustedContext.primaryRemote,
-        kind: requestText(req.query?.kind),
+        kind,
         ...readListFilter(req.query),
         query: requestText(req.query?.query),
         cursor: requestText(req.query?.cursor) || null,
       }));
     }, {
-      validate: (req) => (!requestText(req.query?.directory) || !['issue', 'pull'].includes(requestText(req.query?.kind))
-        ? 'directory and kind (issue or pull) are required' : null),
+      validate: (req) => (!requestText(req.query?.directory) || !['issue', 'pull', 'discussion'].includes(requestText(req.query?.kind))
+        ? 'directory and kind (issue, pull or discussion) are required' : null),
     });
 
     // Every folder's context is validated, and read with its own account, by the provider.
@@ -833,7 +901,10 @@ export function registerProviderRoutes(app, {
       }
     });
 
+    // `kind=discussion` reads a discussion; without it, the issue or change request the number names.
     boundRead('referencePicker', '/references/detail', async ({ req, res, impl, instance, directory, trustedContext }) => {
+      const kind = requestText(req.query?.kind) === 'discussion' ? 'discussion' : 'item';
+      if (kind === 'discussion' && !discussions) return unsupportedCapability(res);
       const read = requireResource(impl, 'referenceDetail');
       const session = await sessionFor(impl, instance, trustedContext.accountId);
       return res.json(await read({
@@ -841,6 +912,21 @@ export function registerProviderRoutes(app, {
         project: optionalProject(req),
         number: requestIssueNumber(req.query?.number),
         host: requestText(req.query?.host),
+        kind,
+      }));
+    }, {
+      validate: (req) => (!requestText(req.query?.directory) || !namesProject(req)
+        || !requestIssueNumber(req.query?.number) ? 'directory, owner, repo and number are required' : null),
+    });
+
+    // A change request's review as the diff draws it: the viewer's draft and the threads on its lines.
+    boundRead('reviewDrafts', '/pr/review/state', async ({ req, res, impl, directory, instance, trustedContext }) => {
+      const read = requireResource(impl, 'reviewState');
+      const session = await sessionFor(impl, instance, trustedContext.accountId);
+      return res.json(await read({
+        session, directory, context: trustedContext, remote: trustedContext.primaryRemote,
+        project: optionalProject(req),
+        number: requestIssueNumber(req.query?.number),
       }));
     }, {
       validate: (req) => (!requestText(req.query?.directory) || !namesProject(req)
@@ -1034,6 +1120,7 @@ export function registerProviderRoutes(app, {
       throw error;
     }
   };
+  const linkedRead = (context) => (context?.linked ? { linked: true } : {});
   const invalidProvider = () => Object.assign(new Error('Change request source provider is invalid'), {
     code: 'INVALID_SOURCE_CONTROL_READ_CONTEXT', status: 400,
   });
@@ -1061,8 +1148,10 @@ export function registerProviderRoutes(app, {
      * instance's current account when the named one no longer resolves
      * (`orCurrent`); GitHub does, GitLab does not.
      */
-    readLiveSummaries: async ({ provider, instance, accountId = null, refs, issueRefs }) => {
+    readLiveSummaries: async ({ provider, instance, accountId = null, refs, issueRefs, discussionRefs = [], details = false }) => {
       const impl = await loadImplementation(requireProvider(provider));
+      // A host without discussions is never asked about them; they stay unanswered (unknown).
+      const askedDiscussions = providers.describe(provider).capabilities.discussions === true ? discussionRefs : [];
       if (!(impl.resources?.liveSummaries instanceof Function)) return { connected: false };
       let session;
       try {
@@ -1073,15 +1162,15 @@ export function registerProviderRoutes(app, {
         if (error?.sourceControlAccountUnavailable) return { connected: false };
         throw error;
       }
-      return { connected: true, ...(await impl.resources.liveSummaries({ session, refs, issueRefs })) };
+      return { connected: true, ...(await impl.resources.liveSummaries({ session, refs, issueRefs, discussionRefs: askedDiscussions, details })) };
     },
     /** `revision` (40-hex) only for a provider that keeps revisions; others refuse it with 400. */
     readChangeRequestPatch: async ({ context, number, sourceRepo, revision }) => readWithBoundAccount(
-      context, 'readChangeRequestPatch', withRevision({ number, sourceRepo }, readRevision(providers.describe(context?.provider), revision)),
+      context, 'readChangeRequestPatch', withRevision({ number, sourceRepo, ...linkedRead(context) }, readRevision(providers.describe(context?.provider), revision)),
     ),
-    readChangeRequestFile: async ({ context, number, sourceRepo, path, previousPath, status, revision }) => readWithBoundAccount(
+    readChangeRequestFile: async ({ context, number, sourceRepo, path, previousPath, status, revision, binary }) => readWithBoundAccount(
       context, 'readChangeRequestFile',
-      withRevision({ number, sourceRepo, path, previousPath, status }, readRevision(providers.describe(context?.provider), revision)),
+      withRevision({ number, sourceRepo, path, previousPath, status, binary: binary || undefined, ...linkedRead(context) }, readRevision(providers.describe(context?.provider), revision)),
     ),
     /** A change request's head on the context's primary project network, for a worktree made from it. */
     readChangeRequestHead: (input) => trustedRead(input, 'readChangeRequestHead', () => ({ number: input.number })),

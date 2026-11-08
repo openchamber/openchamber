@@ -114,7 +114,16 @@ const descriptorSchema = z.object({
     })).max(16),
   }),
   /** Path patterns: `{owner}`, `{namespace+}` (one or more segments), `{repo}`, `{number}`, literal segments. */
-  urls: z.object({ changeRequest: urlPatternsSchema, issue: urlPatternsSchema }),
+  urls: z.object({
+    changeRequest: urlPatternsSchema,
+    issue: urlPatternsSchema,
+    // A host's discussions, where it keeps them; a pattern this version cannot read leaves none.
+    discussion: urlPatternsSchema.default([]).catch([]),
+    // Where a commit (`{sha}` in place of `{number}`) and a person (`/{user}`)
+    // live, for links in item text. A host that names none gets no such links.
+    commit: urlPatternsSchema.default([]).catch([]),
+    user: urlPatternsSchema.default([]).catch([]),
+  }),
   // A feature an older server does not name is off.
   features: z.object({
     referenceSearch: z.boolean().default(false),
@@ -122,6 +131,9 @@ const descriptorSchema = z.object({
     listStatuses: z.boolean().default(false),
     referencesAcross: z.boolean().default(false),
     startThread: z.boolean().default(false),
+    // The viewer's review draft on the host: comments on lines, sent with a verdict.
+    reviewDrafts: z.boolean().default(false),
+    reviewDraftFileComments: z.boolean().default(false),
     authorCanReview: z.boolean().default(false),
     projectUploads: z.boolean().default(false),
     issueCloseReason: z.boolean().default(false),
@@ -142,6 +154,8 @@ const descriptorSchema = z.object({
     createByPush: z.boolean().default(false).catch(false),
     /** A change request's head is a branch that can be checked out and stacked on. */
     branchHeads: z.boolean().default(true).catch(true),
+    /** The host keeps repository discussions, listed beside issues and change requests. */
+    discussions: z.boolean().default(false).catch(false),
   }),
   /**
    * The installed extension that serves this provider; absent for a built-in.
@@ -204,12 +218,12 @@ export const unknownProviderDescriptor = (id: string): SourceControlProviderDesc
     },
     auth: { methods: [], cliTransport: false },
     settings: { fields: [] },
-    urls: { changeRequest: [], issue: [] },
+    urls: { changeRequest: [], issue: [], discussion: [], commit: [], user: [] },
     features: {
       referenceSearch: false, referenceDetail: false, listStatuses: false, referencesAcross: false,
-      startThread: false, authorCanReview: false, projectUploads: false, issueCloseReason: false,
+      startThread: false, reviewDrafts: false, reviewDraftFileComments: false, authorCanReview: false, projectUploads: false, issueCloseReason: false,
       changeRequestTemplates: [], changeRequestPatch: false, reviewModel: 'verdict', revisions: false,
-      submitRequirements: false, createByPush: false, branchHeads: true,
+      submitRequirements: false, createByPush: false, branchHeads: true, discussions: false,
     },
   };
   unknownDescriptors.set(id, descriptor);

@@ -169,6 +169,7 @@ describe('ui auth client credential seam', () => {
     expect(typeof mintRes.body.token).toBe('string');
     expect(mintRes.body.token.startsWith('oc_url_')).toBe(true);
     expect(mintRes.body.expiresAt).toBeGreaterThan(Date.now());
+    expect(mintRes.body.expiresIn).toBe(60_000);
     expect(mintRes.getHeader('cache-control')).toBe('no-store');
 
     const urlToken = mintRes.body.token;

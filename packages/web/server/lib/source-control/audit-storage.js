@@ -20,9 +20,14 @@ const PROVIDER_OPERATIONS = new Set([
   'change-request-comment', 'change-request-review', 'issue-comment', 'change-request-state', 'issue-state',
   'change-request-labels', 'issue-labels', 'change-request-reviewers',
   'change-request-thread-reply', 'change-request-thread-resolve', 'change-request-thread-start',
+  'change-request-review-comment', 'change-request-review-comment-update', 'change-request-review-comment-delete', 'change-request-review-discard',
+  'discussion-comment', 'discussion-state', 'discussion-answer', 'discussion-labels',
 ]);
-// What a provider write acts on: `issue-*` names an issue, everything else a change request.
-const providerTargetKind = (operation) => (operation.startsWith('issue-') ? 'issue' : 'change-request');
+// What a provider write acts on: `issue-*` names an issue, `discussion-*` a discussion, everything else a change request.
+export const providerTargetKind = (operation) => {
+  if (operation.startsWith('issue-')) return 'issue';
+  return operation.startsWith('discussion-') ? 'discussion' : 'change-request';
+};
 const RESULT_STEPS = new Set([
   'validated', 'authenticated', 'transferred', 'updated-local-repository', 'checked-out', 'cleaned-up',
   'fetch:succeeded', 'fetch:skipped', 'fetch:conflicted', 'fetch:failed', 'fetch:cancelled',

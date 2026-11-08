@@ -1,19 +1,19 @@
 import type { UsageStats, UsageTokens } from '@/lib/opencode/session-stats';
 
-export type UsageRange = '7d' | '30d' | '90d' | 'all';
+export type UsageRange = '1d' | '7d' | '30d' | '90d' | 'all';
 
-export const USAGE_RANGES: readonly UsageRange[] = ['7d', '30d', '90d', 'all'];
+export const USAGE_RANGES: readonly UsageRange[] = ['1d', '7d', '30d', '90d', 'all'];
 
-const RANGE_DAYS = { '7d': 7, '30d': 30, '90d': 90 } satisfies Record<Exclude<UsageRange, 'all'>, number>;
+const RANGE_DAYS = { '1d': 1, '7d': 7, '30d': 30, '90d': 90 } satisfies Record<Exclude<UsageRange, 'all'>, number>;
 
 /** Past this many days the chart groups days into weeks so bars stay readable. */
 const MAX_DAILY_BARS = 92;
 
 /**
  * Start of the range in epoch ms: local midnight, so "7 days" means today plus
- * the six calendar days before it, matching the day buckets OpenCode builds
- * in the viewer's time zone. `all` has no start; OpenCode begins at the
- * oldest message.
+ * the six calendar days before it and "today" starts at this midnight,
+ * matching the day buckets OpenCode builds in the viewer's time zone. `all`
+ * has no start; OpenCode begins at the oldest message.
  */
 export function rangeStart(range: UsageRange, now: Date): number | undefined {
   if (range === 'all') return undefined;

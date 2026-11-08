@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import type { Session } from '@/lib/opencode/model';
 import type { SessionMetadataRecord } from './sessionReviewMetadata';
-import { buildLinkedGuestIssue, buildLinkedIssue, buildLinkedIssueId, buildLinkedTrackerItem, getDistinctLinkedIssues, toStoredLinkedIssue, getLinkedIssues, getLinkedSidebarChanges, getLinkedSidebarIssues, getRepositoryThreadRef, withLinkedIssue, type LinkedIssue } from './linkedIssues';
+import { buildLinkedDiscussion, buildLinkedGuestIssue, buildLinkedIssue, buildLinkedIssueId, buildLinkedTrackerItem, getDistinctLinkedIssues, toStoredLinkedIssue, getLinkedIssues, getLinkedSidebarChanges, getLinkedSidebarIssues, getRepositoryThreadRef, withLinkedIssue, type LinkedIssue } from './linkedIssues';
 import { acmeDescriptor, githubLikeDescriptor, gitlabLikeDescriptor } from './source-control/providers/descriptor.fixture';
 import { createRepositoryUrlMatcher } from './source-control/repositoryUrlMatcher';
 import { repositoryThread } from './trackedItems/fromLinks';
@@ -384,6 +384,24 @@ describe('getLinkedSidebarChanges', () => {
         repository: { key: 'gitlab|https://gitlab.com|a/b|pull#42', provider: 'gitlab', instance: 'https://gitlab.com', owner: 'a', repo: 'b', number: 42, thread: 'pull' },
       },
     ]);
+  });
+});
+
+describe('buildLinkedDiscussion', () => {
+  test('is an external link named by the address an agent gets for it, and reads back as a discussion', () => {
+    const url = 'https://github.com/owner/repo/discussions/5#discussioncomment-9';
+    const built = buildLinkedDiscussion({ url, number: 5, title: 'Idea', linkedAt: 3 });
+    // The id `session-link.js` writes for the same address, so the two are one entry.
+    expect(built).toEqual({ id: 'link:https://github.com/owner/repo/discussions/5', kind: 'external', thread: 'issue', identifier: '#5', title: 'Idea', url, linkedAt: 3 });
+    expect(getLinkedSidebarIssues(sessionWith([built]), matcher)).toEqual([{
+      source: 'repository', key: 'github|github.com|owner/repo|discussion#5', identifier: '#5', url, title: 'Idea',
+      ref: { key: 'github|github.com|owner/repo|discussion#5', provider: 'github', instance: 'github.com', owner: 'owner', repo: 'repo', number: 5, thread: 'discussion' },
+    }]);
+    expect(getLinkedSidebarChanges(sessionWith([built]), matcher)).toEqual([]);
+    // One an agent stored as a change before its address decided is still an issue.
+    const asChange = { ...built, thread: 'change' };
+    expect(getLinkedSidebarChanges(sessionWith([asChange]), matcher)).toEqual([]);
+    expect(getLinkedSidebarIssues(sessionWith([asChange]), matcher).map((entry) => entry.key)).toEqual(['github|github.com|owner/repo|discussion#5']);
   });
 });
 

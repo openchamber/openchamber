@@ -69,6 +69,15 @@ describe('buildLinkEntry', () => {
     expect(buildLinkEntry({ url: 'https://www.jira.example/browse/OPS-7', title: 'Outage', kind: 'issue' }, 1).entry.identifier).toBe('jira.example');
   });
 
+  test('a GitHub discussion is an external link under the id and number the UI gives one it links', () => {
+    expect(buildLinkEntry({ url: 'https://github.com/acme/app/discussions/5#discussioncomment-9', title: 'Idea', kind: 'issue' }, 1).entry).toEqual({
+      id: 'link:https://github.com/acme/app/discussions/5', kind: 'external', thread: 'issue', identifier: '#5',
+      title: 'Idea', url: 'https://github.com/acme/app/discussions/5', linkedAt: 1,
+    });
+    // Its address decides that it is no change, whatever kind the model gave.
+    expect(buildLinkEntry({ url: 'https://github.com/acme/app/discussions/5', title: 'Idea', kind: 'change' }, 1).entry.thread).toBe('issue');
+  });
+
   test('a GitLab thread gets one id however its address was written', () => {
     const ids = [
       'https://git.example.cn/team/sub/app/-/merge_requests/600',

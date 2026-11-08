@@ -15,12 +15,31 @@ import { unwrapOpenCodeResponse } from './response-envelope.js';
 import { z } from 'zod';
 
 const CHILDREN_PAGE_SIZE = 50;
+/** OpenCode's 30-minute image timeout, plus a minute. */
+const IMAGE_JOB_LIFETIME_MS = 31 * 60 * 1000;
 const CHILDREN_MAX_PAGES = 8;
 const MAX_SUBAGENT_DEPTH = 8;
 const sessionLineageSchema = z.object({ id: z.string().min(1), parentID: z.string().min(1).nullish() });
+const runningShellsSchema = z.array(z.object({
+  status: z.string(),
+  command: z.string(),
+  metadata: z.record(z.string(), z.unknown()).nullish(),
+  time: z.object({ started: z.number() }),
+}));
+const backgroundJobsSchema = z.array(z.object({
+  kind: z.string(),
+  sessionID: z.string(),
+  status: z.string(),
+  command: z.string().optional(),
+  time: z.object({ started: z.number() }),
+}));
 
-export const createSessionActivityProbe = ({ buildOpenCodeUrl, getOpenCodeAuthHeaders, timeoutMs = 10_000, fetchImpl = fetch }) => {
-  const openCodeGet = async (fetchPath, query, signal = AbortSignal.timeout(timeoutMs)) => {
+export const createSessionActivityProbe = ({ buildOpenCodeUrl, getOpenCodeAuthHeaders, timeoutMs = 10_000, fetchImpl = fetch, signal: parentSignal }) => {
+  const requestSignal = () => {
+    const timeout = AbortSignal.timeout(timeoutMs);
+    return parentSignal ? AbortSignal.any([parentSignal, timeout]) : timeout;
+  };
+  const openCodeGet = async (fetchPath, query, signal = requestSignal()) => {
     const base = buildOpenCodeUrl(fetchPath, '');
     const search = new URLSearchParams(query || {}).toString();
     const response = await fetchImpl(search ? `${base}?${search}` : base, {
@@ -84,7 +103,7 @@ export const createSessionActivityProbe = ({ buildOpenCodeUrl, getOpenCodeAuthHe
    */
   const hasWorkingDescendants = async (sessionId, statuses) => {
     const parents = new Map();
-    const signal = AbortSignal.timeout(timeoutMs);
+    const signal = requestSignal();
     let unknown = false;
     for (const activeId of Object.keys(statuses)) {
       if (activeId === sessionId) continue;
@@ -114,5 +133,71 @@ export const createSessionActivityProbe = ({ buildOpenCodeUrl, getOpenCodeAuthHe
     return unknown ? null : false;
   };
 
-  return { fetchActiveSessionStatuses, fetchChildSessionIds, hasWorkingChildren, hasWorkingDescendants };
+  /**
+   * Commands still running in a directory, each with the session that started
+   * it (`metadata.sessionID`, set by OpenCode's shell tool). `shell.list` is
+   * location-scoped, so the directory travels in the header; name only one
+   * that is already running. Null when OpenCode could not be asked.
+   */
+  const fetchRunningShells = async (directory) => {
+    const base = buildOpenCodeUrl('/api/shell', '');
+    const response = await fetchImpl(base, {
+      method: 'GET',
+      headers: {
+        Accept: 'application/json',
+        'x-opencode-directory': encodeURIComponent(directory),
+        ...getOpenCodeAuthHeaders(),
+      },
+      signal: requestSignal(),
+    }).catch(() => null);
+    if (!response?.ok) return null;
+    const parsed = runningShellsSchema.safeParse(unwrapOpenCodeResponse(await response.json().catch(() => null)));
+    if (!parsed.success) return null;
+    return parsed.data.flatMap((shell) => {
+      const owner = shell.metadata?.sessionID;
+      if (shell.status !== 'running' || typeof owner !== 'string' || !owner) return [];
+      return [{ sessionID: owner, command: shell.command, startedAt: shell.time.started }];
+    });
+  };
+
+  /**
+   * Background work still running for a session and every subagent under it:
+   * subagents, shell commands and image generations, each with the session
+   * that owns it. OpenCode's `job.list` (2.2.6+) is global, so it starts no
+   * folder. `undefined` when this OpenCode has no such route (an unknown route
+   * answers a bare 404), so the caller keeps its older reads; `null` when
+   * OpenCode could not be asked or no longer has the session.
+   */
+  const fetchRunningBackgroundJobs = async (sessionId) => {
+    const base = buildOpenCodeUrl('/api/experimental/job', '');
+    const search = new URLSearchParams({ sessionID: sessionId, descendants: 'true', status: 'running' });
+    const response = await fetchImpl(`${base}?${search}`, {
+      method: 'GET',
+      headers: { Accept: 'application/json', ...getOpenCodeAuthHeaders() },
+      signal: requestSignal(),
+    }).catch(() => null);
+    if (!response) return null;
+    const body = await response.json().catch(() => null);
+    if (response.status === 404 && !body?._tag) return undefined;
+    if (!response.ok) return null;
+    const parsed = backgroundJobsSchema.safeParse(unwrapOpenCodeResponse(body));
+    if (!parsed.success) return null;
+    const now = Date.now();
+    return parsed.data
+      .filter((job) => job.status === 'running')
+      // OpenCode gives up on an image after 30 minutes; one listed as running
+      // past that was left by an OpenCode that stopped mid-generation (2.2.6
+      // keeps it in the list after a restart), and would hold a goal forever.
+      .filter((job) => job.kind !== 'image' || now - job.time.started <= IMAGE_JOB_LIFETIME_MS)
+      .map((job) => ({ kind: job.kind, sessionID: job.sessionID, command: job.command, startedAt: job.time.started }));
+  };
+
+  return {
+    fetchActiveSessionStatuses,
+    fetchChildSessionIds,
+    hasWorkingChildren,
+    hasWorkingDescendants,
+    fetchRunningShells,
+    fetchRunningBackgroundJobs,
+  };
 };

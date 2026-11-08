@@ -1,13 +1,10 @@
 /**
- * Session archive state that OpenCode does not hold.
+ * Session archive state OpenChamber kept before OpenCode held it.
  *
- * OpenCode 2.1 archives sessions itself (`PATCH /api/session/{id}` with
+ * OpenCode archives sessions itself (`PATCH /api/session/{id}` with
  * `archived`), and `session-archive.js` sends every archive there. This file
- * keeps what OpenCode cannot take yet or at all:
- *
- * - a session of a removed worktree while it moves to its project's main
- *   folder, and for good when it cannot (the whole project is gone);
- * - entries written before 2.1 that the migration has not pushed yet.
+ * only drains: it holds entries written before 2.1, and for sessions of
+ * deleted directories before 2.2, until the migration pushes them.
  *
  * One JSON file per data dir, `{ [sessionID]: archivedAt | null }`, folded onto
  * the session records the proxy serves: a number archives, `null` is an
@@ -174,38 +171,6 @@ export const createArchiveStore = ({
     return { failedIds: [] };
   };
 
-  /** Applies a batch and rolls the memory back when the file write fails. */
-  const applyBatch = async (ids, archivedAt) => {
-    const targets = asIdList(ids);
-    if (targets.length === 0) return { applied: [], failedIds: [] };
-    return runExclusive(() => applyBatchExclusive(targets, archivedAt));
-  };
-
-  const applyBatchExclusive = async (targets, archivedAt) => {
-    const loadResult = await load();
-    if (!loadResult.ok || !writable) {
-      return { applied: [], failedIds: targets };
-    }
-
-    const previous = targets.map((id) => [id, entries.has(id) ? { value: entries.get(id) } : undefined]);
-    // `null` is kept as an entry on purpose: it tells the overlay to drop an
-    // archived stamp OpenCode still carries (migrated v1 sessions).
-    for (const id of targets) entries.set(id, archivedAt);
-
-    try {
-      await persist();
-    } catch (error) {
-      for (const [id, restore] of previous) {
-        if (restore === undefined) entries.delete(id);
-        else entries.set(id, restore.value);
-      }
-      console.warn('[openchamber-sessions] failed to persist archive state:', error?.message ?? error);
-      return { applied: [], failedIds: targets };
-    }
-
-    return { applied: targets, failedIds: [] };
-  };
-
   const getAll = async () => {
     await load();
     return snapshot();
@@ -229,15 +194,6 @@ export const createArchiveStore = ({
       const targets = asIdList(ids);
       if (targets.length === 0) return { failedIds: [] };
       return runExclusive(() => forgetExclusive(targets));
-    },
-    archive: async (ids, archivedAt) => {
-      const stamp = asTimestamp(archivedAt) ?? now();
-      const { applied, failedIds } = await applyBatch(ids, stamp);
-      return { archived: applied.map((id) => ({ id, archivedAt: stamp })), failedIds };
-    },
-    unarchive: async (ids) => {
-      const { applied, failedIds } = await applyBatch(ids, null);
-      return { restored: applied.map((id) => ({ id, archivedAt: null })), failedIds };
     },
     filePath,
   };

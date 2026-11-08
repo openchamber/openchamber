@@ -12,6 +12,7 @@ allowlist.
 ## Invariants
 
 - A failed scan answers 503, never an empty list.
+- Linux merges `lsof` and `/proc/net/tcp*` listeners by port. The `lsof` pid and command take priority so own-process exclusions still apply. A successful command does not prove that its listener list is complete.
 - `directory` is optional. It is present only where `lsof` named the process's
   folder: never on Windows (`netstat`) or from `/proc/net/tcp`, which a space's
   container reads while its image has no `lsof`. A missing folder means unknown,
@@ -25,6 +26,10 @@ allowlist.
   every port the panel can show, including the ones it hides by default.
 
 ## Decisions
+
+### Why kernel listeners supplement lsof
+
+An unprivileged `lsof` can exit successfully while omitting root-owned listeners, including Docker-published ports. Reading the kernel tables only after a failed command misses those ports. Merging both sources keeps them reachable, preserves command metadata and folders, and retains useful results when either source fails.
 
 ### Why the server reports folders and the panel decides, rather than filtering here
 

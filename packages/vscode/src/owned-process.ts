@@ -49,6 +49,7 @@ const taskkillTree = (child: ChildProcess) => (pid: number) => new Promise<void>
 });
 
 type OwnedProcessOptions = Pick<SpawnOptions, 'cwd' | 'env'> & {
+  input?: string;
   // Windows only: the child exits on its own once its stdin closes (OpenCode's
   // `serve --stdio` lease). Termination closes stdin first and tree-kills only
   // if the child is still running after this many milliseconds.
@@ -58,13 +59,14 @@ type OwnedProcessOptions = Pick<SpawnOptions, 'cwd' | 'env'> & {
 // Each background command gets its own POSIX group. Never signal the extension
 // host's group, which can also contain unrelated extensions and editor work.
 export function spawnOwnedProcess(binary: string, args: string[], options: OwnedProcessOptions) {
-  const { stdinLeaseGraceMs, ...spawnOptions } = options;
+  const { stdinLeaseGraceMs, input, ...spawnOptions } = options;
   const shared = { ...spawnOptions, windowsHide: true, detached: process.platform !== 'win32' };
-  const child = stdinLeaseGraceMs === undefined
+  const child = stdinLeaseGraceMs === undefined && input === undefined
     ? spawn(binary, args, { ...shared, stdio: ['ignore', 'pipe', 'pipe'] })
     : spawn(binary, args, { ...shared, stdio: ['pipe', 'pipe', 'pipe'] });
   // Closing the lease after the child already exited must not throw EPIPE.
   child.stdin?.on('error', () => {});
+  if (input !== undefined) child.stdin?.end(input);
   let spawnError: Error | null = null;
   const closed = new Promise<ProcessExit>((resolve) => {
     child.once('error', (error) => { spawnError = error; });

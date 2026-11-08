@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { INJECTED_ENV_KEY, assignInjectedEnv, injectedEnvKeys } from './injected-env.js';
+import { INJECTED_ENV_KEY, assignInjectedEnv, injectedEnvKeys, withUserEnv, withoutInjectedEnv } from './injected-env.js';
 
 describe('assignInjectedEnv', () => {
   it('sets the values and records their names', () => {
@@ -52,5 +52,29 @@ describe('injectedEnvKeys', () => {
   it('ignores a malformed record', () => {
     expect(injectedEnvKeys({ [INJECTED_ENV_KEY]: '' }).size).toBe(0);
     expect(injectedEnvKeys({ [INJECTED_ENV_KEY]: ',,' })).toEqual(new Set([INJECTED_ENV_KEY]));
+  });
+});
+
+describe('withoutInjectedEnv', () => {
+  it('drops what OpenChamber put into the shell and keeps the user\'s own', () => {
+    const env = assignInjectedEnv({ PATH: '/usr/bin', OPENCODE_PASSWORD: 'theirs' }, {
+      OPENCHAMBER_DIST_DIR: '/Applications/OpenChamber.app/web-dist',
+      OPENCHAMBER_UI_PASSWORD: 'desktop',
+      OPENCODE_PASSWORD: 'theirs',
+    });
+
+    expect(withoutInjectedEnv(env)).toEqual({ PATH: '/usr/bin', OPENCODE_PASSWORD: 'theirs' });
+    expect(withoutInjectedEnv({ PATH: '/usr/bin' })).toEqual({ PATH: '/usr/bin' });
+  });
+});
+
+describe('withUserEnv', () => {
+  it('hands a value over as the user\'s own, so a server started with it keeps it', () => {
+    const env = assignInjectedEnv({ PATH: '/usr/bin' }, { OPENCHAMBER_UI_PASSWORD: 'old', OPENCHAMBER_RUNTIME: 'web' });
+
+    const next = withUserEnv(env, { OPENCHAMBER_UI_PASSWORD: 'kept' });
+
+    expect(withoutInjectedEnv(next)).toEqual({ PATH: '/usr/bin', OPENCHAMBER_UI_PASSWORD: 'kept' });
+    expect(withoutInjectedEnv(withUserEnv({ A: '1' }, { B: '2' }))).toEqual({ A: '1', B: '2' });
   });
 });

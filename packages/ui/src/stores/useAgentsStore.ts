@@ -552,6 +552,7 @@ export const useAgentsStore = create<AgentsStore>()(
                 // directory directly so this shares the in-flight request with the config
                 // store instead of issuing a duplicate agents fetch at startup.
                 const agents = await opencodeClient.listAgents(configDirectory);
+                if (!isCurrentLoad()) return false;
 
                 const agentsWithScope = await Promise.all(
                   agents.map(async (agent) => {
@@ -917,7 +918,6 @@ async function performConfigRefresh(options: {
     }
 
     if (refreshProviders) {
-      useConfigStore.getState().invalidateModelMetadataCache();
       useConfigStore.getState().invalidateProviderCache(mode === "active" ? currentDirectory : undefined);
     }
 
@@ -938,7 +938,9 @@ async function performConfigRefresh(options: {
     }
     if (refreshCommands) {
       invalidateCommandsLoadCache(currentDirectory);
-      uiRefreshTasks.push(commandsStore.loadCommands().then(() => undefined));
+      // The directory the user works in, as the agents and providers above: a
+      // worktree session's folder is not the active project's path.
+      uiRefreshTasks.push(commandsStore.loadCommands(currentDirectory).then(() => undefined));
     }
     if (refreshSkills) {
       // Match loadSkills cache key (active-project-first). Passing client/directory-store

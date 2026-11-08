@@ -1,4 +1,5 @@
 import { publicEnterprisePolicy } from '../enterprise-mode.js';
+import { withUserEnv } from '../injected-env.js';
 
 const SYSTEMD_SERVICE_UNIT_PATTERN = /^[A-Za-z0-9:_.@-]+\.service$/;
 
@@ -472,8 +473,11 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
         const child = spawnChild(shell, [shellFlag, script], {
           detached: true,
           stdio: logFd !== null ? ['ignore', logFd, logFd] : 'ignore',
+          // The restarted server's password is this one's on purpose: handed
+          // over as the user's own, since `serve` drops what the record marks
+          // as another instance's.
           env: storedOptions.uiPassword
-            ? { ...process.env, OPENCHAMBER_UI_PASSWORD: storedOptions.uiPassword }
+            ? withUserEnv(process.env, { OPENCHAMBER_UI_PASSWORD: storedOptions.uiPassword })
             : process.env,
           windowsHide: true,
         });

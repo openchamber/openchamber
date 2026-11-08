@@ -1,0 +1,922 @@
+diff --git a/react-native.web.js b/react-native.web.js
+--- a/react-native.web.js
++++ b/react-native.web.js
+@@ -1324,7 +1324,11 @@
+   }
+ }
+ function roundSize(size) {
+-  return Math.floor(size * 8) / 8;
++  // Floor to the device pixel grid (LegendApp/legend-list#536). Eighth-pixel
++  // estimates gave rows fractional positions; the browser rounds scrollTop, so
++  // every prepend compensation lost the remainder and the anchor drifted.
++  const scale = typeof window !== "undefined" && window.devicePixelRatio || 1;
++  return Math.floor(size * scale) / scale;
+ }
+ function isNullOrUndefined(value) {
+   return value === null || value === void 0;
+@@ -1409,7 +1413,16 @@
+     return renderedSize;
+   }
+   const itemType = (_b = resolved == null ? void 0 : resolved.itemType) != null ? _b : getItemType ? (_a3 = getItemType(data, index)) != null ? _a3 : "" : "";
+-  if (useAverageSize && !scrollingTo) {
++  // A per-item estimate from the caller, ahead of the per-type average: a
++  // type's average mixes items of very different sizes, and the first layout
++  // caches estimates for every item before any average exists, so each
++  // item measured later moved the content by its full error.
++  const getEstimatedItemSize = state.props.getEstimatedItemSize;
++  if (getEstimatedItemSize) {
++    const estimate = getEstimatedItemSize(data, index, itemType);
++    if (estimate !== void 0) size = roundSize(estimate) + ctx.scrollAxisGap;
++  }
++  if (size === void 0 && useAverageSize && !scrollingTo) {
+     const averageSizeForType = (_c = averageSizes[itemType]) == null ? void 0 : _c.avg;
+     if (averageSizeForType !== void 0) {
+       size = roundSize(averageSizeForType);
+@@ -1613,6 +1626,59 @@
+     return false;
+   }
+   return false;
++}
++// A size correction for rows above the reader is a programmatic scroll. On
++// iOS it lands while the scroll's momentum runs in another thread, which
++// stalls a frame and takes part of the correction back. While the user
++// scrolls, the rows move instead of the viewport: every position shifts by
++// the correction, so the rows on screen stay put and the rows far above
++// take it. Once scrolling stops, the shift is undone with one scroll
++// correction, at rest. Rows that came out shorter push the first row down,
++// leaving space above it; rows that came out taller pull it up over the
++// list header. Near the start of the list either would scroll into view, so
++// there the correction is made at once.
++var DEFERRED_POSITION_FLUSH_MS = 150;
++var DEFERRED_POSITION_START_MARGIN_VIEWPORTS = 2;
++function isUserScrolling(state) {
++  return !!state.props.maintainVisibleContentPosition.deferSizeWhileScrolling && !state.scrollingTo && state.lastUserScrollTime !== void 0 && Date.now() - state.lastUserScrollTime < DEFERRED_POSITION_FLUSH_MS;
++}
++function isShiftNearStart(state, shift) {
++  return shift !== 0 && state.scroll < Math.max(shift, 0) + state.scrollLength * DEFERRED_POSITION_START_MARGIN_VIEWPORTS;
++}
++function shouldDeferSizeAdjust(state, positionDiff) {
++  return isUserScrolling(state) && !isShiftNearStart(state, (state.deferredPositionShift || 0) - positionDiff);
++}
++function flushDeferredPositionShift(ctx) {
++  const shift = ctx.state.deferredPositionShift;
++  if (!shift) return;
++  shiftItemPositions(ctx, -shift);
++  requestAdjust(ctx, -shift);
++}
++function shiftItemPositions(ctx, delta) {
++  const state = ctx.state;
++  const { positions } = state;
++  const notify = ctx.positionListeners.size > 0;
++  for (let i = 0; i < positions.length; i++) {
++    if (positions[i] === void 0) continue;
++    positions[i] += delta;
++    if (notify) notifyPosition$(ctx, getId(state, i), positions[i]);
++  }
++  state.deferredPositionShift = (state.deferredPositionShift || 0) + delta;
++  // The anchor the next pass compares against moved with the rows.
++  if (state.mvcpAnchorLock) state.mvcpAnchorLock.position += delta;
++  updateTotalSize(ctx);
++}
++function scheduleDeferredPositionFlush(ctx) {
++  const state = ctx.state;
++  state.scheduledWork.timeout(() => {
++    if (!state.deferredPositionShift) return;
++    if (isUserScrolling(state)) {
++      scheduleDeferredPositionFlush(ctx);
++      return;
++    }
++    flushDeferredPositionShift(ctx);
++    calculateItemsInView(ctx);
++  }, DEFERRED_POSITION_FLUSH_MS, "deferredPositionFlush");
+ }
+ function prepareMVCP(ctx, dataChanged, adjustmentSource) {
+   var _a3, _b;
+@@ -1786,6 +1852,11 @@
+         maybeApplyPredictedNativeMVCPAdjust(ctx);
+         return;
+       }
++      if (Math.abs(positionDiff) > MVCP_POSITION_EPSILON && !dataChanged && scrollTarget === void 0 && shouldDeferSizeAdjust(state, positionDiff)) {
++        shiftItemPositions(ctx, -positionDiff);
++        scheduleDeferredPositionFlush(ctx);
++        return;
++      }
+       if (Math.abs(positionDiff) > MVCP_POSITION_EPSILON) {
+         const shouldSkipAdjustForMaintainedEnd = (state.maintainingScrollAtEnd === "pending-animated" || state.maintainingScrollAtEnd === "animated") && peek$(ctx, "isWithinMaintainScrollAtEndThreshold");
+         if (!shouldSkipAdjustForMaintainedEnd) {
+@@ -1898,6 +1969,13 @@
+   const isUserScrollEvent = !!(options == null ? void 0 : options.fromNativeScrollEvent) && scrollDelta > 0.1 && (!hasActiveInitialScroll(state) && Math.abs(newScroll - previousComparableScroll) > 0.1) && !adjustChanged && scrollingTo === void 0 && !state.pendingNativeMVCPAdjust;
+   if (isUserScrollEvent) {
+     state.scrollBufferDirection = newScroll > prevScroll ? 1 : -1;
++    state.lastUserScrollTime = currentTime;
++    if (state.deferredPositionShift) {
++      // The start of the list, out of place, is about to scroll into view.
++      // The pass this scroll event runs places the rows.
++      if (isShiftNearStart(state, state.deferredPositionShift)) flushDeferredPositionShift(ctx);
++      else scheduleDeferredPositionFlush(ctx);
++    }
+   }
+   const didCancelMaintainScrollAtEnd = isUserScrollEvent && !!(state.maintainingScrollAtEnd || state.pendingMaintainScrollAtEnd || peek$(ctx, "isFollowingEnd")) && (newScroll < previousComparableScroll - 1 );
+   if (didCancelMaintainScrollAtEnd) {
+@@ -3651,7 +3729,7 @@
+   const useAverageSize = true;
+   const preferCachedSize = !!state.visibleContentAnchor || !doMVCP || dataChanged || state.scrollAdjustHandler.getAdjust() !== 0 || ((_b = peek$(ctx, "scrollAdjustPending")) != null ? _b : 0) !== 0;
+   const notifyTotalSizeWhileCachingSizes = false;
+-  let currentRowTop = 0;
++  let currentRowTop = state.deferredPositionShift || 0;
+   let column = 1;
+   let maxSizeInRow = 0;
+   startIndex = Math.max(0, startIndex);
+@@ -5028,11 +5106,16 @@
+           allocationEnd,
+           pendingRemoval,
+           protectedContainerKeys,
+-          // Initial end alignment has no scroll velocity yet. Keep its
+-          // target-side rows first until the initial scroll settles.
++          // The initial scroll, end-aligned included, hands out containers
++          // in item order. Containers render in index order, so the rows of
++          // a freshly opened list are in DOM order from the first paint and
++          // the DOM-order pass has nothing to move: reversed for an
++          // end-aligned start, it moved nearly every row a moment after the
++          // list showed, restyling each row and re-serializing it for
++          // assistive technology.
+           // After a pause velocity can be zero on the first movement;
+           // use its displacement without treating initial insets as motion.
+-          hasActiveInitialScroll(state) ? (initialScroll == null ? void 0 : initialScroll.viewPosition) === 1 : (speed || (state.hasScrolled ? state.scroll - state.scrollPrev : 0)) < 0
++          !hasActiveInitialScroll(state) && (speed || (state.hasScrolled ? state.scroll - state.scrollPrev : 0)) < 0
+         );
+         for (const allocation of availableContainerAllocations) {
+           const i = allocation.itemIndex;
+@@ -6028,7 +6111,11 @@
+       size: layout
+     });
+   };
+-  const shouldDeferWebShrinkLayoutUpdate = !isInMVCPActiveMode(listState) && previousSize !== void 0 && size + 1 < previousSize;
++  // A row that shrank because its width changed (text re-wrapping as the
++  // list narrows or widens) shrank for real: deferred a frame, the rows below
++  // and an end-pinned scroll position lagged it on every frame of a resize.
++  const widthChanged = state.lastSize !== void 0 && roundSize(state.lastSize.width) !== roundSize(rectangle.width);
++  const shouldDeferWebShrinkLayoutUpdate = !widthChanged && !isInMVCPActiveMode(listState) && previousSize !== void 0 && size + 1 < previousSize;
+   if (shouldDeferWebShrinkLayoutUpdate) {
+     scheduleWebShrinkMeasurement(state, () => {
+       var _a4;
+@@ -6358,7 +6445,11 @@
+   const ctx = useStateContext();
+   React3.useEffect(() => {
+     let timeoutId;
+-    let lastUpdateTime = 0;
++    // A list that just mounted is still settling (initial scroll, measured
++    // heights). Count the mount as activity so the first DOM-order pass waits
++    // for the list to go quiet instead of landing in its opening frames:
++    // moving rows restyles their whole subtree.
++    let lastUpdateTime = Date.now();
+     let delay = 500;
+     const unsubscribe = listen$(ctx, "lastPositionUpdate", () => {
+       const container = ref.current;
+@@ -7909,10 +8000,10 @@
+       doMaintainScrollAtEnd(ctx, { immediate: true });
+     }
+     checkThresholds(ctx);
+-    if (state) {
+-      const crossAxisPadding = state.props.horizontal ? (state.props.stylePaddingTop || 0) + (state.props.stylePaddingBottom || 0) : (state.props.stylePaddingLeft || 0) + (state.props.stylePaddingRight || 0);
+-      state.needsOtherAxisSize = otherAxisSize - crossAxisPadding < 10;
+-    }
++    // The list stays as wide as its column. Below 10px the library took it for a
++    // list sized by its content and kept the rows' width, as an inline width on
++    // the scroll node and a min-width inside, for as long as the list lived: a
++    // chat squeezed to nothing never came back.
+     if (IS_DEV && measuredLength === 0) {
+       warnDevOnce(
+         "height0",
+@@ -8728,6 +8819,7 @@
+   if (value && typeof value === "object") {
+     return {
+       data: (_a3 = value.data) != null ? _a3 : false,
++      deferSizeWhileScrolling: !!value.deferSizeWhileScrolling,
+       shouldRestorePosition: value.shouldRestorePosition,
+       size: (_b = value.size) != null ? _b : true
+     };
+@@ -8846,6 +8938,7 @@
+     estimatedListSize,
+     extraData,
+     getFixedItemSize,
++    getEstimatedItemSize,
+     getItemType,
+     horizontal,
+     rtl,
+@@ -9140,6 +9233,7 @@
+     drawDistance,
+     estimatedItemSize,
+     getFixedItemSize: useWrapIfItem(getFixedItemSize),
++    getEstimatedItemSize: useWrapIfItem(getEstimatedItemSize),
+     getItemType: useWrapIfItem(getItemType),
+     hasExternalScroll,
+     hideItemsUntilMeasured: experimental_hideItemsUntilMeasured,
+diff --git a/react-native.web.mjs b/react-native.web.mjs
+--- a/react-native.web.mjs
++++ b/react-native.web.mjs
+@@ -1303,7 +1303,11 @@
+   }
+ }
+ function roundSize(size) {
+-  return Math.floor(size * 8) / 8;
++  // Floor to the device pixel grid (LegendApp/legend-list#536). Eighth-pixel
++  // estimates gave rows fractional positions; the browser rounds scrollTop, so
++  // every prepend compensation lost the remainder and the anchor drifted.
++  const scale = typeof window !== "undefined" && window.devicePixelRatio || 1;
++  return Math.floor(size * scale) / scale;
+ }
+ function isNullOrUndefined(value) {
+   return value === null || value === void 0;
+@@ -1388,7 +1392,16 @@
+     return renderedSize;
+   }
+   const itemType = (_b = resolved == null ? void 0 : resolved.itemType) != null ? _b : getItemType ? (_a3 = getItemType(data, index)) != null ? _a3 : "" : "";
+-  if (useAverageSize && !scrollingTo) {
++  // A per-item estimate from the caller, ahead of the per-type average: a
++  // type's average mixes items of very different sizes, and the first layout
++  // caches estimates for every item before any average exists, so each
++  // item measured later moved the content by its full error.
++  const getEstimatedItemSize = state.props.getEstimatedItemSize;
++  if (getEstimatedItemSize) {
++    const estimate = getEstimatedItemSize(data, index, itemType);
++    if (estimate !== void 0) size = roundSize(estimate) + ctx.scrollAxisGap;
++  }
++  if (size === void 0 && useAverageSize && !scrollingTo) {
+     const averageSizeForType = (_c = averageSizes[itemType]) == null ? void 0 : _c.avg;
+     if (averageSizeForType !== void 0) {
+       size = roundSize(averageSizeForType);
+@@ -1592,6 +1605,59 @@
+     return false;
+   }
+   return false;
++}
++// A size correction for rows above the reader is a programmatic scroll. On
++// iOS it lands while the scroll's momentum runs in another thread, which
++// stalls a frame and takes part of the correction back. While the user
++// scrolls, the rows move instead of the viewport: every position shifts by
++// the correction, so the rows on screen stay put and the rows far above
++// take it. Once scrolling stops, the shift is undone with one scroll
++// correction, at rest. Rows that came out shorter push the first row down,
++// leaving space above it; rows that came out taller pull it up over the
++// list header. Near the start of the list either would scroll into view, so
++// there the correction is made at once.
++var DEFERRED_POSITION_FLUSH_MS = 150;
++var DEFERRED_POSITION_START_MARGIN_VIEWPORTS = 2;
++function isUserScrolling(state) {
++  return !!state.props.maintainVisibleContentPosition.deferSizeWhileScrolling && !state.scrollingTo && state.lastUserScrollTime !== void 0 && Date.now() - state.lastUserScrollTime < DEFERRED_POSITION_FLUSH_MS;
++}
++function isShiftNearStart(state, shift) {
++  return shift !== 0 && state.scroll < Math.max(shift, 0) + state.scrollLength * DEFERRED_POSITION_START_MARGIN_VIEWPORTS;
++}
++function shouldDeferSizeAdjust(state, positionDiff) {
++  return isUserScrolling(state) && !isShiftNearStart(state, (state.deferredPositionShift || 0) - positionDiff);
++}
++function flushDeferredPositionShift(ctx) {
++  const shift = ctx.state.deferredPositionShift;
++  if (!shift) return;
++  shiftItemPositions(ctx, -shift);
++  requestAdjust(ctx, -shift);
++}
++function shiftItemPositions(ctx, delta) {
++  const state = ctx.state;
++  const { positions } = state;
++  const notify = ctx.positionListeners.size > 0;
++  for (let i = 0; i < positions.length; i++) {
++    if (positions[i] === void 0) continue;
++    positions[i] += delta;
++    if (notify) notifyPosition$(ctx, getId(state, i), positions[i]);
++  }
++  state.deferredPositionShift = (state.deferredPositionShift || 0) + delta;
++  // The anchor the next pass compares against moved with the rows.
++  if (state.mvcpAnchorLock) state.mvcpAnchorLock.position += delta;
++  updateTotalSize(ctx);
++}
++function scheduleDeferredPositionFlush(ctx) {
++  const state = ctx.state;
++  state.scheduledWork.timeout(() => {
++    if (!state.deferredPositionShift) return;
++    if (isUserScrolling(state)) {
++      scheduleDeferredPositionFlush(ctx);
++      return;
++    }
++    flushDeferredPositionShift(ctx);
++    calculateItemsInView(ctx);
++  }, DEFERRED_POSITION_FLUSH_MS, "deferredPositionFlush");
+ }
+ function prepareMVCP(ctx, dataChanged, adjustmentSource) {
+   var _a3, _b;
+@@ -1765,6 +1831,11 @@
+         maybeApplyPredictedNativeMVCPAdjust(ctx);
+         return;
+       }
++      if (Math.abs(positionDiff) > MVCP_POSITION_EPSILON && !dataChanged && scrollTarget === void 0 && shouldDeferSizeAdjust(state, positionDiff)) {
++        shiftItemPositions(ctx, -positionDiff);
++        scheduleDeferredPositionFlush(ctx);
++        return;
++      }
+       if (Math.abs(positionDiff) > MVCP_POSITION_EPSILON) {
+         const shouldSkipAdjustForMaintainedEnd = (state.maintainingScrollAtEnd === "pending-animated" || state.maintainingScrollAtEnd === "animated") && peek$(ctx, "isWithinMaintainScrollAtEndThreshold");
+         if (!shouldSkipAdjustForMaintainedEnd) {
+@@ -1877,6 +1948,13 @@
+   const isUserScrollEvent = !!(options == null ? void 0 : options.fromNativeScrollEvent) && scrollDelta > 0.1 && (!hasActiveInitialScroll(state) && Math.abs(newScroll - previousComparableScroll) > 0.1) && !adjustChanged && scrollingTo === void 0 && !state.pendingNativeMVCPAdjust;
+   if (isUserScrollEvent) {
+     state.scrollBufferDirection = newScroll > prevScroll ? 1 : -1;
++    state.lastUserScrollTime = currentTime;
++    if (state.deferredPositionShift) {
++      // The start of the list, out of place, is about to scroll into view.
++      // The pass this scroll event runs places the rows.
++      if (isShiftNearStart(state, state.deferredPositionShift)) flushDeferredPositionShift(ctx);
++      else scheduleDeferredPositionFlush(ctx);
++    }
+   }
+   const didCancelMaintainScrollAtEnd = isUserScrollEvent && !!(state.maintainingScrollAtEnd || state.pendingMaintainScrollAtEnd || peek$(ctx, "isFollowingEnd")) && (newScroll < previousComparableScroll - 1 );
+   if (didCancelMaintainScrollAtEnd) {
+@@ -3630,7 +3708,7 @@
+   const useAverageSize = true;
+   const preferCachedSize = !!state.visibleContentAnchor || !doMVCP || dataChanged || state.scrollAdjustHandler.getAdjust() !== 0 || ((_b = peek$(ctx, "scrollAdjustPending")) != null ? _b : 0) !== 0;
+   const notifyTotalSizeWhileCachingSizes = false;
+-  let currentRowTop = 0;
++  let currentRowTop = state.deferredPositionShift || 0;
+   let column = 1;
+   let maxSizeInRow = 0;
+   startIndex = Math.max(0, startIndex);
+@@ -5007,11 +5085,16 @@
+           allocationEnd,
+           pendingRemoval,
+           protectedContainerKeys,
+-          // Initial end alignment has no scroll velocity yet. Keep its
+-          // target-side rows first until the initial scroll settles.
++          // The initial scroll, end-aligned included, hands out containers
++          // in item order. Containers render in index order, so the rows of
++          // a freshly opened list are in DOM order from the first paint and
++          // the DOM-order pass has nothing to move: reversed for an
++          // end-aligned start, it moved nearly every row a moment after the
++          // list showed, restyling each row and re-serializing it for
++          // assistive technology.
+           // After a pause velocity can be zero on the first movement;
+           // use its displacement without treating initial insets as motion.
+-          hasActiveInitialScroll(state) ? (initialScroll == null ? void 0 : initialScroll.viewPosition) === 1 : (speed || (state.hasScrolled ? state.scroll - state.scrollPrev : 0)) < 0
++          !hasActiveInitialScroll(state) && (speed || (state.hasScrolled ? state.scroll - state.scrollPrev : 0)) < 0
+         );
+         for (const allocation of availableContainerAllocations) {
+           const i = allocation.itemIndex;
+@@ -6007,7 +6090,11 @@
+       size: layout
+     });
+   };
+-  const shouldDeferWebShrinkLayoutUpdate = !isInMVCPActiveMode(listState) && previousSize !== void 0 && size + 1 < previousSize;
++  // A row that shrank because its width changed (text re-wrapping as the
++  // list narrows or widens) shrank for real: deferred a frame, the rows below
++  // and an end-pinned scroll position lagged it on every frame of a resize.
++  const widthChanged = state.lastSize !== void 0 && roundSize(state.lastSize.width) !== roundSize(rectangle.width);
++  const shouldDeferWebShrinkLayoutUpdate = !widthChanged && !isInMVCPActiveMode(listState) && previousSize !== void 0 && size + 1 < previousSize;
+   if (shouldDeferWebShrinkLayoutUpdate) {
+     scheduleWebShrinkMeasurement(state, () => {
+       var _a4;
+@@ -6337,7 +6424,11 @@
+   const ctx = useStateContext();
+   useEffect(() => {
+     let timeoutId;
+-    let lastUpdateTime = 0;
++    // A list that just mounted is still settling (initial scroll, measured
++    // heights). Count the mount as activity so the first DOM-order pass waits
++    // for the list to go quiet instead of landing in its opening frames:
++    // moving rows restyles their whole subtree.
++    let lastUpdateTime = Date.now();
+     let delay = 500;
+     const unsubscribe = listen$(ctx, "lastPositionUpdate", () => {
+       const container = ref.current;
+@@ -7888,10 +7979,10 @@
+       doMaintainScrollAtEnd(ctx, { immediate: true });
+     }
+     checkThresholds(ctx);
+-    if (state) {
+-      const crossAxisPadding = state.props.horizontal ? (state.props.stylePaddingTop || 0) + (state.props.stylePaddingBottom || 0) : (state.props.stylePaddingLeft || 0) + (state.props.stylePaddingRight || 0);
+-      state.needsOtherAxisSize = otherAxisSize - crossAxisPadding < 10;
+-    }
++    // The list stays as wide as its column. Below 10px the library took it for a
++    // list sized by its content and kept the rows' width, as an inline width on
++    // the scroll node and a min-width inside, for as long as the list lived: a
++    // chat squeezed to nothing never came back.
+     if (IS_DEV && measuredLength === 0) {
+       warnDevOnce(
+         "height0",
+@@ -8707,6 +8798,7 @@
+   if (value && typeof value === "object") {
+     return {
+       data: (_a3 = value.data) != null ? _a3 : false,
++      deferSizeWhileScrolling: !!value.deferSizeWhileScrolling,
+       shouldRestorePosition: value.shouldRestorePosition,
+       size: (_b = value.size) != null ? _b : true
+     };
+@@ -8825,6 +8917,7 @@
+     estimatedListSize,
+     extraData,
+     getFixedItemSize,
++    getEstimatedItemSize,
+     getItemType,
+     horizontal,
+     rtl,
+@@ -9119,6 +9212,7 @@
+     drawDistance,
+     estimatedItemSize,
+     getFixedItemSize: useWrapIfItem(getFixedItemSize),
++    getEstimatedItemSize: useWrapIfItem(getEstimatedItemSize),
+     getItemType: useWrapIfItem(getItemType),
+     hasExternalScroll,
+     hideItemsUntilMeasured: experimental_hideItemsUntilMeasured,
+diff --git a/react.js b/react.js
+--- a/react.js
++++ b/react.js
+@@ -1324,7 +1324,11 @@
+   }
+ }
+ function roundSize(size) {
+-  return Math.floor(size * 8) / 8;
++  // Floor to the device pixel grid (LegendApp/legend-list#536). Eighth-pixel
++  // estimates gave rows fractional positions; the browser rounds scrollTop, so
++  // every prepend compensation lost the remainder and the anchor drifted.
++  const scale = typeof window !== "undefined" && window.devicePixelRatio || 1;
++  return Math.floor(size * scale) / scale;
+ }
+ function isNullOrUndefined(value) {
+   return value === null || value === void 0;
+@@ -1409,7 +1413,16 @@
+     return renderedSize;
+   }
+   const itemType = (_b = resolved == null ? void 0 : resolved.itemType) != null ? _b : getItemType ? (_a3 = getItemType(data, index)) != null ? _a3 : "" : "";
+-  if (useAverageSize && !scrollingTo) {
++  // A per-item estimate from the caller, ahead of the per-type average: a
++  // type's average mixes items of very different sizes, and the first layout
++  // caches estimates for every item before any average exists, so each
++  // item measured later moved the content by its full error.
++  const getEstimatedItemSize = state.props.getEstimatedItemSize;
++  if (getEstimatedItemSize) {
++    const estimate = getEstimatedItemSize(data, index, itemType);
++    if (estimate !== void 0) size = roundSize(estimate) + ctx.scrollAxisGap;
++  }
++  if (size === void 0 && useAverageSize && !scrollingTo) {
+     const averageSizeForType = (_c = averageSizes[itemType]) == null ? void 0 : _c.avg;
+     if (averageSizeForType !== void 0) {
+       size = roundSize(averageSizeForType);
+@@ -1613,6 +1626,59 @@
+     return false;
+   }
+   return false;
++}
++// A size correction for rows above the reader is a programmatic scroll. On
++// iOS it lands while the scroll's momentum runs in another thread, which
++// stalls a frame and takes part of the correction back. While the user
++// scrolls, the rows move instead of the viewport: every position shifts by
++// the correction, so the rows on screen stay put and the rows far above
++// take it. Once scrolling stops, the shift is undone with one scroll
++// correction, at rest. Rows that came out shorter push the first row down,
++// leaving space above it; rows that came out taller pull it up over the
++// list header. Near the start of the list either would scroll into view, so
++// there the correction is made at once.
++var DEFERRED_POSITION_FLUSH_MS = 150;
++var DEFERRED_POSITION_START_MARGIN_VIEWPORTS = 2;
++function isUserScrolling(state) {
++  return !!state.props.maintainVisibleContentPosition.deferSizeWhileScrolling && !state.scrollingTo && state.lastUserScrollTime !== void 0 && Date.now() - state.lastUserScrollTime < DEFERRED_POSITION_FLUSH_MS;
++}
++function isShiftNearStart(state, shift) {
++  return shift !== 0 && state.scroll < Math.max(shift, 0) + state.scrollLength * DEFERRED_POSITION_START_MARGIN_VIEWPORTS;
++}
++function shouldDeferSizeAdjust(state, positionDiff) {
++  return isUserScrolling(state) && !isShiftNearStart(state, (state.deferredPositionShift || 0) - positionDiff);
++}
++function flushDeferredPositionShift(ctx) {
++  const shift = ctx.state.deferredPositionShift;
++  if (!shift) return;
++  shiftItemPositions(ctx, -shift);
++  requestAdjust(ctx, -shift);
++}
++function shiftItemPositions(ctx, delta) {
++  const state = ctx.state;
++  const { positions } = state;
++  const notify = ctx.positionListeners.size > 0;
++  for (let i = 0; i < positions.length; i++) {
++    if (positions[i] === void 0) continue;
++    positions[i] += delta;
++    if (notify) notifyPosition$(ctx, getId(state, i), positions[i]);
++  }
++  state.deferredPositionShift = (state.deferredPositionShift || 0) + delta;
++  // The anchor the next pass compares against moved with the rows.
++  if (state.mvcpAnchorLock) state.mvcpAnchorLock.position += delta;
++  updateTotalSize(ctx);
++}
++function scheduleDeferredPositionFlush(ctx) {
++  const state = ctx.state;
++  state.scheduledWork.timeout(() => {
++    if (!state.deferredPositionShift) return;
++    if (isUserScrolling(state)) {
++      scheduleDeferredPositionFlush(ctx);
++      return;
++    }
++    flushDeferredPositionShift(ctx);
++    calculateItemsInView(ctx);
++  }, DEFERRED_POSITION_FLUSH_MS, "deferredPositionFlush");
+ }
+ function prepareMVCP(ctx, dataChanged, adjustmentSource) {
+   var _a3, _b;
+@@ -1786,6 +1852,11 @@
+         maybeApplyPredictedNativeMVCPAdjust(ctx);
+         return;
+       }
++      if (Math.abs(positionDiff) > MVCP_POSITION_EPSILON && !dataChanged && scrollTarget === void 0 && shouldDeferSizeAdjust(state, positionDiff)) {
++        shiftItemPositions(ctx, -positionDiff);
++        scheduleDeferredPositionFlush(ctx);
++        return;
++      }
+       if (Math.abs(positionDiff) > MVCP_POSITION_EPSILON) {
+         const shouldSkipAdjustForMaintainedEnd = (state.maintainingScrollAtEnd === "pending-animated" || state.maintainingScrollAtEnd === "animated") && peek$(ctx, "isWithinMaintainScrollAtEndThreshold");
+         if (!shouldSkipAdjustForMaintainedEnd) {
+@@ -1898,6 +1969,13 @@
+   const isUserScrollEvent = !!(options == null ? void 0 : options.fromNativeScrollEvent) && scrollDelta > 0.1 && (!hasActiveInitialScroll(state) && Math.abs(newScroll - previousComparableScroll) > 0.1) && !adjustChanged && scrollingTo === void 0 && !state.pendingNativeMVCPAdjust;
+   if (isUserScrollEvent) {
+     state.scrollBufferDirection = newScroll > prevScroll ? 1 : -1;
++    state.lastUserScrollTime = currentTime;
++    if (state.deferredPositionShift) {
++      // The start of the list, out of place, is about to scroll into view.
++      // The pass this scroll event runs places the rows.
++      if (isShiftNearStart(state, state.deferredPositionShift)) flushDeferredPositionShift(ctx);
++      else scheduleDeferredPositionFlush(ctx);
++    }
+   }
+   const didCancelMaintainScrollAtEnd = isUserScrollEvent && !!(state.maintainingScrollAtEnd || state.pendingMaintainScrollAtEnd || peek$(ctx, "isFollowingEnd")) && (newScroll < previousComparableScroll - 1 );
+   if (didCancelMaintainScrollAtEnd) {
+@@ -3651,7 +3729,7 @@
+   const useAverageSize = true;
+   const preferCachedSize = !!state.visibleContentAnchor || !doMVCP || dataChanged || state.scrollAdjustHandler.getAdjust() !== 0 || ((_b = peek$(ctx, "scrollAdjustPending")) != null ? _b : 0) !== 0;
+   const notifyTotalSizeWhileCachingSizes = false;
+-  let currentRowTop = 0;
++  let currentRowTop = state.deferredPositionShift || 0;
+   let column = 1;
+   let maxSizeInRow = 0;
+   startIndex = Math.max(0, startIndex);
+@@ -5028,11 +5106,16 @@
+           allocationEnd,
+           pendingRemoval,
+           protectedContainerKeys,
+-          // Initial end alignment has no scroll velocity yet. Keep its
+-          // target-side rows first until the initial scroll settles.
++          // The initial scroll, end-aligned included, hands out containers
++          // in item order. Containers render in index order, so the rows of
++          // a freshly opened list are in DOM order from the first paint and
++          // the DOM-order pass has nothing to move: reversed for an
++          // end-aligned start, it moved nearly every row a moment after the
++          // list showed, restyling each row and re-serializing it for
++          // assistive technology.
+           // After a pause velocity can be zero on the first movement;
+           // use its displacement without treating initial insets as motion.
+-          hasActiveInitialScroll(state) ? (initialScroll == null ? void 0 : initialScroll.viewPosition) === 1 : (speed || (state.hasScrolled ? state.scroll - state.scrollPrev : 0)) < 0
++          !hasActiveInitialScroll(state) && (speed || (state.hasScrolled ? state.scroll - state.scrollPrev : 0)) < 0
+         );
+         for (const allocation of availableContainerAllocations) {
+           const i = allocation.itemIndex;
+@@ -6028,7 +6111,11 @@
+       size: layout
+     });
+   };
+-  const shouldDeferWebShrinkLayoutUpdate = !isInMVCPActiveMode(listState) && previousSize !== void 0 && size + 1 < previousSize;
++  // A row that shrank because its width changed (text re-wrapping as the
++  // list narrows or widens) shrank for real: deferred a frame, the rows below
++  // and an end-pinned scroll position lagged it on every frame of a resize.
++  const widthChanged = state.lastSize !== void 0 && roundSize(state.lastSize.width) !== roundSize(rectangle.width);
++  const shouldDeferWebShrinkLayoutUpdate = !widthChanged && !isInMVCPActiveMode(listState) && previousSize !== void 0 && size + 1 < previousSize;
+   if (shouldDeferWebShrinkLayoutUpdate) {
+     scheduleWebShrinkMeasurement(state, () => {
+       var _a4;
+@@ -6358,7 +6445,11 @@
+   const ctx = useStateContext();
+   React3.useEffect(() => {
+     let timeoutId;
+-    let lastUpdateTime = 0;
++    // A list that just mounted is still settling (initial scroll, measured
++    // heights). Count the mount as activity so the first DOM-order pass waits
++    // for the list to go quiet instead of landing in its opening frames:
++    // moving rows restyles their whole subtree.
++    let lastUpdateTime = Date.now();
+     let delay = 500;
+     const unsubscribe = listen$(ctx, "lastPositionUpdate", () => {
+       const container = ref.current;
+@@ -7909,10 +8000,10 @@
+       doMaintainScrollAtEnd(ctx, { immediate: true });
+     }
+     checkThresholds(ctx);
+-    if (state) {
+-      const crossAxisPadding = state.props.horizontal ? (state.props.stylePaddingTop || 0) + (state.props.stylePaddingBottom || 0) : (state.props.stylePaddingLeft || 0) + (state.props.stylePaddingRight || 0);
+-      state.needsOtherAxisSize = otherAxisSize - crossAxisPadding < 10;
+-    }
++    // The list stays as wide as its column. Below 10px the library took it for a
++    // list sized by its content and kept the rows' width, as an inline width on
++    // the scroll node and a min-width inside, for as long as the list lived: a
++    // chat squeezed to nothing never came back.
+     if (IS_DEV && measuredLength === 0) {
+       warnDevOnce(
+         "height0",
+@@ -8728,6 +8819,7 @@
+   if (value && typeof value === "object") {
+     return {
+       data: (_a3 = value.data) != null ? _a3 : false,
++      deferSizeWhileScrolling: !!value.deferSizeWhileScrolling,
+       shouldRestorePosition: value.shouldRestorePosition,
+       size: (_b = value.size) != null ? _b : true
+     };
+@@ -8846,6 +8938,7 @@
+     estimatedListSize,
+     extraData,
+     getFixedItemSize,
++    getEstimatedItemSize,
+     getItemType,
+     horizontal,
+     rtl,
+@@ -9140,6 +9233,7 @@
+     drawDistance,
+     estimatedItemSize,
+     getFixedItemSize: useWrapIfItem(getFixedItemSize),
++    getEstimatedItemSize: useWrapIfItem(getEstimatedItemSize),
+     getItemType: useWrapIfItem(getItemType),
+     hasExternalScroll,
+     hideItemsUntilMeasured: experimental_hideItemsUntilMeasured,
+diff --git a/react.mjs b/react.mjs
+--- a/react.mjs
++++ b/react.mjs
+@@ -1303,7 +1303,11 @@
+   }
+ }
+ function roundSize(size) {
+-  return Math.floor(size * 8) / 8;
++  // Floor to the device pixel grid (LegendApp/legend-list#536). Eighth-pixel
++  // estimates gave rows fractional positions; the browser rounds scrollTop, so
++  // every prepend compensation lost the remainder and the anchor drifted.
++  const scale = typeof window !== "undefined" && window.devicePixelRatio || 1;
++  return Math.floor(size * scale) / scale;
+ }
+ function isNullOrUndefined(value) {
+   return value === null || value === void 0;
+@@ -1388,7 +1392,16 @@
+     return renderedSize;
+   }
+   const itemType = (_b = resolved == null ? void 0 : resolved.itemType) != null ? _b : getItemType ? (_a3 = getItemType(data, index)) != null ? _a3 : "" : "";
+-  if (useAverageSize && !scrollingTo) {
++  // A per-item estimate from the caller, ahead of the per-type average: a
++  // type's average mixes items of very different sizes, and the first layout
++  // caches estimates for every item before any average exists, so each
++  // item measured later moved the content by its full error.
++  const getEstimatedItemSize = state.props.getEstimatedItemSize;
++  if (getEstimatedItemSize) {
++    const estimate = getEstimatedItemSize(data, index, itemType);
++    if (estimate !== void 0) size = roundSize(estimate) + ctx.scrollAxisGap;
++  }
++  if (size === void 0 && useAverageSize && !scrollingTo) {
+     const averageSizeForType = (_c = averageSizes[itemType]) == null ? void 0 : _c.avg;
+     if (averageSizeForType !== void 0) {
+       size = roundSize(averageSizeForType);
+@@ -1592,6 +1605,59 @@
+     return false;
+   }
+   return false;
++}
++// A size correction for rows above the reader is a programmatic scroll. On
++// iOS it lands while the scroll's momentum runs in another thread, which
++// stalls a frame and takes part of the correction back. While the user
++// scrolls, the rows move instead of the viewport: every position shifts by
++// the correction, so the rows on screen stay put and the rows far above
++// take it. Once scrolling stops, the shift is undone with one scroll
++// correction, at rest. Rows that came out shorter push the first row down,
++// leaving space above it; rows that came out taller pull it up over the
++// list header. Near the start of the list either would scroll into view, so
++// there the correction is made at once.
++var DEFERRED_POSITION_FLUSH_MS = 150;
++var DEFERRED_POSITION_START_MARGIN_VIEWPORTS = 2;
++function isUserScrolling(state) {
++  return !!state.props.maintainVisibleContentPosition.deferSizeWhileScrolling && !state.scrollingTo && state.lastUserScrollTime !== void 0 && Date.now() - state.lastUserScrollTime < DEFERRED_POSITION_FLUSH_MS;
++}
++function isShiftNearStart(state, shift) {
++  return shift !== 0 && state.scroll < Math.max(shift, 0) + state.scrollLength * DEFERRED_POSITION_START_MARGIN_VIEWPORTS;
++}
++function shouldDeferSizeAdjust(state, positionDiff) {
++  return isUserScrolling(state) && !isShiftNearStart(state, (state.deferredPositionShift || 0) - positionDiff);
++}
++function flushDeferredPositionShift(ctx) {
++  const shift = ctx.state.deferredPositionShift;
++  if (!shift) return;
++  shiftItemPositions(ctx, -shift);
++  requestAdjust(ctx, -shift);
++}
++function shiftItemPositions(ctx, delta) {
++  const state = ctx.state;
++  const { positions } = state;
++  const notify = ctx.positionListeners.size > 0;
++  for (let i = 0; i < positions.length; i++) {
++    if (positions[i] === void 0) continue;
++    positions[i] += delta;
++    if (notify) notifyPosition$(ctx, getId(state, i), positions[i]);
++  }
++  state.deferredPositionShift = (state.deferredPositionShift || 0) + delta;
++  // The anchor the next pass compares against moved with the rows.
++  if (state.mvcpAnchorLock) state.mvcpAnchorLock.position += delta;
++  updateTotalSize(ctx);
++}
++function scheduleDeferredPositionFlush(ctx) {
++  const state = ctx.state;
++  state.scheduledWork.timeout(() => {
++    if (!state.deferredPositionShift) return;
++    if (isUserScrolling(state)) {
++      scheduleDeferredPositionFlush(ctx);
++      return;
++    }
++    flushDeferredPositionShift(ctx);
++    calculateItemsInView(ctx);
++  }, DEFERRED_POSITION_FLUSH_MS, "deferredPositionFlush");
+ }
+ function prepareMVCP(ctx, dataChanged, adjustmentSource) {
+   var _a3, _b;
+@@ -1765,6 +1831,11 @@
+         maybeApplyPredictedNativeMVCPAdjust(ctx);
+         return;
+       }
++      if (Math.abs(positionDiff) > MVCP_POSITION_EPSILON && !dataChanged && scrollTarget === void 0 && shouldDeferSizeAdjust(state, positionDiff)) {
++        shiftItemPositions(ctx, -positionDiff);
++        scheduleDeferredPositionFlush(ctx);
++        return;
++      }
+       if (Math.abs(positionDiff) > MVCP_POSITION_EPSILON) {
+         const shouldSkipAdjustForMaintainedEnd = (state.maintainingScrollAtEnd === "pending-animated" || state.maintainingScrollAtEnd === "animated") && peek$(ctx, "isWithinMaintainScrollAtEndThreshold");
+         if (!shouldSkipAdjustForMaintainedEnd) {
+@@ -1877,6 +1948,13 @@
+   const isUserScrollEvent = !!(options == null ? void 0 : options.fromNativeScrollEvent) && scrollDelta > 0.1 && (!hasActiveInitialScroll(state) && Math.abs(newScroll - previousComparableScroll) > 0.1) && !adjustChanged && scrollingTo === void 0 && !state.pendingNativeMVCPAdjust;
+   if (isUserScrollEvent) {
+     state.scrollBufferDirection = newScroll > prevScroll ? 1 : -1;
++    state.lastUserScrollTime = currentTime;
++    if (state.deferredPositionShift) {
++      // The start of the list, out of place, is about to scroll into view.
++      // The pass this scroll event runs places the rows.
++      if (isShiftNearStart(state, state.deferredPositionShift)) flushDeferredPositionShift(ctx);
++      else scheduleDeferredPositionFlush(ctx);
++    }
+   }
+   const didCancelMaintainScrollAtEnd = isUserScrollEvent && !!(state.maintainingScrollAtEnd || state.pendingMaintainScrollAtEnd || peek$(ctx, "isFollowingEnd")) && (newScroll < previousComparableScroll - 1 );
+   if (didCancelMaintainScrollAtEnd) {
+@@ -3630,7 +3708,7 @@
+   const useAverageSize = true;
+   const preferCachedSize = !!state.visibleContentAnchor || !doMVCP || dataChanged || state.scrollAdjustHandler.getAdjust() !== 0 || ((_b = peek$(ctx, "scrollAdjustPending")) != null ? _b : 0) !== 0;
+   const notifyTotalSizeWhileCachingSizes = false;
+-  let currentRowTop = 0;
++  let currentRowTop = state.deferredPositionShift || 0;
+   let column = 1;
+   let maxSizeInRow = 0;
+   startIndex = Math.max(0, startIndex);
+@@ -5007,11 +5085,16 @@
+           allocationEnd,
+           pendingRemoval,
+           protectedContainerKeys,
+-          // Initial end alignment has no scroll velocity yet. Keep its
+-          // target-side rows first until the initial scroll settles.
++          // The initial scroll, end-aligned included, hands out containers
++          // in item order. Containers render in index order, so the rows of
++          // a freshly opened list are in DOM order from the first paint and
++          // the DOM-order pass has nothing to move: reversed for an
++          // end-aligned start, it moved nearly every row a moment after the
++          // list showed, restyling each row and re-serializing it for
++          // assistive technology.
+           // After a pause velocity can be zero on the first movement;
+           // use its displacement without treating initial insets as motion.
+-          hasActiveInitialScroll(state) ? (initialScroll == null ? void 0 : initialScroll.viewPosition) === 1 : (speed || (state.hasScrolled ? state.scroll - state.scrollPrev : 0)) < 0
++          !hasActiveInitialScroll(state) && (speed || (state.hasScrolled ? state.scroll - state.scrollPrev : 0)) < 0
+         );
+         for (const allocation of availableContainerAllocations) {
+           const i = allocation.itemIndex;
+@@ -6007,7 +6090,11 @@
+       size: layout
+     });
+   };
+-  const shouldDeferWebShrinkLayoutUpdate = !isInMVCPActiveMode(listState) && previousSize !== void 0 && size + 1 < previousSize;
++  // A row that shrank because its width changed (text re-wrapping as the
++  // list narrows or widens) shrank for real: deferred a frame, the rows below
++  // and an end-pinned scroll position lagged it on every frame of a resize.
++  const widthChanged = state.lastSize !== void 0 && roundSize(state.lastSize.width) !== roundSize(rectangle.width);
++  const shouldDeferWebShrinkLayoutUpdate = !widthChanged && !isInMVCPActiveMode(listState) && previousSize !== void 0 && size + 1 < previousSize;
+   if (shouldDeferWebShrinkLayoutUpdate) {
+     scheduleWebShrinkMeasurement(state, () => {
+       var _a4;
+@@ -6337,7 +6424,11 @@
+   const ctx = useStateContext();
+   useEffect(() => {
+     let timeoutId;
+-    let lastUpdateTime = 0;
++    // A list that just mounted is still settling (initial scroll, measured
++    // heights). Count the mount as activity so the first DOM-order pass waits
++    // for the list to go quiet instead of landing in its opening frames:
++    // moving rows restyles their whole subtree.
++    let lastUpdateTime = Date.now();
+     let delay = 500;
+     const unsubscribe = listen$(ctx, "lastPositionUpdate", () => {
+       const container = ref.current;
+@@ -7888,10 +7979,10 @@
+       doMaintainScrollAtEnd(ctx, { immediate: true });
+     }
+     checkThresholds(ctx);
+-    if (state) {
+-      const crossAxisPadding = state.props.horizontal ? (state.props.stylePaddingTop || 0) + (state.props.stylePaddingBottom || 0) : (state.props.stylePaddingLeft || 0) + (state.props.stylePaddingRight || 0);
+-      state.needsOtherAxisSize = otherAxisSize - crossAxisPadding < 10;
+-    }
++    // The list stays as wide as its column. Below 10px the library took it for a
++    // list sized by its content and kept the rows' width, as an inline width on
++    // the scroll node and a min-width inside, for as long as the list lived: a
++    // chat squeezed to nothing never came back.
+     if (IS_DEV && measuredLength === 0) {
+       warnDevOnce(
+         "height0",
+@@ -8707,6 +8798,7 @@
+   if (value && typeof value === "object") {
+     return {
+       data: (_a3 = value.data) != null ? _a3 : false,
++      deferSizeWhileScrolling: !!value.deferSizeWhileScrolling,
+       shouldRestorePosition: value.shouldRestorePosition,
+       size: (_b = value.size) != null ? _b : true
+     };
+@@ -8825,6 +8917,7 @@
+     estimatedListSize,
+     extraData,
+     getFixedItemSize,
++    getEstimatedItemSize,
+     getItemType,
+     horizontal,
+     rtl,
+@@ -9119,6 +9212,7 @@
+     drawDistance,
+     estimatedItemSize,
+     getFixedItemSize: useWrapIfItem(getFixedItemSize),
++    getEstimatedItemSize: useWrapIfItem(getEstimatedItemSize),
+     getItemType: useWrapIfItem(getItemType),
+     hasExternalScroll,
+     hideItemsUntilMeasured: experimental_hideItemsUntilMeasured,
+diff --git a/react.d.ts b/react.d.ts
+--- a/react.d.ts
++++ b/react.d.ts
+@@ -32,6 +32,8 @@
+ interface MaintainVisibleContentPositionNormalized<ItemT = any> {
+     data: boolean;
+     size: boolean;
++    /** While the user scrolls, size corrections move the rows above the viewport instead of the scroll position, until scrolling stops. */
++    deferSizeWhileScrolling?: boolean;
+     shouldRestorePosition?: (item: ItemT, index: number, data: readonly ItemT[]) => boolean;
+ }
+ 
+@@ -232,6 +234,11 @@
+      */
+     getFixedItemSize?: (item: ItemT, index: number, type: TItemType) => number | undefined;
+     /**
++     * Estimated size of one item before it is measured, ahead of `estimatedItemSize` and the per-type average.
++     * Return undefined to fall back to them.
++     */
++    getEstimatedItemSize?: (item: ItemT, index: number, type: TItemType) => number | undefined;
++    /**
+      * Returns a stable item type used for pooling and size estimation.
+      */
+     getItemType?: (item: ItemT, index: number) => TItemType;
+@@ -521,6 +528,8 @@
+ interface MaintainVisibleContentPositionConfig<ItemT = any> {
+     data?: boolean;
+     size?: boolean;
++    /** While the user scrolls, size corrections move the rows above the viewport instead of the scroll position, until scrolling stops. */
++    deferSizeWhileScrolling?: boolean;
+     shouldRestorePosition?: (item: ItemT, index: number, data: readonly ItemT[]) => boolean;
+ }
+ interface AnchoredEndSpaceReadyInfo {
+diff --git a/react-native.web.d.ts b/react-native.web.d.ts
+--- a/react-native.web.d.ts
++++ b/react-native.web.d.ts
+@@ -32,6 +32,8 @@
+ interface MaintainVisibleContentPositionNormalized<ItemT = any> {
+     data: boolean;
+     size: boolean;
++    /** While the user scrolls, size corrections move the rows above the viewport instead of the scroll position, until scrolling stops. */
++    deferSizeWhileScrolling?: boolean;
+     shouldRestorePosition?: (item: ItemT, index: number, data: readonly ItemT[]) => boolean;
+ }
+ 
+@@ -232,6 +234,11 @@
+      */
+     getFixedItemSize?: (item: ItemT, index: number, type: TItemType) => number | undefined;
+     /**
++     * Estimated size of one item before it is measured, ahead of `estimatedItemSize` and the per-type average.
++     * Return undefined to fall back to them.
++     */
++    getEstimatedItemSize?: (item: ItemT, index: number, type: TItemType) => number | undefined;
++    /**
+      * Returns a stable item type used for pooling and size estimation.
+      */
+     getItemType?: (item: ItemT, index: number) => TItemType;
+@@ -521,6 +528,8 @@
+ interface MaintainVisibleContentPositionConfig<ItemT = any> {
+     data?: boolean;
+     size?: boolean;
++    /** While the user scrolls, size corrections move the rows above the viewport instead of the scroll position, until scrolling stops. */
++    deferSizeWhileScrolling?: boolean;
+     shouldRestorePosition?: (item: ItemT, index: number, data: readonly ItemT[]) => boolean;
+ }
+ interface AnchoredEndSpaceReadyInfo {

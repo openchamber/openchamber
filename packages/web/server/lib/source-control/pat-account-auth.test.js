@@ -229,13 +229,15 @@ describe('PAT account auth', () => {
       expect(verify).not.toHaveBeenCalled();
     });
 
-    it('calls a token-only provider exactly as before, ignoring a username', async () => {
+    it('calls a token-only provider with the token alone, ignoring a username', async () => {
       const verify = vi.fn(async () => ({ id: 7, login: 'alice' }));
       const probe = vi.fn(async () => ({ supported: true }));
       const { auth } = setup({ verify, probe });
+      await auth.capabilities({ instance: ORIGIN });
+      expect(probe.mock.calls[0]).toEqual([ORIGIN]);
       await auth.connectToken({ instance: ORIGIN, token: 'pat-1', username: 'ignored' });
       expect(verify.mock.calls[0]).toEqual([ORIGIN, 'pat-1']);
-      expect(probe.mock.calls[0]).toEqual([ORIGIN]);
+      expect(probe.mock.calls[1]).toEqual([ORIGIN, 'pat-1']);
       await auth.status({ instance: ORIGIN });
       expect(verify.mock.calls[1]).toEqual([ORIGIN, 'pat-1']);
     });

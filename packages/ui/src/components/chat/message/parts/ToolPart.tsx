@@ -4,7 +4,7 @@ import { useMobileAppActions } from '@/apps/mobileAppContext';
 import { RuntimeAPIContext } from '@/contexts/runtimeAPIContext';
 import { cn } from '@/lib/utils';
 import { SimpleMarkdownRenderer } from '../../MarkdownRenderer';
-import { BlockLine } from './BlockLine';
+import { BlockBody } from './BlockLine';
 import { FormMarkdown } from '../../FormMarkdown';
 import { MessageFilesDisplay } from '../../FileAttachment';
 import { getToolMetadata } from '@/lib/toolHelpers';
@@ -15,11 +15,11 @@ import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useDirectorySync, useSessionMessages } from '@/sync/sync-context';
 import { useRunningShell } from '@/sync/background-shells';
-import { findShellCancellation, findShellCompletion, readBackgroundShellID } from '@/lib/opencode/background-shell';
+import { findShellCancellation, findShellCompletion, readBackgroundShellID, readRunningShellID } from '@/lib/opencode/background-shell';
 import { opencodeClient } from '@/lib/opencode/client';
 import type { State } from '@/sync/types';
 import { useUIStore } from '@/stores/useUIStore';
-import { ScrollShadow } from '@/components/ui/ScrollShadow';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { Button } from '@/components/ui/button';
 import { toast } from '@/components/ui';
 import { Text } from '@/components/ui/text';
@@ -62,6 +62,7 @@ import {
     resolveRunningTaskChildSessionId,
 } from './taskToolModel';
 import { areRenderRelevantPartsEqual } from '../renderCompare';
+import { HoverTooltip } from '@/components/ui/row-tooltip';
 import { useI18n } from '@/lib/i18n';
 import {
     extractFirstChangedLineFromDiff,
@@ -75,7 +76,7 @@ import {
     resolveToolQuickOpenTarget,
     type DiffPatchEntry,
 } from './toolDiffUtils';
-import { useChatColumnActions } from '@/components/chat/chatColumnSession';
+import { useChatColumnActions, useChatTranscriptDirectory } from '@/components/chat/chatColumnSession';
 import { useStreamingTextThrottle } from '../../hooks/useStreamingTextThrottle';
 import { getStreamingOutputAppend, getToolOutput } from './toolOutput';
 import { toAbsoluteFilePath } from '@/lib/path-utils';
@@ -96,20 +97,29 @@ import {
     subagentAgent,
     subagentDescription,
     isWriteTool,
+    isOpenChamberTool,
     normalizeToolName,
+    openChamberCallSummary,
+    soleNamedCall,
+    executeNamespace,
     toolDescription, type ToolDescription,
     toolInputPath,
     toolFileDiffs,
 } from '@/lib/opencode/tools';
+import { toolContentShellEnvelope } from '@/lib/opencode/toolContentShells';
 import { parseWebSearchOutput, webSearchProviderOf } from '@/lib/opencode/websearch';
 import { ApplyPatchFileButtons } from './ApplyPatchFileButtons';
+import { OpenChamberToolOutput } from './OpenChamberToolOutput';
+import { OpencodeToolOutput } from './OpencodeToolOutput';
+import { opencodeCallSucceeded, opencodeToolVerb, parseOpencodeToolResult } from './opencodeToolResult';
+import { hasOpenChamberView, openChamberVerbKey, parseOpenChamberEnvelope } from './openChamberToolEnvelope';
 import { openApplyPatchFileInEditor } from './applyPatchEditorAction';
 import { WebSearchResults } from './WebSearchResults';
 import { toBackgroundShellPart, type BackgroundShellPhase } from './backgroundShellPart';
 import { toBackgroundSubagentPart, toStoppedSubagentPart, type BackgroundSubagentPhase } from './backgroundSubagentPart';
 import { findSubagentCancellation, findSubagentRun, readBackgroundSubagentChildID } from '@/lib/opencode/subagent-run';
 import { useGlobalSessionStatusStore } from '@/sync/global-session-status';
-import { useBackgroundShellOutput } from './useBackgroundShellOutput';
+import { useShellOutput } from './useShellOutput';
 import { useToolContentCompletion } from './useToolContentCompletion';
 
 type ToolJsonViewMode = 'summary' | 'formatted' | 'raw';
@@ -447,13 +457,10 @@ const getToolDescriptionPath = (part: ToolPartType, state: ToolStateUnion, curre
     return getRelativePath(described.value, currentDirectory);
 };
 
-type DescriptionTranslate = (
-    key: 'chat.toolPart.questionsAsked' | 'chat.toolPart.filesCount' | 'chat.toolPart.moreToolCalls',
-    params: { count: number },
-) => string;
+type DescriptionTranslate = ReturnType<typeof useI18n>['t'];
 
 /** Localized text for a tool description; paths are made relative to the project. */
-const describeTool = (described: ToolDescription | null, currentDirectory: string, t: DescriptionTranslate): string => {
+const describeTool = (described: ToolDescription | null, currentDirectory: string, t: DescriptionTranslate, namespace?: string): string => {
     if (!described) return '';
     switch (described.kind) {
         case 'path':
@@ -465,8 +472,25 @@ const describeTool = (described: ToolDescription | null, currentDirectory: strin
         case 'files':
             return t('chat.toolPart.filesCount', { count: described.count });
         case 'tools': {
-            const named = described.calls
-                .map(({ name, count }) => (count > 1 ? `${name} \u00d7${count}` : name))
+            // OpenCode's namespace tools fail their own call, so each call
+            // that completed is named by its verb ("Listed worktrees") and a
+            // failed one by the tool. OpenChamber's tools go by their row
+            // names: Code Mode reports their call completed even when the
+            // envelope says the action failed, so a verb would claim too much.
+            // Under a row already titled by the script's one namespace, the
+            // calls go by what they did inside it: an OpenChamber call by its
+            // action, any other by its name within the namespace.
+            const counts = new Map<string, number>();
+            const add = (label: string, count: number) => counts.set(label, (counts.get(label) ?? 0) + count);
+            for (const { name, count, completed, actions } of described.calls) {
+                const opencode = opencodeToolVerb(name);
+                if (opencode) add(completed ? t(opencode.key) : opencode.tool, count);
+                else if (isOpenChamberTool(name) && namespace && actions.length > 0) actions.forEach(({ action, count: times }) => add(action, times));
+                else if (isOpenChamberTool(name)) add(getToolMetadata(name).displayName, count);
+                else add(namespace && name.toLowerCase().startsWith(`${namespace}.`) ? name.slice(namespace.length + 1) : name, count);
+            }
+            const named = [...counts]
+                .map(([name, count]) => (count > 1 ? `${name} \u00d7${count}` : name))
                 .join(', ');
             return described.overflow > 0
                 ? `${named}, ${t('chat.toolPart.moreToolCalls', { count: described.overflow })}`
@@ -475,9 +499,50 @@ const describeTool = (described: ToolDescription | null, currentDirectory: strin
     }
 };
 
-const getToolDescription = (part: ToolPartType, state: ToolStateUnion, currentDirectory: string, t: DescriptionTranslate): string => {
+const getToolDescription = (part: ToolPartType, state: ToolStateUnion, currentDirectory: string, t: DescriptionTranslate, namespace?: string): string => {
     const stateWithData = state as ToolStateWithMetadata;
-    return describeTool(toolDescription(part.tool, stateWithData.input, stateWithData.metadata), currentDirectory, t);
+    return describeTool(toolDescription(part.tool, stateWithData.input, stateWithData.metadata), currentDirectory, t, namespace);
+};
+
+/**
+ * What one of OpenChamber's own tools did, once it did it: "Remembered ·
+ * Uses bun" rather than "memory.save · Uses bun". The tool's name stays the
+ * row's title. A call still running, one that failed, or an action without a
+ * verb keeps the action's own name.
+ */
+const describeOpenChamberRow = (
+    part: ToolPartType,
+    input: ToolInput | undefined,
+    output: string | undefined,
+    translate: ReturnType<typeof useI18n>['t'],
+): string | null => {
+    if (part.state.status !== 'completed') return null;
+    const summary = openChamberCallSummary(part.tool, input);
+    // A history page leaves the result out until the row opens, and says
+    // which action it answered instead.
+    const envelope = parseOpenChamberEnvelope(output) ?? toolContentShellEnvelope(part);
+    // The envelope names the action the server ran, a bare `link` included.
+    const key = openChamberVerbKey(envelope?.action);
+    if (!summary || !key || envelope?.ok !== true) return null;
+    const verb = translate(key);
+    return summary.detail ? `${verb} \u00b7 ${summary.detail.slice(0, 120)}` : verb;
+};
+
+/**
+ * The same for a tool of OpenCode's `opencode` namespace, titled "OpenCode":
+ * "Renamed the session · Voice models" once the call succeeded, the tool's
+ * own name (`session_rename`) while it runs or after it failed. Success is the
+ * call's status, which a history page keeps.
+ */
+const describeOpencodeRow = (
+    part: ToolPartType,
+    detail: string,
+    translate: ReturnType<typeof useI18n>['t'],
+): string | null => {
+    const verb = opencodeToolVerb(part.tool);
+    if (!verb) return null;
+    const action = opencodeCallSucceeded(part) ? translate(verb.key) : verb.tool;
+    return detail ? `${action} \u00b7 ${detail.slice(0, 120)}` : action;
 };
 
 interface ToolScrollableSectionProps {
@@ -516,45 +581,41 @@ const ToolScrollableSection: React.FC<ToolScrollableSectionProps> = ({
     }, [followKey]);
 
     return (
-        <div className={cn('w-full min-w-0 flex-none overflow-hidden', outerClassName)}>
-            <ScrollShadow
-                ref={scrollRef}
-                // Tool output boxes are short (often 240px), so the 48px default
-                // fade would hide a couple of lines at each edge.
-                size={24}
-                data-scrollable="true"
-                onWheelCapture={(event) => {
-                    if (followKey !== undefined && event.deltaY < 0) {
-                        isFollowingRef.current = false;
-                    }
-                }}
-                onScroll={(event) => {
-                    if (followKey === undefined) {
-                        return;
-                    }
-                    const element = event.currentTarget;
-                    const distanceToEnd = element.scrollHeight - element.scrollTop - element.clientHeight;
-                    // Output can grow between an automatic scroll and its event.
-                    // A larger bottom gap alone does not mean the reader moved up.
-                    if (distanceToEnd <= 2) {
-                        isFollowingRef.current = true;
-                    } else if (element.scrollTop < lastScrollTopRef.current - 1) {
-                        isFollowingRef.current = false;
-                    }
-                    lastScrollTopRef.current = element.scrollTop;
-                }}
-                className={cn(
-                    'tool-output-surface p-2 rounded-xl w-full min-w-0',
-                    maxHeightClass,
-                    disableHorizontal ? 'overflow-y-auto overflow-x-hidden' : 'overflow-auto',
-                    className,
-                )}
-            >
-                <div className="w-full min-w-0">
-                    {children}
-                </div>
-            </ScrollShadow>
-        </div>
+        <ScrollableOverlay
+            ref={scrollRef}
+            outerClassName={cn('w-full min-w-0 flex-none', maxHeightClass, outerClassName)}
+            useScrollShadow
+            // Tool output boxes are short (often 240px), so the 48px default
+            // fade would hide a couple of lines at each edge.
+            scrollShadowSize={24}
+            disableHorizontal={disableHorizontal}
+            data-scrollable="true"
+            onWheelCapture={(event) => {
+                if (followKey !== undefined && event.deltaY < 0) {
+                    isFollowingRef.current = false;
+                }
+            }}
+            onScroll={(event) => {
+                if (followKey === undefined) {
+                    return;
+                }
+                const element = event.currentTarget;
+                const distanceToEnd = element.scrollHeight - element.scrollTop - element.clientHeight;
+                // Output can grow between an automatic scroll and its event.
+                // A larger bottom gap alone does not mean the reader moved up.
+                if (distanceToEnd <= 2) {
+                    isFollowingRef.current = true;
+                } else if (element.scrollTop < lastScrollTopRef.current - 1) {
+                    isFollowingRef.current = false;
+                }
+                lastScrollTopRef.current = element.scrollTop;
+            }}
+            className={cn('tool-output-surface min-w-0', className)}
+        >
+            <div className="w-full min-w-0">
+                {children}
+            </div>
+        </ScrollableOverlay>
     );
 };
 
@@ -650,17 +711,18 @@ const CopyToolOutputButton: React.FC<{ output: string }> = ({ output }) => {
     }, [output, t]);
 
     return (
-        <Button
-            variant="ghost"
-            size="icon"
-            className="h-6 w-6 rounded-md bg-[var(--surface-elevated)]/80 text-muted-foreground hover:text-foreground"
-            onClick={handleCopy}
-            onPointerDown={(event) => event.stopPropagation()}
-            aria-label={copied ? t('chat.toolPart.copiedOutput') : t('chat.toolPart.copyOutput')}
-            title={copied ? t('chat.toolPart.copiedOutput') : t('chat.toolPart.copyOutput')}
-        >
-            <Icon name={copied ? 'check' : 'file-copy'} className="h-3.5 w-3.5" />
-        </Button>
+        <HoverTooltip label={copied ? t('chat.toolPart.copiedOutput') : t('chat.toolPart.copyOutput')}>
+            <Button
+                variant="ghost"
+                size="icon"
+                className="h-6 w-6 rounded-md bg-[var(--surface-elevated)]/80 text-muted-foreground hover:text-foreground"
+                onClick={handleCopy}
+                onPointerDown={(event) => event.stopPropagation()}
+                aria-label={copied ? t('chat.toolPart.copiedOutput') : t('chat.toolPart.copyOutput')}
+            >
+                <Icon name={copied ? 'check' : 'file-copy'} className="h-3.5 w-3.5" />
+            </Button>
+        </HoverTooltip>
     );
 };
 
@@ -681,46 +743,49 @@ const JsonToolOutput: React.FC<{
     const textOutput = jsonViewMode === 'summary' ? unwrapTextBlocks(jsonResult.data) : null;
 
     return (
-        <div className="tool-output-surface relative p-2 rounded-xl w-full min-w-0">
-            <div className="absolute inset-e-2 top-2 z-10 flex items-center gap-1">
-                <Button
-                    variant="ghost"
-                    size="icon"
-                    className={cn('h-6 w-6 rounded-md text-muted-foreground hover:text-foreground', jsonViewMode === 'summary' && 'bg-[var(--interactive-selection)] text-[var(--interactive-selection-foreground)]')}
-                    onClick={(event) => handleJsonViewChange('summary', event)}
-                    onPointerDown={(event) => event.stopPropagation()}
-                    aria-label={t('chat.toolPart.showNavigableJson')}
-                    title={t('chat.toolPart.showNavigableJson')}
-                >
-                    <Icon name="list-unordered" className="h-3.5 w-3.5" />
-                </Button>
-                <Button
-                    variant="ghost"
-                    size="icon"
-                    className={cn('h-6 w-6 rounded-md text-muted-foreground hover:text-foreground', jsonViewMode === 'formatted' && 'bg-[var(--interactive-selection)] text-[var(--interactive-selection-foreground)]')}
-                    onClick={(event) => handleJsonViewChange('formatted', event)}
-                    onPointerDown={(event) => event.stopPropagation()}
-                    aria-label={t('chat.toolPart.showFormattedJson')}
-                    title={t('chat.toolPart.showFormattedJson')}
-                >
-                    <Icon name="node-tree" className="h-3.5 w-3.5" />
-                </Button>
-                <Button
-                    variant="ghost"
-                    size="icon"
-                    className={cn('h-6 w-6 rounded-md text-muted-foreground hover:text-foreground', jsonViewMode === 'raw' && 'bg-[var(--interactive-selection)] text-[var(--interactive-selection-foreground)]')}
-                    onClick={(event) => handleJsonViewChange('raw', event)}
-                    onPointerDown={(event) => event.stopPropagation()}
-                    aria-label={t('chat.toolPart.showRawJson')}
-                    title={t('chat.toolPart.showRawJson')}
-                >
-                    <Icon name="code-box" className="h-3.5 w-3.5" />
-                </Button>
+        <div className="relative w-full min-w-0">
+            <div className="absolute inset-e-0 top-0 z-10 flex items-center gap-1">
+                <HoverTooltip label={t('chat.toolPart.showNavigableJson')}>
+                    <Button
+                        variant="ghost"
+                        size="icon"
+                        className={cn('h-6 w-6 rounded-md text-muted-foreground hover:text-foreground', jsonViewMode === 'summary' && 'bg-[var(--interactive-selection)] text-[var(--interactive-selection-foreground)]')}
+                        onClick={(event) => handleJsonViewChange('summary', event)}
+                        onPointerDown={(event) => event.stopPropagation()}
+                        aria-label={t('chat.toolPart.showNavigableJson')}
+                    >
+                        <Icon name="list-unordered" className="h-3.5 w-3.5" />
+                    </Button>
+                </HoverTooltip>
+                <HoverTooltip label={t('chat.toolPart.showFormattedJson')}>
+                    <Button
+                        variant="ghost"
+                        size="icon"
+                        className={cn('h-6 w-6 rounded-md text-muted-foreground hover:text-foreground', jsonViewMode === 'formatted' && 'bg-[var(--interactive-selection)] text-[var(--interactive-selection-foreground)]')}
+                        onClick={(event) => handleJsonViewChange('formatted', event)}
+                        onPointerDown={(event) => event.stopPropagation()}
+                        aria-label={t('chat.toolPart.showFormattedJson')}
+                    >
+                        <Icon name="node-tree" className="h-3.5 w-3.5" />
+                    </Button>
+                </HoverTooltip>
+                <HoverTooltip label={t('chat.toolPart.showRawJson')}>
+                    <Button
+                        variant="ghost"
+                        size="icon"
+                        className={cn('h-6 w-6 rounded-md text-muted-foreground hover:text-foreground', jsonViewMode === 'raw' && 'bg-[var(--interactive-selection)] text-[var(--interactive-selection-foreground)]')}
+                        onClick={(event) => handleJsonViewChange('raw', event)}
+                        onPointerDown={(event) => event.stopPropagation()}
+                        aria-label={t('chat.toolPart.showRawJson')}
+                    >
+                        <Icon name="code-box" className="h-3.5 w-3.5" />
+                    </Button>
+                </HoverTooltip>
                 <CopyToolOutputButton output={renderedOutput} />
             </div>
             {jsonViewMode === 'summary' ? (
                 textOutput !== null ? (
-                    <div className="typography-code pe-12 text-muted-foreground/90">
+                    <div className="typography-code pe-12 text-muted-foreground">
                         <WorkerHighlightedCode
                             language="text"
                             code={textOutput}
@@ -739,7 +804,7 @@ const JsonToolOutput: React.FC<{
                     maxHeight="400px"
                 />
             ) : (
-                <div className="typography-code pe-12 text-muted-foreground/90">
+                <div className="typography-code pe-12 text-muted-foreground">
                     <WorkerHighlightedCode
                         language="json"
                         code={renderedOutput}
@@ -770,7 +835,7 @@ const ToolScrollableTextOutput: React.FC<{
 
     if (isShellTool(part.tool) && isStreaming) {
         return (
-            <div className="typography-code text-muted-foreground/90">
+            <div className="typography-code text-muted-foreground">
                 <StreamingPlainTextOutput output={renderedOutput} />
             </div>
         );
@@ -779,7 +844,7 @@ const ToolScrollableTextOutput: React.FC<{
     if (forcedMode === 'markdown') {
         return (
             <div className="w-full min-w-0">
-                <SimpleMarkdownRenderer content={renderedOutput} variant="tool" onShowPopup={onShowPopup} />
+                <SimpleMarkdownRenderer content={renderedOutput} singleTilde={false} variant="tool" onShowPopup={onShowPopup} />
             </div>
         );
     }
@@ -814,7 +879,7 @@ const ToolScrollableTextOutput: React.FC<{
             // min-h-7 holds the copy button (top-1 + h-6): an absolute child taller
             // than one output line overflows the scroller, and platforms with
             // classic scrollbars (Windows) then show one for a single line.
-            <div className="relative min-h-7 typography-code text-muted-foreground/90">
+            <div className="relative min-h-7 typography-code text-muted-foreground">
                 <div className="absolute inset-e-1 top-1 z-10">
                     <CopyToolOutputButton output={renderedOutput} />
                 </div>
@@ -940,20 +1005,21 @@ const OpenSubtaskButton: React.FC<{
     };
 
     return (
-        <button
-            type="button"
-            onPointerDown={(event) => event.stopPropagation()}
-            onClick={handleOpen}
-            className={cn(
-                'flex-shrink-0 inline-flex h-4 w-4 items-center justify-center rounded transition-opacity hover:bg-interactive-hover',
-                'opacity-60 hover:opacity-100 focus-visible:opacity-100',
-            )}
-            style={{ color: 'var(--tools-icon)' }}
-            title={label}
-            aria-label={label}
-        >
-            <Icon name="external-link" className="h-3 w-3" />
-        </button>
+        <HoverTooltip label={label}>
+            <button
+                type="button"
+                onPointerDown={(event) => event.stopPropagation()}
+                onClick={handleOpen}
+                className={cn(
+                    'flex-shrink-0 inline-flex h-4 w-4 items-center justify-center rounded transition-opacity hover:bg-interactive-hover',
+                    'opacity-60 hover:opacity-100 focus-visible:opacity-100',
+                )}
+                style={{ color: 'var(--tools-icon)' }}
+                aria-label={label}
+            >
+                <Icon name="external-link" className="h-3 w-3" />
+            </button>
+        </HoverTooltip>
     );
 };
 
@@ -1070,6 +1136,23 @@ const DiffPreview: React.FC<{ diff: string; diffViewMode: DiffViewMode }> = ({ d
     );
 };
 
+/** Switches an OpenChamber tool's row between its own view and the plain answer. */
+const RawAnswerToggle: React.FC<{ label: string; onToggle: () => void }> = ({ label, onToggle }) => (
+    <Button
+        variant="ghost"
+        size="xs"
+        className="text-muted-foreground hover:text-foreground"
+        onPointerDown={(event) => event.stopPropagation()}
+        onClick={(event) => {
+            event.stopPropagation();
+            onToggle();
+        }}
+    >
+        <Icon name="code-box" className="size-3.5" />
+        {label}
+    </Button>
+);
+
 interface ToolExpandedContentProps {
     part: ToolPartType;
     state: ToolStateUnion;
@@ -1106,21 +1189,30 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
         allowTextReplacement: isStreamingBash,
     });
     const outputString = isStreamingBash ? throttledOutputString : rawOutputString;
+    const isMobile = useUIStore((store) => store.isMobile);
+    // OpenChamber's own tools answer an envelope the chat can show in their
+    // own terms; the plain answer stays one click away.
+    const openChamberEnvelope = React.useMemo(
+        () => (state.status === 'completed' && openChamberCallSummary(part.tool, input) ? parseOpenChamberEnvelope(rawOutputString) : null),
+        [input, part.tool, rawOutputString, state.status],
+    );
+    // OpenCode's `opencode` namespace answers its tool's structured output.
+    const opencodeResult = React.useMemo(() => {
+        const verb = opencodeToolVerb(part.tool);
+        return verb && opencodeCallSucceeded(part) ? parseOpencodeToolResult(verb.tool, rawOutputString) : null;
+    }, [part, rawOutputString]);
+    const [showRawToolAnswer, setShowRawToolAnswer] = React.useState(false);
     const attachments = stateWithData.attachments;
     const diffContent = getToolFallbackDiff(metadata) ?? null;
     const diffEntries = React.useMemo(
         () => getDiffPatchEntries(metadata, diffContent ?? undefined, (path) => getRelativePath(path, currentDirectory)),
         [currentDirectory, diffContent, metadata]
     );
-    const hasVisualDiffEntry = diffEntries.some((entry) => entry.renderMode === 'diff');
-    // `execute` renders its script and its call list itself, below.
-    const hideToolInputPreview = part.tool === 'openchamber'
-        || part.tool === 'openchamber_schedule'
-        || part.tool === 'openchamber_web'
-        || part.tool === 'openchamber_memory'
-        || part.tool === 'openchamber_knowledge'
-        || part.tool === 'openchamber_notify'
-        || part.tool === 'openchamber_render'
+    // `execute` renders its script and its call list itself, below. An
+    // OpenCode namespace view says what the call did; the raw answer and a
+    // failed call keep the input beside it.
+    const hideToolInputPreview = isOpenChamberTool(part.tool)
+        || (opencodeResult !== null && !showRawToolAnswer)
         || isPatchTool(part.tool)
         || isEditTool(part.tool)
         || isExecuteTool(part.tool);
@@ -1276,8 +1368,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
                     input={input}
                     presentation={presentation}
                     onShowPopup={onShowPopup}
-                />,
-                { className: 'p-1' }
+                />
             );
         }
 
@@ -1349,7 +1440,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
         if (isSubagentTool(part.tool) && hasStringOutput) {
             return renderScrollableBlock(
                 <div className="w-full min-w-0">
-                    <SimpleMarkdownRenderer content={prepareTaskToolOutput(outputString)} variant="tool" onShowPopup={onShowPopup} />
+                    <SimpleMarkdownRenderer content={prepareTaskToolOutput(outputString)} singleTilde={false} variant="tool" onShowPopup={onShowPopup} />
                 </div>
             );
         }
@@ -1359,30 +1450,39 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
                 <div className="space-y-3">
                     {diffEntries.map((entry) => (
                         <div key={entry.id} className="w-full min-w-0">
-                            <div className="mb-1 flex min-w-0 items-center gap-1 px-2 py-1">
+                            <div className="mb-1 flex min-w-0 items-center gap-1 py-1">
                                 <div className="min-w-0 flex-1 typography-meta font-medium text-muted-foreground">
                                     {renderPathLikeGitChanges(entry.title)}
                                 </div>
-                                <Button
-                                    variant="ghost"
-                                    size="icon"
-                                    className="h-6 w-6 shrink-0 text-muted-foreground hover:text-foreground"
-                                    onClick={(event) => openEntryFile(entry, event)}
-                                    aria-label={t('chat.toolPart.openFileAtFirstChange')}
-                                    title={t('chat.toolPart.openFileAtFirstChange')}
-                                >
-                                    <Icon name="file-edit" className="h-3.5 w-3.5" />
-                                </Button>
-                                <Button
-                                    variant="ghost"
-                                    size="icon"
-                                    className="h-6 w-6 shrink-0 text-muted-foreground hover:text-foreground"
-                                    onClick={(event) => openEntryDiff(entry, event)}
-                                    aria-label={t('chat.toolPart.openFileDiff')}
-                                    title={t('chat.toolPart.openFileDiff')}
-                                >
-                                    <Icon name="git-pull-request" className="h-3.5 w-3.5" />
-                                </Button>
+                                {entry.renderMode === 'diff' ? (
+                                    <DiffViewToggle
+                                        mode={diffViewMode}
+                                        onModeChange={setDiffViewMode}
+                                        iconClassName="size-4"
+                                    />
+                                ) : null}
+                                <HoverTooltip label={t('chat.toolPart.openFileAtFirstChange')}>
+                                    <Button
+                                        variant="ghost"
+                                        size="icon"
+                                        className="h-6 w-6 shrink-0 text-muted-foreground hover:text-foreground"
+                                        onClick={(event) => openEntryFile(entry, event)}
+                                        aria-label={t('chat.toolPart.openFileAtFirstChange')}
+                                    >
+                                        <Icon name="file-edit" className="size-4" />
+                                    </Button>
+                                </HoverTooltip>
+                                <HoverTooltip label={t('chat.toolPart.openFileDiff')}>
+                                    <Button
+                                        variant="ghost"
+                                        size="icon"
+                                        className="h-6 w-6 shrink-0 text-muted-foreground hover:text-foreground"
+                                        onClick={(event) => openEntryDiff(entry, event)}
+                                        aria-label={t('chat.toolPart.openFileDiff')}
+                                    >
+                                        <Icon name="git-pull-request" className="size-4" />
+                                    </Button>
+                                </HoverTooltip>
                             </div>
                             {entry.renderMode === 'diff' ? (
                                 <DiffPreview
@@ -1395,8 +1495,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
                         </div>
                     ))}
                     {renderDiagnosticsSection()}
-                </div>,
-                { className: 'p-1' }
+                </div>
             );
         }
 
@@ -1404,8 +1503,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
             return renderScrollableBlock(
                 <div className="space-y-3">
                     {renderDiagnosticsSection()}
-                </div>,
-                { className: 'p-1' },
+                </div>
             );
         }
 
@@ -1416,8 +1514,42 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
         if (webSearchOutput) {
             return renderScrollableBlock(
                 <WebSearchResults output={webSearchOutput} providerId={webSearchProviderOf(metadata)} />,
-                { className: 'p-1', maxHeightClass: 'max-h-[50vh]' }
+                { maxHeightClass: 'max-h-[50vh]' }
             );
+        }
+
+        if (opencodeResult && !showRawToolAnswer) {
+            return renderScrollableBlock(
+                <div className="space-y-2">
+                    <OpencodeToolOutput
+                        result={opencodeResult}
+                        rawToggle={<RawAnswerToggle label={t('chat.toolPart.openchamber.raw.show')} onToggle={() => setShowRawToolAnswer(true)} />}
+                    />
+                </div>
+            );
+        }
+
+        if (openChamberEnvelope && !showRawToolAnswer) {
+            const showRaw = (
+                <RawAnswerToggle label={t('chat.toolPart.openchamber.raw.show')} onToggle={() => setShowRawToolAnswer(true)} />
+            );
+            if (!openChamberEnvelope.ok && openChamberEnvelope.errorMessage) {
+                return renderScrollableBlock(
+                    <div className="space-y-1.5">
+                        <div className="typography-meta whitespace-pre-wrap break-words" style={{ color: 'var(--status-error)' }}>
+                            {openChamberEnvelope.errorMessage}
+                        </div>
+                        <div className="-ms-2">{showRaw}</div>
+                    </div>
+                );
+            }
+            if (hasOpenChamberView(openChamberEnvelope)) {
+                return renderScrollableBlock(
+                    <div className="space-y-2">
+                        <OpenChamberToolOutput envelope={openChamberEnvelope} part={part} input={input} directory={currentDirectory} isMobile={isMobile} onShowPopup={onShowPopup} rawToggle={showRaw} />
+                    </div>
+                );
+            }
         }
 
         if (hasStringOutput && outputString.trim()) {
@@ -1432,9 +1564,15 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
             );
 
             return renderScrollableBlock(
-                output,
+                (openChamberEnvelope || opencodeResult) && showRawToolAnswer ? (
+                    <div className="space-y-2">
+                        <div className="-ms-2">
+                            <RawAnswerToggle label={t('chat.toolPart.openchamber.raw.hide')} onToggle={() => setShowRawToolAnswer(false)} />
+                        </div>
+                        {output}
+                    </div>
+                ) : output,
                 {
-                    className: isShellTool(part.tool) ? 'p-1 rounded-none' : 'p-1',
                     maxHeightClass: isShellTool(part.tool) ? 'max-h-[46vh]' : undefined,
                     followKey: isStreamingBash ? outputString : undefined,
                 }
@@ -1442,7 +1580,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
         }
 
         return renderScrollableBlock(
-            <div className="typography-meta text-muted-foreground/70">{t('chat.toolPart.noOutputProduced')}</div>,
+            <div className="typography-meta text-muted-foreground">{t('chat.toolPart.noOutputProduced')}</div>,
             { maxHeightClass: 'max-h-60' }
         );
     };
@@ -1452,17 +1590,13 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
         || (isShellTool(part.tool) && hasVisibleOutput);
 
     return (
-        <div
-            className={cn(
-                'relative pe-2 pb-2 pt-2 space-y-2 ps-4'
-            )}
-        >
+        <div className="relative space-y-2">
             {isQuestionTool(part.tool) ? (
                 renderResultContent()
             ) : (
                 <>
                     {isExecute ? (
-                        <div className="my-1 space-y-2">
+                        <div className="space-y-2">
                             {executeCode ? renderScrollableBlock(
                                 <WorkerHighlightedCode
                                     language="javascript"
@@ -1475,7 +1609,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
                             ) : null}
                             {executeCalls.length > 0 ? (
                                 <div>
-                                    <div className="typography-meta font-medium text-muted-foreground/80 mb-1">
+                                    <div className="typography-meta font-medium text-muted-foreground mb-1">
                                         {t('chat.toolPart.scriptCalls')}
                                     </div>
                                     <ul className="space-y-0.5">
@@ -1488,12 +1622,12 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
                                                     {call.tool}
                                                 </span>
                                                 {call.status && call.status !== 'error' && call.status !== 'completed' ? (
-                                                    <span className="typography-micro flex-shrink-0 text-muted-foreground/70">
+                                                    <span className="typography-micro flex-shrink-0 text-muted-foreground">
                                                         {call.status}
                                                     </span>
                                                 ) : null}
                                                 {call.input ? (
-                                                    <span className="typography-meta truncate text-muted-foreground/70">
+                                                    <span className="typography-meta truncate text-muted-foreground">
                                                         {call.input}
                                                     </span>
                                                 ) : null}
@@ -1505,45 +1639,35 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
                         </div>
                     ) : null}
 
-                    {hasInputText ? (
-                        <div className="my-1">
-                            {renderScrollableBlock(
-                                isShellTool(part.tool) ? (
-                                    <pre className="tool-input-text whitespace-pre-wrap break-words typography-code text-muted-foreground/90 m-0 p-0">
-                                        {inputTextContent}
-                                    </pre>
-                                ) : isWriteLikeTool && writeLikeInputPatch ? (
-                                    <DiffPreview
-                                        diff={writeLikeInputPatch}
-                                        diffViewMode={diffViewMode}
-                                    />
-                                ) : (
-                                    <blockquote className="tool-input-text whitespace-pre-wrap break-words typography-meta italic text-muted-foreground/70">
-                                        {inputTextContent}
-                                    </blockquote>
-                                ),
-                                {
-                                    maxHeightClass: isWriteLikeTool && writeLikeInputPatch && isExpanded ? 'max-h-[50vh]' : 'max-h-60',
-                                    className: isShellTool(part.tool) ? 'tool-input-surface p-0 rounded-none' : 'tool-input-surface',
-                                }
-                            )}
-                        </div>
+                    {hasInputText ? renderScrollableBlock(
+                        isWriteLikeTool && writeLikeInputPatch ? (
+                            <DiffPreview
+                                diff={writeLikeInputPatch}
+                                diffViewMode={diffViewMode}
+                            />
+                        ) : isSubagentTool(part.tool) ? (
+                            <div className="tool-input-text tool-prose-text whitespace-pre-wrap break-words text-muted-foreground">
+                                {inputTextContent}
+                            </div>
+                        ) : (
+                            <pre
+                                className="tool-input-text whitespace-pre-wrap break-words text-muted-foreground m-0"
+                                style={TOOL_COLLAPSED_CUSTOM_STYLE}
+                            >
+                                {inputTextContent}
+                            </pre>
+                        ),
+                        {
+                            maxHeightClass: isWriteLikeTool && writeLikeInputPatch && isExpanded ? 'max-h-[50vh]' : 'max-h-60',
+                            className: 'tool-input-surface',
+                        }
                     ) : null}
 
                     {shouldRenderResult && (
                         <div>
-                            {isFileChangeTool(part.tool) && hasVisualDiffEntry ? (
-                                <div className="mb-1 flex items-center justify-end gap-2">
-                                    <DiffViewToggle
-                                        mode={diffViewMode}
-                                        onModeChange={setDiffViewMode}
-                                        className="h-5 w-5 p-0"
-                                    />
-                                </div>
-                            ) : null}
                             {renderResultContent()}
                             {executeTruncation ? (
-                                <div className="typography-meta mt-1 text-muted-foreground/70">
+                                <div className="typography-meta mt-1 text-muted-foreground">
                                     {t('chat.toolPart.outputTruncated')}
                                     {executeTruncation.outputPath ? ` \u2014 ${executeTruncation.outputPath}` : ''}
                                 </div>
@@ -1553,7 +1677,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
 
                     {state.status === 'error' && 'error' in state && (
                         <div>
-                            <div className="typography-meta font-medium text-muted-foreground/80 mb-1">{t('chat.toolPart.error')}</div>
+                            <div className="typography-meta font-medium text-muted-foreground mb-1">{t('chat.toolPart.error')}</div>
                             <div className="typography-meta p-2 rounded-xl" style={{
                                 backgroundColor: 'var(--status-error-background)',
                                 color: 'var(--status-error)',
@@ -1742,14 +1866,20 @@ const ToolPartContent: React.FC<ToolPartProps & { header?: ToolRowHeader; subage
     const isMultiFileApplyPatch = isPatchTool(normalizedPartTool) && Array.isArray(metadata?.files) && metadata.files.length > 1;
     const normalizedPart = normalizedPartTool !== part.tool ? ({ ...part, tool: normalizedPartTool } as ToolPartType) : part;
     const descriptionPath = getToolDescriptionPath(normalizedPart, state, currentDirectory);
-    const builtInDescription = getToolDescription(normalizedPart, state, currentDirectory, t);
     const stateOutput = typeof stateWithData.output === 'string' ? stateWithData.output : undefined;
+    // A script whose calls all went to one namespace is titled by it.
+    const scriptNamespace = isExecuteTool(part.tool) ? executeNamespace(metadata) : undefined;
+    const plainDescription = getToolDescription(normalizedPart, state, currentDirectory, t, scriptNamespace);
+    const builtInDescription = describeOpenChamberRow(normalizedPart, input, stateOutput, t)
+        ?? describeOpencodeRow(part, plainDescription, t)
+        ?? plainDescription;
     const guestHeader = React.useMemo(
         () => (presentation ? renderGuestToolHeader(presentation, { input, output: stateOutput, metadata }) : null),
         [input, metadata, presentation, stateOutput],
     );
     const description = guestHeader?.subtitle ?? builtInDescription;
-    const displayName = guestHeader?.title ?? getToolMetadata(normalizedPartTool || part.tool).displayName;
+    const rowTool = scriptNamespace ?? (normalizedPartTool || part.tool);
+    const displayName = guestHeader?.title ?? getToolMetadata(rowTool).displayName;
 
     // Opened, the body already carries the whole error and output.
     const failureDetail = isError && !isExpanded ? failureReason : undefined;
@@ -1907,12 +2037,15 @@ const ToolPartContent: React.FC<ToolPartProps & { header?: ToolRowHeader; subage
     const iconStyle = isError ? TOOL_ERROR_ICON_STYLE : TOOL_NORMAL_ICON_STYLE;
     const titleStyle = isError ? TOOL_ERROR_TITLE_STYLE : TOOL_NORMAL_TITLE_STYLE;
     const shouldRenderExpandedContent = useDeferredExpandedContent(isExpanded);
+    const storeDirectory = useChatTranscriptDirectory();
     const contentCompletion = useToolContentCompletion(
         part,
         shouldRenderExpandedContent || (presentation !== null && guestToolHeaderReadsOutput(presentation)),
+        storeDirectory ?? undefined,
     );
     // Shell and subagent rows carry their duration: live while they run, final once settled.
-    const showsDuration = isShellTool(normalizedPartTool) || isTaskTool;
+    // Image generation takes tens of seconds; the ticking time shows it is still at work.
+    const showsDuration = isShellTool(normalizedPartTool) || isTaskTool || part.tool === 'openchamber_image';
 
     if (!shouldTreatAsFinalized && !isActive && !isTaskTool) {
         return null;
@@ -1945,7 +2078,7 @@ const ToolPartContent: React.FC<ToolPartProps & { header?: ToolRowHeader; subage
                                         'absolute inset-0 flex items-center justify-center transition-opacity',
                                         isExpanded ? 'opacity-0' : 'group-hover/tool:opacity-0',
                                     )} style={iconStyle}>
-                                        {getToolIcon(normalizedPartTool || part.tool, presentation)}
+                                        {getToolIcon(rowTool, presentation)}
                                     </span>
                                     <Icon
                                         name={isExpanded ? 'arrow-down-s' : 'arrow-right-s'}
@@ -1991,7 +2124,7 @@ const ToolPartContent: React.FC<ToolPartProps & { header?: ToolRowHeader; subage
                                     )}
                                     style={iconStyle}
                                 >
-                                    {getToolIcon(normalizedPartTool || part.tool, presentation)}
+                                    {getToolIcon(rowTool, presentation)}
                                 </div>
                                 <div
                                     className={cn(
@@ -2014,26 +2147,27 @@ const ToolPartContent: React.FC<ToolPartProps & { header?: ToolRowHeader; subage
                                     {displayName}
                                 </MinDurationShineText>
                                 {quickOpenTarget ? (
-                                    <button
-                                        type="button"
-                                        onClick={handleQuickOpen}
-                                        className={cn(
-                                            'flex-shrink-0 inline-flex h-4 w-4 items-center justify-center rounded transition-opacity hover:bg-interactive-hover',
-                                            'opacity-60 hover:opacity-100 focus-visible:opacity-100',
-                                        )}
-                                        style={{ color: 'var(--tools-icon)' }}
-                                        title={t('chat.toolPart.openFile')}
-                                        aria-label={t('chat.toolPart.openFile')}
-                                    >
-                                        <Icon name="external-link" className="h-3 w-3" />
-                                    </button>
+                                    <HoverTooltip label={t('chat.toolPart.openFile')}>
+                                        <button
+                                            type="button"
+                                            onClick={handleQuickOpen}
+                                            className={cn(
+                                                'flex-shrink-0 inline-flex h-4 w-4 items-center justify-center rounded transition-opacity hover:bg-interactive-hover',
+                                                'opacity-60 hover:opacity-100 focus-visible:opacity-100',
+                                            )}
+                                            style={{ color: 'var(--tools-icon)' }}
+                                            aria-label={t('chat.toolPart.openFile')}
+                                        >
+                                            <Icon name="external-link" className="h-3 w-3" />
+                                        </button>
+                                    </HoverTooltip>
                                 ) : null}
                                 {taskSessionId ? (
                                     <OpenSubtaskButton sessionId={taskSessionId} agent={subagentAgent(input)} isMobile={isMobile} />
                                 ) : null}
                             </div>
                             {showsDuration && typeof effectiveTimeStart === 'number' && !header?.durationUnknown ? (
-                                <span className={cn('flex-shrink-0 tabular-nums text-muted-foreground/80', TOOL_ROW_DESCRIPTION_CLASS)}>
+                                <span className={cn('flex-shrink-0 tabular-nums text-muted-foreground', TOOL_ROW_DESCRIPTION_CLASS)}>
                                     <LiveDuration
                                         start={effectiveTimeStart}
                                         end={typeof effectiveTimeEnd === 'number' ? effectiveTimeEnd : undefined}
@@ -2042,7 +2176,7 @@ const ToolPartContent: React.FC<ToolPartProps & { header?: ToolRowHeader; subage
                                 </span>
                             ) : null}
                             {header?.label ? (
-                                <span className={cn('flex-shrink-0 text-muted-foreground/80', TOOL_ROW_DESCRIPTION_CLASS)}>
+                                <span className={cn('flex-shrink-0 text-muted-foreground', TOOL_ROW_DESCRIPTION_CLASS)}>
                                     {header.label === 'stopped'
                                         ? t('chat.toolPart.background.stoppedLabel')
                                         : t('chat.toolPart.background.label')}
@@ -2108,17 +2242,19 @@ const ToolPartContent: React.FC<ToolPartProps & { header?: ToolRowHeader; subage
                             // A labelled red action, the same one the composer's
                             // background commands strip offers. The negative
                             // margin keeps the header row at its text height.
-                            <Button
-                                type="button"
-                                variant="ghost"
-                                size="xs"
-                                onClick={(event) => { event.stopPropagation(); header.stop?.onStop(); }}
-                                className="-my-0.5 flex-shrink-0 text-[var(--status-error)] hover:text-[var(--status-error)]"
-                                aria-label={header.stop.ariaLabel}
-                            >
-                                <Icon name="stop" className="size-3" />
-                                {t('chat.toolPart.background.stopLabel')}
-                            </Button>
+                            <HoverTooltip label={header.stop.ariaLabel}>
+                                <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="xs"
+                                    onClick={(event) => { event.stopPropagation(); header.stop?.onStop(); }}
+                                    className="-my-0.5 flex-shrink-0 text-[var(--status-error)] hover:text-[var(--status-error)]"
+                                    aria-label={header.stop.ariaLabel}
+                                >
+                                    <Icon name="stop" className="size-3" />
+                                    {t('chat.toolPart.background.stopLabel')}
+                                </Button>
+                            </HoverTooltip>
                         ) : null}
                     </div>
                 )}
@@ -2134,10 +2270,7 @@ const ToolPartContent: React.FC<ToolPartProps & { header?: ToolRowHeader; subage
                 }}
             >
                 {shouldRenderExpandedContent ? (
-                    <div
-                        className="relative ms-2 ps-3"
-                    >
-                        <BlockLine onToggle={() => onToggle(part.id)} topOffset={1} />
+                    <BlockBody onToggle={() => onToggle(part.id)}>
                         {contentCompletion.status === 'whole' ? (
                             <ToolExpandedContent
                                 part={part}
@@ -2149,19 +2282,19 @@ const ToolPartContent: React.FC<ToolPartProps & { header?: ToolRowHeader; subage
                             />
                         ) : contentCompletion.status === 'loading' ? (
                             contentCompletion.showProgress ? (
-                                <div className="typography-meta py-1 text-muted-foreground">
+                                <div className="typography-meta text-muted-foreground">
                                     {t('chat.toolPart.content.loading')}
                                 </div>
                             ) : null
                         ) : (
-                            <div className="typography-meta flex items-center gap-2 py-1 text-muted-foreground">
+                            <div className="typography-meta flex items-center gap-2 text-muted-foreground">
                                 <span>{t('chat.toolPart.content.loadFailed')}</span>
                                 <Button variant="ghost" size="xs" onClick={contentCompletion.retry}>
                                     {t('chat.toolPart.content.retry')}
                                 </Button>
                             </div>
                         )}
-                    </div>
+                    </BlockBody>
                 ) : null}
             </div>
         </div>
@@ -2226,7 +2359,7 @@ const BackgroundShellToolPartContent: React.FC<ToolPartProps & { shellID: string
     const completion = React.useMemo(() => findShellCompletion(messages, shellID), [messages, shellID]);
     const cancellation = React.useMemo(() => findShellCancellation(messages, shellID), [messages, shellID]);
     const isRunning = !completion && running !== undefined;
-    const liveOutput = useBackgroundShellOutput(shellID, running?.directory, isRunning && props.isExpanded);
+    const liveOutput = useShellOutput(shellID, running?.directory, isRunning && props.isExpanded);
     const [stopping, setStopping] = React.useState(false);
 
     // A stop the user asked for wins over the error OpenCode reports for it,
@@ -2264,6 +2397,24 @@ const BackgroundShellToolPartContent: React.FC<ToolPartProps & { shellID: string
             }}
         />
     );
+};
+
+/**
+ * A shell call the turn waits for. OpenCode reports only the command's id
+ * while it runs, so the expanded row reads the output from the shell service,
+ * as a background row does, until the call settles with its final output.
+ */
+const ShellToolPartContent: React.FC<ToolPartProps> = (props) => {
+    const shellID = readRunningShellID(props.part);
+    const running = useRunningShell(shellID);
+    const liveOutput = useShellOutput(shellID ?? '', running?.directory, shellID !== undefined && props.isExpanded);
+    const part = React.useMemo((): ToolPartType => {
+        const { state } = props.part;
+        if (!liveOutput || state.status !== 'running') return props.part;
+        return { ...props.part, state: { ...state, metadata: { ...state.metadata, output: liveOutput } } };
+    }, [liveOutput, props.part]);
+
+    return <ToolPartContent {...props} part={part} />;
 };
 
 /**
@@ -2335,8 +2486,28 @@ const SubagentToolPartContent: React.FC<ToolPartProps> = (props) => {
     return <ToolPartContent {...props} part={part} header={header} subagentSessionId={childSessionID} />;
 };
 
-const ToolPart: React.FC<ToolPartProps> = (props) => {
+/**
+ * Most of OpenChamber's own tools run behind Code Mode, so their calls arrive
+ * as `execute` parts. A script that made just one of those calls reads as that
+ * tool's own row: its action, detail and icon, instead of "execute" and a
+ * list of tool names. Everything else about the part stays the script's.
+ */
+const useShownToolPart = (part: ToolPartProps['part']): ToolPartProps['part'] => {
+    const metadata = 'metadata' in part.state ? part.state.metadata : undefined;
+    const sole = React.useMemo(
+        () => (isExecuteTool(part.tool) ? soleNamedCall(metadata) : undefined),
+        [metadata, part.tool],
+    );
+    return React.useMemo(
+        () => (sole ? { ...part, tool: sole.tool, state: { ...part.state, input: sole.input } } : part),
+        [part, sole],
+    );
+};
+
+const ToolPart: React.FC<ToolPartProps> = (incoming) => {
     const { t } = useI18n();
+    const part = useShownToolPart(incoming.part);
+    const props = part === incoming.part ? incoming : { ...incoming, part };
     const toolName = normalizeToolName(props.part.tool) || 'tool';
     const displayName = getToolMetadata(toolName).displayName;
     const backgroundShellID = isShellTool(toolName) ? readBackgroundShellID(props.part) : undefined;
@@ -2352,7 +2523,9 @@ const ToolPart: React.FC<ToolPartProps> = (props) => {
                 ? <BackgroundShellToolPartContent {...props} shellID={backgroundShellID} />
                 : isSubagentTool(toolName)
                     ? <SubagentToolPartContent {...props} />
-                    : <ToolPartContent {...props} />}
+                    : isShellTool(toolName)
+                        ? <ShellToolPartContent {...props} />
+                        : <ToolPartContent {...props} />}
         </ToolPartErrorBoundary>
     );
 };

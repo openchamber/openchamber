@@ -1,5 +1,19 @@
-import { describe, expect, it, vi } from 'vitest';
+import { execFileSync } from 'node:child_process';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import {
+  createWorktree,
+  getPathsWithoutChanges,
+  listStashes,
+  removeWorktree,
+  stashApply,
+  stashDrop,
+  stashPush,
+  waitForActiveWorktreeBootstrap,
+} from '../git/service.js';
 import { createSessionWorktreeMover } from './worktree-move.js';
 
 const ROOT = '/repo/app';
@@ -11,10 +25,13 @@ const STASH = { ref: 'stash@{0}', message: 'On main: OpenChamber: session ses_1 
  * A git that records what happened: one stash list shared by every worktree,
  * the way `refs/stash` is, and switches for each step that can fail.
  */
-const createMover = ({ changes = true, applyFails = false, moveFails = false, restoreFails = false, removeFails = false, unchanged = [], start = null } = {}) => {
+const NO_SETUP = { startCommand: '', untrustedSkipped: [] };
+
+const createMover = ({ changes = true, applyFails = false, moveFails = false, restoreFails = false, removeFails = false, unchanged = [], start = null, setup = NO_SETUP, setupStillRunning = false, removal = null } = {}) => {
   const stashes = [];
   const calls = [];
   const getPathsWithoutChanges = vi.fn(async () => unchanged);
+  const resolveWorktreeSetup = vi.fn(async () => setup);
   const mover = createSessionWorktreeMover({
     getPathsWithoutChanges,
     createWorktree: vi.fn(async (directory, input, options) => {
@@ -25,8 +42,9 @@ const createMover = ({ changes = true, applyFails = false, moveFails = false, re
     removeWorktree: vi.fn(async (directory, input) => {
       calls.push(['removeWorktree', directory, input]);
       if (removeFails) throw new Error('worktree is locked');
+      await removal?.promise;
     }),
-    waitForWorktreeReady: vi.fn(async (directory) => { calls.push(['waitForWorktreeReady', directory]); }),
+    waitForWorktreeReady: vi.fn(async (directory) => { calls.push(['waitForWorktreeReady', directory]); return { setupStillRunning: setupStillRunning instanceof Function ? setupStillRunning() : setupStillRunning }; }),
     // `start` is the project's folder inside the worktree, where the session starts.
     resolveStartDirectory: vi.fn(async ({ sourceDirectory, worktreeRoot }) => {
       calls.push(['resolveStartDirectory', sourceDirectory, worktreeRoot]);
@@ -59,9 +77,10 @@ const createMover = ({ changes = true, applyFails = false, moveFails = false, re
       calls.push(['moveSession', sessionId, directory]);
       if (moveFails) throw new Error('session not found');
     }),
+    resolveWorktreeSetup,
     warn: vi.fn(),
   });
-  return { mover, calls, stashes, getPathsWithoutChanges };
+  return { mover, calls, stashes, getPathsWithoutChanges, resolveWorktreeSetup };
 };
 
 describe('moving a session into a new worktree', () => {
@@ -97,6 +116,27 @@ describe('moving a session into a new worktree', () => {
 
     expect(result).toMatchObject({ changesMoved: false, carried: [] });
     expect(calls.map(([step]) => step)).toEqual(['createWorktree', 'hydrateCheckout', 'waitForWorktreeReady', 'resolveStartDirectory', 'moveSession']);
+  });
+
+  it('runs the project\'s setup commands in the new worktree before the session moves in', async () => {
+    const { mover, calls, resolveWorktreeSetup } = createMover({ setup: { startCommand: 'pnpm install', untrustedSkipped: [] } });
+
+    const result = await mover.move({ sessionId: 'ses_1', directory: SOURCE, name: 'fix-login' });
+
+    expect(resolveWorktreeSetup).toHaveBeenCalledWith(SOURCE);
+    expect(calls[0]).toEqual(['createWorktree', ROOT, { mode: 'new', name: 'fix-login', startRef: 'main', startCommand: 'pnpm install' }]);
+    // The bootstrap runs the command; the session moves only after it.
+    expect(calls.map(([step]) => step)).toEqual(['createWorktree', 'hydrateCheckout', 'waitForWorktreeReady', 'resolveStartDirectory', 'moveSession']);
+    expect(result).not.toHaveProperty('untrustedSetupCommandsSkipped');
+  });
+
+  it('names the shared setup commands it skipped because nobody trusted them', async () => {
+    const { mover, calls } = createMover({ setup: { startCommand: '', untrustedSkipped: ['pnpm install'] } });
+
+    const result = await mover.move({ sessionId: 'ses_1', directory: SOURCE, name: 'fix-login' });
+
+    expect(calls[0]).toEqual(['createWorktree', ROOT, { mode: 'new', name: 'fix-login', startRef: 'main' }]);
+    expect(result.untrustedSetupCommandsSkipped).toEqual(['pnpm install']);
   });
 
   it('moves the session into the project folder inside the worktree while changes still go to the worktree root', async () => {
@@ -170,7 +210,7 @@ describe('moving a session into a new worktree', () => {
     await expect(mover.move({ sessionId: 'ses_1', directory: SOURCE, name: 'feature', existingBranch: 'feature' })).rejects.toThrow('session not found');
 
     expect(calls[0]).toEqual(['createWorktree', ROOT, { mode: 'existing', name: 'feature', existingBranch: 'feature', setUpstream: true }]);
-    expect(calls).toContainEqual(['removeWorktree', ROOT, { directory: WORKTREE.path, deleteLocalBranch: false }]);
+    expect(calls).toContainEqual(['removeWorktree', ROOT, { directory: WORKTREE.path, deleteLocalBranch: false, cancelSetup: true }]);
   });
 
   it('checks out a remote branch and removes the local branch it made when the move fails', async () => {
@@ -179,7 +219,7 @@ describe('moving a session into a new worktree', () => {
     await expect(mover.move({ sessionId: 'ses_1', directory: SOURCE, name: 'review', existingBranch: 'origin/review' })).rejects.toThrow('session not found');
 
     expect(calls[0]).toEqual(['createWorktree', ROOT, { mode: 'existing', name: 'review', existingBranch: 'origin/review', setUpstream: true }]);
-    expect(calls).toContainEqual(['removeWorktree', ROOT, { directory: WORKTREE.path, deleteLocalBranch: true }]);
+    expect(calls).toContainEqual(['removeWorktree', ROOT, { directory: WORKTREE.path, deleteLocalBranch: true, cancelSetup: true }]);
   });
 
   it('reports the branch it checked out', async () => {
@@ -209,7 +249,7 @@ describe('moving a session into a new worktree', () => {
     });
 
     expect(calls.filter(([step]) => step === 'moveSession')).toEqual([]);
-    expect(calls).toContainEqual(['removeWorktree', ROOT, { directory: WORKTREE.path, deleteLocalBranch: true }]);
+    expect(calls).toContainEqual(['removeWorktree', ROOT, { directory: WORKTREE.path, deleteLocalBranch: true, cancelSetup: true }]);
     expect(calls).toContainEqual(['stashApply', SOURCE, STASH.hash]);
     expect(stashes).toEqual([]);
   });
@@ -227,6 +267,64 @@ describe('moving a session into a new worktree', () => {
     expect(stashes).toEqual([]);
   });
 
+  it('puts the changes back without waiting for the cleanup, and answers after it', async () => {
+    const removal = Promise.withResolvers();
+    const { mover, calls, stashes } = createMover({ moveFails: true, removal });
+
+    const move = mover.move({ sessionId: 'ses_1', directory: SOURCE, name: 'fix-login', carry: ['src/a.ts'] });
+    const failure = expect(move).rejects.toMatchObject({ message: 'session not found' });
+
+    await vi.waitFor(() => expect(calls).toContainEqual(['stashApply', SOURCE, STASH.hash]));
+    await vi.waitFor(() => expect(stashes).toEqual([]));
+    removal.resolve();
+    await failure;
+  });
+
+  it('moves nothing and keeps the worktree while the setup commands still run', async () => {
+    const { mover, calls, stashes } = createMover({ setupStillRunning: true });
+
+    await expect(mover.move({ sessionId: 'ses_1', directory: SOURCE, name: 'fix-login', carry: ['src/a.ts'] })).rejects.toMatchObject({
+      statusCode: 503,
+      partial: true,
+      partialAction: 'worktree-setup-running',
+      directory: WORKTREE.path,
+    });
+
+    expect(calls.map(([step]) => step)).toEqual(['createWorktree', 'hydrateCheckout', 'waitForWorktreeReady']);
+    expect(stashes).toEqual([]);
+  });
+
+  it('moves into the worktree it left once its setup finished, instead of making another', async () => {
+    let setupRunning = true;
+    const { mover, calls } = createMover({ setupStillRunning: () => setupRunning });
+
+    await expect(mover.move({ sessionId: 'ses_1', directory: SOURCE, name: 'fix-login', carry: ['src/a.ts'] })).rejects.toMatchObject({ statusCode: 503 });
+    setupRunning = false;
+    const moved = await mover.move({ sessionId: 'ses_1', directory: SOURCE, name: 'fix-login', carry: ['src/a.ts'] });
+
+    expect(moved.directory).toBe(WORKTREE.path);
+    expect(calls.filter(([step]) => step === 'createWorktree')).toHaveLength(1);
+    expect(calls.some(([step]) => step === 'removeWorktree')).toBe(false);
+  });
+
+  it('keeps a held-back worktree for the same call only, and a failed retry leaves it in place', async () => {
+    let setupRunning = true;
+    const { mover, calls } = createMover({ setupStillRunning: () => setupRunning });
+    const failingMover = createMover({ setupStillRunning: () => setupRunning, moveFails: true });
+
+    await expect(mover.move({ sessionId: 'ses_1', directory: SOURCE, name: 'fix-login' })).rejects.toMatchObject({ statusCode: 503 });
+    setupRunning = false;
+    await mover.move({ sessionId: 'ses_2', directory: SOURCE, name: 'fix-login' });
+    expect(calls.filter(([step]) => step === 'createWorktree')).toHaveLength(2);
+
+    setupRunning = true;
+    await expect(failingMover.mover.move({ sessionId: 'ses_1', directory: SOURCE, name: 'fix-login' })).rejects.toMatchObject({ statusCode: 503 });
+    setupRunning = false;
+    await expect(failingMover.mover.move({ sessionId: 'ses_1', directory: SOURCE, name: 'fix-login' })).rejects.toThrow('session not found');
+    expect(failingMover.calls.filter(([step]) => step === 'createWorktree')).toHaveLength(1);
+    expect(failingMover.calls.some(([step]) => step === 'removeWorktree')).toBe(false);
+  });
+
   it('keeps the stash and names it when the changes cannot be put back either', async () => {
     const { mover, stashes } = createMover({ moveFails: true, restoreFails: true });
 
@@ -242,7 +340,7 @@ describe('moving a session into a new worktree', () => {
     let listings = 0;
     const failingMover = createSessionWorktreeMover({
       resolveStartDirectory: vi.fn(async ({ worktreeRoot }) => ({ directory: worktreeRoot, fallback: null })),
-      ...Object.fromEntries(['createWorktree', 'removeWorktree', 'waitForWorktreeReady', 'hydrateCheckout', 'stashApply', 'stashDrop', 'moveSession'].map((name) => [name, vi.fn(async () => (name === 'createWorktree' ? WORKTREE : undefined))])),
+      ...Object.fromEntries(['createWorktree', 'removeWorktree', 'waitForWorktreeReady', 'hydrateCheckout', 'stashApply', 'stashDrop', 'moveSession'].map((name) => [name, vi.fn(async () => (name === 'createWorktree' ? WORKTREE : { setupStillRunning: false }))])),
       bootstrapStore: {},
       getPathsWithoutChanges: vi.fn(async () => []),
       stashPush: vi.fn(async () => ({})),
@@ -262,7 +360,7 @@ describe('moving a session into a new worktree', () => {
     const { mover, calls } = createMover({ changes: false, moveFails: true, removeFails: true });
 
     await expect(mover.move({ sessionId: 'ses_1', directory: SOURCE, name: 'fix-login' })).rejects.toMatchObject({ message: 'session not found' });
-    expect(calls).toContainEqual(['removeWorktree', ROOT, { directory: WORKTREE.path, deleteLocalBranch: true }]);
+    expect(calls).toContainEqual(['removeWorktree', ROOT, { directory: WORKTREE.path, deleteLocalBranch: true, cancelSetup: true }]);
   });
 
   it('refuses a call without a session, a directory, or a worktree name before creating anything', async () => {
@@ -295,4 +393,79 @@ describe('the default start ref', () => {
     await expect(resolveWith({ all: ['master', 'feature'], defaultBranches: {} })).resolves.toBe('master');
     await expect(resolveWith({ all: ['feature'], defaultBranches: {} })).resolves.toBe('HEAD');
   });
+});
+
+describe('a setup command that writes a carried file after the wait ended', () => {
+  const tempDirs = [];
+  const previousDataHome = process.env.XDG_DATA_HOME;
+
+  afterEach(() => {
+    if (previousDataHome === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = previousDataHome;
+    for (const directory of tempDirs.splice(0)) fs.rmSync(directory, { recursive: true, force: true });
+  });
+
+  const tempDir = () => {
+    const directory = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'worktree-move-')));
+    tempDirs.push(directory);
+    return directory;
+  };
+
+  const git = (directory, ...args) => execFileSync('git', args, { cwd: directory, encoding: 'utf8' });
+
+  it('leaves the edit, its way back and the session where they were', async () => {
+    process.env.XDG_DATA_HOME = tempDir();
+    const markers = tempDir();
+    const started = path.join(markers, 'started');
+    const finish = path.join(markers, 'finish');
+    const repo = tempDir();
+    git(repo, 'init', '-b', 'main');
+    git(repo, 'config', 'user.email', 'test@example.com');
+    git(repo, 'config', 'user.name', 'Test User');
+    fs.writeFileSync(path.join(repo, 'carried.txt'), 'committed\n');
+    git(repo, 'add', '.');
+    git(repo, 'commit', '-m', 'Initial commit');
+    fs.writeFileSync(path.join(repo, 'carried.txt'), 'the agent edit\n');
+
+    const bootstrapStore = {
+      read: vi.fn(async () => null),
+      write: vi.fn(async (_directory, state) => state),
+      remove: vi.fn(async () => true),
+    };
+    const moveSession = vi.fn();
+    const mover = createSessionWorktreeMover({
+      createWorktree: (directory, input, options) => createWorktree(directory, { ...input, returnAfterDirectoryCreated: true }, options),
+      removeWorktree,
+      waitForWorktreeReady: async () => {
+        await vi.waitFor(() => expect(fs.existsSync(started)).toBe(true), { timeout: 10_000 });
+        return { setupStillRunning: true };
+      },
+      resolveStartDirectory: vi.fn(),
+      hydrateCheckout: async () => ({ status: 'not-needed', submodules: [], lfs: [] }),
+      bootstrapStore,
+      stashPush,
+      getPathsWithoutChanges,
+      stashApply,
+      stashDrop,
+      listStashes,
+      getBranches: async () => ({ all: ['main'], defaultBranches: {} }),
+      resolvePrimaryWorktreeRoot: async () => ({ root: repo }),
+      moveSession,
+      resolveWorktreeSetup: async () => ({
+        startCommand: `touch "${started}"; while [ ! -e "${finish}" ]; do sleep 0.02; done; echo setup > carried.txt`,
+        untrustedSkipped: [],
+      }),
+    });
+
+    const refused = await mover.move({ sessionId: 'ses_1', directory: repo, name: 'late-setup', carry: ['carried.txt'] }).catch((error) => error);
+    expect(refused).toMatchObject({ partial: true, partialAction: 'worktree-setup-running' });
+
+    fs.writeFileSync(finish, '');
+    await waitForActiveWorktreeBootstrap(refused.directory);
+
+    expect(fs.readFileSync(path.join(refused.directory, 'carried.txt'), 'utf8')).toBe('setup\n');
+    expect(fs.readFileSync(path.join(repo, 'carried.txt'), 'utf8')).toBe('the agent edit\n');
+    expect(await listStashes(repo)).toEqual([]);
+    expect(moveSession).not.toHaveBeenCalled();
+  }, 30_000);
 });

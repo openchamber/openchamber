@@ -21,7 +21,7 @@ export const LFS_DISCOVERY_LIMITS = Object.freeze({
 const CONTROL_PATTERN = /[\0-\x1f\x7f]/;
 const OID_PATTERN = /^sha256:([0-9a-f]{64})$/;
 const SIZE_PATTERN = /^(0|[1-9][0-9]*)$/;
-const SAFE_FILTERS = Object.freeze({
+export const SAFE_FILTERS = Object.freeze({
   'filter.lfs.clean': 'git-lfs clean -- %f',
   'filter.lfs.smudge': 'git-lfs smudge -- %f',
   'filter.lfs.process': 'git-lfs filter-process',
@@ -79,7 +79,8 @@ const parseAttributes = (value, limits) => {
   const seen = new Set();
   for (let index = 0; index < fields.length; index += 3) {
     const filePath = validateRepositoryPath(fields[index]);
-    if (fields[index + 1] !== 'filter' || !fields[index + 2]) throw lfsError('Effective attributes output is malformed');
+    // An empty value is valid: `filter=` in `.gitattributes` sets it to "".
+    if (fields[index + 1] !== 'filter') throw lfsError('Effective attributes output is malformed');
     if (fields[index + 2] === 'lfs' && !seen.has(filePath)) {
       seen.add(filePath);
       paths.push(filePath);
@@ -322,6 +323,16 @@ const httpsCandidate = (value, gitRemoteUrl) => {
   return candidate;
 };
 
+// Git LFS falls back to the same host over HTTPS for an SSH checkout when the
+// server does not answer `git-lfs-authenticate`: it drops the SSH port and
+// adds `.git` to a repository path that lacks it. `gitRemote.path` is already
+// URL-decoded, so each segment is encoded again before the URL parser sees it.
+const sshRemoteHttpsEndpoint = (gitRemote) => {
+  const decodedPath = gitRemote.path.startsWith('/') ? gitRemote.path : `/${gitRemote.path}`;
+  const repositoryPath = decodedPath.split('/').map((part) => part ? encodeURIComponent(part) : part).join('/');
+  return `https://${gitRemote.host}${repositoryPath}${repositoryPath.endsWith('.git') ? '' : '.git'}/info/lfs`;
+};
+
 export function resolveLfsPushConfig({ lfsConfigOutput, effectiveConfigOutput, gitRemoteName, gitRemoteUrl }) {
   const committed = parseConfig(lfsConfigOutput, LFS_DISCOVERY_LIMITS, 'Committed LFS configuration');
   const effective = parseConfig(effectiveConfigOutput, LFS_DISCOVERY_LIMITS, 'Effective LFS configuration', { allowRepeatedCanonicalFilters: true });
@@ -405,6 +416,8 @@ export function discoverLfs({
     httpsCandidate(record.url, gitRemoteUrl);
   }
 
+  const needed = attributePaths.length > 0 || pointers.length > 0 || lfsConfig.size > 0;
+
   // Git LFS reads `.lfsconfig` only below Git's own configuration, and
   // `lfs.url` wins over `remote.<name>.lfsurl` within either source.
   const remoteUrlKey = `remote.${gitRemoteName.toLowerCase()}.lfsurl`;
@@ -427,11 +440,16 @@ export function discoverLfs({
       source: 'git-remote',
       candidate: httpsCandidate(`${gitRemote.endpoint}/info/lfs`, gitRemoteUrl),
     });
+  } else if (needed) {
+    endpoint = Object.freeze({
+      status: 'resolved',
+      source: 'git-remote',
+      candidate: httpsCandidate(sshRemoteHttpsEndpoint(gitRemote), gitRemoteUrl),
+    });
   } else {
+    // A checkout that needs no LFS transfer has no endpoint to derive.
     endpoint = Object.freeze({ status: 'unresolved', reason: 'ssh-git-remote' });
   }
-
-  const needed = attributePaths.length > 0 || pointers.length > 0 || lfsConfig.size > 0;
   if (!needed && !pointerScanComplete) {
     throw lfsError('LFS pointer scan did not cover every tracked file', 'LFS_DISCOVERY_LIMIT_EXCEEDED');
   }

@@ -1,6 +1,6 @@
 import { getRuntimeExtraHeadersSync, refreshLocalRuntimeUrlAuthToken, refreshRuntimeUrlAuthToken, setRuntimeBearerToken, setRuntimeExtraHeaders } from '@openchamber/ui/lib/runtime-auth';
 import { installRuntimeFetchBridge } from '@openchamber/ui/lib/runtime-fetch';
-import { initializeRuntimeEndpoint } from '@openchamber/ui/lib/runtime-switch';
+import { getRuntimeKey, initializeRuntimeEndpoint, subscribeRuntimeEndpointChanged } from '@openchamber/ui/lib/runtime-switch';
 import { warmDesktopHostStatuses } from '@openchamber/ui/lib/desktopHostStatus';
 import { restoreDesktopRelayRuntime } from '@openchamber/ui/lib/desktopRelayRestore';
 import { getInjectedBootOutcome } from '@openchamber/ui/lib/desktopBoot';
@@ -28,6 +28,10 @@ declare global {
     __OPENCHAMBER_LOCAL_ORIGIN__?: string;
     __OPENCHAMBER_RELAY_HOST_ID__?: string;
     __OPENCHAMBER_EXPLICIT_RUNTIME__?: boolean;
+    /** The Electron preload bridge, present only in the desktop renderer. */
+    __OPENCHAMBER_DESKTOP__?: {
+      invoke?: (cmd: string, args?: Record<string, string>) => Promise<void>;
+    };
   }
 }
 
@@ -71,6 +75,20 @@ export const createConfiguredWebAPIs = () => {
     apiBaseUrl,
     runtimeKey: sameOrigin(apiBaseUrl, localOrigin) ? 'local' : (desktopHostId ? `host:${desktopHostId}` : null),
   });
+  // Tell the desktop shell which instance this window shows, at boot and on
+  // every switch. A window opened for a saved host, or one switched to a host
+  // in place, carries no host tag of its own, so without the report the shell's
+  // window-reuse lookup (a notification click, a session link) opens another
+  // window instead of reusing this one. The bridge is absent off desktop, so
+  // the report is a no-op there.
+  const reportWindowRuntimeKey = (runtimeKey: string): void => {
+    const key = runtimeKey.trim();
+    const invoke = window.__OPENCHAMBER_DESKTOP__?.invoke;
+    if (!key || !invoke) return;
+    void invoke('desktop_set_window_runtime_key', { runtimeKey: key }).catch(() => {});
+  };
+  reportWindowRuntimeKey(getRuntimeKey());
+  subscribeRuntimeEndpointChanged((detail) => reportWindowRuntimeKey(detail.runtimeKey));
   setRuntimeBearerToken(clientToken || null);
   setRuntimeExtraHeaders(runtimeHeaders || null);
   // createWebAPIs imports UI stores, which instantiate the SDK singleton

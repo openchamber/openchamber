@@ -1,6 +1,7 @@
 import React from 'react';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { Icon } from '@/components/icon/Icon';
+import { useDeviceInfo } from '@/lib/device';
 import { useI18n } from '@/lib/i18n';
 import { getSettingsSaveState, subscribeToSettingsSaveState } from '@/lib/persistence';
 import { cn } from '@/lib/utils';
@@ -34,6 +35,11 @@ interface SettingsPageLayoutProps {
   className?: string;
   /** Additional className for the outer ScrollableOverlay */
   outerClassName?: string;
+  /**
+   * The content is at least as tall as the pane, so a `flex-1` child (an
+   * editor) takes the height left under the fields; taller content scrolls.
+   */
+  fillHeight?: boolean;
 }
 
 /**
@@ -51,21 +57,26 @@ export const SettingsPageLayout: React.FC<SettingsPageLayoutProps> = ({
   headerEnd,
   showSaveStatus = false,
   onBlurCapture,
+  fillHeight = false,
 }) => {
   const scrollbarTopClearance = React.useContext(SettingsScrollbarTopClearanceContext);
+  // The phone's header row already names the page. The heading stays for
+  // screen readers and as the focus target of a page that opens.
+  const { isMobile } = useDeviceInfo();
   const hasHeader = title != null || description != null || headerEnd != null || showSaveStatus;
   const isPlainTitle = typeof title === 'string' || typeof title === 'number';
   const hasTitleChrome = titleLeading != null || titleAccessory != null;
 
   return (
     <ScrollableOverlay
-      outerClassName={cn('h-full overlay-scrollbar-wrapper--stable-gutter', outerClassName)}
-      className="w-full @container"
+      outerClassName={cn('h-full', outerClassName)}
+      className={cn('w-full @container', fillHeight && 'flex flex-col')}
       verticalTrackStart={scrollbarTopClearance}
     >
       <div
         className={cn(
           'mx-auto max-w-[840px] space-y-0 px-6 py-6 @3xl:px-12 @3xl:py-8',
+          fillHeight && 'flex w-full flex-1 flex-col',
           // The first visible section never needs the top divider, no matter
           // which platform-conditional sections above it rendered null.
           '[&>section:first-of-type]:border-t-0 [&>section:first-of-type]:pt-0',
@@ -78,7 +89,10 @@ export const SettingsPageLayout: React.FC<SettingsPageLayoutProps> = ({
           // a narrow pane it used to starve the title until the name was a
           // single letter and an ellipsis; giving the title block a basis lets
           // the actions drop to their own line instead.
-          <div className="mb-2 flex flex-wrap items-start justify-between gap-x-4 gap-y-3 pb-6">
+          <div className={cn(
+            'flex flex-wrap items-start justify-between gap-x-4 gap-y-3',
+            isMobile && description == null ? 'mb-0' : 'mb-2 pb-6',
+          )}>
             <div className="min-w-0 flex-1 basis-64 space-y-1">
               {title != null ? (
                 isPlainTitle ? (
@@ -91,7 +105,7 @@ export const SettingsPageLayout: React.FC<SettingsPageLayoutProps> = ({
                       <span className="shrink-0">{titleAccessory}</span>
                     </div>
                   ) : (
-                    <h1 data-settings-page-heading tabIndex={-1} className={SETTINGS_PAGE_TITLE_CLASS}>{title}</h1>
+                    <h1 data-settings-page-heading tabIndex={-1} className={cn(SETTINGS_PAGE_TITLE_CLASS, isMobile && 'sr-only')}>{title}</h1>
                   )
                 ) : (
                   title

@@ -12,6 +12,7 @@ import type { GuestStatusControlBinding } from '@/lib/guests/status-controls';
 import { useUIStore } from '@/stores/useUIStore';
 import { WorkStatusCollapsibleSection } from './WorkStatusPrimitives';
 import { StatusHeaderControls } from './StatusHeaderControls';
+import { GuestStatusViewBody } from './WorkStatusGuestView';
 import { useReportWorkStatusPresence } from './presenceContext';
 import { extensionSectionId } from './sections';
 
@@ -28,7 +29,8 @@ const rememberedHeights = new Map<string, number>();
 
 /**
  * An extension's own section (`contributes.statusSection`): the host draws the
- * header from the extension's title and icon, the body is its sandboxed page.
+ * header from the extension's title and icon. The body is the app's own rows
+ * when the extension declares a `source`, otherwise its sandboxed page.
  *
  * The frame exists only while the section is expanded — the collapsible drops
  * its children when folded, and the panel drops the section when it is hidden
@@ -78,20 +80,37 @@ export const WorkStatusExtensionSection: React.FC<{
         />
       ) : undefined}
     >
-      <div data-guest-status-body={guest.id} className="mx-1 overflow-hidden rounded-md" style={{ height }}>
-        <ErrorBoundary fallback={<div className="px-1 text-xs text-muted-foreground">{t('contextPanel.plugin.loadFailed')}</div>}>
-          <React.Suspense fallback={null}>
-            <PluginPane
-              mode={pluginModeFromId(guest.id)}
-              surface="status"
-              item={null}
-              onResize={handleResize}
-              statusDirectory={directory}
+      {guest.statusSource ? (
+        // Drawn by the app from the service's answers: no frame, and the
+        // section is as tall as its rows. Keyed so a project change starts
+        // from an empty view instead of showing the last project's.
+        <div data-guest-status-body={guest.id}>
+          <ErrorBoundary fallback={<div className="px-1 text-xs text-muted-foreground">{t('contextPanel.plugin.loadFailed')}</div>}>
+            <GuestStatusViewBody
+              key={`${guest.id}:${directory ?? ''}`}
+              guestId={guest.id}
+              source={guest.statusSource}
+              directory={directory}
               onStatusControls={setStatusControls}
             />
-          </React.Suspense>
-        </ErrorBoundary>
-      </div>
+          </ErrorBoundary>
+        </div>
+      ) : (
+        <div data-guest-status-body={guest.id} className="mx-1 overflow-hidden rounded-md" style={{ height }}>
+          <ErrorBoundary fallback={<div className="px-1 text-xs text-muted-foreground">{t('contextPanel.plugin.loadFailed')}</div>}>
+            <React.Suspense fallback={null}>
+              <PluginPane
+                mode={pluginModeFromId(guest.id)}
+                surface="status"
+                item={null}
+                onResize={handleResize}
+                statusDirectory={directory}
+                onStatusControls={setStatusControls}
+              />
+            </React.Suspense>
+          </ErrorBoundary>
+        </div>
+      )}
     </WorkStatusCollapsibleSection>
   );
 };

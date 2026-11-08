@@ -30,6 +30,11 @@ export interface MessageHistory<TAttachment> {
     isBrowsing: boolean;
     older: (currentValue: MessageHistoryValue<TAttachment>) => MessageHistoryValue<TAttachment> | null;
     newer: (currentValue: MessageHistoryValue<TAttachment>) => MessageHistoryValue<TAttachment> | null;
+    jumpTo: (
+        index: number,
+        currentValue: MessageHistoryValue<TAttachment>,
+        expectedValue: MessageHistoryValue<TAttachment>,
+    ) => MessageHistoryValue<TAttachment> | null;
     reset: () => void;
 }
 
@@ -175,6 +180,29 @@ export function stepNewer<TAttachment>(
     };
 }
 
+export function jumpToEntry<TAttachment>(
+    state: HistoryState<TAttachment>,
+    history: readonly MessageHistoryValue<TAttachment>[],
+    index: number,
+    currentValue: MessageHistoryValue<TAttachment>,
+    expectedValue: MessageHistoryValue<TAttachment>,
+): HistoryStep<TAttachment> {
+    const synchronizedState = syncHistoryState(state, history, state.identity);
+    if (!Number.isInteger(index) || index < 0 || index >= history.length) {
+        return { state: synchronizedState, value: null };
+    }
+
+    const target = history[index]!;
+    if (!valuesEqual(target, expectedValue)) return { state: synchronizedState, value: null };
+
+    const overlays = new Map(withOverlay(synchronizedState.overlays, synchronizedState.cursor, currentValue));
+    overlays.delete(index);
+    return {
+        state: { ...synchronizedState, cursor: index, overlays },
+        value: target,
+    };
+}
+
 export function syncHistoryState<TAttachment>(
     state: HistoryState<TAttachment>,
     history: readonly MessageHistoryValue<TAttachment>[],
@@ -202,6 +230,8 @@ export function useMessageHistory<TAttachment>(
     identity: string,
 ): MessageHistory<TAttachment> {
     const [state, setState] = React.useState(() => createHistoryState(history, identity));
+    const stateRef = React.useRef(state);
+    stateRef.current = state;
 
     React.useEffect(() => {
         setState((currentState) => syncHistoryState(currentState, history, identity));
@@ -221,6 +251,18 @@ export function useMessageHistory<TAttachment>(
         return step.value;
     }, [history, state]);
 
+    const jumpTo = React.useCallback((
+        index: number,
+        currentValue: MessageHistoryValue<TAttachment>,
+        expectedValue: MessageHistoryValue<TAttachment>,
+    ) => {
+        const synchronizedState = syncHistoryState(stateRef.current, history, identity);
+        const step = jumpToEntry(synchronizedState, history, index, currentValue, expectedValue);
+        stateRef.current = step.state;
+        setState(step.state);
+        return step.value;
+    }, [history, identity]);
+
     const reset = React.useCallback(() => {
         setState((currentState) => resetHistoryState(currentState, history));
     }, [history]);
@@ -229,6 +271,7 @@ export function useMessageHistory<TAttachment>(
         isBrowsing: state.cursor !== history.length,
         older,
         newer,
+        jumpTo,
         reset,
     };
 }

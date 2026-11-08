@@ -2,21 +2,39 @@ export type UiFontOption = 'inter' | 'fixel' | 'geist-sans' | 'atkinson-hyperleg
 
 export type MonoFontOption = 'jetbrains-mono' | 'fira-code' | 'geist-mono' | 'commit-mono' | 'source-code-pro' | 'cascadia-code' | 'roboto-mono' | 'iosevka' | 'system-mono' | 'custom';
 
-interface FontFaceSourceBase {
+interface FontsourceFaceSource {
     family: string;
     weights: number[];
-}
-
-interface FontsourceFaceSource extends FontFaceSourceBase {
     packageName: string;
     filePrefix: string;
 }
 
-interface DirectFontFaceSource extends FontFaceSourceBase {
+interface DirectFontFaceSource {
+    family: string;
+    weights: number[];
     urls: Record<number, string>;
 }
 
-export type FontFaceSource = FontsourceFaceSource | DirectFontFaceSource;
+/**
+ * One variable file that covers every weight in `weightRange`, so a text
+ * weight between two named weights (450) renders as itself instead of
+ * snapping to Regular or Medium.
+ */
+interface FontsourceVariableFaceSource {
+    family: string;
+    weightRange: [number, number];
+    packageName: string;
+    filePrefix: string;
+}
+
+export type FontFaceSource = FontsourceFaceSource | DirectFontFaceSource | FontsourceVariableFaceSource;
+
+export const UI_FONT_WEIGHT_OPTIONS = ['regular', 'balanced', 'strong'] as const;
+export type UiFontWeight = typeof UI_FONT_WEIGHT_OPTIONS[number];
+
+/** CSS weight of regular interface text; `font-medium` and up stay as they are. */
+export const UI_FONT_WEIGHT_VALUES = { regular: 400, balanced: 450, strong: 500 } as const satisfies Record<UiFontWeight, number>;
+export const DEFAULT_UI_FONT_WEIGHT: UiFontWeight = 'regular';
 
 interface FontOptionDefinition<T extends string> {
     id: T;
@@ -33,7 +51,7 @@ export const UI_FONT_OPTIONS: FontOptionDefinition<UiFontOption>[] = [
         label: 'Inter',
         description: 'Modern UI sans with excellent readability at small sizes.',
         stack: '"Inter", "SF Pro Text", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
-        source: { family: 'Inter', packageName: '@fontsource/inter', filePrefix: 'inter', weights: [400, 500, 600] }
+        source: { family: 'Inter', packageName: '@fontsource-variable/inter', filePrefix: 'inter', weightRange: [100, 900] }
     },
     {
         id: 'fixel',
@@ -55,7 +73,7 @@ export const UI_FONT_OPTIONS: FontOptionDefinition<UiFontOption>[] = [
         label: 'Geist Sans',
         description: 'Crisp sans-serif with a technical interface feel.',
         stack: '"Geist Sans", "SF Pro Text", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
-        source: { family: 'Geist Sans', packageName: '@fontsource/geist-sans', filePrefix: 'geist-sans', weights: [400, 500, 600] }
+        source: { family: 'Geist Sans', packageName: '@fontsource-variable/geist', filePrefix: 'geist', weightRange: [100, 900] }
     },
     {
         id: 'atkinson-hyperlegible',
@@ -69,35 +87,35 @@ export const UI_FONT_OPTIONS: FontOptionDefinition<UiFontOption>[] = [
         label: 'Source Sans 3',
         description: 'Adobe sans-serif tuned for clean, readable interfaces.',
         stack: '"Source Sans 3", "SF Pro Text", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
-        source: { family: 'Source Sans 3', packageName: '@fontsource/source-sans-3', filePrefix: 'source-sans-3', weights: [400, 500, 600] }
+        source: { family: 'Source Sans 3', packageName: '@fontsource-variable/source-sans-3', filePrefix: 'source-sans-3', weightRange: [200, 900] }
     },
     {
         id: 'roboto',
         label: 'Roboto',
         description: 'Familiar Material-style sans-serif with broad UI usage.',
         stack: '"Roboto", "SF Pro Text", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
-        source: { family: 'Roboto', packageName: '@fontsource/roboto', filePrefix: 'roboto', weights: [400, 500, 600] }
+        source: { family: 'Roboto', packageName: '@fontsource-variable/roboto', filePrefix: 'roboto', weightRange: [100, 900] }
     },
     {
         id: 'noto-sans',
         label: 'Noto Sans',
         description: 'Readable sans-serif with strong international coverage.',
         stack: '"Noto Sans", "SF Pro Text", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
-        source: { family: 'Noto Sans', packageName: '@fontsource/noto-sans', filePrefix: 'noto-sans', weights: [400, 500, 600] }
+        source: { family: 'Noto Sans', packageName: '@fontsource-variable/noto-sans', filePrefix: 'noto-sans', weightRange: [100, 900] }
     },
     {
         id: 'dm-sans',
         label: 'DM Sans',
         description: 'Modern product UI sans-serif with friendly proportions.',
         stack: '"DM Sans", "SF Pro Text", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
-        source: { family: 'DM Sans', packageName: '@fontsource/dm-sans', filePrefix: 'dm-sans', weights: [400, 500, 600] }
+        source: { family: 'DM Sans', packageName: '@fontsource-variable/dm-sans', filePrefix: 'dm-sans', weightRange: [100, 1000] }
     },
     {
         id: 'manrope',
         label: 'Manrope',
         description: 'Polished geometric sans-serif for modern app interfaces.',
         stack: '"Manrope", "SF Pro Text", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
-        source: { family: 'Manrope', packageName: '@fontsource/manrope', filePrefix: 'manrope', weights: [400, 500, 600] }
+        source: { family: 'Manrope', packageName: '@fontsource-variable/manrope', filePrefix: 'manrope', weightRange: [200, 800] }
     },
     {
         id: 'system',
@@ -113,21 +131,21 @@ export const CODE_FONT_OPTIONS: FontOptionDefinition<MonoFontOption>[] = [
         label: 'JetBrains Mono',
         description: 'Developer-focused monospace with strong punctuation clarity.',
         stack: '"JetBrains Mono", "SFMono-Regular", "Menlo", monospace',
-        source: { family: 'JetBrains Mono', packageName: '@fontsource/jetbrains-mono', filePrefix: 'jetbrains-mono', weights: [400, 500, 600] }
+        source: { family: 'JetBrains Mono', packageName: '@fontsource-variable/jetbrains-mono', filePrefix: 'jetbrains-mono', weightRange: [100, 800] }
     },
     {
         id: 'fira-code',
         label: 'Fira Code',
         description: 'Readable coding font with ligature support.',
         stack: '"Fira Code", "SFMono-Regular", "Menlo", monospace',
-        source: { family: 'Fira Code', packageName: '@fontsource/fira-code', filePrefix: 'fira-code', weights: [400, 500, 600] }
+        source: { family: 'Fira Code', packageName: '@fontsource-variable/fira-code', filePrefix: 'fira-code', weightRange: [300, 700] }
     },
     {
         id: 'geist-mono',
         label: 'Geist Mono',
         description: 'Sharp monospace pair for Geist Sans.',
         stack: '"Geist Mono", "SFMono-Regular", "Menlo", monospace',
-        source: { family: 'Geist Mono', packageName: '@fontsource/geist-mono', filePrefix: 'geist-mono', weights: [400, 500, 600] }
+        source: { family: 'Geist Mono', packageName: '@fontsource-variable/geist-mono', filePrefix: 'geist-mono', weightRange: [100, 900] }
     },
     {
         id: 'commit-mono',
@@ -141,21 +159,21 @@ export const CODE_FONT_OPTIONS: FontOptionDefinition<MonoFontOption>[] = [
         label: 'Source Code Pro',
         description: 'Adobe monospace designed for source code readability.',
         stack: '"Source Code Pro", "SFMono-Regular", "Menlo", monospace',
-        source: { family: 'Source Code Pro', packageName: '@fontsource/source-code-pro', filePrefix: 'source-code-pro', weights: [400, 500, 600] }
+        source: { family: 'Source Code Pro', packageName: '@fontsource-variable/source-code-pro', filePrefix: 'source-code-pro', weightRange: [200, 900] }
     },
     {
         id: 'cascadia-code',
         label: 'Cascadia Code',
         description: 'Microsoft coding font popular in terminals and editors.',
         stack: '"Cascadia Code", "SFMono-Regular", "Menlo", monospace',
-        source: { family: 'Cascadia Code', packageName: '@fontsource/cascadia-code', filePrefix: 'cascadia-code', weights: [400, 500, 600] }
+        source: { family: 'Cascadia Code', packageName: '@fontsource-variable/cascadia-code', filePrefix: 'cascadia-code', weightRange: [200, 700] }
     },
     {
         id: 'roboto-mono',
         label: 'Roboto Mono',
         description: 'Neutral monospace companion to Roboto.',
         stack: '"Roboto Mono", "SFMono-Regular", "Menlo", monospace',
-        source: { family: 'Roboto Mono', packageName: '@fontsource/roboto-mono', filePrefix: 'roboto-mono', weights: [400, 500, 600] }
+        source: { family: 'Roboto Mono', packageName: '@fontsource-variable/roboto-mono', filePrefix: 'roboto-mono', weightRange: [100, 700] }
     },
     {
         id: 'iosevka',

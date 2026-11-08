@@ -4,7 +4,9 @@ import { startDiagnosticCapture } from '@/lib/diagnostics/capture';
 import { AppStartupOverlay } from '@/components/ui/AppStartupOverlay';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { AppLinkConfirmDialog } from '@/components/chat/AppLinkConfirmDialog';
+import { SnippetQuickCreateDialog } from '@/components/snippets/SnippetQuickCreateDialog';
 import { SharedTrustConfirmDialog } from '@/components/projects/SharedTrustConfirmDialog';
+import { OpenCodeTrustDialog } from '@/components/projects/OpenCodeTrustDialog';
 import { FireworksProvider } from '@/contexts/FireworksContext';
 import { Toaster } from '@/components/ui/sonner';
 import { toast } from '@/components/ui';
@@ -14,6 +16,7 @@ import { setRequestsInFlightTrackingEnabled } from '@/stores/utils/requestsInFli
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
 // useEventStream removed — replaced by SyncProvider + SyncBridge
 import { useMenuActions } from '@/hooks/useMenuActions';
+import { useGuestInstallLinks } from '@/hooks/useGuestInstallLinks';
 import { useSessionStatusBootstrap } from '@/hooks/useSessionStatusBootstrap';
 import { useTraySync } from '@/hooks/useTraySync';
 import { useGlobalSessionsPolling } from '@/hooks/useGlobalSessionsPolling';
@@ -23,6 +26,9 @@ import { useWebNotificationStream } from '@/hooks/useWebNotificationStream';
 import { useAgentMemorySync } from '@/hooks/useAgentMemorySync';
 import { useBrowserProviderSync } from '@/hooks/useBrowserProviderSync';
 import { useSourceControlProviderSync } from '@/hooks/useSourceControlProviderSync';
+import { useTrackerProviderSync } from '@/hooks/useTrackerProviderSync';
+import { useQuotaProviderSync } from '@/hooks/useQuotaProviderSync';
+import { useGuestCatalogSync } from '@/hooks/useGuestCatalogSync';
 import { useLimitFailoverNotices } from '@/hooks/useLimitFailoverNotices';
 import { useEnterprisePolicySync } from '@/hooks/useEnterprisePolicySync';
 import { useRelayLimitToast } from '@/hooks/useRelayLimitToast';
@@ -46,15 +52,13 @@ import {
 } from '@/lib/desktopBoot';
 import type { RecoveryVariant } from '@/components/onboarding/DesktopConnectionRecovery';
 import { useSessionUIStore } from '@/sync/session-ui-store';
-import { openSessionLink } from '@/lib/router/openSessionFromRoute';
+import { openSession, openSessionLink } from '@/lib/router/openSessionFromRoute';
 import { parseRoute } from '@/lib/router';
 import { beginLastSessionRestore, type LastSessionRestoreResult } from '@/sync/last-session-restore';
 import { markSessionViewed } from '@/sync/notification-store';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { opencodeClient } from '@/lib/opencode/client';
 import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
-import { useAutoReviewStore } from '@/stores/useAutoReviewStore';
-import { resumeAutoReviewRun } from '@/lib/reviewFlow';
 import { SyncProvider } from '@/sync/sync-context';
 import { ConfigUpdateOverlay } from '@/components/ui/ConfigUpdateOverlay';
 import { RuntimeAPIProvider } from '@/contexts/RuntimeAPIProvider';
@@ -207,6 +211,7 @@ type AppProps = {
 };
 
 function App({ apis }: AppProps) {
+  useGuestInstallLinks();
   React.useEffect(() => startDiagnosticCapture(), []);
   React.useEffect(() => {
     markStartupTrace('App:mounted');
@@ -306,24 +311,6 @@ function App({ apis }: AppProps) {
       setInitRetryEpoch((epoch) => epoch + 1);
     });
   }, []);
-
-  const autoReviewResumeSignature = useAutoReviewStore((state) => {
-    const runtimeKey = getRuntimeKey();
-    return Object.values(state.runsByOriginalSessionID)
-      .filter((run) => run.status === 'running' && run.runtimeKey === runtimeKey)
-      .map((run) => `${run.originalSessionID}:${run.phase}:${run.lastForwardedMessageID ?? ''}:${run.expectedAssistantParentID ?? ''}`)
-      .sort()
-      .join('|');
-  });
-
-  React.useEffect(() => {
-    const runtimeKey = getRuntimeKey();
-    const runs = Object.values(useAutoReviewStore.getState().runsByOriginalSessionID)
-      .filter((run) => run.status === 'running' && run.runtimeKey === runtimeKey);
-    for (const run of runs) {
-      resumeAutoReviewRun(run.originalSessionID);
-    }
-  }, [autoReviewResumeSignature, runtimeEndpointEpoch]);
 
   React.useEffect(() => {
     document.documentElement.classList.toggle('wide-chat-layout', wideChatLayoutEnabled);
@@ -522,7 +509,7 @@ function App({ apis }: AppProps) {
     if (typeof window === 'undefined') return;
 
     const handler = (event: Event) => {
-      const detail = (event as CustomEvent<{ sessionId?: string; directory?: string; messageId?: string; runtimeKey?: string }>).detail;
+      const detail = (event as CustomEvent<{ sessionId?: string; directory?: string; messageId?: string; runtimeKey?: string; requireKnownSession?: boolean }>).detail;
       const sessionId = typeof detail?.sessionId === 'string' ? detail.sessionId.trim() : '';
       if (!sessionId) return;
       const directory = typeof detail?.directory === 'string' && detail.directory.trim().length > 0
@@ -530,14 +517,9 @@ function App({ apis }: AppProps) {
         : null;
       const messageId = typeof detail?.messageId === 'string' ? detail.messageId.trim() || null : null;
       if (openSessionInOwningHostWindow(sessionId, String(detail?.runtimeKey ?? '').trim(), messageId)) return;
-      // A link (a desktop deep link, a link to this window's instance) carries
-      // no directory; the route opener resolves it from the global session
-      // list, as for a web link.
-      if (!directory) {
-        void openSessionLink(sessionId, messageId);
-        return;
-      }
-      void useSessionUIStore.getState().setCurrentSession(sessionId, directory);
+      // A session event carries the owning directory; a link carries none and
+      // lets the opener resolve it from the global session list.
+      void openSession(sessionId, { directory, messageId, requireKnownSession: detail?.requireKnownSession === true });
     };
 
     window.addEventListener('openchamber:open-session', handler as EventListener);
@@ -547,7 +529,8 @@ function App({ apis }: AppProps) {
     void takePendingDesktopSessionLinks().then((links) => {
       for (const link of links) {
         if (openSessionInOwningHostWindow(link.sessionId, link.runtimeKey, link.messageId)) continue;
-        void openSessionLink(link.sessionId, link.messageId);
+        if (link.requireKnownSession) void openSession(link.sessionId, { messageId: link.messageId, requireKnownSession: true });
+        else void openSessionLink(link.sessionId, link.messageId);
       }
     });
     return () => window.removeEventListener('openchamber:open-session', handler as EventListener);
@@ -686,6 +669,9 @@ function App({ apis }: AppProps) {
   useAgentMemorySync(currentDirectory || null);
   useBrowserProviderSync();
   useSourceControlProviderSync(apis.sourceControl);
+  useTrackerProviderSync(apis.trackers);
+  useQuotaProviderSync();
+  useGuestCatalogSync();
   useLimitFailoverNotices();
   useRoutingSync();
   useEnterprisePolicySync();
@@ -898,7 +884,9 @@ function App({ apis }: AppProps) {
                   {isDesktopRuntime ? <AppStartupOverlay ready={bootOutcomeKnown && bootViewIsMain} /> : null}
                   <Toaster />
                   <AppLinkConfirmDialog />
+                  <SnippetQuickCreateDialog />
                   <SharedTrustConfirmDialog />
+                  <OpenCodeTrustDialog />
                   <ConfigUpdateOverlay />
                   <AboutDialogWrapper />
                   {showMemoryDebug && (

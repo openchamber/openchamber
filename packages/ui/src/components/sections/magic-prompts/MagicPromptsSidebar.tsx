@@ -22,6 +22,7 @@ export const MagicPromptsSidebar: React.FC<MagicPromptsSidebarProps> = ({ onItem
         items: [
           { id: 'git.commit.generate', titleKey: 'settings.magicPrompts.sidebar.item.gitCommitGenerate' },
           { id: 'git.pr.generate', titleKey: 'settings.magicPrompts.sidebar.item.gitPrGenerate' },
+          { id: 'walkthrough', titleKey: 'settings.magicPrompts.sidebar.item.walkthrough' },
           { id: 'git.conflict.resolve', titleKey: 'settings.magicPrompts.sidebar.item.gitConflictResolve' },
           { id: 'git.integrate.cherrypick.resolve', titleKey: 'settings.magicPrompts.sidebar.item.gitCherrypickConflictResolve' },
         ],

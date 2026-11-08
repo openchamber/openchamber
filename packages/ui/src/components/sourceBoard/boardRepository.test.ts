@@ -12,16 +12,28 @@ const ROOT = '/work';
 const REPOS = ['/work/app', '/work/api'];
 
 const none = { path: null, all: undefined } as const;
-const at = (status: 'pending' | 'failed' | 'ready') => ({ status, directory: ROOT, repositories: [], all: false });
+const at = (status: 'pending' | 'failed' | 'ready') => ({ status, directory: ROOT, repositories: [], all: false, allAvailable: false, choosable: false });
 
 describe('resolveBoardRepository', () => {
-  test('reads a root that is a repository where it is, whatever lies below it', () => {
-    expect(resolveBoardRepository(ROOT, true, REPOS, { path: '/work/api', all: true }, true)).toEqual(at('ready'));
-    expect(resolveBoardRepository(ROOT, true, undefined, none, true)).toEqual(at('ready'));
+  test('reads a root that is a repository where it is, offering what lies below it', () => {
+    // The root stays the default; its submodules and nested checkouts are next.
+    expect(resolveBoardRepository(ROOT, true, REPOS, none, true))
+      .toEqual({ status: 'ready', directory: ROOT, repositories: [ROOT, ...REPOS], all: false, allAvailable: false, choosable: true });
+    expect(resolveBoardRepository(ROOT, true, undefined, none, true))
+      .toEqual({ status: 'ready', directory: ROOT, repositories: [ROOT], all: false, allAvailable: false, choosable: false });
+  });
+
+  test('reads a repository picked below an established root, never "all" of them', () => {
+    expect(resolveBoardRepository(ROOT, true, REPOS, { path: '/work/api', all: false }, true))
+      .toMatchObject({ directory: '/work/api', all: false });
+    // A remembered choice that is not below this root falls back to the root.
+    expect(resolveBoardRepository(ROOT, true, REPOS, { path: '/work/gone', all: false }, true).directory).toBe(ROOT);
+    // "All" belongs to a root that is no repository: an established root lists itself.
+    expect(resolveBoardRepository(ROOT, true, REPOS, { path: null, all: true }, true).all).toBe(false);
   });
 
   test('has no directory without a project', () => {
-    expect(resolveBoardRepository(null, null, undefined, none, true)).toEqual({ status: 'ready', directory: null, repositories: [], all: false });
+    expect(resolveBoardRepository(null, null, undefined, none, true)).toEqual({ status: 'ready', directory: null, repositories: [], all: false, allAvailable: false, choosable: false });
   });
 
   test('waits on the probe and the discovery, keeping the root meanwhile', () => {
@@ -39,19 +51,19 @@ describe('resolveBoardRepository', () => {
   });
 
   test('lists all repositories together by default, where the runtime can', () => {
-    expect(resolveBoardRepository(ROOT, false, REPOS, none, true)).toEqual({ status: 'ready', directory: ROOT, repositories: REPOS, all: true });
+    expect(resolveBoardRepository(ROOT, false, REPOS, none, true)).toEqual({ status: 'ready', directory: ROOT, repositories: REPOS, all: true, allAvailable: true, choosable: true });
     expect(resolveBoardRepository(ROOT, false, REPOS, { path: null, all: true }, true).all).toBe(true);
   });
 
   test('keeps a single repository remembered before "all" existed, or chosen after it', () => {
     expect(resolveBoardRepository(ROOT, false, REPOS, { path: '/work/api', all: undefined }, true))
-      .toEqual({ status: 'ready', directory: '/work/api', repositories: REPOS, all: false });
+      .toEqual({ status: 'ready', directory: '/work/api', repositories: REPOS, all: false, allAvailable: true, choosable: true });
     expect(resolveBoardRepository(ROOT, false, REPOS, { path: '/work/api', all: false }, true).directory).toBe('/work/api');
     expect(resolveBoardRepository(ROOT, false, REPOS, { path: '/work/api', all: true }, true).all).toBe(true);
   });
 
   test('falls back to a single repository where the runtime cannot list across them', () => {
-    expect(resolveBoardRepository(ROOT, false, REPOS, none, false)).toEqual({ status: 'ready', directory: '/work/app', repositories: REPOS, all: false });
+    expect(resolveBoardRepository(ROOT, false, REPOS, none, false)).toEqual({ status: 'ready', directory: '/work/app', repositories: REPOS, all: false, allAvailable: false, choosable: true });
     expect(resolveBoardRepository(ROOT, false, REPOS, { path: '/work/api', all: true }, false).directory).toBe('/work/api');
   });
 
@@ -63,8 +75,9 @@ describe('resolveBoardRepository', () => {
 });
 
 describe('repositoryLabel', () => {
-  test('names a repository by its path below the root', () => {
+  test('names a repository by its path below the root, the root by its folder name', () => {
     expect(repositoryLabel('/work/team/app', ROOT)).toBe('team/app');
+    expect(repositoryLabel(ROOT, ROOT)).toBe('work');
     expect(repositoryLabel('/elsewhere/app', ROOT)).toBe('/elsewhere/app');
   });
 });
@@ -151,8 +164,9 @@ describe('a link focus on a project', () => {
     expect(resolve(false, REPOS, true, false)).toMatchObject({ directory: '/work/api', all: false });
   });
 
-  test('leaves a root that is a repository, and a runtime that cannot list across them, as they are', () => {
-    expect(resolve(true, REPOS, true, true)).toEqual({ status: 'ready', directory: ROOT, repositories: [], all: false });
+  test('keeps an established root on itself, and a runtime that cannot list across them on one repository', () => {
+    // A remembered single repository wins over the root, as on the Git surfaces.
+    expect(resolve(true, REPOS, true, true)).toEqual({ status: 'ready', directory: '/work/api', repositories: [ROOT, ...REPOS], all: false, allAvailable: false, choosable: true });
     expect(resolve(false, REPOS, false, true)).toMatchObject({ directory: '/work/api', all: false });
   });
 

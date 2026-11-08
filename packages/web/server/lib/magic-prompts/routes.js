@@ -46,4 +46,7 @@ export const registerMagicPromptRoutes = (app, dependencies) => {
   app.put('/api/magic-prompts/:id', answer('PUT', true));
   app.delete('/api/magic-prompts/:id', answer('DELETE', true));
   app.delete('/api/magic-prompts', answer('DELETE', false));
+
+  // Server features whose prompt runs here read the overrides for their directory.
+  return { overridesForDirectory: service.overridesForDirectory };
 };

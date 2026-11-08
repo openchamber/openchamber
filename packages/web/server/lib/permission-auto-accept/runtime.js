@@ -19,6 +19,8 @@ const storedPolicySchema = z.object({
 const readStoredPolicy = (value) => storedPolicySchema.parse(value ?? {});
 
 const createdSessionSchema = z.object({ id: z.string().min(1), parentID: z.string().nullish() });
+const forkedSessionSchema = z.object({ sessionID: z.string().min(1), parentID: z.string().min(1) })
+  .refine(({ sessionID, parentID }) => sessionID !== parentID);
 
 const hasLegacyEntries = (stored) => Object.values(stored.sessions).some((entry) => entry === true || entry === false);
 
@@ -65,6 +67,7 @@ export function createPermissionAutoAcceptRuntime({
   let loadPromise = null;
   let writePromise = Promise.resolve();
   const sessions = new Map();
+  const pendingForkModes = new Map();
   const inFlight = new Map();
   const reconcilePromises = new Map();
   // What the runtime did with each recent request, so notifications can tell a
@@ -227,6 +230,7 @@ export function createPermissionAutoAcceptRuntime({
     let current = sessionId;
     let currentDirectory = directory;
     while (current && !seen.has(current)) {
+      await pendingForkModes.get(current);
       if (Object.hasOwn(policy.sessions, current)) return policy.sessions[current];
       seen.add(current);
       const info = await getSession(current, currentDirectory);
@@ -234,6 +238,17 @@ export function createPermissionAutoAcceptRuntime({
       currentDirectory = info?.directory ?? currentDirectory;
     }
     return 'ask';
+  };
+
+  const inheritForkMode = async (sessionId, sourceId, directory) => {
+    await load();
+    if (Object.hasOwn(policy.sessions, sessionId)) return;
+    const mode = await resolveLineageMode(sourceId, directory);
+    await persistUpdate((current) => (Object.hasOwn(current.sessions, sessionId) ? current : {
+      ...current,
+      sessions: { ...current.sessions, [sessionId]: mode },
+      revision: current.revision + 1,
+    }));
   };
 
   /** The nearest explicit mode up the session's lineage; unknown lineage fails closed to `ask`. */
@@ -369,6 +384,20 @@ export function createPermissionAutoAcceptRuntime({
   const processEvent = (event) => {
     const directory = typeof event?.directory === 'string' && event.directory !== 'global' ? event.directory : undefined;
     for (const payload of event?.translated?.() ?? []) {
+      if (payload.type === 'session.forked') {
+        const fork = forkedSessionSchema.safeParse(payload.properties);
+        if (!fork.success || pendingForkModes.has(fork.data.sessionID)) continue;
+        const { sessionID, parentID } = fork.data;
+        // A fork is an independent session. Copy its source's effective mode
+        // once, without treating the fork event's parentID as subagent lineage.
+        const task = inheritForkMode(sessionID, parentID, directory)
+          .finally(() => { pendingForkModes.delete(sessionID); });
+        pendingForkModes.set(sessionID, task);
+        void task.catch((error) => {
+          console.warn('[permission-auto-accept] failed to inherit the fork mode:', error?.message ?? error);
+        });
+        continue;
+      }
       if (payload.type === 'session.created' || payload.type === 'session.updated') {
         const info = payload.properties?.info;
         rememberSession(info, directory ?? payload.properties?.directory, { complete: payload.type === 'session.created' });

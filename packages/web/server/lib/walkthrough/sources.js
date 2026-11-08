@@ -57,7 +57,13 @@ export function parseSource(raw) {
       }
       revision = raw.revision.toLowerCase();
     }
-    const withRevision = (source) => (revision ? { ...source, revision } : source);
+    // `linked`: read wherever the repository is, for a change request a link
+    // named outside the bound network (`validatePullRequestContext`).
+    const withRevision = (source) => {
+      if (revision) source.revision = revision;
+      if (raw.linked === true) source.linked = true;
+      return source;
+    };
     if (raw.sourceRepo !== undefined) {
       const { owner, repo } = raw.sourceRepo ?? {};
       try {

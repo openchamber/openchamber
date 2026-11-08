@@ -3,6 +3,11 @@ import { flushSync } from 'react-dom';
 
 import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
+import { ContentLoadingState, ContentState } from '@/components/ui/content-state';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
+import { isEditableEventTarget } from '@/hooks/keyboard-shortcut-dom';
+import { ButtonTooltip } from '@/components/ui/action-toolbar';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { ArtifactMetaBar } from './ArtifactMetaBar';
@@ -29,11 +34,13 @@ const touchDistance = (a: Touch, b: Touch): number => Math.hypot(a.clientX - b.c
 /** A neighbouring image of the same folder and how to show it. */
 export type ImageNeighbor = { name: string; open: () => void };
 
-// FilesView unmounts the viewer while the next image loads, which drops the
-// focus the arrow keys need. A step remembers its target, and the viewer that
-// shows that image shortly after takes the focus back.
-const STEP_FOCUS_WINDOW_MS = 5_000;
-let lastStep: { name: string; at: number } | null = null;
+// With the focus nowhere, the browser scrolls whatever was clicked last, so
+// the keys belong to the viewer only after a click in its panel. The panel
+// outlives the remount a step causes; a clicked arrow button does not.
+let lastPointerRegion: Element | null = null;
+
+// Controls that move with the arrow keys themselves keep them.
+const ARROW_KEY_OWNERS = '[role="tablist"], [role="menu"], [role="menubar"], [role="listbox"], [role="radiogroup"], [role="slider"], [role="combobox"], [role="tree"], [role="grid"], [role="toolbar"]';
 
 // The chat image viewer's arrows, so stepping through images looks the same everywhere.
 const NEIGHBOR_BUTTON_CLASS = 'absolute top-1/2 -translate-y-1/2 z-10 h-10 w-10 flex items-center justify-center rounded-full bg-surface-elevated/90 text-surface-elevated-foreground hover:bg-surface-elevated focus:outline-none focus:ring-2 focus:ring-ring';
@@ -43,6 +50,8 @@ type ImageArtifactProps = {
   name: string;
   sizeBytes: number | null;
   neighbors?: { previous: ImageNeighbor; next: ImageNeighbor } | null;
+  onRetry?: () => void;
+  download?: React.ReactNode;
 };
 
 /**
@@ -53,21 +62,38 @@ type ImageArtifactProps = {
  * the − and + steps, or a double-click between fit and 1:1. A zoomed image
  * larger than the viewer pans by dragging.
  *
- * With `neighbors`, arrows at the viewer's edges and the arrow keys (while the
- * viewer has focus and the image is at fit; zoomed, the keys keep scrolling)
- * show the previous and next image of the folder.
+ * With `neighbors`, arrows at the viewer's edges and the arrow keys show the
+ * previous and next image of the folder. The keys work while the focus is in
+ * the panel that holds the viewer, or nowhere, and the image is at fit; zoomed,
+ * they keep scrolling. A text field or a control that moves with the arrow
+ * keys itself keeps them.
+ *
+ * An empty `src` is an image still being fetched; until it decodes the viewer
+ * shows the loading state, and an image the browser cannot decode shows a
+ * failure with retry and download in its place.
  */
-const ImageArtifactView: React.FC<ImageArtifactProps> = ({ src, name, sizeBytes, neighbors }) => {
+const ImageArtifactView: React.FC<ImageArtifactProps> = ({ src, name, sizeBytes, neighbors, onRetry, download }) => {
   const { t, direction } = useI18n();
   // null is fit: the scale then follows the viewer's size.
   const [scale, setScale] = React.useState<number | null>(null);
   const [natural, setNatural] = React.useState<Size | null>(null);
+  const [failed, setFailed] = React.useState(false);
+  // A retry of the same URL remounts the element, so the browser requests it again.
+  const [attempt, setAttempt] = React.useState(0);
   const [viewport, setViewport] = React.useState<Size | null>(null);
   const [dragging, setDragging] = React.useState(false);
   const viewportRef = React.useRef<HTMLDivElement | null>(null);
+  // Stays laid out when the image fails, unlike the viewport.
+  const viewerRef = React.useRef<HTMLDivElement | null>(null);
   const imageRef = React.useRef<HTMLImageElement | null>(null);
   const anchorRef = React.useRef<ZoomAnchor | null>(null);
   const dragRef = React.useRef<DragState | null>(null);
+
+  const retry = () => {
+    setFailed(false);
+    setAttempt((value) => value + 1);
+    onRetry?.();
+  };
 
   React.useEffect(() => {
     const element = viewportRef.current;
@@ -228,27 +254,43 @@ const ImageArtifactView: React.FC<ImageArtifactProps> = ({ src, name, sizeBytes,
     setDragging(false);
   };
 
-  React.useEffect(() => {
-    if (!lastStep || lastStep.name !== name) return;
-    const recent = Date.now() - lastStep.at <= STEP_FOCUS_WINDOW_MS;
-    lastStep = null;
-    if (recent) viewportRef.current?.focus({ preventScroll: true });
-  }, [name]);
-
-  const step = (neighbor: ImageNeighbor) => {
-    lastStep = { name: neighbor.name, at: Date.now() };
-    neighbor.open();
-  };
-
   // "Previous" sits at the start of the row: on the right in RTL.
-  const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
-    if (!neighbors || scale !== null || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+  const handleKeyDown = (event: KeyboardEvent) => {
+    if (!neighbors || scale !== null || event.defaultPrevented) return;
+    if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
     const previousKey = direction === 'rtl' ? 'ArrowRight' : 'ArrowLeft';
     const nextKey = direction === 'rtl' ? 'ArrowLeft' : 'ArrowRight';
     if (event.key !== previousKey && event.key !== nextKey) return;
+    const viewer = viewerRef.current;
+    if (!viewer || viewer.getClientRects().length === 0) return;
+    const scope = viewer.closest('[data-context-panel]') ?? viewer;
+    const target = event.target;
+    if (target === document.body) {
+      if (!lastPointerRegion || !scope.contains(lastPointerRegion)) return;
+    } else {
+      if (!(target instanceof Element) || isEditableEventTarget(target) || target.closest(ARROW_KEY_OWNERS)) return;
+      if (!scope.contains(target)) return;
+    }
     event.preventDefault();
-    step(event.key === previousKey ? neighbors.previous : neighbors.next);
+    (event.key === previousKey ? neighbors.previous : neighbors.next).open();
   };
+  // On the document: a click on a file in the tree leaves the focus on its row
+  // or nowhere, and the keys should step from there too.
+  const keyDownRef = React.useRef(handleKeyDown);
+  keyDownRef.current = handleKeyDown;
+  React.useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => keyDownRef.current(event);
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target instanceof Element ? event.target : null;
+      lastPointerRegion = target?.closest('[data-context-panel]') ?? target;
+    };
+    document.addEventListener('keydown', onKeyDown);
+    document.addEventListener('pointerdown', onPointerDown, true);
+    return () => {
+      document.removeEventListener('keydown', onKeyDown);
+      document.removeEventListener('pointerdown', onPointerDown, true);
+    };
+  }, []);
 
   const handleDoubleClick = (event: React.MouseEvent<HTMLDivElement>) => {
     if (scale === null) {
@@ -264,54 +306,87 @@ const ImageArtifactView: React.FC<ImageArtifactProps> = ({ src, name, sizeBytes,
         items={[formatArtifactDimensions(natural), formatArtifactSize(sizeBytes)]}
         actions={(
           <>
-            <Button
-              variant="ghost"
-              size="xs"
-              aria-label={t('filesView.artifact.image.zoomOut')}
-              title={t('filesView.artifact.image.zoomOut')}
-              disabled={!natural}
-              onClick={() => zoomAtCenter(stepImageScale(shownScale, -1))}
-            >
-              <Icon name="subtract" className="size-3.5" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="xs"
-              className="min-w-11 tabular-nums"
-              title={t('filesView.artifact.image.actualTitle')}
-              disabled={!natural}
-              onClick={() => zoomAtCenter(1)}
-            >
-              {`${Math.round(shownScale * 100)}%`}
-            </Button>
-            <Button
-              variant="ghost"
-              size="xs"
-              aria-label={t('filesView.artifact.image.zoomIn')}
-              title={t('filesView.artifact.image.zoomIn')}
-              disabled={!natural}
-              onClick={() => zoomAtCenter(stepImageScale(shownScale, 1))}
-            >
-              <Icon name="add" className="size-3.5" />
-            </Button>
-            <Button
-              variant="chip"
-              size="xs"
-              aria-pressed={scale === null}
-              title={t('filesView.artifact.image.fitTitle')}
-              onClick={() => setScale(null)}
-            >
-              {t('filesView.artifact.image.fit')}
-            </Button>
+            <ButtonTooltip side="bottom" label={t('filesView.artifact.image.zoomOut')}>
+              <Button
+                variant="ghost"
+                size="xs"
+                aria-label={t('filesView.artifact.image.zoomOut')}
+                disabled={!natural}
+                onClick={() => zoomAtCenter(stepImageScale(shownScale, -1))}
+              >
+                <Icon name="subtract" className="size-3.5" />
+              </Button>
+            </ButtonTooltip>
+            <ButtonTooltip side="bottom" label={t('filesView.artifact.image.actualTitle')}>
+              <Button
+                variant="ghost"
+                size="xs"
+                className="min-w-11 tabular-nums"
+                aria-label={t('filesView.artifact.image.actualTitle')}
+                disabled={!natural}
+                onClick={() => zoomAtCenter(1)}
+              >
+                {`${Math.round(shownScale * 100)}%`}
+              </Button>
+            </ButtonTooltip>
+            <ButtonTooltip side="bottom" label={t('filesView.artifact.image.zoomIn')}>
+              <Button
+                variant="ghost"
+                size="xs"
+                aria-label={t('filesView.artifact.image.zoomIn')}
+                disabled={!natural}
+                onClick={() => zoomAtCenter(stepImageScale(shownScale, 1))}
+              >
+                <Icon name="add" className="size-3.5" />
+              </Button>
+            </ButtonTooltip>
+            <ButtonTooltip side="bottom" label={t('filesView.artifact.image.fitTitle')}>
+              <Button
+                variant="chip"
+                size="xs"
+                aria-pressed={scale === null}
+                aria-label={t('filesView.artifact.image.fitTitle')}
+                onClick={() => setScale(null)}
+              >
+                {t('filesView.artifact.image.fit')}
+              </Button>
+            </ButtonTooltip>
           </>
         )}
       />
-      <div className="relative flex min-h-0 flex-1 flex-col" onKeyDown={handleKeyDown}>
-        <div
+      <div ref={viewerRef} className="relative flex min-h-0 flex-1 flex-col">
+        {failed ? (
+          <ContentState
+            // Clears the round previous/next arrows at the viewer's edges.
+            className={neighbors ? 'px-16' : undefined}
+            icon={<Icon name="image" className="size-10 text-muted-foreground" />}
+            title={t('filesView.artifact.image.loadFailed')}
+            description={t('filesView.artifact.image.loadFailedDescription')}
+            actions={(
+              <>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button type="button" variant="outline" size="sm" onClick={retry}>
+                      <Icon name="refresh" className="me-2 size-4" />
+                      {t('filesView.artifact.state.retry')}
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent sideOffset={6}>{t('contextTooltips.files.retryImage')}</TooltipContent>
+                </Tooltip>
+                {download}
+              </>
+            )}
+          />
+        ) : null}
+        {!failed && !natural ? (
+          <ContentLoadingState label={t('filesView.artifact.state.loading')} className="pointer-events-none absolute inset-0" />
+        ) : null}
+        <ScrollableOverlay
           ref={viewportRef}
           tabIndex={neighbors ? 0 : undefined}
+          outerClassName={cn('min-h-0 flex-1', failed && 'hidden')}
           className={cn(
-            'min-h-0 flex-1 overflow-auto outline-none',
+            'outline-none',
             canPan && (dragging ? 'cursor-grabbing' : 'cursor-grab'),
           )}
           onPointerDown={handlePointerDown}
@@ -326,46 +401,59 @@ const ImageArtifactView: React.FC<ImageArtifactProps> = ({ src, name, sizeBytes,
               scale === null ? 'h-full w-full' : 'min-h-full min-w-full w-max',
             )}
           >
-            <img
-              ref={imageRef}
-              key={src}
-              src={src}
-              alt={name}
-              draggable={false}
-              onLoad={(event) => {
-                const image = event.currentTarget;
-                setNatural({ width: image.naturalWidth, height: image.naturalHeight });
-              }}
-              style={scale !== null && natural
-                ? { width: natural.width * scale, height: natural.height * scale }
-                : undefined}
-              className={cn(
-                'select-none rounded-md border border-border/30 bg-primary/10',
-                scale === null ? 'max-h-full max-w-full object-contain' : 'max-w-none shrink-0',
-              )}
-            />
+            {src ? (
+              <img
+                ref={imageRef}
+                key={`${src}:${attempt}`}
+                src={src}
+                alt={name}
+                draggable={false}
+                onLoad={(event) => {
+                  const image = event.currentTarget;
+                  setNatural({ width: image.naturalWidth, height: image.naturalHeight });
+                }}
+                onError={() => setFailed(true)}
+                style={scale !== null && natural
+                  ? { width: natural.width * scale, height: natural.height * scale }
+                  : undefined}
+                className={cn(
+                  'select-none rounded-md border border-edge-muted bg-primary/10',
+                  scale === null ? 'max-h-full max-w-full object-contain' : 'max-w-none shrink-0',
+                  // Kept in the document while it decodes, so it can load and report its size.
+                  !natural && 'invisible',
+                )}
+              />
+            ) : null}
           </div>
-        </div>
+        </ScrollableOverlay>
         {neighbors ? (
           <>
-            <button
-              type="button"
-              className={cn(NEIGHBOR_BUTTON_CLASS, 'inset-s-3')}
-              aria-label={t('filesView.artifact.image.previous', { name: neighbors.previous.name })}
-              title={t('filesView.artifact.image.previous', { name: neighbors.previous.name })}
-              onClick={() => step(neighbors.previous)}
-            >
-              <Icon name="arrow-left-s" className="h-6 w-6" />
-            </button>
-            <button
-              type="button"
-              className={cn(NEIGHBOR_BUTTON_CLASS, 'inset-e-3')}
-              aria-label={t('filesView.artifact.image.next', { name: neighbors.next.name })}
-              title={t('filesView.artifact.image.next', { name: neighbors.next.name })}
-              onClick={() => step(neighbors.next)}
-            >
-              <Icon name="arrow-right-s" className="h-6 w-6" />
-            </button>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  className={cn(NEIGHBOR_BUTTON_CLASS, 'inset-s-3')}
+                  aria-label={t('filesView.artifact.image.previous', { name: neighbors.previous.name })}
+                  onClick={() => neighbors.previous.open()}
+                >
+                  <Icon name="arrow-left-s" className="h-6 w-6" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent sideOffset={6}>{t('filesView.artifact.image.previous', { name: neighbors.previous.name })}</TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  className={cn(NEIGHBOR_BUTTON_CLASS, 'inset-e-3')}
+                  aria-label={t('filesView.artifact.image.next', { name: neighbors.next.name })}
+                  onClick={() => neighbors.next.open()}
+                >
+                  <Icon name="arrow-right-s" className="h-6 w-6" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent sideOffset={6}>{t('filesView.artifact.image.next', { name: neighbors.next.name })}</TooltipContent>
+            </Tooltip>
           </>
         ) : null}
       </div>

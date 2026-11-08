@@ -1,6 +1,7 @@
 /**
  * Reference-picker reads: searched lists, an item's detail and listed change
- * requests' statuses, for providers whose descriptor offers them
+ * requests' statuses (discussions where `features.discussions` says the
+ * provider keeps them), for providers whose descriptor offers them
  * (`features.referenceSearch`, `referenceDetail`, `listStatuses`,
  * `referencesAcross`).
  *
@@ -19,6 +20,7 @@ import type {
   RepositoryReferencesAcrossResult,
   SourceControlReadContext,
 } from '@openchamber/ui/lib/api/types';
+import type { ChangeRequestReviewStateResult } from '@openchamber/ui/lib/source-control/types';
 import type { RuntimeFetchOptions } from '@openchamber/ui/lib/runtime-fetch';
 import { z } from 'zod';
 import { providerPath } from './source-control-providers';
@@ -73,6 +75,15 @@ const referenceSchema = z.discriminatedUnion('kind', [
       sshUrl: z.string().optional(),
     }).nullable(),
   }),
+  z.object({
+    kind: z.literal('discussion'),
+    ...referenceFields,
+    state: z.enum(['open', 'resolved', 'outdated', 'duplicate']),
+    answered: z.boolean().nullable(),
+    upvotes: z.number(),
+    locked: z.boolean(),
+    category: z.object({ name: z.string(), emoji: z.string().nullable(), answerable: z.boolean() }),
+  }),
 ]);
 
 const referencesResultSchema = z.discriminatedUnion('connected', [
@@ -95,6 +106,11 @@ const referenceCommentFields = {
   path: z.string().nullable(),
   line: z.number().nullable(),
   review: z.enum(['approved', 'changes_requested', 'commented', 'dismissed']).nullable(),
+  // Absent from older servers and other hosts; a malformed one only costs the suggestion its base.
+  excerpt: z.object({
+    startLine: z.number().int().positive(),
+    lines: z.array(z.string()).max(200),
+  }).optional().catch(undefined),
 };
 
 const referenceDetailResultSchema = z.discriminatedUnion('connected', [
@@ -113,6 +129,7 @@ const referenceDetailResultSchema = z.discriminatedUnion('connected', [
           canReply: z.boolean(),
           replies: z.array(z.object(referenceCommentFields)),
         }).optional(),
+        answer: z.object({ chosen: z.boolean(), canChange: z.boolean() }).optional(),
       })),
       commentTotal: z.number(),
       pull: z.object({
@@ -146,6 +163,7 @@ const referenceDetailResultSchema = z.discriminatedUnion('connected', [
           })),
         }).nullable().optional().catch(undefined),
       }).nullable(),
+      discussion: z.object({ canComment: z.boolean(), canClose: z.boolean(), canReopen: z.boolean() }).optional(),
     }).nullable(),
   }),
 ]);
@@ -157,7 +175,7 @@ const referencesAcrossResultSchema = z.strictObject({
   total: z.number().int().nonnegative(),
   repositories: z.array(z.union([
     z.strictObject({ directory: z.string().min(1), status: z.literal('included'),
-      repo: z.strictObject({ owner: z.string(), repo: z.string(), url: z.string() }),
+      repo: z.strictObject({ owner: z.string(), repo: z.string(), url: z.string(), host: z.string().optional() }),
     }),
     z.strictObject({ directory: z.string().min(1), status: z.enum(['no-repo', 'disconnected', 'invalid-context', 'error']) }),
   ])),
@@ -180,14 +198,18 @@ const pullStatusesResultSchema = z.discriminatedUnion('connected', [
 
 const errorSchema = z.object({ error: z.string() });
 
-const readContextQuery = (context: SourceControlReadContext): URLSearchParams => new URLSearchParams({
-  directory: context.directory,
-  instance: context.instance,
-  repositoryId: context.repositoryId,
-  accountId: context.accountId,
-  bindingRevision: String(context.bindingRevision),
-  primaryRemote: context.primaryRemote,
-});
+const readContextQuery = (context: SourceControlReadContext): URLSearchParams => {
+  const query = new URLSearchParams({
+    directory: context.directory,
+    instance: context.instance,
+    repositoryId: context.repositoryId,
+    accountId: context.accountId,
+    bindingRevision: String(context.bindingRevision),
+    primaryRemote: context.primaryRemote,
+  });
+  if (context.linked) query.set('linked', '1');
+  return query;
+};
 
 /** The parsed answer, or the server's own reason when the request failed. */
 const readPayload = async <TSchema extends z.ZodType>(
@@ -223,12 +245,13 @@ export const fetchRepositoryReferences = async (
 export const fetchRepositoryReferenceDetail = async (
   fetch: ReferencesFetch,
   context: SourceControlReadContext,
-  item: RepositoryItemRef,
+  item: RepositoryItemRef & { kind?: 'discussion' },
 ): Promise<RepositoryReferenceDetailResult> => {
   const query = readContextQuery(context);
   query.set('owner', item.owner);
   query.set('repo', item.repo);
   query.set('number', String(item.number));
+  if (item.kind === 'discussion') query.set('kind', 'discussion');
   const host = item.host?.trim();
   // The wire's default host is github.com; a ref on any other host names it.
   if (host && host !== 'github.com') {
@@ -236,6 +259,49 @@ export const fetchRepositoryReferenceDetail = async (
   }
   const response = await fetch(providerPath(context, '/references/detail'), { query, headers: { Accept: 'application/json' } });
   return readPayload(response, referenceDetailResultSchema, 'Failed to load issue or pull request detail');
+};
+
+const reviewPersonSchema = z.object({ login: z.string(), avatarUrl: z.string().optional() }).nullable();
+const reviewSideSchema = z.enum(['old', 'new']);
+const reviewStateResultSchema = z.discriminatedUnion('connected', [
+  z.object({ connected: z.literal(false) }),
+  z.object({
+    connected: z.literal(true),
+    viewerIsAuthor: z.boolean(),
+    headSha: z.string(),
+    draft: z.object({
+      id: z.string(),
+      body: z.string(),
+      comments: z.array(z.object({
+        id: z.string(), path: z.string(), side: reviewSideSchema,
+        line: z.number().int().nullable(), startLine: z.number().int().nullable(),
+        body: z.string(), author: reviewPersonSchema,
+      })),
+    }).nullable(),
+    threads: z.array(z.object({
+      id: z.string(), path: z.string(), side: reviewSideSchema,
+      line: z.number().int().nullable(), startLine: z.number().int().nullable(),
+      resolved: z.boolean(), canReply: z.boolean(), canResolve: z.boolean(),
+      comments: z.array(z.object({
+        id: z.string(), body: z.string(), createdAt: z.string(), url: z.string(), author: reviewPersonSchema,
+      })),
+    })),
+    truncated: z.boolean(),
+  }),
+]);
+
+/** A change request's review as the diff draws it, read with the repository's bound account. */
+export const fetchChangeRequestReviewState = async (
+  fetch: ReferencesFetch,
+  context: SourceControlReadContext,
+  ref: { owner: string; repo: string; number: number },
+): Promise<ChangeRequestReviewStateResult> => {
+  const query = readContextQuery(context);
+  query.set('owner', ref.owner);
+  query.set('repo', ref.repo);
+  query.set('number', String(ref.number));
+  const response = await fetch(providerPath(context, '/pr/review/state'), { query, headers: { Accept: 'application/json' } });
+  return readPayload(response, reviewStateResultSchema, 'Failed to load the review');
 };
 
 /** One provider per page: every context must name the same provider, whose route serves the search. */

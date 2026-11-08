@@ -9,7 +9,9 @@
  */
 import * as React from 'react';
 
+import { isVideoSource } from '@/components/chat/markdown/markdownVideo';
 import type { RepositoryReference } from '@/lib/api/types';
+import { isRelayModeActive } from '@/lib/relay/runtime-tunnel';
 import { acquireRuntimeUrlAuthToken, refreshRuntimeUrlAuthToken } from '@/lib/runtime-auth';
 import { getRuntimeUrlResolver } from '@/lib/runtime-url';
 import { useSourceControlProvider } from '@/lib/source-control/providers/registry';
@@ -47,21 +49,39 @@ export const rewriteProjectUploads = (markdown: string, urls: ProjectUploadUrls)
     return result + rewrite(markdown.slice(last));
 };
 
-const uploadUrls = (context: SourceControlReadContext, project: RepositoryReference['sourceRepo']): ProjectUploadUrls => ({
-    // Signed with the token current at the time, so every item read later
-    // gets a fresh one; a clip whose token expired retries (markdownVideo.ts).
-    media: (path) => new URL(getRuntimeUrlResolver().authenticatedAsset(`/api/source-control/${encodeURIComponent(context.provider)}${path}`, {
+export const uploadUrls = (context: SourceControlReadContext, project: RepositoryReference['sourceRepo']): ProjectUploadUrls => {
+    const link = (path: string) => new URL(`${joinProjectPath(project.owner, project.repo)}${path}`, `${context.instance.replace(/\/+$/, '')}/`).toString();
+    const route = (path: string) => `/api/source-control/${encodeURIComponent(context.provider)}${path}`;
+    const query = {
         instance: context.instance,
         directory: context.directory,
         repositoryId: context.repositoryId,
         accountId: context.accountId,
         bindingRevision: context.bindingRevision,
         primaryRemote: context.primaryRemote,
+        linked: context.linked ? '1' : undefined,
         owner: project.owner,
         repo: project.repo,
-    }), window.location.href).toString(),
-    link: (path) => new URL(`${joinProjectPath(project.owner, project.repo)}${path}`, `${context.instance.replace(/\/+$/, '')}/`).toString(),
-});
+    };
+    return {
+        media: (path) => {
+            // A URL the browser loads itself never enters the relay tunnel. A
+            // picture keeps the server path, which the media owner reads through
+            // the tunnel; a clip can be too large to read whole, so it points at
+            // the file on the host and falls back to a link when it cannot play.
+            if (isRelayModeActive()) {
+                if (isVideoSource(path)) return link(path);
+                const asset = new URL(route(path), 'http://openchamber.local');
+                for (const [key, value] of Object.entries(query)) asset.searchParams.set(key, String(value));
+                return `${asset.pathname}${asset.search}`;
+            }
+            // Signed with the token current at the time, so every item read later
+            // gets a fresh one; a clip whose token expired retries (markdownVideo.ts).
+            return new URL(getRuntimeUrlResolver().authenticatedAsset(route(path), query), window.location.href).toString();
+        },
+        link,
+    };
+};
 
 /**
  * How an item's description and notes read for display, or null when nothing
@@ -70,7 +90,9 @@ const uploadUrls = (context: SourceControlReadContext, project: RepositoryRefere
  */
 export function useProjectUploadRewrite(directory: string | null, reference: RepositoryReference | null): ((markdown: string) => string) | null {
     const uploads = useSourceControlProvider(reference?.provider).features.projectUploads;
-    const context = useRepositoryReadContext(uploads ? directory : null);
+    const bound = useRepositoryReadContext(uploads ? directory : null);
+    const linked = reference?.linked === true;
+    const context = React.useMemo(() => (bound && bound !== 'missing' && linked ? { ...bound, linked: true as const } : bound), [bound, linked]);
     // `img` and `video` cannot send headers, so the address carries the URL
     // token. It is kept fresh while such an item is shown; without one the
     // cookie authenticates, so a failed mint still renders.

@@ -2,6 +2,7 @@ import type { I18nKey, I18nParams } from '@/lib/i18n/store';
 import { getCustomizableShortcutActions } from '@/lib/shortcuts';
 import { isIsolatedSpacesPageVisible } from '@/lib/spaces/release';
 import { useUIStore } from '@/stores/useUIStore';
+import { useConfigStore } from '@/stores/useConfigStore';
 import { trackerPresentation } from '@/lib/trackers/presentation';
 import type { TrackerDescriptor } from '@/lib/trackers/types';
 import type { ChangeRequestTerm, SourceControlProviderDescriptor } from '@/lib/source-control/providers/descriptor';
@@ -32,7 +33,9 @@ export type SettingsSearchResult = SettingsSearchItem & {
   pageTitle: string;
 };
 
-interface SettingsSearchAvailabilityContext extends SettingsRuntimeContext {
+export interface SettingsSearchAvailabilityContext extends SettingsRuntimeContext {
+  voiceSettings?: Pick<ReturnType<typeof useConfigStore.getState>,
+    'showMessageTTSButtons' | 'autoReadAloudEnabled' | 'voiceProvider' | 'dictationEnabled' | 'sttProvider'>;
   isMobile: boolean;
   isDesktopLocalOrigin: boolean;
   // macOS desktop shell — for controls that only render on darwin (e.g. dock badge).
@@ -150,6 +153,21 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     isAvailable: (ctx) => !ctx.isMobile,
   },
   {
+    id: 'appearance.chat-font-size',
+    page: 'appearance',
+    titleKey: 'settings.openchamber.visual.field.chatFontSize',
+    keywords: ['chat', 'font', 'text size', 'messages'],
+    isAvailable: (ctx) => !ctx.isMobile,
+  },
+  {
+    id: 'appearance.interface-font-weight',
+    page: 'appearance',
+    titleKey: 'settings.openchamber.visual.field.interfaceFontWeight',
+    descriptionKey: 'settings.openchamber.visual.field.interfaceFontWeightInfo',
+    keywords: ['font', 'weight', 'bold', 'medium', 'thickness', 'text'],
+    isAvailable: (ctx) => !ctx.isMobile,
+  },
+  {
     id: 'appearance.terminal-font-size',
     page: 'appearance',
     titleKey: 'settings.openchamber.visual.field.terminalFontSize',
@@ -161,6 +179,14 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     titleKey: 'settings.openchamber.visual.field.terminalShell',
     descriptionKey: 'settings.openchamber.visual.field.terminalShellHint',
     keywords: ['terminal', 'shell', 'bash', 'zsh', 'fish', 'pwsh', 'powershell'],
+    isAvailable: (ctx) => !ctx.isVSCode,
+  },
+  {
+    id: 'appearance.terminal-close-on-exit',
+    page: 'general',
+    titleKey: 'settings.openchamber.visual.field.terminalCloseOnExit',
+    descriptionKey: 'settings.openchamber.visual.field.terminalCloseOnExitInfo',
+    keywords: ['terminal', 'exit', 'close', 'tab', 'shell'],
     isAvailable: (ctx) => !ctx.isVSCode,
   },
   {
@@ -234,7 +260,7 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     page: 'general',
     titleKey: 'settings.layout.general.mobileTabs.title',
     descriptionKey: 'settings.layout.general.mobileTabs.info',
-    keywords: ['tabs', 'workspace', 'panel', 'order', 'hide', 'git', 'files', 'terminal', 'mcp', 'mobile'],
+    keywords: ['tabs', 'workspace', 'panel', 'order', 'hide', 'status', 'git', 'files', 'terminal', 'mobile'],
     isAvailable: (ctx) => ctx.isMobile,
   },
   {
@@ -412,6 +438,13 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['copy', 'clipboard', 'plain text', 'markdown', 'selection'],
   },
   {
+    id: 'chat.selection-approval-text',
+    page: 'chat',
+    titleKey: 'settings.openchamber.visual.field.selectionApprovalText',
+    descriptionKey: 'settings.openchamber.visual.field.selectionApprovalTextInfo',
+    keywords: ['lgtm', 'sounds good', 'approval', 'feedback', 'selection', 'citation', 'comment', 'thumbs up', '👍'],
+  },
+  {
     id: 'chat.inline-assistant-actions',
     page: 'chat',
     titleKey: 'settings.openchamber.visual.field.showSplitAssistantMessageActions',
@@ -524,12 +557,6 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     isAvailable: (ctx) => !ctx.isVSCode,
   },
   {
-    id: 'chat.persist-drafts',
-    page: 'chat',
-    titleKey: 'settings.openchamber.visual.field.persistDraftMessages',
-    keywords: ['draft', 'message'],
-  },
-  {
     id: 'chat.composer',
     page: 'chat',
     titleKey: 'settings.layout.chat.section.sending',
@@ -599,6 +626,34 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['warming', 'warm', 'cache', 'prompt cache', 'keep-alive', 'idle', 'per session', 'keep warm', 'duration', 'how long', 'hour'],
   },
   {
+    id: 'sessions.compaction-auto',
+    page: 'sessions',
+    titleKey: 'settings.openchamber.defaults.compaction.auto',
+    descriptionKey: 'settings.openchamber.defaults.compaction.autoInfo',
+    keywords: ['compaction', 'compact', 'auto', 'automatic', 'context limit', 'summary', 'overflow'],
+  },
+  {
+    id: 'sessions.compaction-buffer',
+    page: 'sessions',
+    titleKey: 'settings.openchamber.defaults.compaction.buffer',
+    descriptionKey: 'settings.openchamber.defaults.compaction.bufferInfo',
+    keywords: ['compaction', 'compact', 'buffer', 'threshold', 'context limit', 'context window', 'summary', 'tokens'],
+  },
+  {
+    id: 'sessions.compaction-keep',
+    page: 'sessions',
+    titleKey: 'settings.openchamber.defaults.compaction.keep',
+    descriptionKey: 'settings.openchamber.defaults.compaction.keepInfo',
+    keywords: ['compaction', 'compact', 'keep', 'recent', 'tail', 'summary', 'tokens'],
+  },
+  {
+    id: 'sessions.background-compaction',
+    page: 'sessions',
+    titleKey: 'settings.openchamber.defaults.compaction.background',
+    descriptionKey: 'settings.openchamber.defaults.compaction.backgroundInfo',
+    keywords: ['compaction', 'compact', 'background', 'experimental', 'precompute', 'summary', 'background_compaction'],
+  },
+  {
     id: 'sessions.permission-default',
     page: 'sessions',
     titleKey: 'settings.sessions.permissions.defaultMode',
@@ -649,18 +704,37 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['retention', 'archive', 'delete'],
   },
   {
+    id: 'sessions.worktree-archive-on-done',
+    page: 'sessions',
+    titleKey: 'settings.openchamber.finishedWorktrees.field.archiveOnDone',
+    descriptionKey: 'settings.openchamber.finishedWorktrees.info',
+    keywords: ['done', 'finish', 'in work', 'worktree', 'archive', 'cleanup', 'remove'],
+    // The section renders everywhere but VS Code, which has no archives.
+    isAvailable: (ctx) => !ctx.isVSCode,
+  },
+  {
     id: 'sessions.merged-worktree-cleanup',
     page: 'sessions',
     titleKey: 'settings.openchamber.mergedWorktreeCleanup.field.enable',
-    descriptionKey: 'settings.openchamber.mergedWorktreeCleanup.field.enableDescription',
+    descriptionKey: 'settings.openchamber.finishedWorktrees.info',
     keywords: ['pr', 'pull request', 'merged', 'worktree', 'branch', 'archive', 'cleanup', 'remove'],
+    // The section renders everywhere but VS Code, which has no archives.
+    isAvailable: (ctx) => !ctx.isVSCode,
   },
   {
     id: 'sessions.retention-only-archived',
     page: 'sessions',
-    titleKey: 'settings.openchamber.sessionRetention.field.onlyArchived',
-    descriptionKey: 'settings.openchamber.sessionRetention.field.onlyArchivedDescription',
+    titleKey: 'settings.layout.sessions.retention.target',
     keywords: ['archive', 'archived', 'only', 'delete', 'cleanup', 'retention'],
+  },
+  {
+    id: 'sessions.retention-include-in-work',
+    page: 'sessions',
+    titleKey: 'settings.openchamber.sessionRetention.field.includeInWork',
+    descriptionKey: 'settings.openchamber.sessionRetention.field.includeInWorkInfo',
+    keywords: ['in work', 'done', 'cleanup', 'retention', 'archive', 'delete'],
+    // The checkbox shows only while sessions in work are on.
+    isAvailable: () => useUIStore.getState().sessionWorkEnabled,
   },
   {
     id: 'sessions.retention-period',
@@ -833,11 +907,43 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     isAvailable: (ctx) => !ctx.isVSCode,
   },
   {
+    id: 'sessions.agent-usage-tool',
+    page: 'general',
+    titleKey: 'settings.openchamber.tools.field.agentUsageTool',
+    descriptionKey: 'settings.openchamber.tools.field.agentUsageToolInfo',
+    keywords: ['agent', 'tool', 'usage', 'quota', 'limit', 'reset', 'openchamber'],
+    isAvailable: (ctx) => !ctx.isVSCode,
+  },
+  {
+    id: 'sessions.agent-image-tool',
+    page: 'general',
+    titleKey: 'settings.openchamber.tools.field.agentImageTool',
+    descriptionKey: 'settings.openchamber.tools.field.agentImageToolInfo',
+    keywords: ['agent', 'tool', 'image', 'picture', 'generate', 'draw', 'openchamber'],
+    isAvailable: (ctx) => !ctx.isVSCode,
+  },
+  {
+    id: 'sessions.agent-image-model',
+    page: 'general',
+    titleKey: 'settings.openchamber.tools.imageModel.label',
+    descriptionKey: 'settings.openchamber.tools.imageModel.info',
+    keywords: ['agent', 'image', 'model', 'picture', 'generate', 'draw'],
+    isAvailable: (ctx) => !ctx.isVSCode,
+  },
+  {
     id: 'sessions.agent-render-tool',
     page: 'general',
     titleKey: 'settings.openchamber.tools.field.agentRenderTool',
     descriptionKey: 'settings.openchamber.tools.field.agentRenderToolInfo',
     keywords: ['agent', 'tool', 'render', 'page', 'html', 'chart', 'table', 'diagram', 'generative', 'ui', 'openchamber'],
+    isAvailable: (ctx) => !ctx.isVSCode,
+  },
+  {
+    id: 'sessions.agent-secret-tool',
+    page: 'general',
+    titleKey: 'settings.openchamber.tools.field.agentSecretTool',
+    descriptionKey: 'settings.openchamber.tools.field.agentSecretToolInfo',
+    keywords: ['agent', 'tool', 'secret', 'token', 'api key', 'password', 'credential', 'openchamber'],
     isAvailable: (ctx) => !ctx.isVSCode,
   },
   {
@@ -887,20 +993,21 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     isAvailable: (ctx) => !ctx.isVSCode && useUIStore.getState().agentMemoryFeatureAvailable,
   },
   {
+    id: 'sessions.agent-workflow-tool',
+    page: 'general',
+    titleKey: 'settings.openchamber.tools.field.agentWorkflowTool',
+    descriptionKey: 'settings.openchamber.tools.field.agentWorkflowToolInfo',
+    keywords: ['agent', 'tool', 'workflow', 'workflows', 'subagents', 'fan out', 'parallel', 'openchamber'],
+    // Only where an OpenChamber server backs workflows, like memory.
+    isAvailable: (ctx) => !ctx.isVSCode && useUIStore.getState().agentWorkflowFeatureAvailable,
+  },
+  {
     id: 'routing.token',
     page: 'routing',
     titleKey: 'settings.routing.token.label',
     descriptionKey: 'settings.routing.token.info',
     keywords: ['jev', 'typesafe', 'api key', 'token', 'routing'],
     isAvailable: (ctx) => !ctx.isVSCode && ctx.routingAvailable,
-  },
-  {
-    id: 'sessions.agent-tools-code-mode',
-    page: 'general',
-    titleKey: 'settings.openchamber.tools.field.agentToolsCodeMode',
-    descriptionKey: 'settings.openchamber.tools.field.agentToolsCodeModeInfo',
-    keywords: ['agent', 'tool', 'code mode', 'codemode', 'execute', 'openchamber'],
-    isAvailable: (ctx) => !ctx.isVSCode,
   },
   {
     id: 'routing.enabled',
@@ -1033,6 +1140,12 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     page: 'projects',
     titleKey: 'settings.projects.shared.replaceMode',
     keywords: ['worktree', 'setup commands', 'shared', 'team', 'only mine'],
+  },
+  {
+    id: 'projects.worktree.teardown',
+    page: 'projects',
+    titleKey: 'settings.openchamber.worktrees.teardown.title',
+    keywords: ['worktree', 'teardown', 'cleanup', 'delete', 'docker', 'stop'],
   },
   {
     id: 'projects.environment',
@@ -1401,6 +1514,7 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
       page: 'shortcuts',
       titleKey: action.settingsLabelKey,
       keywords: ['shortcut', 'hotkey', 'keyboard', 'keybinding'],
+      isAvailable: (ctx) => !('nativeMenu' in action) || (ctx.isDesktop && (action.nativeMenu === 'all' || !ctx.isMac)),
     })),
   {
     id: 'voice.playback',
@@ -1419,7 +1533,36 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     id: 'voice.speech-recognition',
     page: 'voice',
     titleKey: 'settings.voice.page.section.speechRecognition',
-    keywords: ['stt', 'dictation', 'voice input', 'transcribe', 'whisper', 'parakeet', 'microphone'],
+    keywords: ['stt', 'dictation', 'voice input', 'transcribe', 'whisper', 'parakeet', 'qwen', 'microphone', 'misheard', 'correct', 'fix', 'small model'],
+  },
+  {
+    id: 'voice.dictation-auto-send',
+    page: 'voice',
+    titleKey: 'settings.voice.page.field.dictationAutoSend',
+    descriptionKey: 'settings.voice.page.field.dictationAutoSendInfo',
+    keywords: ['dictation', 'voice input', 'send', 'submit', 'automatic'],
+  },
+  {
+    id: 'voice.tts-endpoint-path',
+    page: 'voice',
+    titleKey: 'settings.voice.page.field.endpointPath',
+    descriptionKey: 'settings.voice.page.field.endpointPathHint',
+    keywords: ['tts', 'read aloud', 'endpoint path', 'custom endpoint', 'resource path'],
+    isAvailable: (ctx) => {
+      const state = ctx.voiceSettings ?? useConfigStore.getState();
+      return (state.showMessageTTSButtons || state.autoReadAloudEnabled) && state.voiceProvider === 'openai-compatible';
+    },
+  },
+  {
+    id: 'voice.stt-endpoint-path',
+    page: 'voice',
+    titleKey: 'settings.voice.page.field.endpointPath',
+    descriptionKey: 'settings.voice.page.field.endpointPathHint',
+    keywords: ['stt', 'dictation', 'endpoint path', 'custom endpoint', 'resource path'],
+    isAvailable: (ctx) => {
+      const state = ctx.voiceSettings ?? useConfigStore.getState();
+      return state.dictationEnabled && state.sttProvider === 'openai-compatible';
+    },
   },
   {
     id: 'tunnel.provider',
@@ -1480,6 +1623,14 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['completion', 'subtasks', 'errors', 'questions'],
   },
   {
+    id: 'notifications.pullRequests',
+    page: 'notifications',
+    titleKey: 'settings.notifications.pullRequests.label',
+    descriptionKey: 'settings.notifications.pullRequests.info',
+    keywords: ['pull requests', 'merge queue', 'auto-merge', 'checks', 'github'],
+    isAvailable: (ctx) => !ctx.isVSCode,
+  },
+  {
     id: 'notifications.push',
     page: 'notifications',
     titleKey: 'settings.notifications.page.push.title',
@@ -1488,28 +1639,20 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
   },
 
   {
+    id: 'integrations.browse',
+    page: 'integrations',
+    titleKey: 'settings.integrations.browse.label',
+    descriptionKey: 'settings.integrations.browse.hint',
+    keywords: ['catalog', 'marketplace', 'store', 'discover', 'find', 'mcp', 'plugin', 'skill', 'extension'],
+    isAvailable: (ctx) => !ctx.isVSCode && !ctx.isMobile && !ctx.enterpriseMode,
+  },
+  {
     id: 'integrations.first-party',
     page: 'integrations',
     titleKey: 'settings.integrations.firstParty.title',
     descriptionKey: 'settings.integrations.firstParty.info',
     keywords: ['built-in', 'first-party', 'native', 'github', 'linear'],
     isAvailable: (ctx) => !ctx.isVSCode,
-  },
-  {
-    id: 'integrations.third-party',
-    page: 'integrations',
-    titleKey: 'settings.integrations.thirdParty.title',
-    descriptionKey: 'settings.integrations.thirdParty.info',
-    keywords: ['plugin', 'provider', 'install', 'update', 'remove', 'subscription'],
-    isAvailable: (ctx) => !ctx.isVSCode && !ctx.enterpriseMode,
-  },
-  {
-    id: 'integrations.third-party.opencode-claude',
-    page: 'integrations',
-    titleKey: 'settings.integrations.thirdParty.opencodeClaude.name',
-    descriptionKey: 'settings.integrations.thirdParty.opencodeClaude.description',
-    keywords: ['claude', 'anthropic', 'claude code', 'pro', 'max', 'agent sdk', '@openchamber/opencode-claude'],
-    isAvailable: (ctx) => !ctx.isVSCode && !ctx.enterpriseMode,
   },
   {
     id: 'integrations.extensions',
@@ -1575,6 +1718,18 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     isAvailable: (ctx) => !ctx.isVSCode && !ctx.isMobile,
   },
 ] as const;
+
+/** Static anchors used to seed the first-install baseline. */
+export const SETTINGS_ANCHOR_PAGES: ReadonlyMap<string, SettingsPageSlug> = new Map(
+  SETTINGS_SEARCH_ITEMS.map((item) => [item.id, item.page] as const),
+);
+
+export const getAvailableSettingsAnchorPages = (ctx: SettingsSearchAvailabilityContext): ReadonlyMap<string, SettingsPageSlug> => new Map(
+  SETTINGS_SEARCH_ITEMS.filter((item) => {
+    const page = getSettingsPageMeta(item.page);
+    return page && (!page.isAvailable || page.isAvailable(ctx)) && (!item.isAvailable || item.isAvailable(ctx));
+  }).map((item) => [item.id, item.page] as const),
+);
 
 interface BuildSettingsSearchResultsOptions {
   query: string;

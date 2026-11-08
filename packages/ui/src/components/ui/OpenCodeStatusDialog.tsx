@@ -11,6 +11,8 @@ import { useUIStore } from '@/stores/useUIStore';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { useI18n } from '@/lib/i18n';
 import { Button } from '@/components/ui/button';
+import { OpenCodeHeapSnapshot } from '@/components/ui/OpenCodeHeapSnapshot';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 
 export const OpenCodeStatusDialog: React.FC = () => {
   const { t } = useI18n();
@@ -62,9 +64,11 @@ export const OpenCodeStatusDialog: React.FC = () => {
           </Button>
         </div>
 
-        <pre className="max-h-[60vh] overflow-auto rounded-lg bg-surface-muted p-4 typography-code text-foreground whitespace-pre-wrap">
+        <ScrollableOverlay as="pre" outerClassName="max-h-[60vh] rounded-lg bg-surface-muted" className="p-4 typography-code text-foreground whitespace-pre-wrap" disableHorizontal>
           {openCodeStatusText || t('openCodeStatusDialog.empty.noData')}
-        </pre>
+        </ScrollableOverlay>
+
+        <OpenCodeHeapSnapshot />
       </DialogContent>
     </Dialog>
   );

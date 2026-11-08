@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { createSessionMetadataStore, mergeMetadataPatch } from './session-metadata-store.js';
+import { createOpenCodeSessionMetadata, createSessionMetadataStore, mergeMetadataPatch } from './session-metadata-store.js';
 
 const tempDirs = [];
 
@@ -19,6 +19,7 @@ afterEach(() => {
     fs.rmSync(tempDirs.pop(), { recursive: true, force: true });
   }
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 describe('mergeMetadataPatch', () => {
@@ -91,6 +92,45 @@ const makeStore = (openCode, dataDir = makeDataDir()) => ({
 });
 
 describe('createSessionMetadataStore', () => {
+  it('cancels one reader while shared legacy loading continues for another', async () => {
+    const load = Promise.withResolvers();
+    const openCode = createFakeOpenCode({ ses_1: { ready: true } });
+    const store = createSessionMetadataStore({
+      dataDir: makeDataDir(), openCode,
+      fsPromises: { ...fs.promises, readFile: async () => load.promise },
+    });
+    const controller = new AbortController();
+    const cancelled = store.get('ses_1', { signal: controller.signal }).catch((error) => error);
+    const other = store.get('ses_1');
+    controller.abort(new DOMException('Cleanup timed out', 'TimeoutError'));
+    expect((await cancelled).name).toBe('TimeoutError');
+    expect(openCode.read).not.toHaveBeenCalled();
+    load.resolve('{}');
+    expect(await other).toEqual({ ready: true });
+  });
+
+  it('cancels a hanging SDK session.get through the metadata store', async () => {
+    const entered = Promise.withResolvers();
+    vi.stubGlobal('fetch', vi.fn(async (_input, init) => {
+      entered.resolve(init.signal);
+      return new Promise((_, reject) => init.signal?.addEventListener('abort', () => reject(init.signal.reason), { once: true }));
+    }));
+    const store = createSessionMetadataStore({
+      dataDir: makeDataDir(),
+      openCode: createOpenCodeSessionMetadata({
+        buildOpenCodeUrl: (pathname) => `http://opencode.test${pathname}`,
+        getOpenCodeAuthHeaders: () => ({}),
+      }),
+    });
+    const controller = new AbortController();
+    const result = store.get('ses_hanging', { signal: controller.signal }).catch((error) => error);
+    const signal = await entered.promise;
+    expect(signal).toBeDefined();
+    controller.abort(new DOMException('Cleanup timed out', 'TimeoutError'));
+    expect(await result).toBeInstanceOf(Error);
+    expect(signal.aborted).toBe(true);
+  });
+
   it('reads metadata from OpenCode, and a session OpenCode does not know as empty', async () => {
     const openCode = createFakeOpenCode({ ses_1: { openchamber: { goal: { id: 'g1' } } } });
     const { store } = makeStore(openCode);

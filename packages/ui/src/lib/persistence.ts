@@ -182,15 +182,22 @@ const persistToLocalStorage = (settings: DesktopSettings) => {
   } else {
     localStorage.removeItem('dictationEnabled');
   }
+  if (settings.dictationAutoSend !== undefined) {
+    localStorage.setItem('dictationAutoSend', String(settings.dictationAutoSend));
+  } else {
+    localStorage.removeItem('dictationAutoSend');
+  }
   if (settings.sttProvider === 'local' || settings.sttProvider === 'openai-compatible') {
     localStorage.setItem('sttProvider', settings.sttProvider);
   } else {
     localStorage.removeItem('sttProvider');
   }
   setOrRemoveLocalStorage('sttServerUrl', typeof settings.sttServerUrl === 'string' ? settings.sttServerUrl : null);
+  setOrRemoveLocalStorage('sttEndpointPath', settings.sttEndpointPath ?? null);
   setOrRemoveLocalStorage('sttModel', typeof settings.sttModel === 'string' ? settings.sttModel : null);
   setOrRemoveLocalStorage('sttLocalModel', typeof settings.sttLocalModel === 'string' ? settings.sttLocalModel : null);
   setOrRemoveLocalStorage('sttLanguage', typeof settings.sttLanguage === 'string' ? settings.sttLanguage : null);
+  setOrRemoveLocalStorage('sttCorrectTranscript', settings.sttCorrectTranscript === undefined ? null : String(settings.sttCorrectTranscript));
 };
 
 export interface SettingsSyncedDetail {

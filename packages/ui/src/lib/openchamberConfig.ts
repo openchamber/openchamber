@@ -81,6 +81,8 @@ const sharedSchema = z.object({
   path: z.string(),
   setupWorktree: z.array(z.string()),
   setupWorktreeWait: z.boolean().nullable(),
+  // Defaults keep a server from before teardown commands readable.
+  teardownWorktree: z.array(z.string()).default([]),
   projectActions: z.array(projectActionSchema),
   draftStarters: starterRefsSchema,
   plansDir: z.string().nullable(),
@@ -90,6 +92,7 @@ const personalSchema = z.object({
   setupWorktree: z.array(z.string()),
   setupWorktreeWait: z.boolean().nullable(),
   setupWorktreeMode: z.enum(['append', 'replace']),
+  teardownWorktree: z.array(z.string()).default([]),
   projectActions: z.array(projectActionSchema),
   projectActionsPrimaryId: z.string().nullable(),
   draftStarters: starterRefsSchema,
@@ -102,6 +105,7 @@ const projectSetupSchema = z.object({
   trust: z.object({ hash: z.string().nullable(), trusted: z.boolean() }),
   setupWorktree: z.array(z.string()),
   setupWorktreeWait: z.boolean(),
+  teardownWorktree: z.array(z.string()).default([]),
   projectActions: z.array(projectActionSchema.extend({ source: sourceSchema })),
   projectActionsPrimaryId: z.string().nullable(),
   draftStarters: sourcedStartersSchema,
@@ -116,6 +120,7 @@ export type ProjectSetupPatch = Partial<{
   setupWorktree: string[];
   setupWorktreeWait: boolean;
   setupWorktreeMode: 'append' | 'replace';
+  teardownWorktree: string[];
   projectActions: OpenChamberProjectAction[];
   projectActionsPrimaryId: string | null;
   draftStarters: DraftStarterRef[];
@@ -128,6 +133,7 @@ const EMPTY_PROJECT_SETUP: ProjectSetup = {
   trust: { hash: null, trusted: true },
   setupWorktree: [],
   setupWorktreeWait: false,
+  teardownWorktree: [],
   projectActions: [],
   projectActionsPrimaryId: null,
   draftStarters: [],
@@ -136,6 +142,7 @@ const EMPTY_PROJECT_SETUP: ProjectSetup = {
     path: '.openchamber/project.json',
     setupWorktree: [],
     setupWorktreeWait: null,
+    teardownWorktree: [],
     projectActions: [],
     draftStarters: [],
     plansDir: null,
@@ -144,6 +151,7 @@ const EMPTY_PROJECT_SETUP: ProjectSetup = {
     setupWorktree: [],
     setupWorktreeWait: null,
     setupWorktreeMode: 'append',
+    teardownWorktree: [],
     projectActions: [],
     projectActionsPrimaryId: null,
     draftStarters: [],
@@ -225,6 +233,7 @@ export async function updateProjectSetup(project: ProjectRef, patch: ProjectSetu
 export type SharedProjectSetupPatch = Partial<{
   setupWorktree: string[];
   setupWorktreeWait: boolean | null;
+  teardownWorktree: string[];
   projectActions: OpenChamberProjectAction[];
   draftStarters: DraftStarterRef[];
   plansDir: string | null;

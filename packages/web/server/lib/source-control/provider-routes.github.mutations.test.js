@@ -581,7 +581,7 @@ describe('canonical GitHub mutations', () => {
     expect(response.body.result).toEqual({ merged: true });
     expect(requests).toEqual([
       { method: 'GET', path: '/repos/acme/app/pulls/7', body: null },
-      { method: 'PUT', path: '/repos/acme/app/pulls/7/merge-async', body: { merge_method: 'merge', sha: 'abc123' } },
+      { method: 'PUT', path: '/repos/acme/app/pulls/7/merge-async', body: { merge_method: 'merge', sha: 'abc123', bypass_rules: true } },
     ]);
   });
 
@@ -603,6 +603,44 @@ describe('canonical GitHub mutations', () => {
     final = 'enqueued';
     expect((await request(app).post('/api/source-control/github/pr/merge').send({ ...mergeBody(account.accountId), idempotencyKey: 'request-two' }).expect(200)).body.result)
       .toEqual({ merged: false, outcome: 'queued' });
+  });
+
+  it('enables auto-merge after a rule-blocked async result and cancels it through durable receipts', async () => {
+    const account = await auth.setGitHubAuth({ accessToken: 'token-one', user: { id: 1, login: 'actor' } });
+    let autoMergeRequest = null;
+    const queries = [];
+    vi.stubGlobal('fetch', vi.fn(async (url, options) => {
+      if (new URL(url).pathname === '/graphql') {
+        const { query, variables } = JSON.parse(options.body);
+        queries.push({ query, variables });
+        if (query.includes('enablePullRequestAutoMerge')) {
+          autoMergeRequest = { enabledAt: '2026-11-03T12:00:00Z', mergeMethod: 'MERGE' };
+          return jsonResponse({ data: { enablePullRequestAutoMerge: { pullRequest: { autoMergeRequest } } } });
+        }
+        if (query.includes('disablePullRequestAutoMerge')) {
+          autoMergeRequest = null;
+          return jsonResponse({ data: { disablePullRequestAutoMerge: { pullRequest: { autoMergeRequest } } } });
+        }
+        return jsonResponse({ data: { repository: { mergeQueue: null, pullRequest: {
+          id: 'PR_7', state: 'OPEN', headRefOid: 'abc123', mergeable: 'MERGEABLE', mergeStateStatus: 'BLOCKED', isInMergeQueue: false, autoMergeRequest,
+        } } } });
+      }
+      if (options.method === 'PUT') return jsonResponse({ status: 'failed', details: { message: 'Required checks have not passed' } });
+      return jsonResponse(pullRequest());
+    }));
+    const { app } = makeApp();
+    const body = mergeBody(account.accountId);
+    const enabled = await request(app).post('/api/source-control/github/pr/merge').send(body);
+    expect(enabled.status).toBe(200);
+    expect(queries).toHaveLength(2);
+    expect(enabled.body).toMatchObject({ status: 'succeeded', result: { merged: false, outcome: 'auto-merge' } });
+    expect(queries[1].variables.sha).toBe('abc123');
+    const cancelled = { ...body, idempotencyKey: 'request-cancel', cancel: true };
+    expect((await request(app).post('/api/source-control/github/pr/merge').send(cancelled).expect(200)).body.result)
+      .toEqual({ merged: false, outcome: 'cancelled' });
+    const count = queries.length;
+    expect((await request(app).post('/api/source-control/github/pr/merge').send(cancelled).expect(200)).body.replayed).toBe(true);
+    expect(queries).toHaveLength(count);
   });
 
   it('reports an accepted merge as running when following it fails, and passes on a refusal GitHub explains', async () => {
@@ -822,10 +860,174 @@ describe('canonical GitHub mutations', () => {
 
       expect(approved.body.result).toEqual({ commented: false });
       expect(requested.body.result).toEqual({ commented: true });
-      expect(requests.filter((entry) => entry.method === 'POST')).toEqual([
+      expect(requests.filter((entry) => entry.path.endsWith('/reviews'))).toEqual([
         { method: 'POST', path: '/repos/acme/app/pulls/7/reviews', body: { commit_id: 'abc123', event: 'APPROVE' } },
         { method: 'POST', path: '/repos/acme/app/pulls/7/reviews', body: { commit_id: 'abc123', event: 'REQUEST_CHANGES', body: 'Rename it' } },
       ]);
+    });
+
+    describe('review drafts', () => {
+      const reviewed = { ...pullTarget, headSha: 'abc123' };
+      const pendingReview = (id, commit = pullRequest().head.sha) => ({ data: { repository: { pullRequest: { reviews: { nodes: id ? [{ id, viewerDidAuthor: true, commit: { oid: commit } }] : [] } } } } });
+      const pendingComment = (overrides = {}) => ({
+        data: { node: {
+          __typename: 'PullRequestReviewComment', state: 'PENDING', viewerDidAuthor: true,
+          pullRequest: { number: 7, repository: { name: 'app', owner: { login: 'acme' } } }, ...overrides,
+        } },
+      });
+      const respondWith = (answers) => (entry) => {
+        if (entry.method === 'GET') return jsonResponse({ ...pullRequest(), node_id: 'PR_node' });
+        const found = Object.entries(answers).find(([name]) => entry.body.query.includes(name));
+        return jsonResponse(found ? found[1] : { message: 'unexpected' }, found ? 200 : 500);
+      };
+      const writes = (requests) => requests.filter((entry) => /^\s*mutation/.test(entry.body?.query ?? ''));
+
+      it('starts a pending review on the head commit, then adds the comment to it', async () => {
+        const account = await auth.setGitHubAuth({ accessToken: 'token-one', user: { id: 1, login: 'actor' } });
+        const requests = recordRequests(respondWith({
+          'reviews(states': pendingReview(null),
+          'addPullRequestReview(input': { data: { addPullRequestReview: { pullRequestReview: { id: 'PRR_new' } } } },
+          addPullRequestReviewThread: { data: { addPullRequestReviewThread: { thread: { id: 'PRRT_1' } } } },
+        }));
+        const { app, store } = makeApp();
+
+        await request(app).post('/api/source-control/github/pr/review/comment').send({
+          ...context(account.accountId, { target: reviewed }), path: 'src/a.ts', side: 'new', startLine: 3, line: 5, body: 'Here',
+        }).expect(200);
+
+        expect(writes(requests).map((entry) => entry.body.variables)).toEqual([
+          { pullRequestId: 'PR_node', commitOID: 'abc123' },
+          { input: { pullRequestReviewId: 'PRR_new', path: 'src/a.ts', body: 'Here', subjectType: 'LINE', line: 5, side: 'RIGHT', startLine: 3, startSide: 'RIGHT' } },
+        ]);
+        expect(store.records.get('request-one')).toMatchObject({ kind: 'change-request-review-comment', state: 'succeeded' });
+      });
+
+      it('adds to the pending review that exists, on a whole file or an old line', async () => {
+        const account = await auth.setGitHubAuth({ accessToken: 'token-one', user: { id: 1, login: 'actor' } });
+        const requests = recordRequests(respondWith({
+          'reviews(states': pendingReview('PRR_open'),
+          addPullRequestReviewThread: { data: { addPullRequestReviewThread: { thread: { id: 'PRRT_1' } } } },
+        }));
+        const { app } = makeApp();
+
+        await request(app).post('/api/source-control/github/pr/review/comment')
+          .send({ ...context(account.accountId, { target: reviewed }), path: 'src/a.ts', body: 'File' }).expect(200);
+        await request(app).post('/api/source-control/github/pr/review/comment')
+          .send({ ...context(account.accountId, { target: reviewed, idempotencyKey: 'request-two' }), path: 'src/a.ts', side: 'old', line: 2, body: 'Gone' }).expect(200);
+
+        expect(writes(requests).map((entry) => entry.body.variables.input)).toEqual([
+          { pullRequestReviewId: 'PRR_open', path: 'src/a.ts', body: 'File', subjectType: 'FILE' },
+          { pullRequestReviewId: 'PRR_open', path: 'src/a.ts', body: 'Gone', subjectType: 'LINE', line: 2, side: 'LEFT' },
+        ]);
+      });
+
+      it('refuses a position that does not name real lines and writes nothing', async () => {
+        const account = await auth.setGitHubAuth({ accessToken: 'token-one', user: { id: 1, login: 'actor' } });
+        const requests = recordRequests(() => jsonResponse(pullRequest()));
+        const { app } = makeApp();
+        const send = (position, idempotencyKey) => request(app).post('/api/source-control/github/pr/review/comment')
+          .send({ ...context(account.accountId, { target: reviewed, idempotencyKey }), path: 'a.ts', body: 'x', ...position });
+
+        await send({ side: 'new', line: 0 }, 'one').expect(400);
+        await send({ side: 'middle', line: 1 }, 'two').expect(400);
+        await send({ side: 'new', line: 2, startLine: 2 }, 'three').expect(400);
+        await send({ startLine: 2 }, 'four').expect(400);
+
+        expect(requests).toEqual([]);
+      });
+
+      it('edits and deletes only the viewer\'s own unpublished comment', async () => {
+        const account = await auth.setGitHubAuth({ accessToken: 'token-one', user: { id: 1, login: 'actor' } });
+        let node = pendingComment();
+        const requests = recordRequests((entry) => respondWith({
+          'on PullRequestReviewComment': node,
+          updatePullRequestReviewComment: { data: { updatePullRequestReviewComment: { pullRequestReviewComment: { id: 'PRRC_1' } } } },
+          deletePullRequestReviewComment: { data: { deletePullRequestReviewComment: { clientMutationId: null } } },
+        })(entry));
+        const { app } = makeApp();
+
+        await request(app).post('/api/source-control/github/pr/review/comment/update')
+          .send({ ...context(account.accountId, { target: pullTarget }), commentId: 'PRRC_1', body: 'New' }).expect(200);
+        await request(app).post('/api/source-control/github/pr/review/comment/delete')
+          .send({ ...context(account.accountId, { target: pullTarget, idempotencyKey: 'request-two' }), commentId: 'PRRC_1' }).expect(200);
+        expect(writes(requests)).toHaveLength(2);
+
+        node = pendingComment({ state: 'SUBMITTED' });
+        const refused = await request(app).post('/api/source-control/github/pr/review/comment/delete')
+          .send({ ...context(account.accountId, { target: pullTarget, idempotencyKey: 'request-three' }), commentId: 'PRRC_1' }).expect(409);
+        expect(refused.body.code).toBe('SOURCE_CONTROL_MUTATION_TARGET_INVALID');
+        expect(writes(requests)).toHaveLength(2);
+      });
+
+      it('sends a pending review with the verdict, so GitHub does not refuse a second one', async () => {
+        const account = await auth.setGitHubAuth({ accessToken: 'token-one', user: { id: 1, login: 'actor' } });
+        const requests = recordRequests(respondWith({
+          'reviews(states': pendingReview('PRR_open'),
+          submitPullRequestReview: { data: { submitPullRequestReview: { pullRequestReview: { state: 'APPROVED' } } } },
+        }));
+        const { app } = makeApp();
+
+        const response = await request(app).post('/api/source-control/github/pr/review')
+          .send({ ...context(account.accountId, { target: reviewed }), verdict: 'approve', body: 'Good' }).expect(200);
+
+        expect(response.body.result).toEqual({ commented: true });
+        expect(writes(requests).map((entry) => entry.body.variables)).toEqual([{ id: 'PRR_open', event: 'APPROVE', body: 'Good' }]);
+        expect(requests.some((entry) => entry.path.endsWith('/reviews'))).toBe(false);
+      });
+
+      it('refuses a verdict on a draft from an older commit, and sends it as a comment', async () => {
+        const account = await auth.setGitHubAuth({ accessToken: 'token-one', user: { id: 1, login: 'actor' } });
+        const requests = recordRequests(respondWith({
+          'reviews(states': pendingReview('PRR_open', 'older'),
+          submitPullRequestReview: { data: { submitPullRequestReview: { pullRequestReview: { state: 'COMMENTED' } } } },
+        }));
+        const { app } = makeApp();
+
+        const refused = await request(app).post('/api/source-control/github/pr/review')
+          .send({ ...context(account.accountId, { target: reviewed }), verdict: 'approve' }).expect(409);
+        expect(refused.body.error).toMatch(/older commit/);
+        expect(writes(requests)).toEqual([]);
+
+        await request(app).post('/api/source-control/github/pr/review')
+          .send({ ...context(account.accountId, { target: reviewed, idempotencyKey: 'request-two' }), verdict: 'comment' }).expect(200);
+        expect(writes(requests).map((entry) => entry.body.variables.event)).toEqual(['COMMENT']);
+      });
+
+      it('publishes a comment-only review, and asks for text when there is nothing to publish', async () => {
+        const account = await auth.setGitHubAuth({ accessToken: 'token-one', user: { id: 1, login: 'actor' } });
+        const requests = recordRequests((entry) => (entry.path.endsWith('/reviews')
+          ? jsonResponse({ id: 12, state: 'COMMENTED' })
+          : respondWith({ 'reviews(states': pendingReview(null) })(entry)));
+        const { app } = makeApp();
+
+        const empty = await request(app).post('/api/source-control/github/pr/review')
+          .send({ ...context(account.accountId, { target: reviewed }), verdict: 'comment' }).expect(422);
+        await request(app).post('/api/source-control/github/pr/review')
+          .send({ ...context(account.accountId, { target: reviewed, idempotencyKey: 'request-two' }), verdict: 'comment', body: 'Note' }).expect(200);
+
+        expect(empty.body.error).toBe('A review with no comments needs text');
+        expect(requests.filter((entry) => entry.path.endsWith('/reviews')).map((entry) => entry.body))
+          .toEqual([{ commit_id: 'abc123', event: 'COMMENT', body: 'Note' }]);
+      });
+
+      it('discards the pending review, and says so when there is none', async () => {
+        const account = await auth.setGitHubAuth({ accessToken: 'token-one', user: { id: 1, login: 'actor' } });
+        let pending = 'PRR_open';
+        const requests = recordRequests((entry) => respondWith({
+          'reviews(states': pendingReview(pending),
+          deletePullRequestReview: { data: { deletePullRequestReview: { clientMutationId: null } } },
+        })(entry));
+        const { app } = makeApp();
+
+        await request(app).post('/api/source-control/github/pr/review/discard')
+          .send(context(account.accountId, { target: pullTarget })).expect(200);
+        expect(writes(requests).map((entry) => entry.body.variables)).toEqual([{ id: 'PRR_open' }]);
+
+        pending = null;
+        const none = await request(app).post('/api/source-control/github/pr/review/discard')
+          .send(context(account.accountId, { target: pullTarget, idempotencyKey: 'request-two' })).expect(409);
+        expect(none.body.code).toBe('SOURCE_CONTROL_MUTATION_TARGET_INVALID');
+      });
     });
 
     it('refuses a review once the pull request moved past the commit the client read', async () => {
@@ -893,11 +1095,124 @@ describe('canonical GitHub mutations', () => {
       expect(requests.some((entry) => entry.method === 'POST' && /mutation/.test(entry.body.query))).toBe(false);
     });
 
+    describe('discussions', () => {
+      const discussionTarget = { project: { owner: 'acme', name: 'app' }, number: 5 };
+      const discussionNode = (overrides = {}) => ({
+        id: 'D_five', number: 5, closed: false, labels: { nodes: [{ id: 'LA_bug', name: 'bug' }] }, ...overrides,
+      });
+      const commentNode = (number = 5, overrides = {}) => ({
+        __typename: 'DiscussionComment', isAnswer: false, replyTo: null, discussion: { number, repository: { name: 'app', owner: { login: 'acme' } } }, ...overrides,
+      });
+      // Every discussion read and write is one GraphQL POST; `writes` answers the mutations.
+      const graphqlRequests = (writes, { discussion = discussionNode(), comment = commentNode(), labels = {} } = {}) => recordRequests((entry) => {
+        const { query } = entry.body;
+        if (/^mutation/.test(query.trim())) return jsonResponse({ data: writes(query, entry.body.variables) });
+        if (query.includes('discussion(number:')) return jsonResponse({ data: { repository: { discussion } } });
+        if (query.includes('label(name:')) {
+          return jsonResponse({ data: { repository: Object.fromEntries(Object.entries(entry.body.variables)
+            .filter(([key]) => /^l\d+$/.test(key)).map(([key, name]) => [key, labels[name] ? { id: labels[name], name } : null])) } });
+        }
+        return jsonResponse({ data: { node: comment } });
+      });
+      const graphqlWrites = (requests) => requests.filter((entry) => /^mutation/.test(entry.body.query.trim())).map((entry) => entry.body.variables);
+
+      it('comments on a discussion and answers a comment of it in its thread', async () => {
+        const account = await auth.setGitHubAuth({ accessToken: 'token-one', user: { id: 1, login: 'actor' } });
+        const requests = graphqlRequests(() => ({ addDiscussionComment: { comment: { id: 'DC_new' } } }));
+        const { app, store } = makeApp();
+
+        await request(app).post('/api/source-control/github/discussions/comment')
+          .send({ ...context(account.accountId, { target: discussionTarget }), body: 'Thanks' }).expect(200);
+        await request(app).post('/api/source-control/github/discussions/comment')
+          .send({ ...context(account.accountId, { target: discussionTarget, idempotencyKey: 'request-two' }), body: 'Agreed', replyTo: 'DC_one' }).expect(200);
+
+        expect(graphqlWrites(requests)).toEqual([
+          { discussionId: 'D_five', body: 'Thanks', replyToId: null },
+          { discussionId: 'D_five', body: 'Agreed', replyToId: 'DC_one' },
+        ]);
+        expect(store.records.get('request-one')).toMatchObject({ kind: 'discussion-comment', state: 'succeeded', target: { number: 5 } });
+      });
+
+      it('refuses a reply to a comment of another discussion, or to a reply, and writes nothing', async () => {
+        const account = await auth.setGitHubAuth({ accessToken: 'token-one', user: { id: 1, login: 'actor' } });
+        const elsewhere = graphqlRequests(() => ({}), { comment: commentNode(6) });
+        const { app } = makeApp();
+        const response = await request(app).post('/api/source-control/github/discussions/comment')
+          .send({ ...context(account.accountId, { target: discussionTarget }), body: 'Agreed', replyTo: 'DC_other' }).expect(409);
+        expect(response.body.code).toBe('SOURCE_CONTROL_MUTATION_TARGET_INVALID');
+        expect(graphqlWrites(elsewhere)).toEqual([]);
+
+        const nested = graphqlRequests(() => ({}), { comment: commentNode(5, { replyTo: { id: 'DC_one' } }) });
+        await request(app).post('/api/source-control/github/discussions/comment')
+          .send({ ...context(account.accountId, { target: discussionTarget, idempotencyKey: 'request-two' }), body: 'Agreed', replyTo: 'DC_reply' }).expect(409);
+        expect(graphqlWrites(nested)).toEqual([]);
+      });
+
+      it('closes a discussion for a reason, reopens it, and chooses an answer', async () => {
+        const account = await auth.setGitHubAuth({ accessToken: 'token-one', user: { id: 1, login: 'actor' } });
+        const requests = graphqlRequests((query) => {
+          if (query.includes('closeDiscussion')) return { closeDiscussion: { discussion: { closed: true } } };
+          if (query.includes('reopenDiscussion')) return { reopenDiscussion: { discussion: { closed: false } } };
+          return { markDiscussionCommentAsAnswer: { discussion: { id: 'D_five' } } };
+        });
+        const { app, store } = makeApp();
+
+        const closed = await request(app).post('/api/source-control/github/discussions/state')
+          .send({ ...context(account.accountId, { target: discussionTarget }), state: 'closed', reason: 'outdated' }).expect(200);
+        await request(app).post('/api/source-control/github/discussions/state')
+          .send({ ...context(account.accountId, { target: discussionTarget, idempotencyKey: 'request-two' }), state: 'open' }).expect(200);
+        await request(app).post('/api/source-control/github/discussions/answer')
+          .send({ ...context(account.accountId, { target: discussionTarget, idempotencyKey: 'request-three' }), commentId: 'DC_one', answer: true }).expect(200);
+        // Closing names why; reopening names none.
+        await request(app).post('/api/source-control/github/discussions/state')
+          .send({ ...context(account.accountId, { target: discussionTarget, idempotencyKey: 'request-four' }), state: 'closed' }).expect(400);
+
+        expect(closed.body.result).toEqual({ state: 'closed' });
+        expect(graphqlWrites(requests)).toEqual([{ discussionId: 'D_five', reason: 'OUTDATED' }, { discussionId: 'D_five' }, { id: 'DC_one' }]);
+        expect(store.records.get('request-three')).toMatchObject({ kind: 'discussion-answer', state: 'succeeded' });
+      });
+
+      it('sets the labels as a whole set by their ids, and refuses a label the repository lacks', async () => {
+        const account = await auth.setGitHubAuth({ accessToken: 'token-one', user: { id: 1, login: 'actor' } });
+        const requests = graphqlRequests(() => ({ addLabelsToLabelable: { clientMutationId: null }, removeLabelsFromLabelable: { clientMutationId: null } }), {
+          labels: { idea: 'LA_idea' },
+        });
+        const { app } = makeApp();
+
+        await request(app).post('/api/source-control/github/discussions/labels')
+          .send({ ...context(account.accountId, { target: discussionTarget }), labels: ['idea'] }).expect(200);
+        const refused = await request(app).post('/api/source-control/github/discussions/labels')
+          .send({ ...context(account.accountId, { target: discussionTarget, idempotencyKey: 'request-two' }), labels: ['idea', 'missing'] }).expect(422);
+
+        expect(graphqlWrites(requests)).toEqual([{ id: 'D_five', labelIds: ['LA_idea'] }, { id: 'D_five', labelIds: ['LA_bug'] }]);
+        expect(refused.body).toEqual({ error: 'Label missing does not exist in this repository', code: 'SOURCE_CONTROL_MUTATION_REJECTED' });
+      });
+
+      it('leaves a label change unknown when the labels were added and the removal was refused', async () => {
+        const account = await auth.setGitHubAuth({ accessToken: 'token-one', user: { id: 1, login: 'actor' } });
+        recordRequests((entry) => {
+          const { query } = entry.body;
+          if (query.includes('removeLabelsFromLabelable')) return jsonResponse({ errors: [{ message: 'Refused' }] });
+          if (query.includes('addLabelsToLabelable')) return jsonResponse({ data: { addLabelsToLabelable: { clientMutationId: null } } });
+          if (query.includes('label(name:')) return jsonResponse({ data: { repository: { l0: { id: 'LA_idea', name: 'idea' } } } });
+          return jsonResponse({ data: { repository: { discussion: discussionNode() } } });
+        });
+        const { app, store } = makeApp();
+
+        await request(app).post('/api/source-control/github/discussions/labels')
+          .send({ ...context(account.accountId, { target: discussionTarget }), labels: ['idea'] });
+
+        expect(store.records.get('request-one')).toMatchObject({ kind: 'discussion-labels', state: 'outcome-unknown' });
+      });
+    });
+
     it("passes GitHub's reason when it refuses a review", async () => {
       const account = await auth.setGitHubAuth({ accessToken: 'token-one', user: { id: 1, login: 'actor' } });
-      recordRequests((entry) => (entry.method === 'GET'
-        ? jsonResponse(pullRequest())
-        : jsonResponse({ message: 'Unprocessable Entity', errors: ['Review Can not approve your own pull request'] }, 422)));
+      recordRequests((entry) => {
+        if (entry.method === 'GET') return jsonResponse(pullRequest());
+        if (entry.path.endsWith('/graphql')) return jsonResponse({ data: { repository: { pullRequest: { reviews: { nodes: [] } } } } });
+        return jsonResponse({ message: 'Unprocessable Entity', errors: ['Review Can not approve your own pull request'] }, 422);
+      });
       const { app, store } = makeApp();
 
       const response = await request(app).post('/api/source-control/github/pr/review')

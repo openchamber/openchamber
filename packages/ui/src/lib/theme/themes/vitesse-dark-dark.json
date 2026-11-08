@@ -23,7 +23,7 @@
       "background": "#121212",
       "foreground": "#ddd9cd",
       "muted": "#0e0e0e",
-      "mutedForeground": "#93928c",
+      "mutedForeground": "#878781",
       "elevated": "#1b1b1b",
       "overlay": "#12121280",
       "subtle": "#1e1e1e"
@@ -89,7 +89,7 @@
       "linkHover": "#4d9375",
       "inlineCode": "#80a665",
       "inlineCodeBackground": "#101010",
-      "blockquote": "#dedcd550",
+      "blockquote": "#7e7e7c",
       "blockquoteBorder": "#ffffff15",
       "listMarker": "#4d937599",
       "bold": "#e1ded3",

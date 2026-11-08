@@ -22,7 +22,33 @@ type ProjectActionIconKey =
   | 'stack'
   | 'robot'
   | 'command'
-  | 'file';
+  | 'file'
+  | 'deploy'
+  | 'download'
+  | 'test'
+  | 'database'
+  | 'mobile'
+  | 'desktop'
+  | 'web'
+  | 'package'
+  | 'cloud'
+  | 'security'
+  | 'speed'
+  | 'notify'
+  | 'format'
+  | 'clean'
+  | 'watch'
+  | 'loop'
+  | 'timer'
+  | 'merge'
+  | 'lock'
+  | 'archive'
+  | 'sparkle'
+  | 'npm'
+  | 'apple'
+  | 'android'
+  | 'windows'
+  | 'linux';
 
 /** The id of the built-in action that detects the dev server command and opens what it serves. */
 export const AUTO_DISCOVER_ACTION_ID = '__openchamber_auto_discover_preview__';
@@ -50,6 +76,32 @@ export const PROJECT_ACTION_ICONS: Array<{
   { key: 'robot', label: 'Robot', Icon: 'robot-2' },
   { key: 'command', label: 'Command', Icon: 'command' },
   { key: 'file', label: 'File', Icon: 'file-text' },
+  { key: 'deploy', label: 'Deploy', Icon: 'upload-cloud-2' },
+  { key: 'download', label: 'Download', Icon: 'download-cloud-2' },
+  { key: 'test', label: 'Test', Icon: 'test-tube' },
+  { key: 'database', label: 'Database', Icon: 'database-2' },
+  { key: 'mobile', label: 'Mobile', Icon: 'smartphone' },
+  { key: 'desktop', label: 'Desktop', Icon: 'computer' },
+  { key: 'web', label: 'Web', Icon: 'global' },
+  { key: 'package', label: 'Package', Icon: 'box-3' },
+  { key: 'cloud', label: 'Cloud', Icon: 'cloud' },
+  { key: 'security', label: 'Security', Icon: 'shield-check' },
+  { key: 'speed', label: 'Benchmark', Icon: 'speed-up' },
+  { key: 'notify', label: 'Notify', Icon: 'notification-3' },
+  { key: 'format', label: 'Format', Icon: 'brush' },
+  { key: 'clean', label: 'Clean', Icon: 'delete-bin-2' },
+  { key: 'watch', label: 'Watch', Icon: 'eye' },
+  { key: 'loop', label: 'Loop', Icon: 'loop-left' },
+  { key: 'timer', label: 'Timer', Icon: 'timer' },
+  { key: 'merge', label: 'Merge', Icon: 'git-merge' },
+  { key: 'lock', label: 'Lock', Icon: 'lock' },
+  { key: 'archive', label: 'Archive', Icon: 'archive' },
+  { key: 'sparkle', label: 'Sparkle', Icon: 'sparkling-2' },
+  { key: 'npm', label: 'npm', Icon: 'npmjs' },
+  { key: 'apple', label: 'Apple', Icon: 'apple' },
+  { key: 'android', label: 'Android', Icon: 'android' },
+  { key: 'windows', label: 'Windows', Icon: 'windows' },
+  { key: 'linux', label: 'Linux', Icon: 'ubuntu' },
 ];
 
 export const PROJECT_ACTION_ICON_MAP = Object.fromEntries(

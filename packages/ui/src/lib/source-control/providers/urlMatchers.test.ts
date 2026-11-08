@@ -18,6 +18,15 @@ describe('parseRepositoryItemUrl', () => {
     });
   });
 
+  test('reads a discussion only where the provider keeps them', () => {
+    expect(parseRepositoryItemUrl('https://github.com/acme/app/discussions/5#discussioncomment-2', registry, [])).toEqual({
+      provider: 'github', instance: 'github.com', owner: 'acme', repo: 'app', number: 5, kind: 'discussion',
+    });
+    const withoutDiscussions = githubLikeDescriptor();
+    withoutDiscussions.features = { ...withoutDiscussions.features, discussions: false };
+    expect(parseRepositoryItemUrl('https://github.com/acme/app/discussions/5', [withoutDiscussions], [])).toBeNull();
+  });
+
   test('reads www. in front of a default instance as that instance', () => {
     expect(parseRepositoryItemUrl('https://www.github.com/acme/app/pull/12', registry, [])).toMatchObject({ provider: 'github', instance: 'github.com' });
     expect(parseRepositoryItemUrl('https://www.gitlab.com/g/p/-/issues/3', registry, [])).toMatchObject({ provider: 'gitlab', instance: 'https://gitlab.com' });
@@ -59,7 +68,7 @@ describe('parseRepositoryItemUrl', () => {
     expect(parseRepositoryItemUrl('https://github.com/acme/app', registry, [])).toBeNull();
     expect(parseRepositoryItemUrl('not a url', registry, [])).toBeNull();
     expect(parseRepositoryItemUrl('ftp://github.com/acme/app/pull/1', registry, [])).toBeNull();
-    const broken = acmeDescriptor({ id: 'broken', urls: { changeRequest: ['/{owner}/{project}/pull/{number}', '/{repo}/{number}'], issue: [] } });
+    const broken = acmeDescriptor({ id: 'broken', urls: { changeRequest: ['/{owner}/{project}/pull/{number}', '/{repo}/{number}'], issue: [], discussion: [], commit: [], user: [] } });
     expect(parseRepositoryItemUrl('https://x.example/a/b/pull/1', [broken], [])).toBeNull();
   });
 });

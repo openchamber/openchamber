@@ -38,7 +38,7 @@ Point `index.html` at `main.js` with a normal `<script src="main.js"></script>`.
 
 OpenChamber reads the manifest and shows a dialog listing what the extension asks for (see [Capabilities](#capabilities)). Approve it, and your icon appears on the rail. Click it and your page loads.
 
-You can also add a local `.zip` or an https link to a git repository or a zip file. A git install is the one that can update: raise `version` in `package.json` and push, and OpenChamber offers the update the next time the user opens Settings → Extensions. A `#tag` or `#branch` on the URL pins which one it follows. Those are copied into OpenChamber's data folder and run from that copy, so ship the built files, not `node_modules` or TypeScript sources. Removing the extension deletes the copy. A folder install runs from your folder directly, so you can edit, rebuild, and reload.
+You can also add a local `.zip` or an https link to a git repository or a zip file. A git install is the one that can update: raise `version` in `package.json` and push, and OpenChamber checks soon after it opens and every few hours, tells the user once, and offers the update in Settings → Extensions. A link to `openchamber://extensions/install?url=<encoded repository URL>` on any page opens the desktop app with that repository in the add dialog, so you can offer an install button. A `#tag` or `#branch` on the URL pins which one it follows. Those are copied into OpenChamber's data folder and run from that copy, so ship the built files, not `node_modules` or TypeScript sources. Removing the extension deletes the copy. A folder install runs from your folder directly, so you can edit, rebuild, and reload.
 
 ## Manifest
 
@@ -49,13 +49,11 @@ You can also add a local `.zip` or an https link to a git repository or a zip fi
   "openchamber": {
     "apiVersion": 1,
     "engines": { "openchamber": ">=1.24.0" },
+    "id": "acme-hello",
+    "name": "Hello",
+    "icon": "window",
     "contributes": {
-      "panel": {
-        "id": "acme-hello",
-        "name": "Hello",
-        "icon": "window",
-        "entry": "panel/index.html"
-      },
+      "panel": { "entry": "panel/index.html" },
       "attach": "dialog",
       "page": true,
       "capabilities": ["prompt", "sessions"],
@@ -80,7 +78,7 @@ You can also add a local `.zip` or an https link to a git repository or a zip fi
 
 `engines.openchamber` is optional. Set the oldest OpenChamber version your extension works with, as `1.24.0` or `>=1.24.0`. Older builds refuse to install it instead of failing later.
 
-`contributes.panel` describes the rail entry. `id` is kebab-case and must be unique among installed extensions. `icon` is a Remixicon name (`RiWindowLine` becomes `window`) or an SVG file inside your folder, like `icon.svg`. `entry` is the HTML file inside your folder; leave it out for an extension that only declares `tools` (see [Your tools in the chat](#your-tools-in-the-chat)).
+`id`, `name` and `icon` name the extension. `id` is kebab-case and must be unique among installed extensions. `icon` is a Remixicon name (`RiWindowLine` becomes `window`) or an SVG file inside your folder, like `icon.svg`. `contributes.panel` is the extension's panel on the rail: its `entry` is the HTML file inside your folder. An extension with no rail panel leaves `panel` out. Older packages keep `id`, `name` and `icon` inside `panel`, and that keeps working.
 
 `contributes.attach` is optional. It adds your extension to the + menu next to the chat box, so the user can pick a task and attach it to a session.
 
@@ -89,7 +87,7 @@ You can also add a local `.zip` or an https link to a git repository or a zip fi
 - `{ "mode": "dialog", "entry": "panel/attach.html" }` opens a separate page of yours in the window, so the picker does not have to share code with the rail panel
 - omit it and the extension stays off that menu
 
-Your page can tell where it is from `ctx.surface`: `panel`, `dialog`, `page`, or `status`. When the user clicks an attached item, its `data` comes back in `ctx.item`. Opening from the rail, + menu, or full-screen page menu starts without an item.
+Your page can tell where it is from `ctx.surface`: `panel`, `dialog`, `page`, `status`, or `block`. When the user clicks an attached item, its `data` comes back in `ctx.item`. Opening from the rail, + menu, or full-screen page menu starts without an item.
 
 `contributes.page: true` makes your panel available full-screen from the Extension pages menu above the session list. Use `{ "entry": "panel/page.html", "title": "Board" }` for separate HTML and an optional title. Ship that HTML and its built scripts. A page requires `panel.entry`, uses the same sandbox and permissions, and opens only when the user selects it. Reload, pause, removal, or a server switch closes it.
 
@@ -97,7 +95,7 @@ For a board, use `host.storage` for persistent JSON and the project/worktree/ses
 
 `contributes.integration` is optional. It adds a card at Settings → Integrations where the user connects an account. See [Accounts and network](#accounts-and-network).
 
-`contributes.service` is optional. It declares a local process OpenChamber starts next to the extension, for things a web page cannot reach, like a Docker socket. That process runs with the user's full access and no sandbox, so the approval dialog warns about it; declare one only when the page cannot do the job. See the package file `GUEST_SERVICES.md`. A service with `provides: ["browser"]` can also stand in for the agent's browser: it answers the `browser.*` actions on the server, so agents browse with no desktop app open, and the user picks it under Settings → OpenChamber Tools. Such a service needs no panel.
+`contributes.service` is optional. It declares a local process OpenChamber starts next to the extension, for things a web page cannot reach, like a Docker socket. That process runs with the user's full access and no sandbox, so the approval dialog warns about it; declare one only when the page cannot do the job. See the package file `GUEST_SERVICES.md`. A service with `provides: ["browser"]` can also stand in for the agent's browser: it answers the `browser.*` actions on the server, so agents browse with no desktop app open, and the user picks it under Settings → OpenChamber Tools. Such a service needs no panel. A service can also be told what happens in the user's sessions: declare `contributes.sessionEvents` next to it, and OpenChamber posts each turn that finishes or fails and each permission or question the agent asks to the service, from every project, with no window open. See [Session events](/sdk/host/#session-events). And a service with `provides: ["notifications"]` delivers the user's notifications next to the desktop and the phone, to Slack, Matrix or a server of your own; the user connects the account in Settings → Integrations and the token stays in OpenChamber. See [Notification channels](/sdk/host/#notification-channels). A service with `provides: ["tracker"]` is a work item tracker next to Linear, with its account card under Extension accounts; see [Trackers](/sdk/host/#trackers). And a service with `provides: ["quota"]` reports usage next to the built-in providers, reading the credentials OpenCode holds for the providers it lists in the manifest; see [Usage providers](/sdk/host/#usage-providers).
 
 ## Capabilities
 
@@ -111,9 +109,28 @@ Drawing a panel and reading the current session need no permission. Anything tha
 | `model` | one-off text generation with the user's Small Model (`generate`), outside any session |
 | `shells` | watch the shell commands your agents run in the background, read their output, and stop them (`onRunningShells`, `readShellOutput`, `stopShell`) |
 
-Five more are added for you: `network` when you declare an `integration`, `service` when you declare a `service`, `filesystem` when you declare `filesystem` patterns, `origins` when you declare `origins`, and `conversation` when a session action asks for the messages (see [Actions, commands, and the badge](#actions-commands-and-the-badge)).
+Eleven more are added for you: `network` when you declare an `integration`, `service` when you declare a `service`, `filesystem` when you declare `filesystem` patterns, `origins` when you declare `origins`, `conversation` when a session action asks for the messages (see [Actions, commands, and the badge](#actions-commands-and-the-badge)), `transcript` when `sessionEvents` or `sessionControl` asks for `content` (see [Session events](/sdk/host/#session-events)), `sessionControl` when your service acts on sessions (see [Calling OpenChamber](/sdk/host/#calling-openchamber-from-your-service)), `sessionAnswers` when it answers the agent's permission requests and forms for the user (`sessionControl: { answers: true }`), `instructions` when it adds to what agents read, `skills` when you declare `contributes.skills`, a package folder of skills that reach every agent while the extension is on, and `opencodePlugin` when you declare `contributes.opencodePlugin` (see [An OpenCode plugin in your package](#an-opencode-plugin-in-your-package)).
 
 The user sees the full list once, when they install the extension, and approves it or removes the extension. If a new version asks for more, the dialog appears again. A call that needs a capability the user has not approved fails with `NOT_GRANTED`.
+
+## An OpenCode plugin in your package
+
+An extension can ship an OpenCode plugin, so people install one thing instead of two. Declare `"opencodePlugin": "plugin"`, a folder inside the package with `index.js` or `server.js` at its root. OpenCode does not read `main`, so for an entry anywhere else give the folder's `package.json` a `name` and `exports`. The entry default-exports `{ id, setup }`, the shape OpenCode loads; it imports nothing, because OpenCode loads it with a bare `import()` from your folder, where nothing is installed. A tool's `input` is plain JSON Schema, and its `execute` answers `{ content }`.
+
+```json
+{
+  "contributes": {
+    "panel": { "id": "teapot-tools", "name": "Teapot Tools", "icon": "cup" },
+    "opencodePlugin": "plugin"
+  }
+}
+```
+
+The approval dialog gets one more row, **Add a plugin to OpenCode**, which says plainly that plugin code runs inside OpenCode with the user's full access. Once allowed, OpenChamber lists your folder in the OpenCode config it manages, the same file that carries `contributes.skills`; the OpenCode it runs watches that file and loads the plugin within a couple of seconds. Disabling or removing the extension takes the plugin out the same way. Nothing is written into the user's own `opencode.json`: that file is theirs, and a plugin there would outlive your extension and run in every OpenCode on the machine.
+
+Where that file does not reach OpenCode, the extension's screen says so and offers **Add to global config**, which writes your folder into the user's global OpenCode config as an entry they own from then on. That happens when OpenChamber did not start the OpenCode it talks to, or when the server's environment sets its own `OPENCODE_CONFIG` (the plugin then loads at the next OpenCode start). An OpenCode on another machine cannot load a folder from this one; the screen says so and offers nothing. A plugin that fails to load is reported by OpenCode on Settings → Plugins when it has an entry there; your extension keeps working either way. The install refuses a package whose plugin folder is missing or whose `package.json` names no entry file.
+
+VS Code and the mobile apps load no extensions, so no plugin reaches them. A session inside an isolated space runs its own OpenCode, which never reads the host's config. Enterprise mode treats the plugin like a local service: it installs only from a repository the administrator listed. The SDK has a working example, `examples/opencode-plugin`.
 
 ## Generate text
 
@@ -158,7 +175,7 @@ What each `scheme` sends:
 | `"bearer"` | `Authorization: Bearer <token>` | the API documents a bearer or personal access token |
 | `"basic"` | `Authorization: Basic base64(username:token)` | the API documents HTTP Basic auth with a username (often an email) and an API token; the card asks for both, and `usernameLabel` names the first field |
 
-`settings` adds plain text fields to the card. Their values arrive in `ctx.settings`.
+`settings` adds plain text fields to the card. Their values arrive in `ctx.settings`. A field with `"secret": true` is masked on the card and never reaches a page; your service reads it with `readSettings()`.
 
 ## Files
 
@@ -266,6 +283,8 @@ Beyond the rail and the + menu, an extension can appear in three more places. Al
 ]
 ```
 
+`where` also takes `selection` (text selected in a message), `file` (a row in Files) and `diff` (selected lines of a file or a diff). Their items carry `kind` of the same name: `selection` has the text, `file` the path, `diff` the path and the line range. On a selection, `display` says how the action shows: `label` (the default), `icon` with the label as its tooltip, or `both`.
+
 A message action opens your extension with `ctx.item` of `kind: "message"`: the session id and title, the project directory, the message id, its role, and its text. A session action opens it with `kind: "session"` and the session id, title, and directory. Add `"payload": ["messages"]` and the item also carries the whole conversation, oldest first, the same text the Markdown export produces. That needs the `conversation` capability, which the user sees as a separate line in the approval dialog. `item.action` tells you which entry was clicked.
 
 **Slash commands that attach.** Declare a command and handle it in the page:
@@ -283,7 +302,7 @@ host.onResolve(async ({ command, args }) => {
 
 When the user types `/task ABC-12` in the chat box, OpenChamber asks your extension to resolve it and attaches what you return as a chip, without opening anything. Return `null` for "nothing found". If your panel is closed, OpenChamber loads it in the background for the call. A name that OpenChamber or OpenCode already uses is ignored.
 
-**Badge on the rail icon.** `host.setBadge(3)` shows a number on your icon, for example open tasks; `host.setBadge(null)` clears it. Opening the panel clears it too.
+**Badge on the rail icon.** `host.setBadge(3)` puts a dot on your icon and the number in its tooltip, for example open tasks; `host.setBadge(null)` clears it. Opening the panel clears it too.
 
 ## Your tools in the chat
 

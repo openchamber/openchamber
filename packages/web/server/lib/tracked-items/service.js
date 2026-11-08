@@ -1,6 +1,7 @@
 // Server-owned live state of the pull requests, merge requests, issues and
 // tracker work items the connected clients show (sidebar badges, a session's
-// Context sources).
+// Context sources), and of the ones a server module follows on its own (an
+// agent waiting on its pull request, `../pr-watch`).
 //
 // Clients say what they show and whether their window is visible; they never
 // poll. This service asks the providers on a cadence that follows each item's
@@ -81,9 +82,9 @@ const publicState = (key, entry) => ({ key, item: entry.item, state: entry.state
 
 /**
  * `readers` answer one provider batch each and never see other providers:
- * - `sourceControl({ provider, instance, accountId, pulls, issues })` with
- *   `{ owner, repo, number }` refs, answering `{ status: 'ok', pulls, issues }`
- *   in the live summary shape;
+ * - `sourceControl({ provider, instance, accountId, pulls, issues, discussions })`
+ *   with `{ owner, repo, number }` refs, answering `{ status: 'ok', pulls,
+ *   issues, discussions }` in the live summary shape;
  * - `workItems({ provider, identifiers })` answering `{ status: 'ok', items }`
  *   (tracker live summaries, whose `state.category` sets the cadence);
  * - or `{ status: 'disconnected' }` (no account there) /
@@ -103,6 +104,10 @@ export function createTrackedItemsService({
 }) {
   const entries = new Map();
   const connections = new Map();
+  // Items a server module follows on its own (an agent waiting on a pull
+  // request), refreshed whether or not any window is open: owner → key → item.
+  const serverInterests = new Map();
+  const serverListeners = new Set();
   const forced = new Set();
   const backoff = new Map();
   let timer = null;
@@ -119,19 +124,40 @@ export function createTrackedItemsService({
     }
   };
 
+  const addServerKeys = (keys) => {
+    for (const items of serverInterests.values()) for (const key of items.keys()) keys.add(key);
+    return keys;
+  };
+
   const watchedKeys = () => {
     const keys = new Set();
     for (const connection of connections.values()) {
       if (!connection.visible) continue;
       for (const key of connection.keys) keys.add(key);
     }
-    return keys;
+    return addServerKeys(keys);
   };
 
   const interestedKeys = () => {
     const keys = new Set();
     for (const connection of connections.values()) for (const key of connection.keys) keys.add(key);
-    return keys;
+    return addServerKeys(keys);
+  };
+
+  // A listener that throws must not stop the others or the tick.
+  const notifyServerListeners = (changedKeys) => {
+    if (changedKeys.size === 0 || serverListeners.size === 0) return;
+    // `requestedAt` says when the read that produced the state began, so a
+    // listener with a fresher read of its own can drop an answer that was
+    // already on its way.
+    const states = [...changedKeys].map((key) => ({ ...publicState(key, entries.get(key)), requestedAt: entries.get(key).requestedAt ?? 0 }));
+    for (const listener of serverListeners) {
+      try {
+        listener(states);
+      } catch (error) {
+        log.warn?.('[tracked-items] a server listener failed', error?.message ?? error);
+      }
+    }
   };
 
   const dueAt = (key, entry) => {
@@ -205,11 +231,12 @@ export function createTrackedItemsService({
 
   // Applies one answered batch. An item the provider did not answer is
   // unknown, not closed: its state is cleared, never invented.
-  const applyAnswers = (batch, answers, changed) => {
+  const applyAnswers = (batch, answers, changed, requestedAt) => {
     const checkedAt = now();
     for (const [key, entry] of batch) {
       forced.delete(key);
       entry.checkedAt = checkedAt;
+      entry.requestedAt = requestedAt;
       const answer = answers.get(key) ?? null;
       if (answer) entry.fetchedAt = checkedAt;
       if (JSON.stringify(answer) === JSON.stringify(entry.state)) continue;
@@ -230,7 +257,7 @@ export function createTrackedItemsService({
       return answers;
     }
     const byThread = new Map(batch.map(([key, entry]) => [`${entry.item.kind}:${threadAnswerKey(entry.item)}`, key]));
-    for (const [kind, summaries] of [['pull', result.pulls], ['issue', result.issues]]) {
+    for (const [kind, summaries] of [['pull', result.pulls], ['issue', result.issues], ['discussion', result.discussions]]) {
       for (const summary of summaries ?? []) {
         const key = byThread.get(`${kind}:${threadAnswerKey(summary)}`);
         if (key) answers.set(key, summary);
@@ -244,10 +271,14 @@ export function createTrackedItemsService({
     if (isWorkItem(first)) {
       return readers.workItems({ provider: first.provider, identifiers: batch.map(([, entry]) => entry.item.identifier) });
     }
-    const pulls = batch.filter(([, entry]) => entry.item.kind === 'pull').map(([, entry]) => threadRef(entry.item));
-    const issues = batch.filter(([, entry]) => entry.item.kind === 'issue').map(([, entry]) => threadRef(entry.item));
+    const refsOf = (kind) => batch.filter(([, entry]) => entry.item.kind === kind).map(([, entry]) => threadRef(entry.item));
     return readers.sourceControl({
-      provider: first.provider, instance: threadInstance(first), accountId: first.accountId ?? null, pulls, issues,
+      provider: first.provider,
+      instance: threadInstance(first),
+      accountId: first.accountId ?? null,
+      pulls: refsOf('pull'),
+      issues: refsOf('issue'),
+      discussions: refsOf('discussion'),
     });
   };
 
@@ -255,6 +286,7 @@ export function createTrackedItemsService({
     const limit = batchLimitOf(groupEntries[0][1].item);
     for (let start = 0; start < groupEntries.length; start += limit) {
       const batch = groupEntries.slice(start, start + limit);
+      const requestedAt = now();
       let result;
       try {
         result = await readBatch(batch);
@@ -264,7 +296,7 @@ export function createTrackedItemsService({
       }
       if (result?.status === 'ok') {
         backoff.delete(group);
-        applyAnswers(batch, answersFor(batch, result), changed);
+        applyAnswers(batch, answersFor(batch, result), changed, requestedAt);
         continue;
       }
       // The last known state stays; the items wait for the provider.
@@ -290,6 +322,7 @@ export function createTrackedItemsService({
     await Promise.all([...groups].map(([group, groupEntries]) => refreshGroup(group, groupEntries, changed)));
     if (disposed) return;
     broadcast(changed);
+    notifyServerListeners(changed);
     if (changed.size > 0) schedulePersist();
   };
 
@@ -356,6 +389,34 @@ export function createTrackedItemsService({
       trim();
       if (visible) scheduleNext();
       return known;
+    },
+
+    /**
+     * Replaces what one server module follows (`owner` names it) with
+     * `items`, a key → item map; an empty map ends its interest. These items
+     * are refreshed on their cadence whether or not any window is open, and a
+     * new one is asked about right away.
+     */
+    setServerInterest(owner, items) {
+      if (items.size === 0) {
+        serverInterests.delete(owner);
+        return;
+      }
+      serverInterests.set(owner, new Map(items));
+      for (const [key, item] of items) {
+        if (!entries.has(key)) entries.set(key, { item, state: null, fetchedAt: 0, checkedAt: 0 });
+      }
+      trim();
+      scheduleNext();
+    },
+
+    /**
+     * `listener(states)` hears every state that moved, in the clients' shape
+     * plus `requestedAt`, when the read behind it began. Returns the unsubscribe.
+     */
+    subscribe(listener) {
+      serverListeners.add(listener);
+      return () => serverListeners.delete(listener);
     },
 
     /** A connection's window became visible or hidden. Visible again refreshes what aged past the floor. */

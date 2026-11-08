@@ -482,7 +482,9 @@ export const createUiAuth = ({
     const token = `${URL_AUTH_TOKEN_PREFIX}${crypto.randomBytes(24).toString('base64url')}`;
     const expiresAt = Date.now() + URL_AUTH_TOKEN_TTL_MS;
     urlAuthTokens.set(token, { sessionToken, expiresAt, scope });
-    return { token, expiresAt };
+    // `expiresAt` is on this server's clock. `expiresIn` lets a client whose
+    // clock disagrees place the expiry on its own clock.
+    return { token, expiresAt, expiresIn: URL_AUTH_TOKEN_TTL_MS };
   };
 
   const authenticateUrlAuthToken = (req) => {

@@ -178,6 +178,15 @@ describe("Gitea fork pull requests through the maintainer's upstream clone", () 
     return { ...gitea, service: createGiteaResourceService({ origin: ORIGIN, client, resolveRepos: resolveUpstreamRemote }) };
   };
 
+  it('reads an issue a link named in another repository, and refuses it without the link', async () => {
+    const { service } = setupUpstream({
+      'GET /repos/bob/app/issues/6': fixtures.issue,
+    });
+    const selector = { owner: 'bob', name: 'app' };
+    await expect(service.getIssue('/repo', 6, selector, 'origin')).rejects.toMatchObject({ status: 404 });
+    await expect(service.getIssue('/repo', 6, selector, 'origin', { linked: true })).resolves.toMatchObject({ number: fixtures.issue.number });
+  });
+
   it("reads the patch, both sides of a file at the fork's head and the context from the upstream", async () => {
     const { service, calls } = setupUpstream({
       'GET /repos/alice/app/pulls/1.diff': fixtures.forkPullDiff,
@@ -354,12 +363,66 @@ describe('Gitea mutations', () => {
   });
 
   it('reviews the commit the user read, after checking it is still the head', async () => {
-    const { service, calls } = setup({ 'POST /repos/alice/app/pulls/1/reviews': fixtures.reviews[0] });
+    const { service, calls } = setup({
+      'GET /repos/alice/app/pulls/1/reviews': [],
+      'GET /user': { login: 'alice' },
+      'POST /repos/alice/app/pulls/1/reviews': fixtures.reviews[0],
+    });
 
     await expect(service.reviewChangeRequest({
       providerTarget, verdict: 'approve', body: 'Ship it', expectedTarget: { headSha: HEAD },
     })).resolves.toEqual({ commented: true });
     expect(calls.find((call) => call.method === 'POST').body).toEqual({ event: 'APPROVED', commit_id: HEAD, body: 'Ship it' });
+  });
+
+  describe('review drafts', () => {
+    const pending = { id: 9, state: 'PENDING', user: { login: 'alice' }, body: '' };
+    const draftRoutes = (reviews = [pending], comments = [{ id: 4, path: 'a.ts', body: 'Mine', position: 3, user: { login: 'alice' } }]) => ({
+      'GET /user': { login: 'alice' },
+      'GET /repos/alice/app/pulls/1/reviews': reviews,
+      'GET /repos/alice/app/pulls/1/reviews/9/comments': comments,
+    });
+    const writes = (calls) => calls.filter((call) => call.method !== 'GET').map(({ method, path, body }) => ({ method, path, body }));
+
+    it('adds a comment through the call that starts a pending review', async () => {
+      const { service, calls } = setup({ 'POST /repos/alice/app/pulls/1/reviews': { id: 9 } });
+      await service.addReviewComment({ providerTarget, position: { path: 'a.ts', side: 'old', line: 2 }, body: 'Gone', expectedTarget: { headSha: HEAD } });
+      expect(calls.at(-1).body).toEqual({
+        event: 'PENDING', commit_id: HEAD, body: '', comments: [{ path: 'a.ts', body: 'Gone', new_position: 0, old_position: 2 }],
+      });
+    });
+
+    it('refuses a verdict on a draft from an older commit and still sends it as a comment', async () => {
+      const stale = { ...pending, commit_id: 'older' };
+      const { service, calls } = setup({ ...draftRoutes([stale]), 'POST /repos/alice/app/pulls/1/reviews/9': { id: 9 } });
+
+      await expect(service.reviewChangeRequest({ providerTarget, verdict: 'approve', expectedTarget: { headSha: HEAD } })).rejects.toMatchObject({ status: 409 });
+      expect(writes(calls)).toEqual([]);
+      await service.reviewChangeRequest({ providerTarget, verdict: 'comment', expectedTarget: { headSha: HEAD } });
+      expect(writes(calls)).toHaveLength(1);
+    });
+
+    it('says so when this version keeps a comment it was asked to remove', async () => {
+      const { service } = setup({ ...draftRoutes(), 'DELETE /repos/alice/app/issues/comments/4': {} });
+
+      await expect(service.deleteReviewComment({ providerTarget, commentId: '4' })).rejects.toMatchObject({ status: 422 });
+    });
+
+    it('sends the pending review with the verdict', async () => {
+      const { service, calls } = setup({ ...draftRoutes(), 'POST /repos/alice/app/pulls/1/reviews/9': { id: 9 } });
+
+      await service.reviewChangeRequest({ providerTarget, verdict: 'comment', expectedTarget: { headSha: HEAD } });
+
+      expect(calls.at(-1).body).toEqual({ event: 'COMMENT', body: '' });
+    });
+
+    it('refuses an empty review and a comment that is not a draft of the viewer', async () => {
+      const { service, calls } = setup(draftRoutes([]));
+
+      await expect(service.reviewChangeRequest({ providerTarget, verdict: 'comment', expectedTarget: { headSha: HEAD } })).rejects.toMatchObject({ status: 422 });
+      await expect(service.deleteReviewComment({ providerTarget, commentId: '4' })).rejects.toMatchObject({ code: 'SOURCE_CONTROL_MUTATION_TARGET_INVALID' });
+      expect(writes(calls)).toEqual([]);
+    });
   });
 
   it('reconciles a ready mutation from the title prefix', async () => {

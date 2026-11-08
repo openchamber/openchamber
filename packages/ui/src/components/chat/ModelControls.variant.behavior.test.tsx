@@ -7,6 +7,7 @@ import { ThemeSystemContext, type ThemeContextValue } from '@/contexts/theme-sys
 import { getThemeById } from '@/lib/theme/themes';
 import { AUTO_MODEL_ID, AUTO_PROVIDER_ID, isAutoModel } from '@/lib/routing/autoModel';
 import { useRoutingStore } from '@/stores/useRoutingStore';
+import type { ModelMetadata } from '@/types';
 
 /**
  * Restoring a session must not invent an effort choice.
@@ -48,6 +49,17 @@ const planAgent: TestAgent = { ...agent, id: 'plan', name: 'plan', displayName: 
 const reviewAgent: TestAgent = { ...agent, id: 'review', name: 'review', displayName: 'Review' };
 
 let latestUserChoice: UserModelChoice | null = null;
+/** Catalogs of folders other than the active one, keyed by folder. */
+/** A test variant carries no settings. */
+type EmptyVariant = { readonly settings?: never };
+type FolderCatalog = {
+  providers: Array<{ id: string; name: string; models: Array<{ id: string; name: string; providerID: string; variants: { low?: EmptyVariant; high?: EmptyVariant; max?: EmptyVariant } }> }>;
+  agents: TestAgent[];
+  loaded: boolean;
+};
+let folderCatalogs = new Map<string, FolderCatalog>();
+/** Every folder a catalog load was asked for, as `resource:folder`. */
+const catalogLoads: string[] = [];
 /** Models and agents another directory's catalog lists, for the display fallback. */
 type KnownElsewhere = { models: typeof model[]; agents: TestAgent[] };
 const nothingKnownElsewhere = (): KnownElsewhere => ({ models: [], agents: [] });
@@ -57,9 +69,10 @@ let forcePreserveManualOverride: boolean | null = null;
 /** Every effort written for the session, in order, including `undefined`. */
 const variantWrites: VariantChoice[] = [];
 /** Every `(override, inherited)` pair pushed into the config store. */
-const overrideWrites: Array<{ override: VariantChoice; inherited: string | undefined }> = [];
+const overrideWrites: Array<{ override: VariantChoice; inherited: VariantChoice }> = [];
 /** Every model remembered as the last chat pick. */
 const lastSelectedWrites: string[] = [];
+const pendingModelWrites: string[] = [];
 
 type ConfigState = {
   providers: typeof provider[];
@@ -71,7 +84,7 @@ type ConfigState = {
   currentProviderId: string;
   currentModelId: string;
   currentVariant: string | undefined;
-  currentVariantSelection: { override: VariantChoice; inherited: string | undefined };
+  currentVariantSelection: { override: VariantChoice; inherited: VariantChoice };
   currentAgentName: string | undefined;
   settingsDefaultModel: string | undefined;
   settingsDefaultVariant: string | undefined;
@@ -82,13 +95,15 @@ type ConfigState = {
   setModel: (modelId: string) => void;
   setAgent: (agentName: string, options?: { keepModel?: boolean }) => void;
   setCurrentVariant: (variant: string | undefined) => void;
-  setCurrentVariantOverride: (override: VariantChoice, inherited: string | undefined) => void;
+  setCurrentVariantOverride: (override: VariantChoice, inherited: VariantChoice) => void;
   getCurrentProvider: () => typeof provider | undefined;
   getCurrentAgent: () => TestAgent;
   getVisibleAgents: () => TestAgent[];
   getCurrentModelVariants: () => string[];
   getDefaultVariantForModel: (providerId: string, modelId: string) => string | undefined;
-  getModelMetadata: () => undefined;
+  getModelMetadata: () => ModelMetadata | undefined;
+  loadProviders: (options: { directory?: string | null }) => Promise<void>;
+  loadAgents: (options: { directory?: string | null }) => Promise<boolean>;
 };
 
 const useConfigStore = create<ConfigState>((set, get) => ({
@@ -127,7 +142,7 @@ const useConfigStore = create<ConfigState>((set, get) => ({
   },
   setCurrentVariantOverride: (override, inherited) => {
     set((state) => {
-      const currentVariant = override === null ? undefined : override ?? inherited;
+      const currentVariant = override === null ? undefined : (override ?? inherited) ?? undefined;
       if (
         state.currentVariant === currentVariant
         && state.currentVariantSelection.override === override
@@ -148,6 +163,8 @@ const useConfigStore = create<ConfigState>((set, get) => ({
     get().settingsDefaultModel === `${providerId}/${modelId}` ? get().settingsDefaultVariant : undefined
   ),
   getModelMetadata: () => undefined,
+  loadProviders: async ({ directory }) => { catalogLoads.push(`models:${directory}`); },
+  loadAgents: async ({ directory }) => { catalogLoads.push(`agents:${directory}`); return true; },
 }));
 
 type SelectionState = {
@@ -163,7 +180,9 @@ type SelectionState = {
   getAgentModelForSession: (sessionId: string, agentName: string) => { providerId: string; modelId: string } | null;
   getAgentModelVariantForSession: () => VariantChoice;
   saveSessionModelSelection: (sessionId: string, providerId: string, modelId: string) => void;
+  pickSessionModel: (sessionId: string, providerId: string, modelId: string) => void;
   saveSessionAgentSelection: (sessionId: string, agentName: string) => void;
+  pickSessionAgent: (sessionId: string, agentName: string) => void;
   saveAgentModelForSession: (sessionId: string, agentName: string, providerId: string, modelId: string) => void;
   saveAgentModelVariantForSession: (
     sessionId: string,
@@ -200,7 +219,11 @@ const useSelectionStore = create<SelectionState>((set, get) => ({
   getAgentModelForSession: () => ({ providerId: PROVIDER_ID, modelId: MODEL_ID }),
   getAgentModelVariantForSession: () => get().savedVariant,
   saveSessionModelSelection: () => undefined,
+  pickSessionModel: (sessionId, providerId, modelId) => { pendingModelWrites.push(`${sessionId}:${providerId}/${modelId}`); },
   saveSessionAgentSelection: (sessionId, agentName) => set((state) => ({
+    sessionAgentSelections: new Map(state.sessionAgentSelections).set(sessionId, agentName),
+  })),
+  pickSessionAgent: (sessionId, agentName) => set((state) => ({
     sessionAgentSelections: new Map(state.sessionAgentSelections).set(sessionId, agentName),
   })),
   saveAgentModelForSession: () => undefined,
@@ -216,7 +239,30 @@ const useSessionUIStore = create<SessionUIState>(() => ({
   getDirectoryForSession: () => '/workspace/project',
 }));
 
-const useUIStore = create(() => ({
+type UIStoreMock = {
+  isMobile: boolean;
+  isModelSelectorOpen: boolean;
+  hiddenModels: Array<{ providerID: string; modelID: string }>;
+  favoriteAgents: string[];
+  toggleFavoriteAgent: (agentName: string) => void;
+  providerOrder: string[];
+  shortcutOverrides: Record<string, string>;
+  isFavoriteModel: (providerID: string, modelID: string) => boolean;
+  toggleFavoriteModel: (providerID: string, modelID: string) => void;
+  reorderFavoriteModel: (providerID: string, modelID: string, targetIndex: number) => void;
+  setProviderOrder: (order: string[]) => void;
+  setModelSelectorOpen: (open: boolean) => void;
+  setSettingsDialogOpen: (open: boolean) => void;
+  setSettingsPage: (page: string) => void;
+  addRecentAgent: (agentName: string) => void;
+  addRecentModel: (providerID: string, modelID: string) => void;
+  setLastSelectedModel: (providerID: string, modelID: string) => void;
+  addRecentEffort: (providerID: string, modelID: string, variant: string | undefined) => void;
+  lastUsedEfforts: Record<string, string | null>;
+  rememberLastUsedEffort: (providerID: string, modelID: string, variant: string | null) => void;
+};
+
+const useUIStore = create<UIStoreMock>((set) => ({
   isMobile: false,
   isModelSelectorOpen: false,
   hiddenModels: [],
@@ -235,6 +281,10 @@ const useUIStore = create(() => ({
   addRecentModel: () => undefined,
   setLastSelectedModel: (providerID: string, modelID: string) => { lastSelectedWrites.push(`${providerID}/${modelID}`); },
   addRecentEffort: () => undefined,
+  lastUsedEfforts: {} as Record<string, string | null>,
+  rememberLastUsedEffort: (providerID: string, modelID: string, variant: string | null) => set((state) => ({
+    lastUsedEfforts: { ...state.lastUsedEfforts, [`${providerID}/${modelID}`]: variant },
+  })),
 }));
 
 const passthrough = ({ children }: React.PropsWithChildren) => <div>{children}</div>;
@@ -262,7 +312,15 @@ mock.module('@/lib/messages/userModelChoice', () => ({
 mock.module('@/stores/useConfigStore', () => ({
   useConfigStore,
   isStaleAutoSelection: () => false,
-  selectCatalogLoadedForDirectory: (state: ConfigState, resource: 'models' | 'agents') => resource === 'models' ? state.providersLoaded : state.agentsLoaded,
+  selectCatalogLoadedForDirectory: (state: ConfigState, resource: 'models' | 'agents', directory?: string | null) => (directory == null
+    ? (resource === 'models' ? state.providersLoaded : state.agentsLoaded)
+    : folderCatalogs.get(directory)?.loaded ?? false),
+  selectConfigAgentsForDirectory: (state: ConfigState, directory?: string | null) => (directory == null
+    ? state.agents
+    : folderCatalogs.get(directory)?.agents ?? []),
+  selectProvidersForDirectory: (state: ConfigState, directory?: string | null) => (directory == null
+    ? state.providers
+    : folderCatalogs.get(directory)?.providers ?? []),
   // The active catalog first, then what other directories' catalogs know.
   selectKnownCatalogModel: (state: ConfigState, providerId: string, modelId: string) =>
     state.providers.find((provider) => provider.id === providerId)?.models.find((entry) => entry.id === modelId)
@@ -303,6 +361,9 @@ mock.module('@/components/ui/dropdown-menu', () => ({
   DropdownMenuLabel: passthrough,
   DropdownMenuSeparator: () => null,
   DropdownMenuTrigger: passthrough,
+  DropdownMenuSub: passthrough,
+  DropdownMenuSubContent: passthrough,
+  DropdownMenuSubTrigger: passthrough,
 }));
 mock.module('@/components/ui/input', () => ({
   Input: (props: React.InputHTMLAttributes<HTMLInputElement>) => <input {...props} />,
@@ -319,9 +380,15 @@ mock.module('@/components/ui/tooltip', () => ({
 }));
 mock.module('@/components/icon/Icon', () => ({ Icon: () => null }));
 mock.module('@/components/model-picker/ModelPickerList', () => ({
-  ModelPickerList: ({ onSelect }: React.ComponentProps<typeof import('@/components/model-picker/ModelPickerList').ModelPickerList>) => (
-    <button onClick={() => onSelect({ providerID: PROVIDER_ID, modelID: MODEL_ID, model })}>{MODEL_ID}</button>
+  ModelPickerList: ({ onSelect, onActiveKeyDown }: React.ComponentProps<typeof import('@/components/model-picker/ModelPickerList').ModelPickerList>) => (
+    <div
+      data-testid="model-picker-host"
+      onKeyDown={(event) => onActiveKeyDown?.(event, { providerID: PROVIDER_ID, modelID: MODEL_ID, model })}
+    >
+      <button onClick={() => onSelect({ providerID: PROVIDER_ID, modelID: MODEL_ID, model })}>{MODEL_ID}</button>
+    </div>
   ),
+  ModelPickerCardBody: () => null,
 }));
 mock.module('@/hooks/useRuntimeAPIs', () => ({ useIsVSCodeRuntime: () => false }));
 mock.module('@/hooks/useModelLists', () => ({ useModelLists: () => ({ favoriteModelsList: [], recentModelsList: [] }) }));
@@ -330,7 +397,10 @@ mock.module('@/lib/device', () => ({ useDeviceInfo: () => ({ isTouch: false }) }
 mock.module('@/lib/startupTrace', () => ({ markStartupTrace: () => undefined }));
 
 const { ModelControls } = await import('./ModelControls');
-const { I18nProvider } = await import('@/lib/i18n');
+const { ChatColumnSessionContext } = await import('./chatColumnSession');
+const { I18nProvider, useI18nStore } = await import('@/lib/i18n');
+const enDict = useI18nStore.getState().dictionary;
+const { dict: zhCnDict } = await import('@/lib/i18n/messages/zh-CN');
 
 const DOM_GLOBAL_NAMES = [
   'window',
@@ -397,7 +467,10 @@ const installDom = () => {
   };
 };
 
-const renderModelControls = async (props: React.ComponentProps<typeof ModelControls> = {}) => {
+const renderModelControls = async (
+  props: React.ComponentProps<typeof ModelControls> = {},
+  column: { sessionId: string; directory: string } | null = null,
+) => {
   const dom = installDom();
   const root = createRoot(dom.container);
   const theme = getThemeById('openchamber-dark');
@@ -412,7 +485,9 @@ const renderModelControls = async (props: React.ComponentProps<typeof ModelContr
   await act(async () => root.render(
     <ThemeSystemContext.Provider value={themeContext}>
       <I18nProvider>
-        <ModelControls {...props} />
+        <ChatColumnSessionContext.Provider value={column}>
+          <ModelControls {...props} />
+        </ChatColumnSessionContext.Provider>
       </I18nProvider>
     </ThemeSystemContext.Provider>,
   ));
@@ -430,12 +505,13 @@ describe('ModelControls effort restore', () => {
     variantWrites.length = 0;
     overrideWrites.length = 0;
     lastSelectedWrites.length = 0;
+    pendingModelWrites.length = 0;
     latestUserChoice = null;
     knownElsewhere = nothingKnownElsewhere();
     setSessionRecord(undefined);
     forcePreserveManualOverride = null;
     useSessionUIStore.setState({ currentSessionId: SESSION_ID });
-    useUIStore.setState({ isMobile: false, isModelSelectorOpen: false });
+    useUIStore.setState({ isMobile: false, isModelSelectorOpen: false, lastUsedEfforts: {} });
     useSelectionStore.setState({
       savedVariant: undefined,
       sessionAgentSelections: new Map([[SESSION_ID, AGENT]]),
@@ -456,6 +532,7 @@ describe('ModelControls effort restore', () => {
       settingsDefaultModel: undefined,
       settingsDefaultVariant: undefined,
       selectionSource: 'auto',
+      getModelMetadata: () => undefined,
     });
   });
 
@@ -518,6 +595,7 @@ describe('ModelControls effort restore', () => {
       expect(variantWrites).not.toContain(null);
       // Opening a session is not a pick: the next new session must not inherit its model.
       expect(lastSelectedWrites).toEqual([]);
+      expect(pendingModelWrites).toEqual([]);
       expect(useSelectionStore.getState().savedVariant).toBe('low');
       expect(useConfigStore.getState().currentVariantSelection.override).toBe('low');
     } finally {
@@ -639,6 +717,153 @@ describe('ModelControls effort restore', () => {
   const OTHER_MODEL_ID = 'gpt-other';
   const twoModelProvider = { ...provider, models: [model, { ...model, id: OTHER_MODEL_ID, name: OTHER_MODEL_ID }] };
 
+  test('a draft starts on the level its model was last sent with', async () => {
+    useSessionUIStore.setState({ currentSessionId: null });
+    useUIStore.setState({ lastUsedEfforts: { [`${PROVIDER_ID}/${MODEL_ID}`]: 'high' } });
+
+    const { dom, cleanup } = await renderModelControls();
+    try {
+      expect(useConfigStore.getState().currentVariant).toBe('high');
+      expect(useConfigStore.getState().currentVariantSelection).toEqual({
+        override: undefined,
+        inherited: 'high',
+      });
+      // The tooltip names it as remembered, not as the model's configured default.
+      expect(dom.container.textContent).toContain('last used with this model');
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test('a configured level wins over the remembered level', async () => {
+    useSessionUIStore.setState({ currentSessionId: null });
+    useConfigStore.setState({
+      settingsDefaultModel: `${PROVIDER_ID}/${MODEL_ID}`,
+      settingsDefaultVariant: 'low',
+    });
+    useUIStore.setState({ lastUsedEfforts: { [`${PROVIDER_ID}/${MODEL_ID}`]: 'high' } });
+
+    const { dom, cleanup } = await renderModelControls();
+    try {
+      expect(useConfigStore.getState().currentVariant).toBe('low');
+      expect(dom.container.textContent).toContain("this model's default");
+      expect(dom.container.textContent).not.toContain('last used with this model');
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test('an explicit Default remembered for a model is kept as a choice', async () => {
+    useSessionUIStore.setState({ currentSessionId: null });
+    useUIStore.setState({ lastUsedEfforts: { [`${PROVIDER_ID}/${MODEL_ID}`]: null } });
+
+    const { dom, cleanup } = await renderModelControls();
+    try {
+      expect(useConfigStore.getState().currentVariant).toBeUndefined();
+      expect(useConfigStore.getState().currentVariantSelection).toEqual({
+        override: undefined,
+        inherited: null,
+      });
+      expect(dom.container.querySelector('.model-controls__variant-label')?.textContent?.trim()).toBe('Default');
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test('a remembered level the model no longer offers is ignored', async () => {
+    useSessionUIStore.setState({ currentSessionId: null });
+    useUIStore.setState({ lastUsedEfforts: { [`${PROVIDER_ID}/${MODEL_ID}`]: 'removed' } });
+
+    const { cleanup } = await renderModelControls();
+    try {
+      expect(useConfigStore.getState().currentVariant).toBeUndefined();
+      // Not an explicit Default the user never picked.
+      expect(useConfigStore.getState().currentVariantSelection).toEqual({
+        override: undefined,
+        inherited: undefined,
+      });
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test('[issue-4601] a remembered level does not follow the user to another model', async () => {
+    useSessionUIStore.setState({ currentSessionId: null });
+    useConfigStore.setState({ providers: [twoModelProvider] });
+    useUIStore.setState({ lastUsedEfforts: { [`${PROVIDER_ID}/${MODEL_ID}`]: 'high' } });
+
+    const { dom, cleanup } = await renderModelControls();
+    try {
+      expect(useConfigStore.getState().currentVariant).toBe('high');
+
+      await act(async () => { useConfigStore.getState().setModel(OTHER_MODEL_ID); });
+      expect(useConfigStore.getState().currentVariant).toBeUndefined();
+      expect(useConfigStore.getState().currentVariantSelection).toEqual({
+        override: undefined,
+        inherited: undefined,
+      });
+      expect(dom.container.querySelector('.model-controls__variant-label')?.textContent?.trim()).toBe('Default');
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test('choosing a level in the picker remembers it without a send', async () => {
+    useSessionUIStore.setState({ currentSessionId: null });
+    useConfigStore.setState({ currentVariantSelection: { override: undefined, inherited: undefined } });
+
+    const { dom, cleanup } = await renderModelControls();
+    try {
+      await act(async () => dom.container.querySelector<HTMLButtonElement>('.model-controls__variant-trigger')?.click());
+      const highButton = Array.from(dom.container.querySelectorAll('button')).find((button) => button.textContent?.trim() === 'High');
+      await act(async () => highButton?.click());
+
+      expect(useConfigStore.getState().currentVariantSelection.override).toBe('high');
+      expect(useUIStore.getState().lastUsedEfforts).toEqual({ [`${PROVIDER_ID}/${MODEL_ID}`]: 'high' });
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test('choosing Default in the picker remembers it as a real choice', async () => {
+    useSessionUIStore.setState({ currentSessionId: null });
+    useConfigStore.setState({ currentVariantSelection: { override: undefined, inherited: undefined } });
+
+    const { dom, cleanup } = await renderModelControls();
+    try {
+      await act(async () => dom.container.querySelector<HTMLButtonElement>('.model-controls__variant-trigger')?.click());
+      const defaultButton = Array.from(dom.container.querySelectorAll('button'))
+        .filter((button) => button.textContent?.trim() === 'Default')
+        .at(-1);
+      await act(async () => defaultButton?.click());
+
+      expect(useConfigStore.getState().currentVariantSelection.override).toBeNull();
+      expect(useUIStore.getState().lastUsedEfforts).toEqual({ [`${PROVIDER_ID}/${MODEL_ID}`]: null });
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test('arrow keys in the model picker remember the adjusted level before a model is chosen', async () => {
+    useUIStore.setState({ isModelSelectorOpen: true });
+
+    const { dom, cleanup } = await renderModelControls();
+    try {
+      const host = dom.container.querySelector('[data-testid="model-picker-host"]');
+      await act(async () => {
+        host?.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+      });
+
+      // Default -> low on the row's own line, remembered for that model.
+      expect(useUIStore.getState().lastUsedEfforts).toEqual({ [`${PROVIDER_ID}/${MODEL_ID}`]: 'low' });
+      // The row is still adjusting its pending level; no session choice was
+      // written for the model.
+      expect(variantWrites).toEqual([]);
+    } finally {
+      await cleanup();
+    }
+  });
+
   test('[issue-4601] the settings effort applies on the settings model only', async () => {
     useSessionUIStore.setState({ currentSessionId: null });
     useConfigStore.setState({
@@ -651,13 +876,10 @@ describe('ModelControls effort restore', () => {
       const label = () => dom.container.querySelector('.model-controls__variant-label');
       expect(useConfigStore.getState().currentVariant).toBe('high');
       expect(label()?.textContent?.trim()).toBe('High');
-      // Only the "Default" option is muted; an inherited effort shows like a picked one.
-      expect(label()?.classList.contains('text-muted-foreground')).toBe(false);
 
       await act(async () => { useConfigStore.getState().setModel(OTHER_MODEL_ID); });
       expect(useConfigStore.getState().currentVariant).toBe(undefined);
       expect(label()?.textContent?.trim()).toBe('Default');
-      expect(label()?.classList.contains('text-muted-foreground')).toBe(true);
 
       await act(async () => { useConfigStore.getState().setModel(MODEL_ID); });
       expect(useConfigStore.getState().currentVariant).toBe('high');
@@ -676,7 +898,6 @@ describe('ModelControls effort restore', () => {
     const { dom, cleanup } = await renderModelControls();
     try {
       const label = () => dom.container.querySelector('.model-controls__variant-label');
-      expect(label()?.classList.contains('text-muted-foreground')).toBe(false);
 
       await act(async () => { useConfigStore.getState().setModel(OTHER_MODEL_ID); });
       expect(useConfigStore.getState().currentVariant).toBe(undefined);
@@ -821,13 +1042,15 @@ describe('ModelControls effort restore', () => {
     try {
       const callsAfterHydration = getSessionModel.mock.calls.length;
 
-      await act(async () => useConfigStore.setState({ currentAgentName: 'plan' }));
+      await act(async () => useConfigStore.getState().setAgent('plan'));
 
       expect(getSessionModel.mock.calls.length).toBe(callsAfterHydration);
       expect(useConfigStore.getState().currentAgentName).toBe('plan');
     } finally {
       getSessionModel.mockRestore();
       await cleanup();
+      // The pick wrote a new state object that still carries the spy.
+      useSelectionStore.setState(selections);
     }
   });
 
@@ -887,12 +1110,13 @@ describe('ModelControls effort restore', () => {
       const { dom, cleanup } = await renderModelControls({
         sessionId: btwSessionId,
         selection: { model: { providerId: PROVIDER_ID, modelId: MODEL_ID }, agent: 'plan', variant },
+        rememberVariantPicks: false,
       });
       try {
         expect(overrideWrites).toEqual([]);
         expect(variantWrites).toEqual([]);
         expect(saveModel.mock.calls).toEqual([]);
-        expect(dom.container.querySelector('.model-controls__agent-label')).toBeNull();
+        expect(dom.container.querySelector('.model-controls__agent-label')?.textContent).toBe('Plan');
         expect(dom.container.querySelector('.model-controls__variant-label')?.textContent?.trim()).toBe(variantLabel);
         if (!isMobile) {
           expect(dom.container.querySelector('.model-controls__model-trigger')?.closest('[data-menu-open]')?.getAttribute('data-menu-open')).toBe('false');
@@ -901,13 +1125,20 @@ describe('ModelControls effort restore', () => {
         await act(async () => dom.container.querySelector<HTMLButtonElement>('.model-controls__model-trigger')?.click());
         const modelButton = Array.from(dom.container.querySelectorAll<HTMLButtonElement>('button:not(.model-controls__model-trigger)')).find((button) => button.textContent?.trim() === MODEL_ID);
         await act(async () => modelButton?.click());
+        expect(pendingModelWrites).toContain(`${btwSessionId}:${PROVIDER_ID}/${MODEL_ID}`);
         expect(saveModel.mock.calls.at(-1)).toEqual([btwSessionId, PROVIDER_ID, MODEL_ID]);
         expect(saveAgentModel.mock.calls.at(-1)).toEqual([btwSessionId, 'plan', PROVIDER_ID, MODEL_ID]);
 
         await act(async () => dom.container.querySelector<HTMLButtonElement>('.model-controls__variant-trigger')?.click());
-        const defaultButton = Array.from(dom.container.querySelectorAll('button')).find((button) => button.textContent?.trim() === 'Default');
+        // On mobile the trigger itself reads "Default" too; the last one is the
+        // panel entry that actually picks it.
+        const defaultButton = Array.from(dom.container.querySelectorAll('button'))
+          .filter((button) => button.textContent?.trim() === 'Default')
+          .at(-1);
         await act(async () => defaultButton?.click());
         expect(saveVariant.mock.calls.at(-1)).toEqual([btwSessionId, 'plan', PROVIDER_ID, MODEL_ID, null]);
+        // A BTW picker sees the model's memory but never rewrites it.
+        expect(useUIStore.getState().lastUsedEfforts).toEqual({});
         const config = useConfigStore.getState();
         expect([config.currentProviderId, config.currentModelId, config.currentAgentName, config.currentVariant])
           .toEqual(['main-provider', 'main-model', AGENT, 'low']);
@@ -916,6 +1147,112 @@ describe('ModelControls effort restore', () => {
         await cleanup();
         for (const write of [saveModel, saveAgentModel, saveVariant]) write.mockRestore();
         useSelectionStore.setState(selections);
+      }
+    });
+  }
+
+  // The BTW composer offers the agent picker, so a side question can start on
+  // another agent without collapsing the panel first (#6333).
+  for (const isMobile of [false, true]) {
+    test(`a controlled agent pick stays on its own session (mobile: ${isMobile})`, async () => {
+      const btwSessionId = 'btw-pending:ses_restore';
+      useUIStore.setState({ isMobile });
+      useConfigStore.setState({ agents: [agent, planAgent] });
+      const { dom, cleanup } = await renderModelControls({
+        sessionId: btwSessionId,
+        selection: { model: { providerId: PROVIDER_ID, modelId: MODEL_ID }, agent: AGENT, variant: 'low' },
+        rememberVariantPicks: false,
+      });
+      const buttonsReading = (label: string) => Array
+        .from(dom.container.querySelectorAll<HTMLButtonElement>('button'))
+        .filter((button) => button.textContent?.trim() === label);
+      try {
+        expect(dom.container.querySelector('.model-controls__agent-label')?.textContent).toBe('Build');
+        // Mobile reaches the agents through the bottom sheet the chip opens.
+        if (isMobile) {
+          expect(buttonsReading('Plan')).toHaveLength(0);
+          await act(async () => dom.container.querySelector<HTMLButtonElement>('.model-controls__agent-trigger')?.click());
+        }
+        expect(buttonsReading('Plan')).toHaveLength(1);
+        await act(async () => buttonsReading('Plan')[0]?.click());
+
+        expect(useSelectionStore.getState().sessionAgentSelections.get(btwSessionId)).toBe('plan');
+        // The picked agent is the fork's alone: the main chat keeps its own.
+        expect(useSelectionStore.getState().sessionAgentSelections.get(SESSION_ID)).toBe(AGENT);
+        expect(useConfigStore.getState().currentAgentName).toBe(AGENT);
+        // Effort is remembered per agent, so the level the composer carries
+        // follows the pick instead of falling back to the model's own.
+        expect(variantWrites).toEqual(['low']);
+        // The sheet answers the pick by closing.
+        if (isMobile) expect(buttonsReading('Plan')).toHaveLength(0);
+      } finally {
+        await cleanup();
+      }
+    });
+  }
+
+  test('a controlled agent pick leaves an unchosen effort unchosen', async () => {
+    const btwSessionId = 'btw-pending:ses_restore';
+    useConfigStore.setState({ agents: [agent, planAgent] });
+    const { dom, cleanup } = await renderModelControls({
+      sessionId: btwSessionId,
+      selection: { model: { providerId: PROVIDER_ID, modelId: MODEL_ID }, agent: AGENT, variant: undefined },
+      rememberVariantPicks: false,
+    });
+    try {
+      const planRow = Array.from(dom.container.querySelectorAll<HTMLButtonElement>('button'))
+        .find((button) => button.textContent?.trim() === 'Plan');
+      await act(async () => planRow?.click());
+      expect(useSelectionStore.getState().sessionAgentSelections.get(btwSessionId)).toBe('plan');
+      // Nothing was chosen, so the new agent inherits instead of latching Default.
+      expect(variantWrites).toEqual([]);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  for (const isMobile of [false, true]) {
+    test(`reselecting the controlled model preserves Default (mobile: ${isMobile})`, async () => {
+      useUIStore.setState({ isMobile, lastUsedEfforts: { [`${PROVIDER_ID}/${MODEL_ID}`]: 'high' } });
+      const saveVariant = spyOn(useSelectionStore.getState(), 'saveAgentModelVariantForSession');
+      const { dom, cleanup } = await renderModelControls({
+        sessionId: 'pinned-default',
+        selection: { model: { providerId: PROVIDER_ID, modelId: MODEL_ID }, agent: 'plan', variant: null },
+      });
+      try {
+        await act(async () => dom.container.querySelector<HTMLButtonElement>('.model-controls__model-trigger')?.click());
+        const modelButton = Array.from(dom.container.querySelectorAll<HTMLButtonElement>('button:not(.model-controls__model-trigger)'))
+          .find((button) => button.textContent?.trim() === MODEL_ID);
+        expect(modelButton).toBeDefined();
+        await act(async () => modelButton?.click());
+        expect(saveVariant.mock.calls.at(-1)).toEqual(['pinned-default', 'plan', PROVIDER_ID, MODEL_ID, null]);
+      } finally {
+        await cleanup();
+        saveVariant.mockRestore();
+      }
+    });
+
+    test(`a controlled model pick applies its remembered effort without rewriting it (mobile: ${isMobile})`, async () => {
+      useUIStore.setState({ isMobile, lastUsedEfforts: { [`${PROVIDER_ID}/${MODEL_ID}`]: 'high' } });
+      useConfigStore.setState({ providers: [twoModelProvider] });
+      const saveVariant = spyOn(useSelectionStore.getState(), 'saveAgentModelVariantForSession');
+      const { dom, cleanup } = await renderModelControls({
+        sessionId: 'btw-pending:ses_restore',
+        selection: { model: { providerId: PROVIDER_ID, modelId: OTHER_MODEL_ID }, agent: 'plan', variant: 'low' },
+        rememberVariantPicks: false,
+      });
+      try {
+        await act(async () => dom.container.querySelector<HTMLButtonElement>('.model-controls__model-trigger')?.click());
+        const modelButton = Array.from(dom.container.querySelectorAll<HTMLButtonElement>('button:not(.model-controls__model-trigger)'))
+          .find((button) => button.textContent?.trim() === MODEL_ID);
+        expect(modelButton).toBeDefined();
+        await act(async () => modelButton?.click());
+
+        expect(saveVariant.mock.calls.at(-1)).toEqual(['btw-pending:ses_restore', 'plan', PROVIDER_ID, MODEL_ID, 'high']);
+        expect(useUIStore.getState().lastUsedEfforts).toEqual({ [`${PROVIDER_ID}/${MODEL_ID}`]: 'high' });
+      } finally {
+        await cleanup();
+        saveVariant.mockRestore();
       }
     });
   }
@@ -971,6 +1308,21 @@ describe('ModelControls effort restore', () => {
 
         expect(agentLabel(dom.container)).toBe('Plan');
         expect(useConfigStore.getState().currentAgentName).toBe('plan');
+      } finally {
+        await cleanup();
+      }
+    });
+
+    test('the agent sent comes back to the session agent shown when the app-wide one drifts', async () => {
+      setSessionRecord(recordOn(AGENT));
+      const { dom, cleanup } = await renderModelControls();
+      try {
+        // Another session or folder moved the app-wide agent; this session
+        // still holds Build, and the label shows Build.
+        await act(async () => useConfigStore.setState({ currentAgentName: 'plan' }));
+
+        expect(agentLabel(dom.container)).toBe('Build');
+        expect(useConfigStore.getState().currentAgentName).toBe(AGENT);
       } finally {
         await cleanup();
       }
@@ -1062,6 +1414,275 @@ describe('ModelControls effort restore', () => {
           useRoutingStore.setState({ available: false, autoReady: false });
         }
       });
+    }
+  });
+
+  const metadataValues = (container: ParentNode, label: string) => [...container.querySelectorAll('span')]
+    .filter((node) => node.textContent === label)
+    .map((node) => node.nextElementSibling?.textContent ?? '');
+
+  describe('knowledge month display', () => {
+    const setKnowledgeMetadata = (knowledge: string | undefined) => {
+      useConfigStore.setState({
+        getModelMetadata: () => ({ id: MODEL_ID, providerId: PROVIDER_ID, knowledge }),
+      });
+    };
+
+    beforeEach(() => {
+      useI18nStore.setState({ locale: 'en', dictionary: enDict, loadingLocale: null });
+    });
+
+    for (const { knowledge, expected } of [
+      { knowledge: '2025-08', expected: 'Aug 2025' },
+      { knowledge: '2025-01', expected: 'Jan 2025' },
+      { knowledge: undefined, expected: '—' },
+      { knowledge: '', expected: '—' },
+      { knowledge: '2026-04-30', expected: '2026-04-30' },
+      { knowledge: 'unknown', expected: 'unknown' },
+    ]) {
+      test(`preserves the knowledge value for ${knowledge ?? 'a missing cutoff'}`, async () => {
+        setKnowledgeMetadata(knowledge);
+        const { dom, cleanup } = await renderModelControls();
+        try {
+          expect(metadataValues(dom.container, 'Knowledge')).toEqual([expected]);
+        } finally {
+          await cleanup();
+        }
+      });
+    }
+
+    test('keeps the knowledge month when the mounted locale changes', async () => {
+      setKnowledgeMetadata('2025-08');
+      const previousLocale = useI18nStore.getState();
+      const { dom, cleanup } = await renderModelControls();
+      try {
+        expect(metadataValues(dom.container, 'Knowledge')).toEqual(['Aug 2025']);
+        await act(async () => {
+          useI18nStore.setState({ locale: 'zh-CN', dictionary: zhCnDict, loadingLocale: null });
+        });
+        expect(metadataValues(dom.container, zhCnDict['chat.modelControls.knowledge'])).toEqual(['2025年8月']);
+      } finally {
+        await cleanup();
+        useI18nStore.setState(previousLocale);
+      }
+    });
+
+    test('keeps the knowledge month and UTC release day in mobile long-press details', async () => {
+      useUIStore.setState({ isMobile: true });
+      useConfigStore.setState({
+        getModelMetadata: () => ({
+          id: MODEL_ID,
+          providerId: PROVIDER_ID,
+          knowledge: '2025-08',
+          release_date: '2026-09-29',
+        }),
+      });
+      const { dom, cleanup } = await renderModelControls();
+      const trigger = dom.container.querySelector('.model-controls__model-trigger');
+      const dispatchTouch = (type: 'touchstart' | 'touchend') => {
+        const view = trigger?.ownerDocument?.defaultView;
+        if (!trigger || !view) throw new Error('Expected model trigger');
+        trigger.dispatchEvent(new view.Event(type, { bubbles: true }));
+      };
+      try {
+        expect(metadataValues(dom.container, 'Knowledge')).toEqual(['Aug 2025']);
+        expect(metadataValues(dom.container, 'Release')).toEqual(['Sep 29, 2026']);
+        await act(async () => {
+          dispatchTouch('touchstart');
+          await new Promise((resolve) => setTimeout(resolve, 500));
+        });
+        expect(metadataValues(dom.container, 'Knowledge')).toEqual(['Aug 2025', 'Aug 2025']);
+        expect(metadataValues(dom.container, 'Release')).toEqual(['Sep 29, 2026', 'Sep 29, 2026']);
+      } finally {
+        if (trigger) dispatchTouch('touchend');
+        await cleanup();
+      }
+    });
+  });
+
+  describe('release date display', () => {
+    const setReleaseMetadata = (releaseDate: string | undefined) => {
+      useConfigStore.setState({
+        getModelMetadata: () => ({
+          id: MODEL_ID,
+          providerId: PROVIDER_ID,
+          name: MODEL_ID,
+          release_date: releaseDate,
+        }),
+      });
+    };
+
+    beforeEach(() => {
+      useI18nStore.setState({ locale: 'en', dictionary: enDict, loadingLocale: null });
+    });
+
+    test('shows a date-only release on its UTC day and follows the mounted locale', async () => {
+      setReleaseMetadata('2026-09-29');
+      const { dom, cleanup } = await renderModelControls();
+      try {
+        expect(metadataValues(dom.container, 'Release')).toEqual(['Sep 29, 2026']);
+        await act(async () => {
+          useI18nStore.setState({ locale: 'zh-CN', dictionary: zhCnDict, loadingLocale: null });
+        });
+        expect(metadataValues(dom.container, '发布时间')).toEqual(['2026年9月29日']);
+      } finally {
+        await cleanup();
+        useI18nStore.setState({ locale: 'en', dictionary: enDict, loadingLocale: null });
+      }
+    });
+
+    const fallbackCases = [
+      { release: undefined, expected: '—' },
+      { release: 'not-a-date', expected: 'not-a-date' },
+    ];
+    for (const { release, expected } of fallbackCases) {
+      test(`keeps the release fallback for ${release ?? 'a missing date'}`, async () => {
+        setReleaseMetadata(release);
+        const { dom, cleanup } = await renderModelControls();
+        try {
+          expect(metadataValues(dom.container, 'Release')).toEqual([expected]);
+        } finally {
+          await cleanup();
+        }
+      });
+    }
+
+    test('keeps a full release timestamp on the local calendar day', async () => {
+      const timestamp = '2026-09-29T23:30:00.000Z';
+      const expectedTimestamp = new Intl.DateTimeFormat('en-US', {
+        month: 'short', day: 'numeric', year: 'numeric',
+      }).format(new Date(timestamp));
+      setReleaseMetadata(timestamp);
+      const { dom, cleanup } = await renderModelControls();
+      try {
+        expect(metadataValues(dom.container, 'Release')).toEqual([expectedTimestamp]);
+      } finally {
+        await cleanup();
+      }
+    });
+  });
+});
+
+describe('ModelControls in a pinned column', () => {
+  const PINNED_FOLDER = '/repo/pinned';
+  const pinnedModel = { ...model, id: 'pinned-model', name: 'Pinned Model', providerID: 'pinned' };
+  const pinnedProvider = { id: 'pinned', name: 'pinned', models: [pinnedModel] };
+  const stockAgent: TestAgent = { ...agent, id: 'stock', name: 'stock', displayName: 'Stock' };
+  const pinnedSelection = { agent: AGENT, model: { providerId: 'pinned', modelId: 'pinned-model' }, variant: undefined };
+  const column = { sessionId: 'ses_pinned', directory: PINNED_FOLDER };
+
+  beforeEach(() => {
+    catalogLoads.length = 0;
+    knownElsewhere = nothingKnownElsewhere();
+    setSessionRecord(undefined);
+    useSelectionStore.setState({ savedVariant: undefined, sessionAgentSelections: new Map() });
+    useUIStore.setState({ isMobile: false, isModelSelectorOpen: false, lastUsedEfforts: {} });
+    useConfigStore.setState({ providers: [provider], agents: [agent], providersLoaded: true, agentsLoaded: true });
+    folderCatalogs = new Map([[PINNED_FOLDER, { providers: [pinnedProvider], agents: [agent, stockAgent], loaded: true }]]);
+  });
+
+  // The main chat's folder lacks `stock` and the pinned model; the pinned
+  // chat's folder has both, and its picker lists that folder's catalog (#5522).
+  test('lists the agents and models of its own session folder', async () => {
+    const { dom, cleanup } = await renderModelControls({ selection: pinnedSelection, sessionId: 'ses_pinned' }, column);
+    try {
+      expect(dom.container.textContent).toContain('Stock');
+      expect(dom.container.querySelector('.model-controls__model-trigger')?.textContent).toContain('Pinned Model');
+      expect(catalogLoads).toEqual([]);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test('is ready when its own folder is, whatever the main folder does', async () => {
+    useConfigStore.setState({ providers: [], agents: [], providersLoaded: false, agentsLoaded: false });
+    const { dom, cleanup } = await renderModelControls({ selection: pinnedSelection, sessionId: 'ses_pinned' }, column);
+    try {
+      expect(dom.container.querySelector('.model-controls__model-trigger')?.textContent).toContain('Pinned Model');
+      expect(dom.container.textContent).toContain('Stock');
+      expect(dom.container.textContent).not.toContain('Loading');
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test('arrow keys cycle the efforts its own folder gives the model', async () => {
+    // Same provider and model id in both folders, with other efforts in the pinned one.
+    const pinnedVariantModel = { ...model, variants: { max: {} } };
+    folderCatalogs = new Map([[PINNED_FOLDER, { providers: [{ ...provider, models: [pinnedVariantModel] }], agents: [agent], loaded: true }]]);
+    const { dom, cleanup } = await renderModelControls({
+      selection: { agent: AGENT, model: { providerId: PROVIDER_ID, modelId: MODEL_ID }, variant: undefined },
+      sessionId: 'ses_pinned',
+    }, column);
+    try {
+      const host = dom.container.querySelector('[data-testid="model-picker-host"]');
+      await act(async () => {
+        host?.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+      });
+      expect(useUIStore.getState().lastUsedEfforts).toEqual({ [`${PROVIDER_ID}/${MODEL_ID}`]: 'max' });
+    } finally {
+      await cleanup();
+    }
+  });
+
+  // BTW's model shortcut opens its own picker, never the main chat's (#6403).
+  test('opens the picker its composer opens, and only that one', async () => {
+    useUIStore.setState({ isModelSelectorOpen: true });
+    const isOpen = (dom: { container: Element }) => dom.container.querySelector('.model-controls__model-trigger')?.closest('[data-menu-open]')?.getAttribute('data-menu-open');
+    const closed = await renderModelControls({ selection: pinnedSelection, sessionId: 'ses_btw', modelSelectorOpen: false, onModelSelectorOpenChange: () => undefined }, column);
+    try {
+      expect(isOpen(closed.dom)).toBe('false');
+    } finally {
+      await closed.cleanup();
+    }
+    useUIStore.setState({ isModelSelectorOpen: false });
+    const open = await renderModelControls({ selection: pinnedSelection, sessionId: 'ses_btw', modelSelectorOpen: true, onModelSelectorOpenChange: () => undefined }, column);
+    try {
+      expect(isOpen(open.dom)).toBe('true');
+    } finally {
+      await open.cleanup();
+    }
+  });
+
+  // A pinned chat's agent pick carries the level its composer is on, as a
+  // BTW pick does, instead of the new agent falling back to another level.
+  test('an agent pick carries the effort the pinned composer is on', async () => {
+    // The store copies a spy into every later state, so restore the function
+    // on the live state: `mockRestore` reaches only the object spied on.
+    const saveOriginal = useSelectionStore.getState().saveAgentModelVariantForSession;
+    const saveVariant = spyOn(useSelectionStore.getState(), 'saveAgentModelVariantForSession');
+    const callsBefore = saveVariant.mock.calls.length;
+    const { dom, cleanup } = await renderModelControls({ selection: { ...pinnedSelection, variant: 'high' }, sessionId: 'ses_pinned' }, column);
+    try {
+      const stockRow = Array.from(dom.container.querySelectorAll<HTMLButtonElement>('button'))
+        .find((button) => button.textContent?.trim() === 'Stock');
+      await act(async () => stockRow?.click());
+      expect(useSelectionStore.getState().sessionAgentSelections.get('ses_pinned')).toBe('stock');
+      expect(saveVariant.mock.calls.slice(callsBefore)).toEqual([['ses_pinned', 'stock', 'pinned', 'pinned-model', 'high']]);
+      // The main chat's agent stays its own.
+      expect(useConfigStore.getState().currentAgentName).toBe(AGENT);
+    } finally {
+      useSelectionStore.setState({ saveAgentModelVariantForSession: saveOriginal });
+      await cleanup();
+    }
+  });
+
+  test('the main chat keeps the active folder catalog', async () => {
+    const { dom, cleanup } = await renderModelControls();
+    try {
+      expect(dom.container.textContent).not.toContain('Stock');
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test('loads the pinned folder catalog when it has not loaded', async () => {
+    folderCatalogs = new Map([[PINNED_FOLDER, { providers: [], agents: [], loaded: false }]]);
+    const { cleanup } = await renderModelControls({ selection: pinnedSelection, sessionId: 'ses_pinned' }, column);
+    try {
+      expect(catalogLoads).toEqual([`models:${PINNED_FOLDER}`, `agents:${PINNED_FOLDER}`]);
+    } finally {
+      await cleanup();
     }
   });
 });

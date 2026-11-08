@@ -46,7 +46,15 @@ Een paneel tonen en lezen welk project en welke sessie geopend zijn, vereist gee
 - **Uw Small Model gebruiken:** eenmalige tekstgeneratie buiten uw sessies, met het model uit Instellingen → Sessies → Small Model. Dit verbruikt tokens.
 - **Verbinding maken met een externe dienst:** met het account dat u bij Instellingen → Integraties verbindt.
 - **Een sessiegesprek lezen:** alleen wanneer u de extensieactie op die sessie uitvoert.
-- **Een lokale service uitvoeren:** een apart programma met uw volledige gebruikerstoegang. Sta dit alleen toe als u de maker vertrouwt.
+- **Een lokale service uitvoeren:** een apart programma met uw volledige gebruikerstoegang. Sta dit alleen toe als u de maker vertrouwt. Wil de extensie te horen krijgen wat er in uw sessies gebeurt, dan noemt deze regel ook de momenten waarover ze wordt ingelicht: een beurt is afgerond, een beurt mislukt, de agent vraagt toestemming, de agent stelt een vraag. Ze hoort ervan in elk project, zonder geopend venster, en krijgt alleen identificatiegegevens: de sessie, het project en de items die u eraan hebt gekoppeld.
+- **Lezen wat de agent op de achtergrond zegt:** het eindantwoord van elke beurt, de vragen die de agent stelt en waarvoor hij toestemming vraagt, in elk project, verstuurd naar de lokale service van de extensie. Sta dit alleen toe als u vertrouwt waar de extensie het naartoe stuurt.
+- **Zelfstandig sessies starten en berichten sturen:** de lokale service doet dit zonder geopend venster. Dit verbruikt tokens en kan tools uitvoeren.
+- **Toevoegen aan wat agents lezen:** tekst in de instructies van uw sessies, en skills die aan elke agent worden aangeboden zolang de extensie aanstaat.
+- **Een plugin toevoegen aan OpenCode:** de plugin van het pakket wordt in uw OpenCode geladen zolang de extensie aanstaat. Plugincode draait binnen OpenCode met uw volledige toegang, net als een lokale service, dus sta dit alleen toe als u de auteur vertrouwt.
+
+Een lokale service kan ook blijven draaien zolang OpenChamber draait, of volgens schema actief worden. Het toestemmingsvenster meldt dat onder **Een lokale service uitvoeren**, en ook wanneer wat u na `@` typt naar de service gaat. Een extensie kan eigen rijen aan het `@`-menu toevoegen en eigen blokken aan antwoorden van de agent. De extensie pauzeren haalt dit allemaal weg.
+
+Een extensie die uw meldingen bezorgt, aan Slack, Matrix of een eigen server, zegt dat ook onder **Een lokale service uitvoeren**, met een regel die begint met **Bezorgt uw meldingen**. Er gaat niets uit totdat u er een account voor verbindt bij [Instellingen → Integraties](/nl/integrations/#meldingskanalen-van-extensies). Daarna krijgt ze wat uw telefoon zou krijgen, en de extensie pauzeren stopt het.
 
 Vraagt een nieuwe versie om meer rechten dan u eerder toestond, dan toont de kaart **Goedkeuring nodig** en **Rechten bekijken**. De extensie blijft uit totdat u de nieuwe lijst goedkeurt.
 
@@ -60,6 +68,14 @@ Naast het paneel kan een extensie onderdelen toevoegen aan bestaande menu's: act
 
 Sommige extensies tonen een livebeeld van wat de agent op de server gebruikt, zoals een browser of simulator. Klik of typ in het beeld om de bediening over te nemen. De statusregel toont **U heeft de controle**. Browseracties van de agent worden dan geweigerd totdat u op **Teruggeven aan de agent** klikt. Kopiëren en plakken werken normaal. Een ander verbonden apparaat ziet wie bedient en kan de controle niet overnemen. Zo'n extensie kan eigen bediening naast het beeld plaatsen, bijvoorbeeld een adresbalk erboven of een kolom met tools ernaast.
 
+## Een extensie met een OpenCode-plugin
+
+Een extensie kan een OpenCode-plugin meeleveren, zodat u één ding installeert in plaats van twee. Het toestemmingsvenster heeft een regel die begint met **Een plugin toevoegen aan OpenCode**. Zodra u die toestaat, voegt OpenChamber de plugin binnen een paar seconden toe aan de OpenCode die het voor u draait, zonder herstart; de extensie uitschakelen of verwijderen haalt hem op dezelfde manier weg. Er wordt niets in uw eigen `opencode.json` geschreven, dus de plugin overleeft de extensie nooit en draait nooit in de OpenCode die u in een terminal start.
+
+Als OpenChamber de OpenCode waarmee het praat niet heeft gestart, of uw omgeving een eigen `OPENCODE_CONFIG` instelt, bereikt de configuratie van OpenChamber die OpenCode niet. Het scherm van de extensie zegt dat en biedt **Toevoegen aan globale configuratie** aan. Dat schrijft de map van de plugin in uw globale OpenCode-configuratie: hij draait dan in elke OpenCode op deze computer, ook in de terminal, blijft aan terwijl de extensie uitstaat en is van u om te beheren onder **Instellingen → Plugins**. Als u de extensie verwijdert, toont OpenCode die vermelding als een mislukte plugin en blijft het draaien tot u de vermelding daar verwijdert. Een OpenCode op een andere machine kan geen map van deze machine laden; het scherm zegt dat.
+
+VS Code en de mobiele app laden geen extensies. Een sessie in een geïsoleerde space draait zijn eigen OpenCode, dat de plugin nooit ontvangt. In de bedrijfsmodus telt de plugin als een lokale service: de extensie installeert alleen vanuit een repository die uw beheerder heeft toegestaan.
+
 ## Een extensie als Git-host
 
 Een extensie kan een Git-host toevoegen naast GitHub, GitLab, Gitea, Forgejo en Gerrit. Het toestemmingsvenster heeft dan een regel die begint met **Werkt als de Git-host** en de host noemt. De regel zegt ook wat OpenChamber ernaartoe stuurt: repositorynamen, branches en de tekst van de issues en pull requests die u schrijft.
@@ -71,6 +87,28 @@ Uw token blijft in OpenChamber. De extensie vraagt OpenChamber om de host voor h
 Pauzeert u de extensie, dan verdwijnt de host tot u haar weer inschakelt, en uw account blijft bewaard. Verwijdert u de extensie, dan wordt het account vergeten. VS Code toont geen Git-hosts van extensies.
 
 De OpenChamber SDK bevat een werkend voorbeeld, `examples/source-control-provider`, om mee te beginnen als u er zelf een bouwt. Zie [Een extensie bouwen](/nl/sdk/).
+
+## Een extensie als tracker
+
+Een extensie kan een tracker voor werkitems toevoegen naast Linear: YouTrack, Jira, Plane of een eigen tracker. Het toestemmingsvenster heeft dan een regel die begint met **Werkt als de tracker** en de tracker noemt. De regel zegt ook wat OpenChamber ernaartoe stuurt: uw zoekopdrachten en de items die u opent, en dat hij wordt gevraagd hun status te wijzigen en namens u sessiereacties te plaatsen.
+
+Staat u het toe, dan krijgt de tracker een eigen kaart bij **Instellingen → Integraties** onder **Extensieaccounts**. Verbind daar een account: met een token, of door in de browser in te loggen nadat u de client-ID hebt ingevoerd van de app die u bij de tracker hebt geregistreerd, en eerst het adres van de server als de kaart daarom vraagt. Daarna staan zijn items overal waar die van Linear staan: in het menu **+** van de chat en de kiezer, in New Worktree, bij de gekoppelde items van een sessie en in de livestatus van items die u volgt. Een geplakte link naar een van zijn items wordt op dezelfde manier herkend. Wat elk hiervan doet, staat bij [Linear](/nl/integrations/#linear).
+
+Uw tokens blijven in OpenChamber. De extensie vraagt OpenChamber om de tracker voor haar aan te roepen, en OpenChamber voegt de inloggegevens aan elke aanroep toe, alleen voor de server die u hebt verbonden. De extensie krijgt ze nooit, en alleen haar aanroepen voor statuswijzigingen en reacties mogen daar iets schrijven.
+
+Pauzeert u de extensie, dan verdwijnt de tracker tot u haar weer inschakelt, en uw accounts blijven bewaard. Verwijdert u de extensie, dan worden ze vergeten. VS Code toont geen trackers; op de telefoon worden de items van de tracker getoond, en accounts verbindt u vanuit de web- of desktop-app.
+
+De OpenChamber SDK bevat een werkend voorbeeld, `examples/tracker-provider`, met een neptracker om ernaast te draaien. Zie [Een extensie bouwen](/nl/sdk/).
+
+## Een extensie als verbruiksprovider
+
+Een extensie kan naast de ingebouwde providers een verbruiksprovider toevoegen: een provider die OpenChamber niet zelf uitleest, of een eigen provider. Haar toestemmingsdialoog heeft dan een regel die begint met **Rapporteert gebruik als een ingebouwde provider** en de OpenCode-providers noemt waarvan zij de aanmeldgegevens leest, zoals `openrouter`; een extensie die er geen noemt, zegt dat.
+
+Zodra u haar toestaat, staat haar kaart onder **Instellingen → Verbruik** achter de ingebouwde providers, met de naam en het pictogram van de extensie, en verschijnt zij net als elke ingebouwde provider in de limieten in de kopbalk, in de werkstatus, in de popover op de telefoon en in het systeemvak op de desktop wanneer u **Tonen in werkstatus** aanvinkt. Bij elke vernieuwing geeft OpenChamber de extensie de aanmeldgegevens die OpenCode voor elke genoemde provider bewaart, en verder niets; een versie die een andere provider noemt, vraagt opnieuw om uw toestemming. De extensie leest het verbruik zelf, en OpenChamber tekent het zoals bij een ingebouwde provider.
+
+Pauzeert u de extensie, dan verdwijnt de kaart tot u haar weer inschakelt, en uw verbruiksinstellingen ervoor blijven bewaard. Verwijdert u de extensie, dan verdwijnt de kaart voorgoed. VS Code toont geen verbruik uit extensies; op de telefoon wordt de kaart getoond, en de extensie stelt u in vanuit de web- of desktopapp. Een sessie in een geïsoleerde space leest het verbruik van de eigen server van die space, die geen extensies heeft.
+
+De OpenChamber SDK bevat een werkend voorbeeld, `examples/quota-provider`, met een nep-verbruiks-API om ernaast te draaien. Zie [Een extensie bouwen](/nl/sdk/).
 
 ## Het account verbinden
 

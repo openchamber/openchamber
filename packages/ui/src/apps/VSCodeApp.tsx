@@ -9,7 +9,9 @@ import { ConfigUpdateOverlay } from '@/components/ui/ConfigUpdateOverlay';
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
 import { OpenCodeUpdateToast } from '@/components/update/OpenCodeUpdateToast';
 import { AppLinkConfirmDialog } from '@/components/chat/AppLinkConfirmDialog';
+import { SnippetQuickCreateDialog } from '@/components/snippets/SnippetQuickCreateDialog';
 import { SharedTrustConfirmDialog } from '@/components/projects/SharedTrustConfirmDialog';
+import { OpenCodeTrustDialog } from '@/components/projects/OpenCodeTrustDialog';
 import { VSCodeLayout } from '@/components/layout/VSCodeLayout';
 import { useEnterprisePolicySync } from '@/hooks/useEnterprisePolicySync';
 import { usePushVisibilityBeacon } from '@/hooks/usePushVisibilityBeacon';
@@ -146,7 +148,9 @@ export function VSCodeApp({ apis }: VSCodeAppProps) {
                   </>
                 )}
                 <AppLinkConfirmDialog />
+                <SnippetQuickCreateDialog />
                 <SharedTrustConfirmDialog />
+                <OpenCodeTrustDialog />
                 <OpenCodeUpdateToast />
                 <Toaster position="top-center" />
                 <ConfigUpdateOverlay />

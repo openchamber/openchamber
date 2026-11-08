@@ -1,10 +1,11 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { readFileSync } from 'node:fs';
+import { readFileSync, realpathSync } from 'node:fs';
 import { VitePWA } from 'vite-plugin-pwa';
-import { themeStoragePlugin } from '../../vite-theme-plugin';
+import { cacheReactBabel } from './vite-react-babel-cache';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const packageJson = JSON.parse(readFileSync(path.resolve(__dirname, 'package.json'), 'utf-8'));
@@ -12,6 +13,8 @@ const pwaDevEnabled = process.env.OPENCHAMBER_DISABLE_PWA_DEV !== '1';
 const reactScanToggle = (process.env.VITE_ENABLE_REACT_SCAN ?? '').toLowerCase();
 const enableReactScan = reactScanToggle === '1' || reactScanToggle === 'true' || reactScanToggle === 'on' || reactScanToggle === 'yes';
 const themeDirectory = path.resolve(__dirname, '../ui/src/lib/theme/themes');
+
+const reactBabel = { plugins: ['babel-plugin-react-compiler'] };
 
 const themeJsonHmrPlugin = () => ({
   name: 'openchamber-theme-json-hmr',
@@ -40,10 +43,14 @@ const themeJsonHmrPlugin = () => ({
 export default defineConfig({
   root: path.resolve(__dirname, '.'),
   plugins: [
-    react({
-      babel: {
-        plugins: ['babel-plugin-react-compiler'],
-      },
+    // The React Compiler is most of a cold dev start; its output is kept on
+    // disk for every checkout of the repository, so a restart or a new
+    // worktree compiles only what changed.
+    ...cacheReactBabel(react({ babel: reactBabel }), {
+      directory: path.join(os.homedir(), '.cache', 'openchamber', 'react-babel'),
+      // Real path: module ids are, and a checkout under a symlink (/tmp on macOS) would never match.
+      root: realpathSync(path.resolve(__dirname, '../..')),
+      setup: reactBabel,
     }),
     {
       name: 'inject-react-scan-script',
@@ -63,7 +70,6 @@ export default defineConfig({
         ];
       },
     },
-    themeStoragePlugin(),
     themeJsonHmrPlugin(),
     VitePWA({
       strategies: 'injectManifest',

@@ -107,6 +107,12 @@ export function translateWireEvent(payload) {
       })];
     }
 
+    case 'session.forked': {
+      const parentID = trimmed(data.parentID);
+      if (!sessionID || !parentID) return [];
+      return [event('session.forked', { sessionID, parentID })];
+    }
+
     case 'session.renamed':
       if (!sessionID) return [];
       return [event('session.updated', {
@@ -133,6 +139,17 @@ export function translateWireEvent(payload) {
     case 'session.deleted':
       if (!sessionID) return [];
       return [event('session.deleted', { sessionID, info: { id: sessionID } })];
+
+    // Their own events, never a `session.updated`: the consumers of that one
+    // (goal mode, lineage, notifications) would take an archive or a restore
+    // for an edit.
+    case 'session.archived':
+      if (!sessionID) return [];
+      return [event('session.archived', { sessionID })];
+
+    case 'session.unarchived':
+      if (!sessionID) return [];
+      return [event('session.unarchived', { sessionID })];
 
     // --- live status --------------------------------------------------------
 

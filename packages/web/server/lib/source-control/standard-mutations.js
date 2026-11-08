@@ -1,5 +1,6 @@
 import { isPlainObject, isString } from '../shared/guards.js';
 import { digestMutationInput } from './mutation-executor.js';
+import { reviewDraftEntries } from './review-position.js';
 
 /**
  * The standard mutation table: each shell route's persisted kind (GitLab's
@@ -42,6 +43,8 @@ const parseVotes = (value) => {
  * Routes are listed in a fixed order; a provider registers them all and the
  * shell answers 501 for a capability that is off.
  */
+const VERDICTS = ['approve', 'request-changes'];
+
 export function createStandardMutations(descriptor) {
   const commentText = (value, required) => {
     if (value === undefined && !required) return undefined;
@@ -59,6 +62,7 @@ export function createStandardMutations(descriptor) {
   };
   const mergeMethods = descriptor.capabilities.merge ? descriptor.capabilities.merge.methods : [];
   const votesHost = descriptor.capabilities.reviewModel === 'votes';
+  const reviewDrafts = Boolean(descriptor.capabilities.reviewDrafts);
   const requireNumber = (context) => {
     if (!context.target.number) throw invalidMutationContext('target number is required');
   };
@@ -75,9 +79,13 @@ export function createStandardMutations(descriptor) {
     }
     if (!context.target.number || !context.target.headSha) throw invalidMutationContext('target number and head SHA are required');
     const votes = parseVotes(input.votes ?? {});
-    if (Object.keys(votes).length === 0 && input.body === undefined) throw invalidMutationContext('a vote or a message is required');
+    // A review may be its draft comments alone: nothing but the host knows
+    // whether there are any, so the provider refuses an empty one.
+    const publishDrafts = reviewDrafts && input.publishDrafts === true;
+    if (!publishDrafts && Object.keys(votes).length === 0 && input.body === undefined) throw invalidMutationContext('a vote or a message is required');
     const text = commentText(input.body, false);
-    return { votes, body: text, digest: { votes, body: text ?? null } };
+    const digest = { votes, body: text ?? null };
+    return publishDrafts ? { votes, body: text, digest: { ...digest, publishDrafts } } : { votes, body: text, digest };
   };
 
   const entries = {
@@ -139,13 +147,14 @@ export function createStandardMutations(descriptor) {
         if (votesHost) return normalizeVotes(input, context);
         if (input.votes !== undefined) throw invalidMutationContext(`${descriptor.label} reviews take a verdict, not votes`);
         // A verdict names the commit it is for; without one it would land on whatever was pushed last.
-        if (!context.target.number || !context.target.headSha || !['approve', 'request-changes'].includes(input.verdict)) {
+        if (!context.target.number || !context.target.headSha || ![...VERDICTS, ...(reviewDrafts ? ['comment'] : [])].includes(input.verdict)) {
           throw invalidMutationContext('target number, head SHA and review verdict are required');
         }
         const text = commentText(input.body, false);
         return { verdict: input.verdict, body: text, digest: { verdict: input.verdict, body: text ?? null } };
       },
     },
+    ...reviewDraftEntries({ commentText, fail: (message) => { throw invalidMutationContext(message); } }),
   };
   for (const [route, kind] of [['/pr/comment', 'change-request-comment'], ['/issues/comment', 'issue-comment']]) {
     entries[route] = {

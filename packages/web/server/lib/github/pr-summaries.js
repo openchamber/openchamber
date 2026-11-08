@@ -1,11 +1,11 @@
-// Live status for PRs and issues the client already knows by number.
+// Live status for PRs, issues and discussions the client already knows by number.
 //
 // The sidebar shows many worktrees at once. Asking the full per-branch
 // resolver for each of them costs several REST calls per PR; here one GraphQL
-// document carries up to SUMMARY_ALIASES_PER_QUERY PRs or issues (a PR's
-// state, draft, mergeability and check contexts; an issue's state and close
-// reason), and GitHub prices such a document at a single point of the GraphQL
-// budget.
+// document carries up to SUMMARY_ALIASES_PER_QUERY items (a PR's state,
+// draft, mergeability and check contexts; an issue's state and close reason;
+// a discussion's state and whether it is answered), and GitHub prices such a
+// document at a single point of the GraphQL budget.
 
 import { z } from 'zod';
 
@@ -27,8 +27,13 @@ const SUMMARY_FIELDS = `
   isDraft
   mergeable
   mergeStateStatus
+  isInMergeQueue
+  mergeQueueEntry { state position }
+  autoMergeRequest { enabledAt mergeMethod }
   headRefOid
   baseRefName
+  comments { totalCount }
+  reviews { totalCount }
   commits(last: 1) {
     nodes {
       commit {
@@ -56,11 +61,26 @@ const SUMMARY_FIELDS = `
   }
 `;
 
+// Who wrote last, asked only for a pull request an agent is woken about
+// (`../pr-watch`): the sidebar never shows it.
+const ACTIVITY_FIELDS = `
+  recentComments: comments(last: 10) { nodes { createdAt author { __typename login } } }
+  recentReviews: reviews(last: 10) { nodes { submittedAt author { __typename login } } }
+`;
+
 const ISSUE_FIELDS = `
   number
   title
   state
   stateReason
+`;
+
+const DISCUSSION_FIELDS = `
+  number
+  title
+  closed
+  stateReason
+  isAnswered
 `;
 
 const githubName = z.string().trim().regex(GITHUB_NAME_PATTERN);
@@ -108,6 +128,13 @@ export const checkContextSchema = z.discriminatedUnion('__typename', [
   }),
 ]);
 
+const activityNodesSchema = (timeField) => z.object({
+  nodes: z.array(z.object({
+    [timeField]: z.string().nullable(),
+    author: z.object({ __typename: z.string(), login: z.string() }).nullable(),
+  }).nullable()),
+}).nullish();
+
 const prNodeSchema = z.object({
   number: z.number().int(),
   title: z.string(),
@@ -115,8 +142,15 @@ const prNodeSchema = z.object({
   isDraft: z.boolean(),
   mergeable: z.string().nullable(),
   mergeStateStatus: z.string().nullable(),
+  isInMergeQueue: z.boolean().optional(),
+  mergeQueueEntry: z.object({ state: z.string(), position: z.number().int().nonnegative() }).nullish(),
+  autoMergeRequest: z.object({ enabledAt: z.string(), mergeMethod: z.string() }).nullish(),
   headRefOid: z.string(),
   baseRefName: z.string(),
+  comments: z.object({ totalCount: z.number().int() }).nullish(),
+  reviews: z.object({ totalCount: z.number().int() }).nullish(),
+  recentComments: activityNodesSchema('createdAt'),
+  recentReviews: activityNodesSchema('submittedAt'),
   commits: z.object({
     nodes: z.array(z.object({
       commit: z.object({
@@ -134,6 +168,13 @@ const prNodeSchema = z.object({
  * latest run per app and name, win over classic commit statuses.
  */
 export function summarizeCheckContexts(contexts) {
+  const { checkRuns, statuses } = splitCheckContexts(contexts);
+  return checkRuns.length > 0
+    ? summarizeCheckRuns(dedupeCheckRuns(checkRuns))
+    : summarizeCombinedStatuses(statuses);
+}
+
+function splitCheckContexts(contexts) {
   const checkRuns = [];
   const statuses = [];
   for (const context of contexts) {
@@ -147,12 +188,38 @@ export function summarizeCheckContexts(contexts) {
         started_at: context.startedAt ?? undefined,
       });
     } else {
-      statuses.push({ state: context.state.toLowerCase() });
+      statuses.push({ name: context.context, state: context.state.toLowerCase() });
     }
   }
-  return checkRuns.length > 0
-    ? summarizeCheckRuns(dedupeCheckRuns(checkRuns))
-    : summarizeCombinedStatuses(statuses);
+  return { checkRuns, statuses };
+}
+
+const PASSING_CONCLUSIONS = new Set(['success', 'neutral', 'skipped']);
+
+/** The names of the checks `summarizeCheckContexts` counts as failed, in the same terms. */
+function failedCheckNames(contexts) {
+  const { checkRuns, statuses } = splitCheckContexts(contexts);
+  if (checkRuns.length > 0) {
+    return dedupeCheckRuns(checkRuns)
+      .filter((run) => run.status !== 'in_progress' && run.status !== 'queued' && run.conclusion && !PASSING_CONCLUSIONS.has(run.conclusion))
+      .map((run) => run.name);
+  }
+  return statuses.filter((status) => status.state === 'failure' || status.state === 'error').map((status) => status.name);
+}
+
+/** Comments and reviews, newest first, as `{ author, at }`; a bot reads as GitHub shows it. */
+function recentActivityOf(node) {
+  const entries = [
+    ...(node.recentComments?.nodes ?? []).map((entry) => entry && { author: entry.author, at: entry.createdAt }),
+    ...(node.recentReviews?.nodes ?? []).map((entry) => entry && { author: entry.author, at: entry.submittedAt }),
+  ];
+  return entries
+    .filter((entry) => entry?.author && entry.at)
+    .map((entry) => ({
+      author: entry.author.__typename === 'Bot' ? `${entry.author.login}[bot]` : entry.author.login,
+      at: entry.at,
+    }))
+    .sort((left, right) => (left.at < right.at ? 1 : left.at > right.at ? -1 : 0));
 }
 
 const issueNodeSchema = z.object({
@@ -183,6 +250,38 @@ function toIssueSummary(ref, value) {
   };
 }
 
+const DISCUSSION_CLOSE_REASONS = { RESOLVED: 'resolved', OUTDATED: 'outdated', DUPLICATE: 'duplicate' };
+
+/**
+ * A discussion's state: open, or why it was closed. A discussion closed
+ * before GitHub kept reasons reads as resolved, the reason GitHub defaults to.
+ */
+export const toDiscussionState = (node) => (node.closed ? DISCUSSION_CLOSE_REASONS[node.stateReason] ?? 'resolved' : 'open');
+
+const discussionNodeSchema = z.object({
+  number: z.number().int(),
+  title: z.string(),
+  closed: z.boolean(),
+  stateReason: z.string().nullable(),
+  isAnswered: z.boolean().nullable(),
+});
+
+/** `answered` is null where the discussion's category takes no answers. */
+function toDiscussionSummary(ref, value) {
+  const parsed = discussionNodeSchema.safeParse(value);
+  if (!parsed.success || parsed.data.number !== ref.number) {
+    return null;
+  }
+  return {
+    owner: ref.owner,
+    repo: ref.repo,
+    number: ref.number,
+    title: parsed.data.title,
+    state: toDiscussionState(parsed.data),
+    answered: parsed.data.isAnswered,
+  };
+}
+
 const PR_STATES = { OPEN: 'open', CLOSED: 'closed', MERGED: 'merged' };
 
 const toMergeable = (mergeable) => {
@@ -191,14 +290,15 @@ const toMergeable = (mergeable) => {
   return null;
 };
 
-function toSummary(ref, value) {
+function toSummary(ref, value, details) {
   const parsed = prNodeSchema.safeParse(value);
   if (!parsed.success || parsed.data.number !== ref.number) {
     return null;
   }
   const node = parsed.data;
   const state = PR_STATES[node.state];
-  return {
+  const contexts = node.commits.nodes[0]?.commit.statusCheckRollup?.contexts.nodes ?? [];
+  const summary = {
     owner: ref.owner,
     repo: ref.repo,
     number: ref.number,
@@ -211,15 +311,25 @@ function toSummary(ref, value) {
     base: node.baseRefName,
     mergeable: toMergeable(node.mergeable),
     mergeableState: node.mergeStateStatus ? node.mergeStateStatus.toLowerCase() : null,
+    isInMergeQueue: node.isInMergeQueue ?? false,
+    mergeQueueEntry: node.mergeQueueEntry ?? null,
+    autoMergeRequest: node.autoMergeRequest ?? null,
     // A closed/merged PR's checks are not actionable; the REST status route
     // drops them too.
-    checks: state === 'open'
-      ? summarizeCheckContexts(node.commits.nodes[0]?.commit.statusCheckRollup?.contexts.nodes ?? [])
-      : null,
+    checks: state === 'open' ? summarizeCheckContexts(contexts) : null,
   };
+  // Conversation comments plus reviews: it grows when someone writes on the
+  // pull request (a reply in a review thread is a review of its own), so an
+  // agent waiting on it hears about it (`../pr-watch`).
+  if (node.comments && node.reviews) summary.activity = node.comments.totalCount + node.reviews.totalCount;
+  if (details) {
+    summary.failedChecks = state === 'open' ? failedCheckNames(contexts) : [];
+    summary.recentActivity = recentActivityOf(node);
+  }
+  return summary;
 }
 
-function buildSummaryQuery(entries) {
+function buildSummaryQuery(entries, details) {
   const variables = {};
   const declarations = [];
   const selections = [];
@@ -228,14 +338,18 @@ function buildSummaryQuery(entries) {
     variables[`n${index}`] = ref.repo;
     variables[`p${index}`] = ref.number;
     declarations.push(`$o${index}: String!, $n${index}: String!, $p${index}: Int!`);
-    const field = kind === 'issue'
-      ? `issue(number: $p${index}) { ...IssueSummary }`
-      : `pullRequest(number: $p${index}) { ...PrSummary }`;
+    const field = {
+      issue: `issue(number: $p${index}) { ...IssueSummary }`,
+      discussion: `discussion(number: $p${index}) { ...DiscussionSummary }`,
+      pull: `pullRequest(number: $p${index}) { ...PrSummary }`,
+    }[kind];
     selections.push(`a${index}: repository(owner: $o${index}, name: $n${index}) { ${field} }`);
   });
+  // A fragment the document does not use is an error, so each is sent only with its kind.
   const fragments = [
-    entries.some((entry) => entry.kind === 'pull') ? `fragment PrSummary on PullRequest {${SUMMARY_FIELDS}}` : '',
+    entries.some((entry) => entry.kind === 'pull') ? `fragment PrSummary on PullRequest {${SUMMARY_FIELDS}${details ? ACTIVITY_FIELDS : ''}}` : '',
     entries.some((entry) => entry.kind === 'issue') ? `fragment IssueSummary on Issue {${ISSUE_FIELDS}}` : '',
+    entries.some((entry) => entry.kind === 'discussion') ? `fragment DiscussionSummary on Discussion {${DISCUSSION_FIELDS}}` : '',
   ].filter(Boolean);
   const query = `query(${declarations.join(', ')}) {\n${selections.join('\n')}\n}\n${fragments.join('\n')}`;
   return { query, variables };
@@ -249,8 +363,8 @@ export const isGraphqlRateLimitError = (error) => Array.isArray(error?.errors)
 // GitHub answers a PR it cannot resolve (deleted, no access) with a per-alias
 // error next to the data for every other alias. Octokit throws on any error,
 // so keep the partial data and only rethrow when there is none.
-async function runSummaryQuery(octokit, entries) {
-  const { query, variables } = buildSummaryQuery(entries);
+async function runSummaryQuery(octokit, entries, details) {
+  const { query, variables } = buildSummaryQuery(entries, details);
   try {
     return await octokit.graphql(query, variables);
   } catch (error) {
@@ -262,21 +376,25 @@ async function runSummaryQuery(octokit, entries) {
 }
 
 /**
- * Fetch live summaries for known PRs and issues. One GitHub could not resolve
- * is left out of the result: absence means "unknown", never "closed".
+ * Fetch live summaries for known PRs, issues and discussions. One GitHub
+ * could not resolve is left out of the result: absence means "unknown",
+ * never "closed". `details` adds each open pull request's failed check names
+ * (`failedChecks`) and its newest comments and reviews (`recentActivity`).
  */
-export async function fetchPrSummaries({ octokit, refs, issueRefs = [] }) {
+export async function fetchPrSummaries({ octokit, refs, issueRefs = [], discussionRefs = [], details = false }) {
   const entries = [
     ...refs.map((ref) => ({ kind: 'pull', ref })),
     ...issueRefs.map((ref) => ({ kind: 'issue', ref })),
+    ...discussionRefs.map((ref) => ({ kind: 'discussion', ref })),
   ];
   const summaries = [];
   const issueSummaries = [];
+  const discussionSummaries = [];
   // Chunks run one after another: GitHub's secondary limits punish bursts of
   // concurrent GraphQL documents more than a short sequence.
   for (let start = 0; start < entries.length; start += SUMMARY_ALIASES_PER_QUERY) {
     const chunk = entries.slice(start, start + SUMMARY_ALIASES_PER_QUERY);
-    const data = await runSummaryQuery(octokit, chunk);
+    const data = await runSummaryQuery(octokit, chunk, details);
     chunk.forEach(({ kind, ref }, index) => {
       const repository = data?.[`a${index}`];
       if (kind === 'issue') {
@@ -284,9 +402,14 @@ export async function fetchPrSummaries({ octokit, refs, issueRefs = [] }) {
         if (summary) issueSummaries.push(summary);
         return;
       }
-      const summary = toSummary(ref, repository?.pullRequest);
+      if (kind === 'discussion') {
+        const summary = toDiscussionSummary(ref, repository?.discussion);
+        if (summary) discussionSummaries.push(summary);
+        return;
+      }
+      const summary = toSummary(ref, repository?.pullRequest, details);
       if (summary) summaries.push(summary);
     });
   }
-  return { summaries, issueSummaries };
+  return { summaries, issueSummaries, discussionSummaries };
 }

@@ -70,7 +70,10 @@ Auto. There is no env gate — the feature shipped dark behind
   swallowed and marks the session (`noteModelSelection`), and every
   `POST /api/session/:id/{prompt,command}` in a marked session is routed
   (`routeSend`) and switches the session onto the answer before the send is
-  forwarded. Both sit ahead of the generic proxy, which replays a parsed body.
+  forwarded. So is `POST /api/session/:id/form/:formId/reply`: the answer
+  resumes a turn, so it is routed on the values the user filled in, and a
+  failure answers with an error and leaves the form pending. Both sit ahead of
+  the generic proxy, which replays a parsed body.
   The message queue calls `resolveAutoSelection` itself and applies the answer
   with the model/agent switches it already makes. Without a fallback model the
   runtime throws 400 rather than forwarding. The OpenChamber session service
@@ -82,10 +85,13 @@ Auto. There is no env gate — the feature shipped dark behind
 - Routing failures keep the user's own behaviour: a Jev error, timeout, unknown
   category or low confidence routes to the fallback model, and the decision
   carries the reason.
-- The routing question sends `ROUTING_INSTRUCTIONS` as one string, the same
-  form as the Test probe. TypeSafe also accepts a list there, but a
-  self-hosted System One server may not: Kev answers a list with 400, so Auto
-  fell back on every send while Test passed (#4175).
+- The routing and safety-net questions send `ROUTING_INSTRUCTIONS` and
+  `SAFETY_INSTRUCTIONS` as one string each, the same form as the Test probe,
+  and the safety-net `ask` question passes `SAFETY_CRITERIA` (`true` / `false`)
+  on `criteria`. TypeSafe and Ollama's `kev` runner accept a list for
+  `instructions`, while `@kev-ai/server` answers a list with 400 (#4175);
+  without `criteria` on `ask`, Ollama `kev` also scored `brew install` and
+  `git checkout -- .` below the 0.6 hold threshold (#6028).
 - The safety net accepts only on a verdict from Jev. With no usable
   classification provider it holds quietly (the session behaves like `ask`);
   when Jev fails it holds, broadcasts `openchamber:routing.safety-skipped` with
@@ -96,7 +102,14 @@ Auto. There is no env gate — the feature shipped dark behind
   entries. `safetyNet.threshold` still applies.
 - A category without a model uses the fallback model *and* variant; a variant
   only travels with the model it was chosen for. A category agent replaces the
-  composer's agent; an empty one keeps it.
+  session's agent, and the runtime remembers which agent it replaced. A send
+  whose category names no agent, or that falls back, keeps the composer's
+  agent, except while the session still runs as the agent routing set: then
+  it goes back to the agent from before (#6392). A session found on any other
+  agent, a composer agent other than the routed one, or a switch off Auto ends
+  that, so an agent the user picked stays. A session that had no agent of its
+  own before the category agent has nothing to go back to. The record is
+  process memory, like the Auto mark.
 - A variant the model's catalog entry does not list is dropped before the
   switch, so the reply runs on the model's default thinking instead of OpenCode
   refusing it (Settings from before #4133 saved list positions like `"2"`).
@@ -128,6 +141,16 @@ Auto. There is no env gate — the feature shipped dark behind
   which the URL alone answers; every other send, and anything that is not JSON,
   reaches the proxy as the stream it arrived as.
 
+## Decisions
+
+### Why the server puts the agent back and not the composer
+
+In Auto the composer hides the agent control and shows the session's agent,
+which after a routed Plan is `plan`, so the composer has no agent of its own
+to send. Only the runtime knows that it set the agent and which one was there
+before. Before #6392 an empty category agent left the routed agent in place,
+and every later send stayed in Plan.
+
 ## Where a Jev request goes
 
 The user picks a classification provider in Settings → Providers →
@@ -136,12 +159,26 @@ Classification providers:
 - `off`: no Jev at all. Every Jev feature takes its no-provider path.
 - `zen-promo`: `opencode.ai/zen/v1/systemone` as `jev-1.13-free`, which OpenCode
   Zen answers with no credential at all. Usable while
-  `ZEN_JEV_PROMOTION_ACTIVE` is true; flip it when OpenCode ends the promotion.
+  `ZEN_JEV_PROMOTION_ACTIVE` is true. While it is false, a user who had picked
+  it sees it disabled as temporarily unavailable and falls back like any
+  unusable pick.
+  On 2026-10-27 zen's anti-fraud client check answered the free model with
+  429 `FreeUsageLimitError` ("Free models work in OpenCode") to Node and curl
+  clients whatever the headers, while Bun clients such as OpenCode got
+  through. The server runs on Node, so the promotion was off for a few hours
+  until Dax exempted Jev. If that 429 comes back, compare one call from Node
+  and one from Bun before anything else, and ask OpenCode in Slack. The other
+  route is OpenCode 2.2's `POST /api/experimental/generate/decisions` with the
+  `opencode` provider, which serves `jev-1.13-free` without a login and takes
+  `x-opencode-client` from `provider.opencode.options.headers`; in 2.2.0 it
+  starts a second copy of every local MCP server (anomalyco/opencode#59605)
+  and its predicate questions take no `criteria` (anomalyco/opencode#59606).
 - `zen-key`: the same endpoint as `jev-1.13` with a Zen API key read from
   OpenCode's credentials (`opencode/auth.js`, entry `opencode`, type `api`).
   An OpenCode account sign-in is an OAuth credential, and zen rejects it as a
-  key ("Invalid API key", checked 2026-09-27), so it does not count. The paid
-  call itself is not verified live yet.
+  key ("Invalid API key", checked 2026-09-27), so it does not count. A paid
+  call from Node with a Zen API key answers (checked 2026-10-27, billed to the
+  Zen balance); the client check that blocks the free model does not apply.
 - `openrouter`: `openrouter.ai/api/v1/systemone` as `jev-latest` (OpenRouter's
   `~typesafe/jev-latest` alias) with the OpenRouter API key saved in OpenCode
   (entry `openrouter`, type `api`), billed to that OpenRouter account.
@@ -253,7 +290,7 @@ features that need Jev.
 `store.test.js` (defaults, deviation round-trip, the cache setting's default,
 deleted built-ins, malformed
 file, token file mode, classifier pick, custom endpoint file), `runtime.test.js` (request text,
-excerpts, decisions, cache holds and the warm window, endpoints, custom URL normalization and setter,
+excerpts, decisions, the agent a category set and the way back from it, cache holds and the warm window, endpoints, custom URL normalization and setter,
 classifier fallback, rewrite and fallback
 paths, safety net accept/hold/skip/unavailable), `routes.http.test.js`
 (sentinel dropped from a create and swallowed on the model switch, routed send

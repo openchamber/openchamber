@@ -1,10 +1,13 @@
 import React from 'react';
+import { useI18n } from '@/lib/i18n';
 import { SessionNodeItem } from './SessionNodeItem';
 import type { SessionNodeItemProps } from './SessionNodeItem';
 import type { SessionNode } from '../types';
+import { listedChildren } from '../listedChildren';
 import type { SessionSidebarRenderContext } from '../sessionSidebarRowModel';
 import type { SessionNodeRenderExtras } from './sessionNodeItemUtils';
 import { useSessionActions, type DeleteSessionConfirmState } from './useSessionActions';
+import { collectParentIdDescendantIds } from './sessionSubtreeActions';
 import { useSessionFoldersStore } from '@/stores/useSessionFoldersStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { SessionDeleteConfirmDialog } from '../shell/ConfirmDialogs';
@@ -16,10 +19,13 @@ type Context = {
   groupDirectory?: string | null;
   projectId?: string | null;
   folderOwnerKey?: string | null;
+  ownerProjectId?: string | null;
   selectionScopeKey?: string | null;
   archivedBucket?: boolean;
   secondaryMeta?: { projectLabel?: string | null; branchLabel?: string | null; inSpace?: boolean } | null;
   renderContext?: SessionSidebarRenderContext;
+  /** Two lines under the project: a work of its own with Detailed rows on. */
+  detailed?: boolean;
   rowKey?: string;
   dragKey?: string;
 };
@@ -38,6 +44,8 @@ type SessionTreeItemRenderProps = Context & Pick<SessionNodeItemProps,
   node: SessionNode;
   pinnedSessionIds: Set<string>;
   depth?: number;
+  /** A work of its own; on by default for a top row, never for what nests under it. */
+  ownsWork?: boolean;
   renderExtras?: SessionNodeRenderExtras;
 };
 
@@ -65,13 +73,16 @@ const EMPTY_SUBTREE_CONTAINS_EDITING: Set<string> = new Set();
 function SessionTreeItemComponent({
   node,
   depth = 0,
+  ownsWork = true,
   groupDirectory,
   projectId,
   folderOwnerKey,
+  ownerProjectId,
   selectionScopeKey,
   archivedBucket = false,
   secondaryMeta,
   renderContext = 'project',
+  detailed = false,
   rowKey,
   dragKey,
   renderExtras,
@@ -100,6 +111,7 @@ function SessionTreeItemComponent({
   renderChildren = true,
 }: SessionTreeItemProps): React.ReactNode {
   streamPerfCount('ui.sidebar_tree_item.render');
+  const { t } = useI18n();
   const effectiveRowKey = rowKey ?? `${renderContext}:${archivedBucket ? 'archived' : 'active'}:${node.session.id}`;
   const createFolder = useSessionFoldersStore((state) => state.createFolder);
   const toggleFolderCollapse = useSessionFoldersStore((state) => state.toggleFolderCollapse);
@@ -109,15 +121,10 @@ function SessionTreeItemComponent({
   // rebuilds a project's node tree whenever one of its session records
   // changes, and a fresh array here would give every row in that project a
   // new delete handler and force it to re-render.
-  const descendantIdsKey = React.useMemo(() => {
-    const ids: string[] = [];
-    const visit = (current: SessionNode) => current.children.forEach((child) => {
-      ids.push(child.session.id);
-      visit(child);
-    });
-    visit(node);
-    return ids.join('\n');
-  }, [node]);
+  const descendantIdsKey = React.useMemo(
+    () => collectParentIdDescendantIds(node).join('\n'),
+    [node],
+  );
   const descendantIds = React.useMemo(
     () => (descendantIdsKey ? descendantIdsKey.split('\n') : []),
     [descendantIdsKey],
@@ -125,10 +132,10 @@ function SessionTreeItemComponent({
   const createFolderAndStartRename = React.useCallback((scopeKey: string, parentId?: string | null) => {
     if (!scopeKey) return null;
     if (parentId && useSessionFoldersStore.getState().collapsedFolderIds.has(parentId)) toggleFolderCollapse(parentId);
-    const folder = createFolder(scopeKey, 'New folder', parentId);
+    const folder = createFolder(scopeKey, t('sessions.sidebar.folders.newFolderTitle'), parentId);
     startFolderRename(scopeKey, folder);
     return folder;
-  }, [createFolder, startFolderRename, toggleFolderCollapse]);
+  }, [createFolder, startFolderRename, t, toggleFolderCollapse]);
   const sessionActions = useSessionActions({
     mobileVariant,
     allowReselect,
@@ -181,13 +188,16 @@ function SessionTreeItemComponent({
         pinnedSessionIds={pinnedSessionIds}
       node={node}
       depth={depth}
+      ownsWork={ownsWork}
       groupDirectory={groupDirectory}
       projectId={projectId}
       folderOwnerKey={folderOwnerKey}
+      ownerProjectId={ownerProjectId}
       selectionScopeKey={selectionScopeKey}
       archivedBucket={archivedBucket}
       secondaryMeta={secondaryMeta}
       renderContext={renderContext}
+      detailed={detailed}
       rowKey={effectiveRowKey}
       dragKey={dragKey ?? rowKey ?? node.session.id}
       subtreeContainsEditing={renderExtras?.subtreeContainsEditing ?? EMPTY_SUBTREE_CONTAINS_EDITING}
@@ -196,7 +206,7 @@ function SessionTreeItemComponent({
       blockingBadgeSessionScopes={renderExtras?.blockingBadgeSessionScopes}
       relativeTimeTick={renderExtras?.relativeTimeTick}
     >
-      {renderChildren ? node.children.map((child) => (
+      {renderChildren ? listedChildren(node).map((child) => (
         <SessionTreeItem
           key={child.session.id}
            node={child}
@@ -223,7 +233,9 @@ function SessionTreeItemComponent({
            mobileVariant={mobileVariant}
            alwaysShowActions={alwaysShowActions}
            depth={depth + 1}
+           ownsWork={false}
            folderOwnerKey={folderOwnerKey}
+           ownerProjectId={ownerProjectId}
            selectionScopeKey={selectionScopeKey}
           {...childContext}
           renderExtras={childRenderExtrasFor?.(child)}
@@ -270,8 +282,8 @@ const areSessionTreeItemPropsEqual = (prev: SessionTreeItemProps, next: SessionT
   if ((prev.secondaryMeta?.branchLabel ?? null) !== (next.secondaryMeta?.branchLabel ?? null)) return false;
   if ((prev.secondaryMeta?.inSpace ?? false) !== (next.secondaryMeta?.inSpace ?? false)) return false;
   const scalarKeys = [
-    'depth', 'groupDirectory', 'projectId', 'folderOwnerKey', 'selectionScopeKey', 'archivedBucket',
-    'renderContext', 'rowKey', 'dragKey', 'renderChildren',
+    'depth', 'ownsWork', 'groupDirectory', 'projectId', 'folderOwnerKey', 'ownerProjectId', 'selectionScopeKey', 'archivedBucket',
+    'renderContext', 'detailed', 'rowKey', 'dragKey', 'renderChildren',
     'hasSessionSearchQuery', 'normalizedSessionSearchQuery',
     'editingId', 'editingRowKey', 'editTitle', 'openSidebarMenuKey',
     'mobileVariant', 'alwaysShowActions', 'allowReselect',

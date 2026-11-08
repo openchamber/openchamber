@@ -94,10 +94,10 @@ describe('GitHub live summaries', () => {
       .resolves.toEqual({ summaries: [{ number: 1 }], issueSummaries: [{ number: 2 }] });
     // A bound repository's account answers for its own pull requests.
     await liveSummaries(providerWith({ fetchPrSummaries }), { accountId: 'bound' });
-    expect(fetchPrSummaries).toHaveBeenLastCalledWith({ octokit: { bound: true }, refs: [], issueRefs: [] });
+    expect(fetchPrSummaries).toHaveBeenLastCalledWith({ octokit: { bound: true }, refs: [], issueRefs: [], discussionRefs: [], details: false });
     // A bound account that no longer resolves falls back to the host's current credential.
     await liveSummaries(providerWith({ fetchPrSummaries }), { accountId: 'gone' });
-    expect(fetchPrSummaries).toHaveBeenLastCalledWith({ octokit: {}, refs: [], issueRefs: [] });
+    expect(fetchPrSummaries).toHaveBeenLastCalledWith({ octokit: {}, refs: [], issueRefs: [], discussionRefs: [], details: false });
     await expect(liveSummaries(providerWith({ rateLimit: rateLimitModule(true) }))).resolves.toEqual({ status: 'unavailable' });
     const limitedNow = vi.fn(async () => { throw Object.assign(new Error('limit'), { status: 429 }); });
     await expect(liveSummaries(providerWith({ fetchPrSummaries: limitedNow }))).resolves.toEqual({ status: 'unavailable' });
@@ -131,7 +131,7 @@ describe('GitHub live summaries', () => {
     await expect(liveSummaries(providerWith({ fetchPrSummaries, octokitFor, octokitForAccount }), { instance: 'github.acme.com', accountId: 'github.acme.com#pat:7' }))
       .resolves.toEqual({ summaries: [{ number: 7 }], issueSummaries: [] });
     expect(fetchPrSummaries).toHaveBeenLastCalledWith({
-      octokit: { account: 'pat-user', openChamberHost: 'github.acme.com' }, refs: [], issueRefs: [],
+      octokit: { account: 'pat-user', openChamberHost: 'github.acme.com' }, refs: [], issueRefs: [], discussionRefs: [], details: false,
     });
     expect(octokitFor).not.toHaveBeenCalled();
   });

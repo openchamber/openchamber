@@ -1,7 +1,7 @@
 import React from 'react';
 import type { SourceControlIdentity } from '@/lib/api/types';
 import { useSourceControlAuthStore } from '@/stores/useSourceControlAuthStore';
-import { unknownProviderDescriptor, type SourceControlProviderDescriptor } from './providers/descriptor';
+import { unknownProviderDescriptor, type ChangeRequestTerm, type SourceControlProviderDescriptor } from './providers/descriptor';
 import { useSourceControlProviderRegistry } from './providers/registry';
 import { parseRepositoryItemUrl, type RepositoryItemUrlMatch } from './providers/urlMatchers';
 
@@ -26,6 +26,12 @@ export const createRepositoryUrlMatcher = (
     match: (url) => parseRepositoryItemUrl(url, descriptors, knownIdentities),
     descriptorOf: (provider) => byId.get(provider) ?? unknownProviderDescriptor(provider),
   };
+};
+
+/** What the provider of a change request link calls it; an address no provider claims reads as a pull request. */
+export const changeRequestTermOfUrl = (url: string, urls: RepositoryUrlMatcher): ChangeRequestTerm => {
+  const item = urls.match(url);
+  return item ? urls.descriptorOf(item.provider).terminology.changeRequest : 'pullRequest';
 };
 
 /**

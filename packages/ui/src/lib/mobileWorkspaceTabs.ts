@@ -2,19 +2,32 @@
  * The tabs of the phone's workspace drawer (and the tablet's workspace panel),
  * in their default order. The user's order and hidden set are stored per
  * device in `useUIStore`; both hold plain ids so a tab added in a later
- * release shows up for everyone, at the end of a saved order.
+ * release shows up for everyone, in its default place within a saved order.
+ * An id no longer listed (the old `mcp` tab, now a Status section) drops out.
  */
-const MOBILE_WORKSPACE_TABS = ['changes', 'files', 'terminal', 'notes', 'mcp'] as const;
+const MOBILE_WORKSPACE_TABS = ['status', 'changes', 'files', 'terminal', 'notes'] as const;
 
 export type MobileWorkspaceTab = (typeof MOBILE_WORKSPACE_TABS)[number];
 
 const isMobileWorkspaceTab = (id: string): id is MobileWorkspaceTab =>
   (MOBILE_WORKSPACE_TABS as readonly string[]).includes(id);
 
-/** Every tab in the user's order; tabs the saved order does not name follow in default order. */
+/**
+ * Every tab in the user's order. A tab the saved order does not name goes
+ * before every saved tab that follows it by default, so a new first tab
+ * (Status) is first for people who reordered the others too. Saved orders are
+ * always complete, so in practice only a tab a release added is missing.
+ */
 export const orderMobileWorkspaceTabs = (order: readonly string[]): MobileWorkspaceTab[] => {
   const ordered = order.filter(isMobileWorkspaceTab).filter((id, index, all) => all.indexOf(id) === index);
-  return [...ordered, ...MOBILE_WORKSPACE_TABS.filter((id) => !ordered.includes(id))];
+  MOBILE_WORKSPACE_TABS.forEach((id, index) => {
+    if (ordered.includes(id)) return;
+    const followers = MOBILE_WORKSPACE_TABS.slice(index + 1)
+      .map((next) => ordered.indexOf(next))
+      .filter((position) => position >= 0);
+    ordered.splice(followers.length > 0 ? Math.min(...followers) : ordered.length, 0, id);
+  });
+  return ordered;
 };
 
 /**

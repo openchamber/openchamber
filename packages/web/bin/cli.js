@@ -73,6 +73,7 @@ import {
   logStatus,
 } from './cli-output.js';
 import { applyConnectAttemptTimeout } from '../server/lib/network-defaults.js';
+import { bunVersionRunsBunPty } from '../server/lib/terminal/bun-pty-support.js';
 
 // The CLI process performs provider fetches (quota/usage, update notes) under
 // Node/undici, whose happy-eyeballs default aborts each connect attempt after
@@ -138,21 +139,26 @@ function isBunRuntime() {
   return typeof globalThis.Bun !== 'undefined';
 }
 
-function isBunInstalled() {
+function getInstalledBunVersion() {
   try {
     const result = spawnSync(BUN_BIN, ['--version'], {
-      stdio: 'ignore',
+      stdio: ['ignore', 'pipe', 'ignore'],
+      encoding: 'utf8',
       env: process.env,
       windowsHide: true,
     });
-    return result.status === 0;
+    return result.status === 0 ? result.stdout.trim() : null;
   } catch {
-    return false;
+    return null;
   }
 }
 
-function getPreferredServerRuntime() {
-  return isBunInstalled() ? 'bun' : 'node';
+// On older Bun the terminal has no working PTY backend (#6322), so the server runs on Node there.
+// The update restart reruns this CLI with the server's own runtime, which can be that older Bun.
+function getServerRuntimeBinary() {
+  if (bunVersionRunsBunPty(getInstalledBunVersion())) return BUN_BIN;
+  if (!isBunRuntime() || bunVersionRunsBunPty(globalThis.Bun.version)) return process.execPath;
+  return searchPathFor('node') ?? process.execPath;
 }
 
 async function checkOpenCodeCLI(onNotice) {
@@ -210,9 +216,8 @@ const commands = {
 
 commands.serve = createServeCommand({
   serverPath: path.join(__dirname, '..', 'server', 'index.js'),
-  bunBin: BUN_BIN,
   checkOpenCodeCLI,
-  getPreferredServerRuntime,
+  getServerRuntimeBinary,
   setForegroundServerActive(value) { foregroundServerActive = value; },
   setForegroundShutdown(handler) { foregroundShutdown = handler; },
 });

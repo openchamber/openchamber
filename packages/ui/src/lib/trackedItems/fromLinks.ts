@@ -1,9 +1,9 @@
-import type { TrackedThread, TrackedWorkItem } from './model';
+import type { TrackedThread, TrackedThreadKind, TrackedWorkItem } from './model';
 
 // The items behind a session's links, in the shape the server follows.
 
-/** A linked issue or change request on any source-control provider, as the item the server follows. */
-export const repositoryThread = <Kind extends 'pull' | 'issue'>(
+/** A linked issue, discussion or change request on any source-control provider, as the item the server follows. */
+export const repositoryThread = <Kind extends TrackedThreadKind>(
   kind: Kind,
   ref: { provider: string; instance: string; owner: string; repo: string; number: number },
 ): TrackedThread<Kind> => (

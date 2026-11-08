@@ -9,6 +9,7 @@ import { ChildStoreManager } from '@/sync/child-store';
 import { setSyncRefs } from '@/sync/sync-refs';
 import { createRuntimeOpencodeClient } from '@/lib/opencode/client';
 import { applyGlobalSessionStatusEvent, replaceGlobalSessionStatusById } from '@/sync/global-session-status';
+import { applySessionEventToGlobalSessions } from '@/sync/session-event-router';
 import { readGuestWorkspace, observeGuestWorkspace } from './workspace';
 import { guestMay } from './capabilities';
 
@@ -56,6 +57,49 @@ describe('extension workspace projection', () => {
       expect(fetch.mock.calls.length).toBe(0);
     } finally { fetch.mockRestore(); }
   });
+  test('forwards the session agent to extensions and publishes changes', async () => {
+    useGlobalSessionsStore.getState().applySnapshot([
+      { ...session('b-session', '/b-tree'), agent: 'fixer' },
+      session('a-session', '/a'),
+    ], [], 'ready');
+    const snapshot = readB();
+    expect(snapshot.sessions.map((entry) => [entry.id, entry.agent])).toEqual([['b-session', 'fixer']]);
+    const agents: (string | undefined)[] = [];
+    const stop = observeGuestWorkspace({ kind: 'sessions', projectId: 'b' }, 'board', (next) => {
+      if (next.kind === 'sessions') agents.push(next.sessions[0].agent);
+    });
+    try {
+      useGlobalSessionsStore.getState().applySnapshot([{ ...session('b-session', '/b-tree'), agent: 'review', time: { created: 1, updated: 2 } }], [], 'ready');
+      await Promise.resolve();
+      useGlobalSessionsStore.getState().applySnapshot([{ ...session('b-session', '/b-tree'), time: { created: 1, updated: 3 } }], [], 'ready');
+      await Promise.resolve();
+      expect(agents.length).toBe(3);
+      expect(agents).toEqual(['fixer', 'review', undefined]);
+      expect(Object.hasOwn(readB().sessions[0], 'agent')).toBe(false);
+    } finally { stop(); }
+  });
+  for (const updated of [1, 2]) {
+    test(`publishes agent patches immediately with updated timestamp ${updated}`, async () => {
+      const agents: (string | undefined)[] = [];
+      const stop = observeGuestWorkspace({ kind: 'sessions', projectId: 'b' }, 'board', (next) => {
+        if (next.kind === 'sessions') agents.push(next.sessions[0].agent);
+      });
+      try {
+        for (const agent of ['fixer', 'review']) {
+          applySessionEventToGlobalSessions({
+            type: 'session.patched',
+            properties: { sessionID: 'b-session', patch: { agent, time: { updated } } },
+          });
+          await Promise.resolve();
+          expect(readB().sessions[0].agent).toBe(agent);
+        }
+        expect(agents).toEqual([undefined, 'fixer', 'review']);
+      } finally {
+        stop();
+        applySessionEventToGlobalSessions({ type: 'session.idle', properties: { sessionID: 'b-session' } });
+      }
+    });
+  }
   test('a session in the project folder of a worktree belongs to the project and to that worktree', () => {
     useGlobalSessionsStore.getState().applySnapshot([
       session('b-session', '/b-tree/ai'),
@@ -115,6 +159,23 @@ describe('extension workspace projection', () => {
     applyGlobalSessionStatusEvent('/b-tree', { type: 'session.status', properties: { sessionID: 'b-session', status: { type: 'busy' } } });
     await Promise.resolve();
     expect(snapshots.length).toBe(baseline + 1);
+  });
+  test('links show every thread on the session, whoever linked it, without another extension data', () => {
+    useGlobalSessionsStore.getState().applySnapshot([{ ...session('b-session', '/b-tree'), metadata: { openchamber: { linked_issues: [
+      { id: 'link:https://gitlab.com/g/r/-/merge_requests/4', kind: 'external', thread: 'change', identifier: '!4', title: 'Agent MR', url: 'https://gitlab.com/g/r/-/merge_requests/4', linkedAt: 2 },
+      { id: 'openchamber/openchamber#7', number: 7, kind: 'issue', title: 'User issue', url: 'https://github.com/openchamber/openchamber/issues/7', linkedAt: 3 },
+      { id: 'guest:other:X-1', kind: 'guest', providerId: 'other', identifier: 'X-1', title: 'Other card', url: 'https://other.example/X-1', data: { secret: true }, linkedAt: 4 },
+      { id: 'guest:board:B-2', kind: 'guest', providerId: 'board', identifier: 'B-2', title: 'Own card', url: 'https://board.example/B-2', data: { column: 'todo' }, linkedAt: 5 },
+    ] } } }], [], 'ready');
+
+    const [record] = readB().sessions;
+    expect(record.items).toEqual([{ id: 'B-2', data: { column: 'todo' } }]);
+    expect(record.links).toEqual([
+      { title: 'Agent MR', url: 'https://gitlab.com/g/r/-/merge_requests/4', kind: 'change', linkedAt: 2 },
+      { title: 'User issue', url: 'https://github.com/openchamber/openchamber/issues/7', kind: 'issue', linkedAt: 3 },
+      { title: 'Other card', url: 'https://other.example/X-1', kind: 'issue', linkedAt: 4 },
+      { title: 'Own card', url: 'https://board.example/B-2', kind: 'issue', linkedAt: 5 },
+    ]);
   });
   test('blocking requests and retries expose state without conversation data', () => {
     const child = manager.ensureChild('/b-tree', { bootstrap: false });

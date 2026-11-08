@@ -12,16 +12,22 @@ import { execFile, spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 import updaterPkg from 'electron-updater';
+import { z } from 'zod';
 import { ElectronSshManager } from './ssh-manager.mjs';
 import { collectLocalFileDiagnostics, collectSshBufferDiagnostics } from '@openchamber/web/server/lib/diagnostics/local-files.js';
 import { replaceFileWithRetry } from './windows-file-replace.mjs';
+import { persistMainWindowState } from './window-state.mjs';
+import { attachWindowEvents, isNativeWindowVisible } from './window-events.mjs';
 import { createTrayController } from './tray.mjs';
+import { buildDockMenuTemplate, buildUnreadJumpList, isJumpListSessionId } from './dock-menu.mjs';
+import { createSessionLinkGate } from './session-link-gate.mjs';
 import { applyDevDockIdentity, applyDockBadge } from './dev-dock-identity.mjs';
 import { attachDevWindowTape } from './dev-window-tape.mjs';
 import { resolveManagedOpenCodeCwd } from './opencode-cwd.mjs';
 import { stopEmbeddedServer } from './server-shutdown.mjs';
 import { describeStartupEnvironmentOverrides, resolveStartupUrlProbePlan } from './startup-url-selection.mjs';
 import { clearAppCache } from './app-cache.mjs';
+import { hideWindow, isWindowHidePending, showWindow } from './window-hide.mjs';
 import { parseExternalUrl } from './external-url-policy.mjs';
 import {
   BACKGROUND_START_ARG,
@@ -32,6 +38,7 @@ import {
   buildMainWindowOptions,
   buildRendererAdditionalArguments,
   buildStartupSplashUrl,
+  isStartupSplashUrl,
   getLoginItemOptions,
   getWindowIconPath,
   installPackagedUiRequestHandler,
@@ -60,11 +67,18 @@ import {
   wasEarlyWindowClosed,
 } from './early-startup.mjs';
 import { sanitizeRuntimeRequestHeaders } from './runtime-request-headers.mjs';
+import {
+  LOCAL_HOST_ID,
+  buildStoredHostEntry,
+  normalizeHostUrl,
+  sanitizeClientTokenForStorage,
+  sanitizeHostRelayForStorage,
+} from './desktop-hosts-storage.mjs';
 import { isSplashColor, redactHostsConfigForRemote } from './remote-page-policy.mjs';
 import { connectDefaultSshInstanceAtStartup, resolveDefaultSshInstanceId } from './startup-ssh.mjs';
-import { normalizeNotificationInput, readTrimmedString, resolveHostEntryForRuntimeKey, runtimeKeyForDeepLinkHost, stampForwardedNotification } from './notification-host-routing.mjs';
+import { findReusableHostWindowIndex, normalizeNotificationInput, readTrimmedString, resolveHostEntryForRuntimeKey, resolveSenderHostId, runtimeKeyForDeepLinkHost, stampForwardedNotification } from './notification-host-routing.mjs';
 import { isPackagedUiRuntimeRequest } from './packaged-ui-routing.mjs';
-import { RUNTIME_CONFIG_SCRIPT_PATHNAME, claimRuntimeConfigScriptRequest, createRuntimeConfigGate, injectRuntimeConfig } from './packaged-runtime-config.mjs';
+import { RUNTIME_CONFIG_SCRIPT, RUNTIME_CONFIG_SCRIPT_PATHNAME, createRuntimeConfigGate, injectRuntimeConfig, isRuntimeConfigFrame } from './packaged-runtime-config.mjs';
 import { settleMainProcessCompileCache } from './compile-cache.mjs';
 import { probeDirectHostWithRetry } from './host-probe-policy.mjs';
 import { probeElectronHostWithDeadline } from './electron-host-probe.mjs';
@@ -72,7 +86,7 @@ import { requestRemoteHostUpdate } from './remote-host-update.mjs';
 import { assertUpdaterCapability, readLinuxPackageType } from './updater-capability.mjs';
 import { relaunchAfterExit } from './linux-relaunch.mjs';
 import { installLinuxPackage } from './linux-package-install.mjs';
-import { checkForDesktopUpdate } from './updater-check.mjs';
+import { checkForDesktopUpdate, downloadPendingDesktopUpdate, markDesktopUpdateDownloaded } from './updater-check.mjs';
 import { resolveUpdaterChannel } from './updater-channel.mjs';
 import { convertShortcutComboToAccelerator, MINI_CHAT_GLOBAL_SHORTCUT_SETTING_KEY, normalizeStoredShortcutCombo, selectMiniChatGlobalShortcutAction } from './mini-chat-global-shortcut.mjs';
 import {
@@ -86,15 +100,26 @@ import {
   selectQuakeToggleAction,
 } from './quake-mode.mjs';
 import { createContextMenuLabels, menuLabel, normalizeMenuLocale, roleMenuItem } from './menu-locales.mjs';
+import { menuAccelerator, normalizeMenuShortcuts } from './menu-shortcuts.mjs';
 import { createCopyLinkMenuHook } from './context-menu-clipboard.mjs';
-import { resolveUpdaterFeed } from './updater-feed.mjs';
+import { createCopyMenuAction } from './menu-copy-action.mjs';
+import {
+  CANARY_UPDATER_FEED,
+  PRODUCTION_UPDATER_FEED,
+  isCanaryVersion,
+  isUpdateChannel,
+  normalizeUpdateChannel,
+  resolveUpdaterFeed,
+} from './updater-feed.mjs';
 import {
   buildLinuxInstalledApps,
   buildLinuxOpenSpecs,
+  runLinuxSpecChain,
   fetchLinuxAppIcons,
   filterLinuxInstalledApps,
   readLinuxDesktopEntries,
 } from './linux-app-discovery.mjs';
+import { createWindowsAppDiscovery } from './windows-app-discovery.mjs';
 import {
   readLinuxAutostartEnabled,
   setLinuxAutostartEnabled,
@@ -117,6 +142,7 @@ import { attachRendererRecovery, takeSafeStart } from './renderer-recovery.mjs';
 import { createLoadFailureWarningFilter } from './load-failure-warnings.mjs';
 import { mintOutsideFileGrant } from '@openchamber/web/server/lib/fs/routes.js';
 import { fetchUpdateNotes } from '@openchamber/web/server/lib/changelog/update-notes.js';
+import { compareVersions } from '@openchamber/web/server/lib/version-order.js';
 import { applyConnectAttemptTimeout } from '@openchamber/web/server/lib/network-defaults.js';
 import { isNetworkAccessBlocked } from '@openchamber/web/server/lib/enterprise-mode.js';
 import { assignInjectedEnv } from '@openchamber/web/server/lib/injected-env.js';
@@ -257,7 +283,6 @@ const MINI_CHAT_WINDOW_HEIGHT = 760;
 const MINI_CHAT_MIN_WINDOW_WIDTH = 360;
 const MINI_CHAT_MIN_WINDOW_HEIGHT = 480;
 const MAX_CAPTURE_PAGE_RECT_AREA = 4_000_000;
-const LOCAL_HOST_ID = 'local';
 const LOCAL_DESKTOP_CLIENT_KIND = 'desktop-local';
 const LOCAL_DESKTOP_CLIENT_DEDUPE_KEY = 'desktop-local';
 // Remote hosts get a regular 'desktop' client (NOT 'desktop-local' — that kind
@@ -266,13 +291,13 @@ const LOCAL_DESKTOP_CLIENT_DEDUPE_KEY = 'desktop-local';
 const REMOTE_DESKTOP_CLIENT_KIND = 'desktop';
 const ENV_OVERRIDE_HOST_ID = '__env';
 const GITHUB_BUG_REPORT_URL = 'https://github.com/openchamber/openchamber/issues/new?template=bug_report.yml';
-const GITHUB_IDEAS_URL = 'https://github.com/openchamber/openchamber/discussions/categories/ideas';
+const GITHUB_FEATURE_REQUEST_URL = 'https://github.com/openchamber/openchamber/issues/new?template=feature_request.yml';
 const DISCORD_INVITE_URL = 'https://discord.gg/ZYRSdnwwKA';
 const INSTALLED_APPS_CACHE_TTL_SECS = 60 * 60 * 24;
 const INSTALLED_APPS_CACHE_FILE = 'discovered-apps.json';
 // Bump when discovery results change shape or matching semantics change, so cached
 // entries written by an older build are treated as stale and refresh immediately.
-const INSTALLED_APPS_CACHE_VERSION = 2;
+const INSTALLED_APPS_CACHE_VERSION = 3;
 const LINUX_DESKTOP_ENTRIES_CACHE_TTL_MS = 30_000;
 const OPENCODE_SHUTDOWN_GRACE_MS = 100;
 const { autoUpdater } = updaterPkg;
@@ -305,6 +330,12 @@ const state = {
   // path may end the process: the update sequence owns the exit.
   updateInstallPending: false,
   pendingUpdate: null,
+  // The channel the updater's feed was last pointed at (applyUpdaterChannel),
+  // and the update check in flight, if any.
+  updaterChannel: null,
+  updateCheck: null,
+  updateDownloadPromise: null,
+  updateDownloadVersion: null,
   unreachableHosts: new Set(),
   windowCounter: 1,
   // Quake Mode: the main window's normal geometry while it is showing the
@@ -512,9 +543,18 @@ const isLinuxPackageInstall = () => process.platform === 'linux'
   && app.isPackaged
   && ['deb', 'rpm'].includes(readLinuxPackageType());
 
+// `electron:dev` owns the HMR server and tears it down when Electron exits, and
+// app.relaunch() would rerun the relative `./entry.mjs` from the home directory
+// this process chdirs to. Under that script a relaunch exits with the code it
+// passes in, and the script starts Electron again.
+const devRelaunchExitCode = Number(process.env.OPENCHAMBER_ELECTRON_DEV_RELAUNCH_EXIT_CODE) || null;
+
+/** Arranges the next launch and returns the exit code to quit with. */
 const relaunchApp = () => {
+  if (devRelaunchExitCode) return devRelaunchExitCode;
   if (isLinuxPackageInstall()) relaunchAfterExit();
   else app.relaunch();
+  return 0;
 };
 
 const performConfirmedQuit = async ({ relaunch = false } = {}) => {
@@ -530,8 +570,7 @@ const performConfirmedQuit = async ({ relaunch = false } = {}) => {
   } catch (error) {
     log.warn('[electron] background shutdown failed:', error);
   } finally {
-    if (relaunch) relaunchApp();
-    app.exit(0);
+    app.exit(relaunch ? relaunchApp() : 0);
   }
 };
 
@@ -564,7 +603,7 @@ const requestQuitWithConfirmation = async () => {
   if (!visible) {
     const hidden = windows.find((window) => !window.isVisible());
     if (hidden) {
-      hidden.show();
+      showWindow(hidden);
       hidden.focus();
     }
   }
@@ -721,25 +760,6 @@ const getOrCreateDesktopInstallId = async () => {
   return typeof after === 'string' && after.trim() ? after.trim() : generated;
 };
 
-const normalizeHostUrl = (raw) => {
-  const trimmed = typeof raw === 'string' ? raw.trim() : '';
-  if (!trimmed) return null;
-  try {
-    const parsed = new URL(trimmed);
-    if (!['http:', 'https:'].includes(parsed.protocol)) return null;
-    parsed.hash = '';
-    return parsed.toString();
-  } catch {
-    return null;
-  }
-};
-
-const sanitizeHostUrlForStorage = (raw) => normalizeHostUrl(raw);
-const sanitizeClientTokenForStorage = (raw) => {
-  const token = typeof raw === 'string' ? raw.trim() : '';
-  return token.length > 0 ? token : null;
-};
-
 const sameOrigin = (left, right) => {
   if (!left || !right) return false;
   try {
@@ -808,56 +828,6 @@ const isLocalRuntimeUrl = (targetUrl) => {
   }
 };
 
-// A relay host is reached over the E2EE tunnel: it has no http(s) apiUrl, only a
-// { relayUrl (ws/wss), serverId, hostEncPubJwk } descriptor. The relay grant is a
-// one-time pairing artifact and is never persisted.
-const sanitizeHostRelayForStorage = (value) => {
-  if (!value || typeof value !== 'object') return null;
-  const relayUrl = typeof value.relayUrl === 'string' ? value.relayUrl.trim() : '';
-  const serverId = typeof value.serverId === 'string' ? value.serverId.trim() : '';
-  const jwk = value.hostEncPubJwk;
-  if (!relayUrl || !serverId || !jwk || typeof jwk !== 'object' || Array.isArray(jwk)) return null;
-  // Minimal EC public JWK shape check so a malformed descriptor is rejected at
-  // storage time instead of surfacing later as a tunnel handshake failure.
-  if (typeof jwk.kty !== 'string' || typeof jwk.crv !== 'string' || typeof jwk.x !== 'string') return null;
-  try {
-    const parsed = new URL(relayUrl);
-    if (parsed.protocol !== 'ws:' && parsed.protocol !== 'wss:') return null;
-  } catch {
-    return null;
-  }
-  return { relayUrl, serverId, hostEncPubJwk: jwk };
-};
-
-// Shared storage shape for a persisted host. A host may carry a direct HTTP
-// transport, a relay transport, or BOTH (a multi-transport device: direct on
-// the home network, relay away — mirrors the mobile connection model). Returns
-// null for entries that can't be stored (missing id, reserved 'local', or no
-// usable transport at all).
-const buildStoredHostEntry = (entry) => {
-  const id = typeof entry?.id === 'string' ? entry.id.trim() : '';
-  if (!id || id === LOCAL_HOST_ID) return null;
-  const clientToken = sanitizeClientTokenForStorage(entry?.clientToken);
-  const requestHeaders = sanitizeRuntimeRequestHeaders(entry?.requestHeaders);
-  const headerFields = Object.keys(requestHeaders).length > 0 ? { requestHeaders } : {};
-  const tokenField = clientToken ? { clientToken } : {};
-  const labelRaw = typeof entry?.label === 'string' && entry.label.trim() ? entry.label.trim() : '';
-
-  const relay = sanitizeHostRelayForStorage(entry?.relay);
-  const relayField = relay ? { relay } : {};
-  const directUrl = sanitizeHostUrlForStorage(entry?.url);
-  const apiUrl = directUrl ? (sanitizeHostUrlForStorage(entry?.apiUrl) || directUrl) : null;
-
-  if (directUrl) {
-    return { id, label: labelRaw || directUrl, url: directUrl, apiUrl, ...tokenField, ...headerFields, ...relayField };
-  }
-  if (relay) {
-    const url = `relay://${relay.serverId}`;
-    return { id, label: labelRaw || url, url, ...tokenField, ...headerFields, relay };
-  }
-  return null;
-};
-
 const readDesktopHostsConfig = () => {
   const root = readSettingsRoot();
   const hostsRaw = Array.isArray(root.desktopHosts) ? root.desktopHosts : [];
@@ -899,23 +869,15 @@ const writeDesktopHostsConfig = async (config) => {
 };
 
 const writeWindowState = async (browserWindow) => {
-  if (!browserWindow || browserWindow.isDestroyed()) return;
-  if (!state.mainWindow || browserWindow.id !== state.mainWindow.id) return;
   // Quake geometry is transient: persisting it would overwrite the user's
   // normal window bounds with the dropdown size.
-  if (state.quakeActive) return;
-
-  const bounds = browserWindow.getBounds();
-  await mutateSettingsRoot((root) => {
-    if (!browserWindow || browserWindow.isDestroyed()) return root;
-    root.desktopWindowState = {
-      x: bounds.x,
-      y: bounds.y,
-      width: Math.max(bounds.width, MIN_WINDOW_WIDTH),
-      height: Math.max(bounds.height, MIN_WINDOW_HEIGHT),
-      maximized: browserWindow.isMaximized(),
-      fullscreen: browserWindow.isFullScreen(),
-    };
+  await persistMainWindowState({
+    browserWindow,
+    mainWindowId: state.mainWindow?.id,
+    quakeActive: state.quakeActive,
+    minWidth: MIN_WINDOW_WIDTH,
+    minHeight: MIN_WINDOW_HEIGHT,
+    mutateSettingsRoot,
   });
 };
 
@@ -1080,18 +1042,11 @@ const buildPackagedUiUrl = (pathname = '/index.html') => new URL(pathname, `${pa
 // see packaged-runtime-config.mjs.
 const runtimeConfigGate = createRuntimeConfigGate();
 
-const buildRuntimeConfigScript = () => {
-  const apiBaseUrl = state.apiBaseUrl || state.sidecarUrl || '';
-  const localOrigin = state.localOrigin || state.sidecarUrl || '';
-  return `if(window.__OPENCHAMBER_LOCAL_ORIGIN__===undefined){window.__OPENCHAMBER_LOCAL_ORIGIN__=${JSON.stringify(localOrigin)};}if(window.__OPENCHAMBER_API_BASE_URL__===undefined){window.__OPENCHAMBER_API_BASE_URL__=${JSON.stringify(apiBaseUrl)};}if(window.__OPENCHAMBER_CLIENT_TOKEN__===undefined&&${JSON.stringify(state.clientToken || '')}){window.__OPENCHAMBER_CLIENT_TOKEN__=${JSON.stringify(state.clientToken || '')};}`;
-};
+// Settles when the launch's own startup has finished; a startup that fails
+// exits the app instead.
+const initialStartup = Promise.withResolvers();
 
-const injectRuntimeConfigIntoHtml = (html) => {
-  if (runtimeConfigGate.isHeld()) {
-    return injectRuntimeConfig(html, { pending: true, scriptBody: '', nonce: runtimeConfigGate.issueScriptNonce() });
-  }
-  return injectRuntimeConfig(html, { pending: false, scriptBody: buildRuntimeConfigScript() });
-};
+const injectRuntimeConfigIntoHtml = (html) => injectRuntimeConfig(html, { pending: runtimeConfigGate.isHeld() });
 
 /**
  * The browser panel's own session, kept separate from OpenChamber's.
@@ -1327,12 +1282,8 @@ const registerPackagedUiProtocol = () => {
     }
 
     if (new URL(request.url).pathname === RUNTIME_CONFIG_SCRIPT_PATHNAME) {
-      // Carries the client token: only the document it was issued to gets it.
-      if (!claimRuntimeConfigScriptRequest(runtimeConfigGate, request)) {
-        return new Response('', { status: 404, headers: { 'Cache-Control': 'no-store' } });
-      }
       await runtimeConfigGate.whenReleased();
-      return new Response(buildRuntimeConfigScript(), {
+      return new Response(RUNTIME_CONFIG_SCRIPT, {
         headers: { 'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': 'no-store' },
       });
     }
@@ -1394,7 +1345,7 @@ const focusForegroundWindow = () => {
   // unless app.focus runs first.
   if (process.platform === 'darwin') app.focus({ steal: true });
   if (target.isMinimized()) target.restore();
-  target.show();
+  showWindow(target);
   target.focus();
   if (typeof target.moveTop === 'function') target.moveTop();
 };
@@ -1493,7 +1444,20 @@ const maybeShowNativeNotification = (rawInput) => {
   const release = () => { activeNotifications.delete(notification); };
 
   notification.on('click', () => {
-    focusForegroundWindow();
+    // The open-session route below hands a session owned by another runtime to
+    // the window that shows that runtime, and focuses it there. Pull the
+    // receiving window forward only when it is the window that will open the
+    // session: when the click names no runtime, when the window has not
+    // reported its runtime yet, or when both name the same instance. Otherwise
+    // focusing first raises the window the user did not click for, so activate
+    // the app instead: macOS needs that before the window the route raises can
+    // come forward, whether the route reuses a window or creates one.
+    const receivingKey = readTrimmedString(primaryEventWindow()?.__ocRuntimeKey);
+    if (!runtimeKey || !receivingKey || runtimeKey === receivingKey) {
+      focusForegroundWindow();
+    } else if (process.platform === 'darwin') {
+      app.focus({ steal: true });
+    }
     if (sessionId) {
       // Name the runtime that owns the session so the receiving window can
       // tell a session of its own instance from one of another, and route
@@ -1981,13 +1945,16 @@ const emitToAllWindows = (event, detail) => {
 // Session navigation must land in ONE window. Broadcasting it makes every
 // open window adopt the same session, hijacking whatever the other windows
 // were doing.
-const emitToPrimaryWindow = (event, detail) => {
+const primaryEventWindow = () => {
   const windows = BrowserWindow.getAllWindows().filter((window) => !window.isDestroyed());
-  if (windows.length === 0) return;
-  const target = (state.mainWindow && !state.mainWindow.isDestroyed())
+  if (windows.length === 0) return null;
+  return (state.mainWindow && !state.mainWindow.isDestroyed())
     ? state.mainWindow
     : windows.find((window) => window.isFocused()) || windows.find((window) => window.isVisible()) || windows[0];
-  emitToWindow(target, event, detail);
+};
+
+const emitToPrimaryWindow = (event, detail) => {
+  emitToWindow(primaryEventWindow(), event, detail);
 };
 
 const setTaskbarProgress = (value) => {
@@ -2000,6 +1967,9 @@ const setTaskbarProgress = (value) => {
 };
 
 const pendingDeepLinks = [];
+let pendingMarkAllRead = process.platform === 'win32' && process.argv.includes('--mark-all-read');
+let mainWindowTrayActionsReady = false;
+let lastJumpListKey = '';
 const PENDING_SESSION_LINK_FALLBACK_MS = 10_000;
 
 // A session link (`openchamber://session/<id>`) can also name the message to
@@ -2008,6 +1978,7 @@ const PENDING_SESSION_LINK_FALLBACK_MS = 10_000;
 // another host in that host's window, as for a notification click.
 const sessionDeepLinkTarget = (link) => {
   const target = { sessionId: link.value };
+  if (readDeepLinkQueryParam(link.raw, 'source') === 'jump-list') target.requireKnownSession = true;
   const messageId = readDeepLinkQueryParam(link.raw, 'message');
   if (messageId) target.messageId = messageId;
   const runtimeKey = runtimeKeyForDeepLinkHost(readDeepLinkQueryParam(link.raw, 'host'));
@@ -2028,6 +1999,31 @@ const takePendingSessionDeepLinks = () => {
   return taken;
 };
 
+// `openchamber://extensions/install?url=…`: any web page can raise this link, so
+// only an https repository passes, and the app asks before it fetches anything.
+const extensionInstallUrl = (link) => {
+  if (link.value !== 'install') return null;
+  const value = readDeepLinkQueryParam(link.raw, 'url');
+  try {
+    const url = new URL(value ?? '');
+    return url.protocol === 'https:' ? url.href : null;
+  } catch {
+    return null;
+  }
+};
+
+const takePendingExtensionInstalls = () => {
+  const taken = [];
+  for (let index = pendingDeepLinks.length - 1; index >= 0; index -= 1) {
+    const link = pendingDeepLinks[index];
+    if (link.type !== 'extensions') continue;
+    pendingDeepLinks.splice(index, 1);
+    const url = extensionInstallUrl(link);
+    if (url) taken.unshift(url);
+  }
+  return taken;
+};
+
 const parseDeepLink = (raw) => {
   if (typeof raw !== 'string') return null;
   const trimmed = raw.trim();
@@ -2041,6 +2037,8 @@ const parseDeepLink = (raw) => {
     const value = segments.length > 0
       ? decodeURIComponent(segments.join('/'))
       : '';
+    if (url.searchParams.get('source') === 'jump-list'
+      && (type !== 'session' || !isJumpListSessionId(value) || segments.length !== 1)) return null;
     return { type, value, raw: trimmed };
   } catch {
     return null;
@@ -2119,7 +2117,7 @@ const confirmConnectDeepLink = async (payload) => {
   // BEFORE writing anything to the hosts config. Never surface the token.
   const visible = BrowserWindow.getAllWindows().find((window) => !window.isDestroyed() && window.isVisible());
   if (visible) {
-    visible.show();
+    showWindow(visible);
     visible.focus();
   }
   const options = {
@@ -2175,7 +2173,7 @@ const dispatchDeepLink = (link) => {
       : BrowserWindow.getAllWindows().find((window) => !window.isDestroyed());
     if (target) {
       if (target.isMinimized()) target.restore();
-      target.show();
+      showWindow(target);
       target.focus();
     }
     emitToAllWindows('openchamber:deep-link-focus', { reason: link.value || null });
@@ -2191,6 +2189,16 @@ const dispatchDeepLink = (link) => {
     emitToPrimaryWindow('openchamber:open-session', sessionDeepLinkTarget(link));
     return;
   }
+  if (link.type === 'extensions') {
+    const url = extensionInstallUrl(link);
+    if (!url) {
+      log.warn('[electron] invalid extension install link');
+      return;
+    }
+    focusForegroundWindow();
+    emitToPrimaryWindow('openchamber:install-extension', { url });
+    return;
+  }
   if (link.type === 'host' && link.value) {
     void switchToHostById(link.value);
     return;
@@ -2200,13 +2208,13 @@ const dispatchDeepLink = (link) => {
 
 // Session links wait for the renderer to take them (desktop_take_pending_session_links)
 // once its listener is mounted: an event sent when the page has merely loaded
-// reached no listener on a cold start and the link was lost. The late flush
-// still delivers them to a renderer that never asks (an older remote UI).
+// reached no listener on a cold start and the link was lost. The gate's fallback
+// still delivers them to a renderer that never asks (a remote page).
 const flushPendingDeepLinks = ({ includeSessions }) => {
   const kept = [];
   while (pendingDeepLinks.length > 0) {
     const link = pendingDeepLinks.shift();
-    if (link.type === 'session' && !includeSessions) {
+    if ((link.type === 'session' || link.type === 'extensions') && !includeSessions) {
       kept.push(link);
       continue;
     }
@@ -2214,6 +2222,11 @@ const flushPendingDeepLinks = ({ includeSessions }) => {
   }
   pendingDeepLinks.push(...kept);
 };
+
+const mainWindowSessionLinkGate = createSessionLinkGate({
+  fallbackMs: PENDING_SESSION_LINK_FALLBACK_MS,
+  onFallback: () => flushPendingDeepLinks({ includeSessions: true }),
+});
 
 const isMainWindowReadyForDeepLink = () =>
   Boolean(state.mainWindow)
@@ -2224,7 +2237,7 @@ const handleDeepLinks = (urls) => {
   for (const raw of urls) {
     const parsed = parseDeepLink(raw);
     if (!parsed) continue;
-    if (isMainWindowReadyForDeepLink()) {
+    if (isMainWindowReadyForDeepLink() && ((parsed.type !== 'session' && parsed.type !== 'extensions') || mainWindowSessionLinkGate.isListening())) {
       dispatchDeepLink(parsed);
     } else {
       pendingDeepLinks.push(parsed);
@@ -2262,6 +2275,16 @@ const closeTabOrWindow = () => {
   target.close();
 };
 
+// The combos the renderer sends for menu items Settings can rebind. Until the
+// first update the menus use their built-in keys.
+let menuShortcuts = {};
+let appMenuLocale = 'en';
+const menuKey = (id, fallback) => menuAccelerator(menuShortcuts, id, fallback);
+
+const applyApplicationMenu = () => {
+  Menu.setApplicationMenu(process.platform === 'darwin' ? buildMacMenu(appMenuLocale) : buildAutoHiddenMenu());
+};
+
 const getMenuTargetWindow = () => {
   const focused = BrowserWindow.getFocusedWindow();
   if (focused && !focused.isDestroyed()) return focused;
@@ -2282,6 +2305,17 @@ const dispatchMenuAction = (action) => {
 };
 
 const dispatchAddSelectionToChat = () => dispatchMenuAction('add-selection-to-chat');
+
+// Copy is not a plain role because the app's own copy action still runs for
+// app pages; the shared handler routes the clipboard write to whatever
+// webContents has focus, DevTools windows and guest pages included (#6012).
+const handleCopyAction = createCopyMenuAction({
+  getFocusedWebContents: () => webContents.getFocusedWebContents(),
+  getAppWindows: () => BrowserWindow.getAllWindows().filter(
+    (window) => !window.isDestroyed() && !isBrowserPanelPopup(window),
+  ),
+  dispatchAppCopy: (window) => dispatchDomEventToWindow(window, 'openchamber:menu-action', 'copy'),
+});
 
 // Mini-chat draft windows are not deduplicated, so this must reach the renderer
 // exactly once — emitToWindow alone (no DOM-event double dispatch). The renderer
@@ -2326,10 +2360,10 @@ const handleMiniChatGlobalShortcut = () => {
   if (action.type === 'hide' || action.type === 'focus') {
     const target = BrowserWindow.fromId(action.windowId);
     if (!target || target.isDestroyed()) return;
-    if (action.type === 'hide') {
-      target.hide();
+    if (action.type === 'hide' && !isWindowHidePending(target)) {
+      hideWindow(target);
     } else {
-      if (!target.isVisible()) target.show();
+      showWindow(target);
       target.focus();
     }
     return;
@@ -2460,7 +2494,7 @@ const showQuakeWindow = (browserWindow, heightFraction) => {
     if (displayBounds) {
       browserWindow.setBounds(computeQuakeBounds(displayBounds, heightFraction));
     }
-    if (!browserWindow.isVisible()) browserWindow.show();
+    showWindow(browserWindow);
     browserWindow.focus();
     browserWindow.moveTop();
     state.quakeActive = true;
@@ -2471,14 +2505,14 @@ const showQuakeWindow = (browserWindow, heightFraction) => {
   }
 };
 
-const hideQuakeWindow = (browserWindow) => {
+const hideQuakeWindow = (browserWindow, { restoreFullScreen = true } = {}) => {
   if (!browserWindow || browserWindow.isDestroyed()) return;
   try {
     debounceWindowStatePersist(browserWindow, true);
   } catch {
     // Persist is best-effort; hiding must not fail because of it.
   }
-  browserWindow.hide();
+  hideWindow(browserWindow, process.platform, { restoreFullScreen });
 };
 
 // Leaves the dropdown and puts the normal window back: the bounds and the
@@ -2506,7 +2540,7 @@ const handleQuakeModeGlobalShortcut = () => {
   const mainWindow = state.mainWindow && !state.mainWindow.isDestroyed() ? state.mainWindow : null;
   const action = selectQuakeToggleAction({
     windowExists: mainWindow !== null,
-    isVisible: mainWindow?.isVisible() === true,
+    isVisible: mainWindow?.isVisible() === true && !isWindowHidePending(mainWindow),
     isMinimized: mainWindow?.isMinimized() === true,
     isFocused: mainWindow?.isFocused() === true,
   });
@@ -2592,6 +2626,28 @@ const canUseTitleBarOverlay = (browserWindow) => (
   !browserWindow.isDestroyed()
 );
 
+// Whether a main-frame navigation lands on this app's own UI. Pages served by
+// the app keep the runtime a window reported; any other page drops it.
+const isAppUiNavigationTarget = (raw) => {
+  if (!raw) return false;
+  let url;
+  try {
+    url = new URL(raw);
+  } catch {
+    return false;
+  }
+  if (url.protocol === `${UI_PROTOCOL}:`) return true;
+  for (const base of [state.localUiUrl, state.localOrigin, state.sidecarUrl]) {
+    if (!base) continue;
+    try {
+      if (new URL(base).origin === url.origin) return true;
+    } catch {
+      // A malformed configured base cannot match anything.
+    }
+  }
+  return false;
+};
+
 // `adopt` hands over the window the entry module created before this module
 // loaded; it is already on the splash and shows itself on ready-to-show.
 const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {}, adopt = null }) => {
@@ -2637,6 +2693,7 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {}, 
   browserWindow.on('blur', () => {
     state.focusedWindowIds.delete(browserWindow.id);
   });
+  attachWindowEvents(browserWindow, emitToWindow);
 
   // Traffic lights disappear during dock-restore animation when using
   // titleBarStyle:'hidden' + custom trafficLightPosition. macOS caches a
@@ -2664,9 +2721,6 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {}, 
   }
 
   browserWindow.on('resize', () => {
-    if (process.platform === 'darwin') {
-      emitToWindow(browserWindow, 'openchamber:window-resized');
-    }
     debounceWindowStatePersist(browserWindow, false);
   });
   browserWindow.on('maximize', () => {
@@ -2684,13 +2738,13 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {}, 
     if (!state.quitRequested && shouldHideMainWindowToTray(browserWindow)) {
       debounceWindowStatePersist(browserWindow, true);
       event.preventDefault();
-      browserWindow.hide();
+      hideWindow(browserWindow, process.platform, { restoreFullScreen: false });
       return;
     }
 
     if (!state.quitRequested && shouldHideMainWindowToQuake(browserWindow)) {
       event.preventDefault();
-      hideQuakeWindow(browserWindow);
+      hideQuakeWindow(browserWindow, { restoreFullScreen: false });
       return;
     }
 
@@ -2702,7 +2756,7 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {}, 
       if (remainingVisible <= 1) {
         debounceWindowStatePersist(browserWindow, true);
         event.preventDefault();
-        browserWindow.hide();
+        hideWindow(browserWindow, process.platform, { restoreFullScreen: false });
         return;
       }
     }
@@ -2712,6 +2766,8 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {}, 
   browserWindow.on('closed', () => {
     state.focusedWindowIds.delete(browserWindow.id);
     if (state.mainWindow && browserWindow.id === state.mainWindow.id) {
+      mainWindowTrayActionsReady = false;
+      mainWindowSessionLinkGate.documentReplaced();
       state.mainWindow = null;
     }
     if (BrowserWindow.getAllWindows().length === 0) {
@@ -2796,6 +2852,22 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {}, 
     void shell.openExternal(url).catch(() => {});
   });
 
+  // The runtime key says which instance this window shows, and only a page of
+  // this app can keep saying it. A page loaded in its place reports nothing, so
+  // a kept key would make the reuse lookup raise this window for an instance it
+  // no longer shows. Dropping it lets the creation-time host tag answer, the
+  // same fallback a window that has not reported yet uses.
+  browserWindow.webContents.on('did-navigate', (_event, url) => {
+    if (!isAppUiNavigationTarget(url)) browserWindow.__ocRuntimeKey = null;
+    // On commit: a navigation that only started can still leave this document in place.
+    if (browserWindow === state.mainWindow) mainWindowSessionLinkGate.documentReplaced();
+  });
+  browserWindow.webContents.on('did-start-navigation', (details) => {
+    if (browserWindow === state.mainWindow && details.isMainFrame && !details.isSameDocument) {
+      mainWindowTrayActionsReady = false;
+    }
+  });
+
   // An extension frame navigating itself would carry data out in the URL;
   // refused before the request (see guest-frame-navigation.mjs).
   browserWindow.webContents.on('will-frame-navigate', (details) => {
@@ -2849,11 +2921,12 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {}, 
         documentClass: classifyStartupDocument(browserWindow.webContents.getURL()),
       });
     }
-    if (state.mainWindow && browserWindow.id === state.mainWindow.id && pendingDeepLinks.length > 0) {
-      const timer = setTimeout(() => flushPendingDeepLinks({ includeSessions: false }), 400);
-      if (typeof timer?.unref === 'function') timer.unref();
-      const lateTimer = setTimeout(() => flushPendingDeepLinks({ includeSessions: true }), PENDING_SESSION_LINK_FALLBACK_MS);
-      if (typeof lateTimer?.unref === 'function') lateTimer.unref();
+    if (state.mainWindow && browserWindow.id === state.mainWindow.id) {
+      if (pendingDeepLinks.length > 0) {
+        const timer = setTimeout(() => flushPendingDeepLinks({ includeSessions: mainWindowSessionLinkGate.isListening() }), 400);
+        if (typeof timer?.unref === 'function') timer.unref();
+      }
+      if (!isStartupSplashUrl(browserWindow.webContents.getURL())) mainWindowSessionLinkGate.applicationDocumentLoaded();
     }
   });
 
@@ -2864,7 +2937,7 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {}, 
           documentClass: classifyStartupDocument(browserWindow.webContents.getURL()),
         });
       }
-      browserWindow.show();
+      showWindow(browserWindow);
       browserWindow.focus();
     });
   }
@@ -2956,7 +3029,7 @@ const activateMainWindow = async (url, localOrigin, bootOutcome, runtimeConfig =
     } else {
       await navigateWindow(mainWindow, url, { allowAbort: true });
     }
-    mainWindow.show();
+    showWindow(mainWindow);
     mainWindow.focus();
     return mainWindow;
   }
@@ -2972,6 +3045,15 @@ const activateMainWindow = async (url, localOrigin, bootOutcome, runtimeConfig =
 
 const openMainWindow = async () => {
   if (!state.startupResolved) {
+    // The tray, a second launch, a deep link or a shortcut can ask for a window
+    // while startup still runs. Resolving next to it would start the in-process
+    // server a second time, and that run replaces the first one's listener.
+    await initialStartup.promise;
+    // A foreground startup has opened the window this caller asked for.
+    if (state.mainWindow && !state.mainWindow.isDestroyed()) return state.mainWindow;
+  }
+
+  if (!state.startupResolved) {
     const { initialUrl, localOrigin, bootOutcome, apiBaseUrl, clientToken, requestHeaders } = await resolveInitialUrl();
     return activateMainWindow(initialUrl, localOrigin, bootOutcome, { apiBaseUrl, clientToken, requestHeaders });
   }
@@ -2981,6 +3063,13 @@ const openMainWindow = async () => {
   const host = config.defaultHostId && config.defaultHostId !== LOCAL_HOST_ID
     ? config.hosts.find((entry) => entry.id === config.defaultHostId)
     : null;
+  if (host && state.bootOutcome?.sshStartupFallbackHostId === host.id) {
+    return activateMainWindow(localUiUrl, state.localOrigin, state.bootOutcome, {
+      apiBaseUrl: state.sidecarUrl || state.localOrigin || '',
+      clientToken: readDesktopLocalClientToken(),
+      requestHeaders: {},
+    });
+  }
   const relayHost = host && host.relay && typeof host.relay === 'object' ? host : null;
   if (relayHost) {
     // Relay hosts have no reachable HTTP base. Boot the LOCAL UI with the local
@@ -3069,12 +3158,34 @@ const openHostWindow = async (host, route = null, { reuseOpenWindow = false } = 
   // A link to a host already open in a window lands in that window: brought
   // to the front and moved to the session there, instead of one more window
   // per click. "New window" from the switcher always opens one.
-  const existing = reuseOpenWindow
-    ? BrowserWindow.getAllWindows().find((window) => !window.isDestroyed() && window.__ocHostWindowId === host.id)
-    : null;
+  //
+  // A window is identified by the instance its renderer reports (boot and every
+  // switch), which a window that was opened for another instance and switched
+  // since no longer claims through its creation-time tag. A window that has not
+  // reported yet (still booting) falls back to the tag it was created with.
+  const allWindows = reuseOpenWindow ? BrowserWindow.getAllWindows() : [];
+  const reusableIndex = reuseOpenWindow
+    ? findReusableHostWindowIndex(
+      allWindows.map((window) => (window.isDestroyed() ? null : {
+        runtimeKey: window.__ocRuntimeKey,
+        hostWindowId: window.__ocHostWindowId,
+      })),
+      host.id,
+      {
+        hosts: readDesktopHostsConfig()?.hosts || [],
+        localUrl: state.sidecarUrl || null,
+        localClientToken: readDesktopLocalClientToken(),
+      },
+    )
+    : -1;
+  const existing = reusableIndex >= 0 ? allWindows[reusableIndex] : null;
   if (existing) {
+    // macOS: raising a window does not activate a backgrounded app, so a click
+    // or a link that lands here can leave the window behind another app.
+    // Activate first, the same way focusForegroundWindow does.
+    if (process.platform === 'darwin') app.focus({ steal: true });
     if (existing.isMinimized()) existing.restore();
-    existing.show();
+    showWindow(existing);
     existing.focus();
     if (!route) return;
     // A window still booting has no listener yet; it reloads on the route.
@@ -3186,7 +3297,7 @@ const createMiniChatWindow = async ({ mode, sessionId = '', directory = '', proj
     const existing = state.miniChatWindowsBySession.get(sessionWindowKey);
     if (existing && !existing.isDestroyed()) {
       if (existing.isMinimized()) existing.restore();
-      existing.show();
+      showWindow(existing);
       existing.focus();
       return existing;
     }
@@ -3267,7 +3378,7 @@ const createMiniChatWindow = async ({ mode, sessionId = '', directory = '', proj
   }
 
   browserWindow.once('ready-to-show', () => {
-    browserWindow.show();
+    showWindow(browserWindow);
     browserWindow.focus();
   });
 
@@ -3358,9 +3469,7 @@ const resolveMiniChatRuntimeConfig = (browserWindow, args = {}) => {
 const showSplashStatus = (text) => {
   const mainWindow = state.mainWindow;
   if (!mainWindow || mainWindow.isDestroyed()) return;
-  // Development shows the splash as a data: URL, packaged builds as /__splash.
-  const url = mainWindow.webContents.getURL();
-  if (!url.startsWith('data:') && !url.endsWith('/__splash')) return;
+  if (!isStartupSplashUrl(mainWindow.webContents.getURL())) return;
   const script = `(() => {
     const show = () => {
     const stack = document.querySelector('.stack');
@@ -3541,15 +3650,40 @@ const resolveInitialUrl = async ({ onPlainLocalBoot = null } = {}) => {
   return { initialUrl, localOrigin, localUiUrl, bootOutcome, apiBaseUrl, clientToken, requestHeaders };
 };
 
-const compareSemver = (left, right) => {
-  const a = String(left || '').replace(/^v/, '').split('.').map((value) => Number.parseInt(value || '0', 10));
-  const b = String(right || '').replace(/^v/, '').split('.').map((value) => Number.parseInt(value || '0', 10));
-  const length = Math.max(a.length, b.length);
-  for (let index = 0; index < length; index += 1) {
-    const diff = (a[index] || 0) - (b[index] || 0);
-    if (diff !== 0) return diff;
+const UPDATER_E2E_BUILD = typeof __OPENCHAMBER_UPDATER_E2E_BUILD__ !== 'undefined'
+  && __OPENCHAMBER_UPDATER_E2E_BUILD__ === true;
+
+const readUpdateChannel = () => normalizeUpdateChannel(readSettingsRoot().desktopUpdateChannel, APP_VERSION);
+
+/**
+ * Points the updater at the chosen channel's feed; every check re-reads the
+ * stored channel, so a switch takes effect on the next check without a
+ * restart. Stable from a Canary build allows the downgrade to the latest
+ * release, which is the way back; a release build never downgrades.
+ */
+const applyUpdaterChannel = (channel) => {
+  if (state.updaterChannel === channel) return;
+  // An update found on the other channel is not this channel's; the next
+  // check starts clean (a failed feed otherwise keeps it, #5921).
+  if (state.updaterChannel !== null) state.pendingUpdate = null;
+  const feed = resolveUpdaterFeed({ testBuild: UPDATER_E2E_BUILD, channel });
+  // Both published feeds carry the Windows ARM64 manifest; the E2E fixture does not.
+  const updaterChannel = feed === PRODUCTION_UPDATER_FEED || feed === CANARY_UPDATER_FEED
+    ? resolveUpdaterChannel({ platform: process.platform, architecture: process.arch })
+    : null;
+  if (updaterChannel) {
+    autoUpdater.channel = updaterChannel;
   }
-  return 0;
+  autoUpdater.setFeedURL(feed);
+  autoUpdater.allowDowngrade = channel === 'stable' && isCanaryVersion(APP_VERSION);
+  state.updaterChannel = channel;
+  log.info('[electron] updater feed configured', {
+    channel,
+    provider: feed.provider,
+    target: feed.provider === 'github' ? `${feed.owner}/${feed.repo}` : feed.url,
+    manifest: updaterChannel || 'latest',
+    allowDowngrade: autoUpdater.allowDowngrade,
+  });
 };
 
 const setupAutoUpdater = () => {
@@ -3562,22 +3696,7 @@ const setupAutoUpdater = () => {
   autoUpdater.fullChangelog = true;
   autoUpdater.disableWebInstaller = false;
   autoUpdater.logger = log;
-
-  const testBuild = typeof __OPENCHAMBER_UPDATER_E2E_BUILD__ !== 'undefined'
-    && __OPENCHAMBER_UPDATER_E2E_BUILD__ === true;
-  const feed = resolveUpdaterFeed({ testBuild });
-  const updaterChannel = feed.provider === 'github'
-    ? resolveUpdaterChannel({ platform: process.platform, architecture: process.arch })
-    : null;
-  if (updaterChannel) {
-    autoUpdater.channel = updaterChannel;
-  }
-  autoUpdater.setFeedURL(feed);
-  log.info('[electron] updater feed configured', {
-    provider: feed.provider,
-    target: feed.provider === 'github' ? `${feed.owner}/${feed.repo}` : feed.url,
-    channel: updaterChannel || 'latest',
-  });
+  applyUpdaterChannel(readUpdateChannel());
 
   autoUpdater.on('download-progress', (progress) => {
     const total = Number(progress.total || 0);
@@ -3596,10 +3715,7 @@ const setupAutoUpdater = () => {
   autoUpdater.on('update-downloaded', (info) => {
     log.info(`[electron] update-downloaded version=${info?.version || 'unknown'}`);
     setTaskbarProgress(-1);
-    if (state.pendingUpdate) {
-      state.pendingUpdate.downloaded = true;
-      if (info?.downloadedFile) state.pendingUpdate.downloadedFile = info.downloadedFile;
-    }
+    markDesktopUpdateDownloaded(state.pendingUpdate, info);
   });
 
   autoUpdater.on('error', (err) => {
@@ -3692,6 +3808,7 @@ const installDownloadedUpdate = () => new Promise((resolve, reject) => {
         await installLinuxPackage({
           packageType: readLinuxPackageType(),
           file: state.pendingUpdate?.downloadedFile,
+          downgrade: state.pendingUpdate?.downgrade === true,
         });
         settled = true;
         autoUpdater.off('error', fail);
@@ -3724,9 +3841,13 @@ const installDownloadedUpdate = () => new Promise((resolve, reject) => {
   });
 });
 
-const parseRelevantChangelogNotes = (fromVersion, toVersion) => fetchUpdateNotes(fromVersion, toVersion, compareSemver);
+const parseRelevantChangelogNotes = (fromVersion, toVersion) => fetchUpdateNotes(fromVersion, toVersion, compareVersions);
 
 const buildInstalledAppsCachePath = () => path.join(path.dirname(settingsFilePath()), INSTALLED_APPS_CACHE_FILE);
+
+// The renderer asks again while a first scan is still running (it retries an
+// empty answer), so later requests share the scan in flight.
+let installedAppsRefresh = null;
 
 // Async variants. sips + mdfind via spawnSync blocked the Electron main event
 // loop for 2-3s on boot (22 OPEN_IN_APPS × ~200 ms each). Use execFile promises
@@ -3832,52 +3953,6 @@ const buildPlatformInstalledApps = async (apps) => {
   return buildInstalledApps(apps);
 };
 
-const spawnDetachedLinux = (program, args) => new Promise((resolve, reject) => {
-  const child = spawn(program, args, {
-    detached: true,
-    stdio: 'ignore',
-  });
-  let settled = false;
-  const finish = (callback, value) => {
-    if (settled) return;
-    settled = true;
-    callback(value);
-  };
-  child.once('error', (error) => finish(reject, error));
-  child.once('spawn', () => {
-    child.unref();
-    finish(resolve);
-  });
-});
-
-const runLinuxSpecChain = async (specs, appName) => {
-  if (!Array.isArray(specs) || specs.length === 0) {
-    throw new Error(`Failed to open in ${appName}: no launch candidates`);
-  }
-
-  const failures = [];
-  for (const spec of specs) {
-    if (spec.kind === 'default') {
-      if (spec.targetKind === 'file') {
-        shell.showItemInFolder(spec.targetPath);
-        return;
-      }
-      const errorMessage = await shell.openPath(spec.targetPath);
-      if (!errorMessage) return;
-      failures.push(`default opener: ${errorMessage}`);
-      continue;
-    }
-
-    try {
-      await spawnDetachedLinux(spec.program, spec.args);
-      return;
-    } catch (error) {
-      failures.push(`${spec.program}: ${error instanceof Error ? error.message : String(error)}`);
-    }
-  }
-  throw new Error(`Failed to open in ${appName}: ${failures.join('; ')}`);
-};
-
 const parseSshConfigImports = () => {
   const sshConfigPath = path.join(os.homedir(), '.ssh', 'config');
   if (!fs.existsSync(sshConfigPath)) return [];
@@ -3939,275 +4014,13 @@ const CLI_BY_APP_ID = {
   zed: 'zed',
 };
 
-const WINDOWS_CLI_BY_APP_ID = {
-  vscode: 'code.cmd',
-  cursor: 'cursor.cmd',
-  vscodium: 'codium.cmd',
-  windsurf: 'windsurf.cmd',
-  zed: 'zed.cmd',
-};
-
-const WINDOWS_APP_EXECUTABLES = {
-  terminal: ['wt.exe', 'WindowsTerminal.exe'],
-  vscode: ['code.exe', 'code.cmd'],
-  cursor: ['cursor.exe', 'cursor.cmd'],
-  vscodium: ['codium.exe', 'codium.cmd'],
-  windsurf: ['windsurf.exe', 'windsurf.cmd'],
-  zed: ['zed.exe', 'zed.cmd'],
-  'visual-studio': ['devenv.exe'],
-  'sublime-text': ['subl.exe', 'sublime_text.exe'],
-};
-
-const WINDOWS_APP_ID_BY_NAME = new Map([
-  ['finder', 'finder'],
-  ['file explorer', 'finder'],
-  ['terminal', 'terminal'],
-  ['windows terminal', 'terminal'],
-  ['visual studio code', 'vscode'],
-  ['cursor', 'cursor'],
-  ['vscodium', 'vscodium'],
-  ['windsurf', 'windsurf'],
-  ['zed', 'zed'],
-  ['visual studio', 'visual-studio'],
-  ['sublime text', 'sublime-text'],
-]);
-
-const getWindowsAppIdForName = (appName) => WINDOWS_APP_ID_BY_NAME.get(String(appName || '').trim().toLowerCase()) || '';
-
-const runWhere = (program) => {
-  const result = spawnSync('where.exe', [program], { encoding: 'utf8', windowsHide: true });
-  if (result.error || result.status !== 0) return null;
-  const first = String(result.stdout || '').split(/\r?\n/).map((line) => line.trim()).find(Boolean);
-  return first || null;
-};
-
-const findWindowsExecutable = (appId) => {
-  for (const program of WINDOWS_APP_EXECUTABLES[appId] || []) {
-    const resolved = runWhere(program);
-    if (resolved) return resolved;
-  }
-  return null;
-};
-
-const resolveWindowsScriptIconExecutable = (scriptPath) => {
-  if (!scriptPath || !/\.(?:cmd|bat)$/i.test(scriptPath)) return null;
-  let source = '';
-  try {
-    source = fs.readFileSync(scriptPath, 'utf8');
-  } catch {
-    return null;
-  }
-  const scriptDir = path.dirname(scriptPath);
-  const matches = [...source.matchAll(/(?:(?:%~dp0|%~dp0\\|%~dp0\/|\.\.\\|\.\.\/|[A-Za-z]:\\|[A-Za-z]:\/)[^"'\r\n]*?\.exe)/gi)];
-  for (const match of matches) {
-    const raw = String(match[0] || '').replace(/^%~dp0[\\/]?/i, '').trim();
-    const candidate = path.isAbsolute(raw) ? raw : path.resolve(scriptDir, raw);
-    if (fs.existsSync(candidate)) return candidate;
-  }
-  return null;
-};
-
-let windowsTerminalPackagePathCache;
-
-const resolveWindowsTerminalPackagePath = () => {
-  if (windowsTerminalPackagePathCache !== undefined) return windowsTerminalPackagePathCache;
-
-  const powershell = runWhere('powershell.exe') || runWhere('pwsh.exe');
-  if (powershell) {
-    const command = '$packages = @(' +
-      'Get-AppxPackage -Name Microsoft.WindowsTerminal -ErrorAction SilentlyContinue;' +
-      'Get-AppxPackage -Name Microsoft.WindowsTerminalPreview -ErrorAction SilentlyContinue' +
-      ') | Where-Object { $_.InstallLocation } | Sort-Object Version -Descending; ' +
-      'if ($packages) { $packages[0].InstallLocation }';
-    const result = spawnSync(powershell, ['-NoProfile', '-NonInteractive', '-Command', command], {
-      encoding: 'utf8',
-      windowsHide: true,
-    });
-    if (!result.error && result.status === 0) {
-      const packagePath = String(result.stdout || '').split(/\r?\n/).map((line) => line.trim()).find(Boolean);
-      if (packagePath && fs.existsSync(packagePath)) {
-        windowsTerminalPackagePathCache = packagePath;
-        return windowsTerminalPackagePathCache;
-      }
-    }
-  }
-
-  const programFilesRoots = [process.env.ProgramW6432, process.env.ProgramFiles, 'C:\\Program Files']
-    .filter((value, index, values) => typeof value === 'string' && value && values.indexOf(value) === index);
-  for (const root of programFilesRoots) {
-    const windowsAppsPath = path.join(root, 'WindowsApps');
-    let entries = [];
-    try {
-      entries = fs.readdirSync(windowsAppsPath, { withFileTypes: true });
-    } catch {
-      continue;
-    }
-
-    const packageNames = entries
-      .filter((entry) => entry.isDirectory())
-      .map((entry) => entry.name)
-      .filter((name) => /^Microsoft\.WindowsTerminal(?:Preview)?_.*__8wekyb3d8bbwe$/i.test(name))
-      .sort()
-      .reverse();
-    const stable = packageNames.find((name) => /^Microsoft\.WindowsTerminal_/i.test(name));
-    const selected = stable || packageNames[0];
-    if (selected) {
-      windowsTerminalPackagePathCache = path.join(windowsAppsPath, selected);
-      return windowsTerminalPackagePathCache;
-    }
-  }
-
-  windowsTerminalPackagePathCache = null;
-  return windowsTerminalPackagePathCache;
-};
-
-const resolveWindowsTerminalIconPath = () => {
-  const packagePath = resolveWindowsTerminalPackagePath();
-  if (!packagePath) return null;
-  const candidates = [
-    path.join(packagePath, 'Images', 'Square44x44Logo.targetsize-96_altform-unplated.png'),
-    path.join(packagePath, 'Images', 'Square44x44Logo.targetsize-96.png'),
-    path.join(packagePath, 'Images', 'StoreLogo.scale-200.png'),
-    path.join(packagePath, 'Images', 'StoreLogo.scale-100.png'),
-  ];
-  return candidates.find((candidate) => fs.existsSync(candidate)) || null;
-};
-
-const resolveWindowsTerminalExecutable = () => {
-  const packagePath = resolveWindowsTerminalPackagePath();
-  if (packagePath) {
-    const executable = path.join(packagePath, 'WindowsTerminal.exe');
-    if (fs.existsSync(executable)) return executable;
-  }
-  return findWindowsExecutable('terminal');
-};
-
-const imageFileToDataUrl = (filePath) => {
-  if (!filePath) return null;
-  try {
-    return `data:image/png;base64,${fs.readFileSync(filePath).toString('base64')}`;
-  } catch {
-    return null;
-  }
-};
-
-const resolveWindowsAppIconExecutable = ({ appId, appName }) => {
-  if (appId === 'finder') {
-    const explorerPath = path.join(process.env.SystemRoot || 'C:\\Windows', 'explorer.exe');
-    return fs.existsSync(explorerPath) ? explorerPath : 'explorer.exe';
-  }
-  if (appId === 'terminal') {
-    return resolveWindowsTerminalExecutable();
-  }
-
-  const executable = findWindowsExecutable(appId) || findWindowsAppNameExecutable(appName);
-  if (!executable) return null;
-  if (/\.exe$/i.test(executable)) return executable;
-  return resolveWindowsScriptIconExecutable(executable) || executable;
-};
-
-const windowsIconToDataUrl = async (executablePath) => {
-  if (!executablePath) return null;
-  try {
-    const image = await app.getFileIcon(executablePath, { size: 'normal' });
-    if (image.isEmpty()) return null;
-    return image.toDataURL();
-  } catch {
-    return null;
-  }
-};
-
-const findWindowsAppNameExecutable = (appName) => {
-  const program = `${String(appName || '').trim()}.exe`.replace(/\s+/g, '');
-  return program === '.exe' ? null : runWhere(program);
-};
-
-const isWindowsAppInstalled = ({ appId, appName }) => {
-  if (appId === 'finder') return true;
-  if (appId === 'terminal') return Boolean(findWindowsExecutable('terminal'));
-  if (findWindowsExecutable(appId)) return true;
-  return Boolean(findWindowsAppNameExecutable(appName));
-};
-
-const buildWindowsInstalledApps = async (apps) => {
-  const seen = new Set();
-  const names = (Array.isArray(apps) ? apps : [])
-    .map((appName) => String(appName || '').trim())
-    .filter((appName) => appName && !seen.has(appName) && seen.add(appName))
-    .filter((appName) => isWindowsAppInstalled({ appId: getWindowsAppIdForName(appName), appName }));
-  const results = [];
-  for (const name of names) {
-    const appId = getWindowsAppIdForName(name);
-    const executablePath = resolveWindowsAppIconExecutable({ appId, appName: name });
-    const iconDataUrl = appId === 'terminal'
-      ? imageFileToDataUrl(resolveWindowsTerminalIconPath()) || await windowsIconToDataUrl(executablePath)
-      : await windowsIconToDataUrl(executablePath);
-    results.push({ name, iconDataUrl });
-  }
-  return results;
-};
-
-const buildWindowsOpenProjectSpecs = ({ projectPath, appId, appName }) => {
-  if (appId === 'finder') {
-    return [{ program: 'explorer.exe', args: [projectPath] }];
-  }
-  if (appId === 'terminal') {
-    const specs = [];
-    const terminal = findWindowsExecutable('terminal');
-    if (terminal) {
-      specs.push({ program: terminal, args: ['-d', projectPath] });
-    }
-    const shell = runWhere('pwsh.exe') || runWhere('powershell.exe');
-    if (shell) {
-      specs.push({ program: shell, args: ['-NoExit', '-Command', `Set-Location -LiteralPath ${JSON.stringify(projectPath)}`], shellStart: true });
-    }
-    const commandPrompt = process.env.ComSpec || runWhere('cmd.exe');
-    if (commandPrompt) {
-      specs.push({ program: commandPrompt, args: ['/k', 'cd', '/d', projectPath], shellStart: true });
-    }
-    return specs;
-  }
-  const specs = [];
-  const cli = WINDOWS_CLI_BY_APP_ID[appId];
-  if (cli) {
-    const resolvedCli = runWhere(cli);
-    if (resolvedCli) {
-      specs.push({ program: resolvedCli, args: [projectPath] });
-    }
-  }
-  const exe = findWindowsExecutable(appId);
-  if (exe) {
-    specs.push({ program: exe, args: [projectPath] });
-  }
-  const namedExe = findWindowsAppNameExecutable(appName);
-  if (namedExe && !specs.some((spec) => spec.program === namedExe)) {
-    specs.push({ program: namedExe, args: [projectPath] });
-  }
-  return specs;
-};
-
-const buildWindowsOpenFileSpecs = ({ filePath, appId, appName }) => {
-  if (appId === 'terminal') {
-    return buildWindowsOpenProjectSpecs({ projectPath: path.dirname(filePath), appId, appName });
-  }
-  const specs = [];
-  const cli = WINDOWS_CLI_BY_APP_ID[appId];
-  if (cli) {
-    const resolvedCli = runWhere(cli);
-    if (resolvedCli) {
-      specs.push({ program: resolvedCli, args: [filePath] });
-    }
-  }
-  const exe = findWindowsExecutable(appId);
-  if (exe) {
-    specs.push({ program: exe, args: [filePath] });
-  }
-  const namedExe = findWindowsAppNameExecutable(appName);
-  if (namedExe && !specs.some((spec) => spec.program === namedExe)) {
-    specs.push({ program: namedExe, args: [filePath] });
-  }
-  return specs;
-};
+const {
+  runWhere,
+  buildWindowsInstalledApps,
+  fetchWindowsAppIcons,
+  buildWindowsOpenProjectSpecs,
+  buildWindowsOpenFileSpecs,
+} = createWindowsAppDiscovery({ getFileIcon: (filePath, options) => app.getFileIcon(filePath, options) });
 
 const buildOpenProjectSpecs = ({ projectPath, appId, appName }) => {
   if (appId === 'finder') {
@@ -4256,7 +4069,7 @@ const buildOpenFileSpecs = ({ filePath, appId, appName }) => {
 
 const quoteWindowsCommandArg = (value) => `"${String(value).replace(/"/g, '""')}"`;
 
-const resolveWindowsLaunchProgram = (program) => {
+const resolveWindowsLaunchProgram = async (program) => {
   if (path.isAbsolute(program)) {
     return fs.existsSync(program) ? program : null;
   }
@@ -4274,8 +4087,8 @@ const launchWindowsCommandScript = (spec, program) => {
   child.unref();
 };
 
-const launchWindowsSpec = (spec) => {
-  const program = resolveWindowsLaunchProgram(spec.program);
+const launchWindowsSpec = async (spec) => {
+  const program = await resolveWindowsLaunchProgram(spec.program);
   if (!program) {
     throw new Error('program not found');
   }
@@ -4305,7 +4118,7 @@ const launchWindowsSpec = (spec) => {
   child.unref();
 };
 
-const runSpecChain = (specs, appName) => {
+const runSpecChain = async (specs, appName) => {
   if (!Array.isArray(specs) || specs.length === 0) {
     throw new Error(`Failed to open in ${appName}: no launch candidates`);
   }
@@ -4314,7 +4127,7 @@ const runSpecChain = (specs, appName) => {
     const failures = [];
     for (const spec of specs) {
       try {
-        launchWindowsSpec(spec);
+        await launchWindowsSpec(spec);
         return;
       } catch (error) {
         failures.push(`${spec.program}: ${error instanceof Error ? error.message : String(error)}`);
@@ -4425,7 +4238,7 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
         : (state.mainWindow && !state.mainWindow.isDestroyed() ? state.mainWindow : null);
       if (!target) return false;
       if (target.isMinimized()) target.restore();
-      target.show();
+      showWindow(target);
       target.focus();
       app.focus?.({ steal: true });
       return true;
@@ -4889,9 +4702,29 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       // Stamp the forwarding window's own host identity: the renderer of a
       // direct host window cannot name its host (it sees only the API URL).
       const senderHostId = browserWindow && !browserWindow.isDestroyed()
-        ? readTrimmedString(browserWindow.__ocHostWindowId) || null
+        ? resolveSenderHostId(
+          { runtimeKey: browserWindow.__ocRuntimeKey, hostWindowId: browserWindow.__ocHostWindowId },
+          {
+            hosts: readDesktopHostsConfig()?.hosts || [],
+            localUrl: state.sidecarUrl || null,
+            localClientToken: readDesktopLocalClientToken(),
+          },
+        )
         : null;
       maybeShowNativeNotification(stampForwardedNotification(args, senderHostId));
+      return null;
+    }
+
+    case 'desktop_set_window_runtime_key': {
+      // The instance the sender window currently shows, reported by its renderer
+      // at boot and on every switch. openHostWindow's reuse lookup matches it
+      // before the creation-time tag, so a window switched in place to a saved
+      // host is reused by a notification click or session link for that host.
+      // Local pages only: this writes the identity the reuse lookup trusts, so
+      // it must stay out of COMMANDS_SAFE_FOR_REMOTE.
+      if (browserWindow && !browserWindow.isDestroyed()) {
+        browserWindow.__ocRuntimeKey = readTrimmedString(args.runtimeKey);
+      }
       return null;
     }
 
@@ -4900,6 +4733,27 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       if (sessionId) clearSessionNotifications(sessionId);
       return null;
     }
+
+    case 'desktop_clipboard_read_selection':
+      if (process.platform !== 'linux' || !clipboard.selection) return '';
+      return clipboard.selection.readText();
+
+    case 'desktop_clipboard_write_selection': {
+      if (process.platform !== 'linux' || !clipboard.selection) return false;
+      const text = z.string().safeParse(args?.text);
+      if (!text.success) return false;
+      await clipboard.selection.writeText(text.data);
+      return true;
+    }
+
+    case 'desktop_tray_actions_ready':
+      if (browserWindow !== state.mainWindow) return null;
+      mainWindowTrayActionsReady = true;
+      if (pendingMarkAllRead) {
+        pendingMarkAllRead = false;
+        void dispatchTrayAction({ type: 'mark-all-read' });
+      }
+      return null;
 
     case 'desktop_tray_update':
       if (state.trayController) {
@@ -4916,6 +4770,25 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
         const rawCount = args && typeof args.dockBadgeCount === 'number' ? args.dockBadgeCount : 0;
         const badgeCount = Number.isFinite(rawCount) ? Math.max(0, Math.floor(rawCount)) : 0;
         applyDockBadge(app, badgeCount);
+        if (process.platform === 'darwin' && app.dock) {
+          const template = buildDockMenuTemplate(args, {
+            locale: normalizeMenuLocale(readPreferredLocale()),
+            onAction: (action) => { void dispatchTrayAction(action); },
+          });
+          app.dock.setMenu(template.length > 0 ? Menu.buildFromTemplate(template) : null);
+        }
+        if (process.platform === 'win32' && app.isPackaged) {
+          const jumpList = buildUnreadJumpList(args, {
+            execPath: process.execPath, locale: normalizeMenuLocale(readPreferredLocale()),
+            removedItems: app.getJumpListSettings().removedItems,
+          });
+          const key = JSON.stringify(jumpList);
+          if (key !== lastJumpListKey) {
+            const result = app.setJumpList(jumpList);
+            if (result === 'ok') lastJumpListKey = key;
+            else log.warn('[electron] unread jump list update failed', { result });
+          }
+        }
       } catch (error) {
         log.warn('[electron] dock badge update failed', error);
       }
@@ -4989,7 +4862,7 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
           if (error) throw new Error(error);
           return null;
         }
-        runSpecChain(buildWindowsOpenProjectSpecs({ projectPath: validated.path, appId, appName }), appName);
+        await runSpecChain(await buildWindowsOpenProjectSpecs({ projectPath: validated.path, appId, appName }), appName);
         return null;
       }
       if (process.platform === 'linux') {
@@ -5000,13 +4873,13 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
           appName,
           targetKind: 'project',
           entries,
-        }), appName);
+        }), appName, { shell });
         return null;
       }
       if (process.platform !== 'darwin') {
         throw new Error(unsupportedAppSpecificOpenError('projects'));
       }
-      runSpecChain(buildOpenProjectSpecs({ projectPath: validated.path, appId, appName }), appName);
+      await runSpecChain(buildOpenProjectSpecs({ projectPath: validated.path, appId, appName }), appName);
       return null;
     }
 
@@ -5024,7 +4897,7 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
           shell.showItemInFolder(validated.path);
           return null;
         }
-        runSpecChain(buildWindowsOpenFileSpecs({ filePath: validated.path, appId, appName }), appName);
+        await runSpecChain(await buildWindowsOpenFileSpecs({ filePath: validated.path, appId, appName }), appName);
         return null;
       }
       if (process.platform === 'linux') {
@@ -5035,13 +4908,13 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
           appName,
           targetKind: 'file',
           entries,
-        }), appName);
+        }), appName, { shell });
         return null;
       }
       if (process.platform !== 'darwin') {
         throw new Error(unsupportedAppSpecificOpenError('files'));
       }
-      runSpecChain(buildOpenFileSpecs({ filePath: validated.path, appId, appName }), appName);
+      await runSpecChain(buildOpenFileSpecs({ filePath: validated.path, appId, appName }), appName);
       return null;
     }
 
@@ -5064,18 +4937,7 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
 
     case 'desktop_fetch_app_icons': {
       if (process.platform === 'win32') {
-        const names = Array.isArray(args.apps) ? args.apps : [];
-        const results = [];
-        for (const name of names) {
-          const appName = String(name || '').trim();
-          if (!appName) continue;
-          const appId = getWindowsAppIdForName(appName);
-          const dataUrl = appId === 'terminal'
-            ? imageFileToDataUrl(resolveWindowsTerminalIconPath()) || await windowsIconToDataUrl(resolveWindowsAppIconExecutable({ appId, appName }))
-            : await windowsIconToDataUrl(resolveWindowsAppIconExecutable({ appId, appName }));
-          if (dataUrl) results.push({ app: appName, data_url: dataUrl });
-        }
-        return results;
+        return fetchWindowsAppIcons(args.apps);
       }
       if (process.platform === 'linux') {
         return fetchLinuxAppIcons(Array.isArray(args.apps) ? args.apps : []);
@@ -5117,7 +4979,9 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
         return { apps: [], hasCache: false, isCacheStale: false, supported: false };
       }
       if (!hasCache || isCacheStale || args.force === true) {
-        void refresh();
+        installedAppsRefresh ??= refresh().finally(() => {
+          installedAppsRefresh = null;
+        });
       }
       return { apps: cachedApps, hasCache, isCacheStale };
     }
@@ -5252,19 +5116,51 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       return null;
     }
 
+    case 'desktop_get_update_channel': {
+      return { channel: readUpdateChannel() };
+    }
+
+    case 'desktop_set_update_channel': {
+      if (!isUpdateChannel(args?.channel)) {
+        throw new Error('Unknown update channel');
+      }
+      const channel = args.channel;
+      await mutateSettingsRoot((root) => {
+        root.desktopUpdateChannel = channel;
+      });
+      return { channel };
+    }
+
     case 'desktop_check_for_updates': {
       assertUpdaterCapability({ packaged: app.isPackaged });
+      // electron-updater answers a check that is already running, for the
+      // feed it started on. A channel switched meanwhile waits for that check
+      // to end, then checks its own feed.
+      if (state.updateCheck && readUpdateChannel() !== state.updaterChannel) {
+        await state.updateCheck.catch(() => null);
+      }
+      applyUpdaterChannel(readUpdateChannel());
       const currentVersion = APP_VERSION;
-      const { available, updateInfo, updateResult, nextVersion, pendingUpdate } = await checkForDesktopUpdate({
+      const check = checkForDesktopUpdate({
         autoUpdater,
         currentVersion,
         pendingUpdate: state.pendingUpdate,
-        compareVersions: compareSemver,
       });
+      state.updateCheck = check;
+      let result;
+      try {
+        result = await check;
+      } finally {
+        if (state.updateCheck === check) state.updateCheck = null;
+      }
+      const { available, updateInfo, nextVersion, pendingUpdate } = result;
+      // Assign before the changelog fetch: a download can finish while the
+      // notes load and mark this record as downloaded. Assigning after that
+      // await would replace it with the pre-await copy and drop the payload.
+      state.pendingUpdate = pendingUpdate;
       const body =
         (typeof updateInfo?.releaseNotes === 'string' && updateInfo.releaseNotes.trim() ? updateInfo.releaseNotes : null) ||
         await parseRelevantChangelogNotes(currentVersion, nextVersion);
-      state.pendingUpdate = pendingUpdate;
       return {
         available,
         currentVersion,
@@ -5289,44 +5185,7 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
         },
       }));
       try {
-        if (!state.pendingUpdate.electronUpdate) {
-          throw new Error('Electron updater metadata is not available for this build');
-        }
-        if (!state.pendingUpdate.downloaded) {
-          await new Promise((resolve, reject) => {
-            let settled = false;
-            const cleanup = () => {
-              autoUpdater.off('update-downloaded', onDownloaded);
-              autoUpdater.off('error', onError);
-            };
-            const finish = (callback, value) => {
-              if (settled) return;
-              settled = true;
-              cleanup();
-              callback(value);
-            };
-            const onDownloaded = () => finish(resolve, null);
-            const onError = (error) => finish(reject, error);
-            autoUpdater.on('update-downloaded', onDownloaded);
-            autoUpdater.on('error', onError);
-            // downloadUpdate() resolves once the payload is on disk. It stays
-            // the authoritative signal: when the file was already cached the
-            // updater emits no 'update-downloaded', and waiting only for the
-            // event left this promise pending and its listeners attached on
-            // every retry.
-            Promise.resolve(autoUpdater.downloadUpdate())
-              .then((files) => {
-                // The installer comes first; Linux packages install from it.
-                if (state.pendingUpdate && files?.[0]) state.pendingUpdate.downloadedFile = files[0];
-                finish(resolve, null);
-              })
-              .catch((error) => finish(reject, error));
-          });
-        }
-        // The 'update-downloaded' event does not fire for an already cached
-        // payload, so record the payload as ready here too; otherwise restart
-        // would relaunch without installing anything.
-        state.pendingUpdate.downloaded = true;
+        await downloadPendingDesktopUpdate({ autoUpdater, state });
         emitToAllWindows('openchamber:update-progress', mapUpdaterProgressEvent({
           event: 'Finished',
           data: {},
@@ -5400,7 +5259,8 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       if (config.defaultHostId && config.defaultHostId !== LOCAL_HOST_ID) {
         const host = config.hosts.find((entry) => entry.id === config.defaultHostId);
         const apiUrl = host?.apiUrl || host?.url;
-        if (host?.url && apiUrl && !state.unreachableHosts.has(apiUrl)) {
+        if (host?.url && apiUrl && !state.unreachableHosts.has(apiUrl)
+          && state.bootOutcome?.sshStartupFallbackHostId !== host.id) {
           targetUrl = shouldUsePackagedUi() ? buildPackagedUiUrl('/index.html') : host.url;
           runtimeConfig = {
             apiBaseUrl: normalizeHostUrl(apiUrl),
@@ -5430,13 +5290,21 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       const config = readDesktopHostsConfig();
       const providedToken = typeof args.clientToken === 'string' ? args.clientToken : '';
       const clientToken = sanitizeClientTokenForStorage(providedToken) || resolveStoredClientTokenForUrl(targetUrl, config);
-      const requestHeaders = sanitizeRuntimeRequestHeaders(args.requestHeaders || config.hosts.find((host) => normalizeHostUrl(host.apiUrl || host.url) === targetUrl)?.requestHeaders || {});
+      // The saved host the request headers fall back to. A window opened for it
+      // is tagged with its id, so a notification click for that host reuses this
+      // window instead of opening another one.
+      const hostForUrl = config.hosts.find((host) => normalizeHostUrl(host.apiUrl || host.url) === targetUrl);
+      const requestHeaders = sanitizeRuntimeRequestHeaders(args.requestHeaders || hostForUrl?.requestHeaders || {});
       let windowUrl = targetUrl;
       const runtimeConfig = { apiBaseUrl: targetUrl, clientToken, requestHeaders };
       if (shouldUsePackagedUi()) {
         windowUrl = buildPackagedUiUrl('/index.html');
       }
-      await createAdditionalWindow(windowUrl, { ...runtimeConfig, explicitRuntime: true });
+      const browserWindow = await createAdditionalWindow(windowUrl, { ...runtimeConfig, explicitRuntime: true });
+      if (browserWindow && hostForUrl) {
+        browserWindow.__ocHostWindowId = hostForUrl.id;
+        browserWindow.__ocHostWindowBaseUrl = windowUrl;
+      }
       return null;
     }
 
@@ -5466,9 +5334,14 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       if (!browserWindow || !state.mainWindow || browserWindow.id !== state.mainWindow.id) return [];
       return pendingHostActions.splice(0, pendingHostActions.length);
 
+    case 'desktop_take_pending_extension_installs':
+      // Install links open in the main window only.
+      if (!browserWindow || !state.mainWindow || browserWindow.id !== state.mainWindow.id) return [];
+      return takePendingExtensionInstalls();
     case 'desktop_take_pending_session_links':
       // Session links open in the main window only.
       if (!browserWindow || !state.mainWindow || browserWindow.id !== state.mainWindow.id) return [];
+      mainWindowSessionLinkGate.documentAsked();
       return takePendingSessionDeepLinks();
 
     case 'desktop_open_host_session': {
@@ -5501,7 +5374,7 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       // No live main window (e.g. "Open in main window" from a mini-chat after
       // the main window was closed): create one and open the session in it. A
       // fresh window can't take an immediate emit, so queue the session as a
-      // pending deep-link and let did-finish-load flush it once ready.
+      // pending deep-link for its renderer to take once it listens.
       if (!hasMainWindow) {
         if (sessionId) pendingDeepLinks.push({ type: 'session', value: sessionId });
         await openMainWindow();
@@ -5509,7 +5382,7 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       }
 
       if (state.mainWindow.isMinimized()) state.mainWindow.restore();
-      state.mainWindow.show();
+      showWindow(state.mainWindow);
       state.mainWindow.focus();
       if (sessionId) {
         emitToWindow(state.mainWindow, 'openchamber:open-session', { sessionId, directory });
@@ -5547,14 +5420,27 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       return { maximized: false };
 
     case 'desktop_get_current_window_state':
-      return { maximized: Boolean(browserWindow && !browserWindow.isDestroyed() && browserWindow.isMaximized()) };
+      return {
+        maximized: Boolean(browserWindow && !browserWindow.isDestroyed() && browserWindow.isMaximized()),
+        visible: isNativeWindowVisible(browserWindow),
+      };
 
     case 'desktop_set_locale': {
       if (typeof args.locale === 'string') {
         setContextMenuLocale(args.locale);
         if (process.platform === 'darwin') {
-          Menu.setApplicationMenu(buildMacMenu(normalizeMenuLocale(args.locale)));
+          appMenuLocale = normalizeMenuLocale(args.locale);
+          applyApplicationMenu();
         }
+      }
+      return null;
+    }
+
+    case 'desktop_set_menu_shortcuts': {
+      const next = normalizeMenuShortcuts(args.shortcuts);
+      if (JSON.stringify(next) !== JSON.stringify(menuShortcuts)) {
+        menuShortcuts = next;
+        applyApplicationMenu();
       }
       return null;
     }
@@ -5615,10 +5501,6 @@ const buildMacMenu = (locale = 'en') => {
   const dispatchAction = (action) => dispatchMenuAction(action);
   const t = (key) => menuLabel(locale, key);
   const roleItem = (role, key) => roleMenuItem(locale, role, key);
-  const handleCopyAction = () => {
-    BrowserWindow.getFocusedWindow()?.webContents.copy();
-    dispatchAction('copy');
-  };
 
   return Menu.buildFromTemplate([
     {
@@ -5646,7 +5528,7 @@ const buildMacMenu = (locale = 'en') => {
     {
       label: t('file'),
       submenu: [
-        { label: t('newWindow'), accelerator: 'Cmd+Shift+Alt+N', click: () => void handleInvoke(null, 'desktop_new_window') },
+        { label: t('newWindow'), accelerator: menuKey('new_window', 'Cmd+Shift+Alt+N'), click: () => void handleInvoke(null, 'desktop_new_window') },
         { type: 'separator' },
         { label: t('newSession'), accelerator: 'Cmd+N', click: () => dispatchAction('new-session') },
         { label: t('newWorktree'), accelerator: 'Cmd+Shift+N', click: () => dispatchAction('new-worktree-session') },
@@ -5676,18 +5558,18 @@ const buildMacMenu = (locale = 'en') => {
       label: t('view'),
       submenu: [
         { label: t('toggleRightSidebar'), accelerator: 'Cmd+B', click: () => dispatchAction('toggle-right-sidebar') },
-        { label: t('openGitSidebar'), accelerator: 'Cmd+Shift+G', click: () => dispatchAction('open-right-sidebar-git') },
-        { label: t('openFilesSidebar'), accelerator: 'Cmd+Shift+F', click: () => dispatchAction('open-right-sidebar-files') },
+        { label: t('openGitSidebar'), accelerator: menuKey('open_git_panel', 'Cmd+Shift+G'), click: () => dispatchAction('open-right-sidebar-git') },
+        { label: t('openFilesSidebar'), click: () => dispatchAction('open-right-sidebar-files') },
         { type: 'separator' },
         { label: t('toggleTerminalDock'), accelerator: 'Cmd+J', click: () => dispatchAction('toggle-terminal') },
-        { label: t('toggleTerminalExpanded'), accelerator: 'Cmd+Shift+J', click: () => dispatchAction('toggle-terminal-expanded') },
+        { label: t('toggleContextPanelExpanded'), accelerator: 'Cmd+Shift+F', click: () => dispatchAction('toggle-context-panel-expanded') },
         { type: 'separator' },
         { label: t('lightTheme'), click: () => dispatchAction('theme-light') },
         { label: t('darkTheme'), click: () => dispatchAction('theme-dark') },
         { label: t('systemTheme'), click: () => dispatchAction('theme-system') },
         { type: 'separator' },
         { label: t('toggleSessionSidebar'), accelerator: 'Cmd+Alt+L', click: () => dispatchAction('toggle-sidebar') },
-        { label: t('toggleMemoryDebug'), accelerator: 'Cmd+Shift+D', click: () => dispatchAction('toggle-memory-debug') },
+        { label: t('toggleMemoryDebug'), accelerator: menuKey('toggle_memory_debug', 'Cmd+Shift+D'), click: () => dispatchAction('toggle-memory-debug') },
         { type: 'separator' },
         roleItem('togglefullscreen', 'toggleFullScreen'),
       ],
@@ -5698,9 +5580,9 @@ const buildMacMenu = (locale = 'en') => {
         roleItem('minimize', 'minimize'),
         roleItem('zoom', 'zoom'),
         { type: 'separator' },
-        { label: t('zoomIn'), accelerator: 'CmdOrCtrl+=', click: () => dispatchAction('zoom-in') },
-        { label: t('zoomOut'), accelerator: 'CmdOrCtrl+-', click: () => dispatchAction('zoom-out') },
-        { label: t('resetZoom'), accelerator: 'CmdOrCtrl+0', click: () => dispatchAction('zoom-reset') },
+        { label: t('zoomIn'), accelerator: menuKey('zoom_in', 'CmdOrCtrl+='), click: () => dispatchAction('zoom-in') },
+        { label: t('zoomOut'), accelerator: menuKey('zoom_out', 'CmdOrCtrl+-'), click: () => dispatchAction('zoom-out') },
+        { label: t('resetZoom'), accelerator: menuKey('zoom_reset', 'CmdOrCtrl+0'), click: () => dispatchAction('zoom-reset') },
         { type: 'separator' },
         { label: t('close'), accelerator: 'CmdOrCtrl+W', click: closeTabOrWindow },
       ],
@@ -5709,13 +5591,13 @@ const buildMacMenu = (locale = 'en') => {
       label: t('help'),
       submenu: [
         { label: t('keyboardShortcuts'), accelerator: 'Cmd+.', click: () => dispatchAction('help-dialog') },
-        { label: t('showDiagnostics'), accelerator: 'Cmd+Shift+L', click: () => dispatchAction('download-logs') },
-        { label: t('toggleDeveloperTools'), accelerator: 'Cmd+Alt+I', click: () => openDevToolsForMenuTarget() },
+        { label: t('showDiagnostics'), accelerator: menuKey('show_diagnostics', 'Cmd+Shift+L'), click: () => dispatchAction('download-logs') },
+        { label: t('toggleDeveloperTools'), accelerator: menuKey('toggle_developer_tools', 'Cmd+Alt+I'), click: () => openDevToolsForMenuTarget() },
         { type: 'separator' },
         { label: t('clearCache'), click: () => void handleInvoke(null, 'desktop_clear_cache') },
         { type: 'separator' },
         { label: t('reportABug'), click: () => shell.openExternal(GITHUB_BUG_REPORT_URL) },
-        { label: t('discussAnIdea'), click: () => shell.openExternal(GITHUB_IDEAS_URL) },
+        { label: t('suggestFeature'), click: () => shell.openExternal(GITHUB_FEATURE_REQUEST_URL) },
         { type: 'separator' },
         { label: t('joinDiscord'), click: () => shell.openExternal(DISCORD_INVITE_URL) },
       ],
@@ -5727,10 +5609,6 @@ const buildAutoHiddenMenu = (locale = 'en') => {
   const dispatchAction = (action) => dispatchMenuAction(action);
   const t = (key) => menuLabel(locale, key);
   const roleItem = (role, key) => roleMenuItem(locale, role, key);
-  const handleCopyAction = () => {
-    BrowserWindow.getFocusedWindow()?.webContents.copy();
-    dispatchAction('copy');
-  };
 
   return Menu.buildFromTemplate([
     {
@@ -5753,7 +5631,7 @@ const buildAutoHiddenMenu = (locale = 'en') => {
     {
       label: t('file'),
       submenu: [
-        { label: t('newWindow'), accelerator: 'Ctrl+Shift+Alt+N', click: () => void handleInvoke(null, 'desktop_new_window') },
+        { label: t('newWindow'), accelerator: menuKey('new_window', 'Ctrl+Shift+Alt+N'), click: () => void handleInvoke(null, 'desktop_new_window') },
         { type: 'separator' },
         { label: t('newSession'), accelerator: 'Ctrl+N', click: () => dispatchAction('new-session') },
         { label: t('newWorktree'), accelerator: 'Ctrl+Shift+N', click: () => dispatchAction('new-worktree-session') },
@@ -5781,21 +5659,21 @@ const buildAutoHiddenMenu = (locale = 'en') => {
       submenu: [
         roleItem('reload', 'reload'),
         roleItem('forceReload', 'forceReload'),
-        { label: t('toggleDeveloperTools'), accelerator: 'Ctrl+Alt+I', click: () => openDevToolsForMenuTarget() },
+        { label: t('toggleDeveloperTools'), accelerator: menuKey('toggle_developer_tools', 'Ctrl+Alt+I'), click: () => openDevToolsForMenuTarget() },
         { type: 'separator' },
         { label: t('toggleRightSidebar'), accelerator: 'Ctrl+B', click: () => dispatchAction('toggle-right-sidebar') },
-        { label: t('openGitSidebar'), accelerator: 'Ctrl+Shift+G', click: () => dispatchAction('open-right-sidebar-git') },
-        { label: t('openFilesSidebar'), accelerator: 'Ctrl+Shift+F', click: () => dispatchAction('open-right-sidebar-files') },
+        { label: t('openGitSidebar'), accelerator: menuKey('open_git_panel', 'Ctrl+Shift+G'), click: () => dispatchAction('open-right-sidebar-git') },
+        { label: t('openFilesSidebar'), click: () => dispatchAction('open-right-sidebar-files') },
         { type: 'separator' },
         { label: t('toggleTerminalDock'), accelerator: 'Ctrl+J', click: () => dispatchAction('toggle-terminal') },
-        { label: t('toggleTerminalExpanded'), accelerator: 'Ctrl+Shift+J', click: () => dispatchAction('toggle-terminal-expanded') },
+        { label: t('toggleContextPanelExpanded'), accelerator: 'Ctrl+Shift+F', click: () => dispatchAction('toggle-context-panel-expanded') },
         { type: 'separator' },
         { label: t('lightTheme'), click: () => dispatchAction('theme-light') },
         { label: t('darkTheme'), click: () => dispatchAction('theme-dark') },
         { label: t('systemTheme'), click: () => dispatchAction('theme-system') },
         { type: 'separator' },
         { label: t('toggleSessionSidebar'), accelerator: 'Ctrl+Alt+L', click: () => dispatchAction('toggle-sidebar') },
-        { label: t('toggleMemoryDebug'), accelerator: 'Ctrl+Shift+D', click: () => dispatchAction('toggle-memory-debug') },
+        { label: t('toggleMemoryDebug'), accelerator: menuKey('toggle_memory_debug', 'Ctrl+Shift+D'), click: () => dispatchAction('toggle-memory-debug') },
         { type: 'separator' },
         roleItem('togglefullscreen', 'toggleFullScreen'),
       ],
@@ -5811,17 +5689,17 @@ const buildAutoHiddenMenu = (locale = 'en') => {
         { label: t('previousSession'), click: () => dispatchAction('previous-session') },
         { label: t('nextSession'), click: () => dispatchAction('next-session') },
         { type: 'separator' },
-        { label: t('previousProject'), accelerator: 'Ctrl+Alt+Up', click: () => dispatchAction('previous-project') },
-        { label: t('nextProject'), accelerator: 'Ctrl+Alt+Down', click: () => dispatchAction('next-project') },
+        { label: t('previousProject'), accelerator: menuKey('previous_project', 'Ctrl+Alt+Up'), click: () => dispatchAction('previous-project') },
+        { label: t('nextProject'), accelerator: menuKey('next_project', 'Ctrl+Alt+Down'), click: () => dispatchAction('next-project') },
       ],
     },
     {
       label: t('window'),
       submenu: [
         roleItem('minimize', 'minimize'),
-        { label: t('zoomIn'), accelerator: 'Ctrl+=', click: () => dispatchAction('zoom-in') },
-        { label: t('zoomOut'), accelerator: 'Ctrl+-', click: () => dispatchAction('zoom-out') },
-        { label: t('resetZoom'), accelerator: 'Ctrl+0', click: () => dispatchAction('zoom-reset') },
+        { label: t('zoomIn'), accelerator: menuKey('zoom_in', 'Ctrl+='), click: () => dispatchAction('zoom-in') },
+        { label: t('zoomOut'), accelerator: menuKey('zoom_out', 'Ctrl+-'), click: () => dispatchAction('zoom-out') },
+        { label: t('resetZoom'), accelerator: menuKey('zoom_reset', 'Ctrl+0'), click: () => dispatchAction('zoom-reset') },
         roleItem('togglefullscreen', 'toggleFullScreen'),
         { type: 'separator' },
         { label: t('close'), accelerator: 'CmdOrCtrl+W', click: closeTabOrWindow },
@@ -5831,12 +5709,12 @@ const buildAutoHiddenMenu = (locale = 'en') => {
       label: t('help'),
       submenu: [
         { label: t('keyboardShortcuts'), accelerator: 'Ctrl+.', click: () => dispatchAction('help-dialog') },
-        { label: t('showDiagnostics'), accelerator: 'Ctrl+Shift+L', click: () => dispatchAction('download-logs') },
+        { label: t('showDiagnostics'), accelerator: menuKey('show_diagnostics', 'Ctrl+Shift+L'), click: () => dispatchAction('download-logs') },
         { type: 'separator' },
         { label: t('clearCache'), click: () => void handleInvoke(null, 'desktop_clear_cache') },
         { type: 'separator' },
         { label: t('reportABug'), click: () => shell.openExternal(GITHUB_BUG_REPORT_URL) },
-        { label: t('discussAnIdea'), click: () => shell.openExternal(GITHUB_IDEAS_URL) },
+        { label: t('suggestFeature'), click: () => shell.openExternal(GITHUB_FEATURE_REQUEST_URL) },
         { type: 'separator' },
         { label: t('joinDiscord'), click: () => shell.openExternal(DISCORD_INVITE_URL) },
       ],
@@ -5859,12 +5737,12 @@ contextMenu({
   showCopyLink: true,
 });
 
-const loadUrlInsideWebContents = (contents, rawUrl) => {
+const loadUrlInsideWebContents = (contents, rawUrl, loadOptions) => {
   try {
     const url = new URL(rawUrl);
     if (url.protocol !== 'http:' && url.protocol !== 'https:') return false;
     if (contents.isDestroyed()) return false;
-    void contents.loadURL(url.toString()).catch((error) => {
+    void contents.loadURL(url.toString(), loadOptions).catch((error) => {
       log.warn('[webview] failed to load popup URL in place:', error);
     });
     return true;
@@ -5919,6 +5797,31 @@ const trackBrowserPanelPopup = (contents, popup) => {
   });
 };
 
+/**
+ * Gives a popup the panel's user agent. The popup already runs in the panel's
+ * session, but Electron applies that session's user agent to a window.open
+ * window only on navigations the app starts (electron/electron#45897): the
+ * opener's own navigation sends Electron's default agent, and every later
+ * navigation in the popup inherits it. So the first navigation is cancelled
+ * before it sends anything and started again from here. A form posted into a
+ * new window keeps Electron's agent: starting it again would drop the form.
+ */
+const loadBrowserPanelPopupWithPanelUserAgent = (popup, { url, referrer }) => {
+  const contents = popup.webContents;
+  contents.once('will-navigate', (event, navigationUrl) => {
+    if (navigationUrl !== url) return;
+    event.preventDefault();
+    setImmediate(() => {
+      // The page may close its popup before this runs.
+      if (contents.isDestroyed()) return;
+      loadUrlInsideWebContents(contents, url, {
+        userAgent: contents.session.getUserAgent(),
+        httpReferrer: referrer,
+      });
+    });
+  });
+};
+
 app.on('web-contents-created', (_event, contents) => {
   if (contents.getType() === 'window') {
     guardAttachedWebviews(contents);
@@ -5930,7 +5833,7 @@ app.on('web-contents-created', (_event, contents) => {
   // theirs would leave the space's session for the user's.
   const isUserPanelPage = () => contents.session === session.fromPartition(BROWSER_PANEL_PARTITION);
 
-  contents.setWindowOpenHandler(({ url, disposition, postBody }) => {
+  contents.setWindowOpenHandler(({ url, disposition, postBody, referrer }) => {
     const target = isUserPanelPage()
       ? browserPanelWindowOpenTarget({ url, disposition, hasPostBody: Boolean(postBody) })
       : 'in-place';
@@ -5943,6 +5846,13 @@ app.on('web-contents-created', (_event, contents) => {
           autoHideMenuBar: true,
           webPreferences: BROWSER_PANEL_POPUP_WEB_PREFERENCES,
         },
+        // Created here so the window is tied to this request and its form body.
+        createWindow: (options) => {
+          const popup = new BrowserWindow(options);
+          trackBrowserPanelPopup(contents, popup);
+          if (!postBody) loadBrowserPanelPopupWithPanelUserAgent(popup, { url, referrer });
+          return popup.webContents;
+        },
       };
     }
     if (target === 'tab' || target === 'background-tab') {
@@ -5951,10 +5861,6 @@ app.on('web-contents-created', (_event, contents) => {
       loadUrlInsideWebContents(contents, url);
     }
     return { action: 'deny' };
-  });
-
-  contents.on('did-create-window', (popup) => {
-    trackBrowserPanelPopup(contents, popup);
   });
 });
 
@@ -6005,6 +5911,7 @@ const COMMANDS_SAFE_FOR_REMOTE = new Set([
   'desktop_host_probe',
   'desktop_switch_to_local',
   'desktop_new_window',
+  'desktop_set_menu_shortcuts',
   'desktop_new_window_at_url',
   'desktop_new_window_for_host',
   'desktop_set_window_title',
@@ -6020,6 +5927,7 @@ const COMMANDS_SAFE_FOR_REMOTE = new Set([
   'desktop_get_lan_address',
   'desktop_capture_page_rect',
   'desktop_tray_update',
+  'desktop_tray_actions_ready',
   // A remote page can only dismiss delivered notifications of a session id it names.
   'desktop_clear_session_notifications',
 ]);
@@ -6039,6 +5947,20 @@ ipcMain.handle('openchamber:invoke', async (event, command, args) => {
 // layout. The answer is about the asking page only, so any origin may ask.
 ipcMain.on('openchamber:take-safe-start', (event) => {
   event.returnValue = takeSafeStart(event.sender);
+});
+
+// Sync, because the document's own scripts read these values as they run.
+ipcMain.on('openchamber:read-runtime-config', (event) => {
+  event.returnValue = isRuntimeConfigFrame(event.senderFrame)
+    ? {
+      localOrigin: state.localOrigin || state.sidecarUrl || '',
+      apiBaseUrl: state.apiBaseUrl || state.sidecarUrl || '',
+      clientToken: state.clientToken || '',
+      // The asking window's own: a window opened for another host must not
+      // send the main window's headers there.
+      requestHeaders: sanitizeRuntimeRequestHeaders(BrowserWindow.fromWebContents(event.sender)?.__ocRuntimeConfig?.requestHeaders || {}),
+    }
+    : null;
 });
 
 ipcMain.handle('openchamber:dialog:open', async (event, options) => {
@@ -6211,7 +6133,7 @@ const revealMainWindow = async () => {
   }
   if (target && !target.isDestroyed()) {
     if (target.isMinimized()) target.restore();
-    target.show();
+    showWindow(target);
     target.focus();
   }
   return target;
@@ -6219,12 +6141,12 @@ const revealMainWindow = async () => {
 
 // Open a session in the main window, creating one first if none is alive. A
 // freshly created window can't receive an immediate emit (its renderer hasn't
-// mounted its listeners yet), so we queue the session as a pending deep-link —
-// the did-finish-load handler flushes it once the window is ready.
+// mounted its listeners yet), so we queue the session as a pending deep-link
+// for its renderer to take once it listens.
 const focusMainWindowWithSession = async (sessionId, directory) => {
   if (state.mainWindow && !state.mainWindow.isDestroyed()) {
     if (state.mainWindow.isMinimized()) state.mainWindow.restore();
-    state.mainWindow.show();
+    showWindow(state.mainWindow);
     state.mainWindow.focus();
     if (sessionId) {
       emitToWindow(state.mainWindow, 'openchamber:open-session', { sessionId, directory: directory || '' });
@@ -6238,6 +6160,12 @@ const focusMainWindowWithSession = async (sessionId, directory) => {
 const dispatchTrayAction = async (action) => {
   if (!action || typeof action !== 'object') return;
 
+  if (action.type === 'menu-opened') {
+    const target = state.mainWindow;
+    if (target && !target.isDestroyed()) emitToWindow(target, 'openchamber:tray-action', action);
+    return;
+  }
+
   if (action.type === 'quit') {
     app.quit();
     return;
@@ -6249,7 +6177,7 @@ const dispatchTrayAction = async (action) => {
       : BrowserWindow.getFocusedWindow();
     if (target && !target.isDestroyed() && target.isVisible()) {
       debounceWindowStatePersist(target, true);
-      target.hide();
+      hideWindow(target);
     }
     return;
   }
@@ -6258,9 +6186,9 @@ const dispatchTrayAction = async (action) => {
     const target = (state.mainWindow && !state.mainWindow.isDestroyed())
       ? state.mainWindow
       : null;
-    if (target && target.isVisible() && !target.isMinimized()) {
+    if (target && target.isVisible() && !target.isMinimized() && !isWindowHidePending(target)) {
       debounceWindowStatePersist(target, true);
-      target.hide();
+      hideWindow(target);
       return;
     }
     await revealMainWindow();
@@ -6268,7 +6196,7 @@ const dispatchTrayAction = async (action) => {
   }
 
   // Responding to a permission doesn't need to steal focus — just deliver it.
-  if (action.type === 'respond-permission') {
+  if (action.type === 'respond-permission' || action.type === 'mark-all-read') {
     const target = (state.mainWindow && !state.mainWindow.isDestroyed())
       ? state.mainWindow
       : await revealMainWindow();
@@ -6292,7 +6220,7 @@ const dispatchTrayAction = async (action) => {
     const surface = resolveTraySurface();
     if (surface && surface.__ocMiniChat === true && action.sessionId) {
       if (surface.isMinimized()) surface.restore();
-      surface.show();
+      showWindow(surface);
       surface.focus();
       emitToWindow(surface, 'openchamber:open-session', {
         sessionId: action.sessionId,
@@ -6354,6 +6282,13 @@ app.on('before-quit', (event) => {
 });
 
 const handleSecondInstance = (argv) => {
+  if (process.platform === 'win32' && Array.isArray(argv) && argv.includes('--mark-all-read')) {
+    pendingMarkAllRead = true;
+    if (mainWindowTrayActionsReady) {
+      pendingMarkAllRead = false;
+      void dispatchTrayAction({ type: 'mark-all-read' });
+    }
+  }
   const urls = Array.isArray(argv)
     ? argv.filter((arg) => typeof arg === 'string' && arg.startsWith(`${DEEP_LINK_PROTOCOL}://`))
     : [];
@@ -6408,7 +6343,7 @@ app.on('activate', async () => {
     ? remembered
     : (windows.find((window) => window.isVisible() && !window.isMinimized()) || windows[0]);
   if (targetWindow.isMinimized()) targetWindow.restore();
-  targetWindow.show();
+  showWindow(targetWindow);
   targetWindow.focus();
 });
 
@@ -6444,11 +6379,9 @@ app.whenReady().then(async () => {
   hardenBrowserPanelSession();
   setupAutoUpdater();
 
+  applyApplicationMenu();
   if (process.platform === 'darwin') {
-    Menu.setApplicationMenu(buildMacMenu());
     void applyDevDockIdentity({ app, electronDir: __dirname, log });
-  } else {
-    Menu.setApplicationMenu(buildAutoHiddenMenu());
   }
   setupTray();
   applyDesktopMiniChatGlobalShortcut();
@@ -6493,6 +6426,7 @@ app.whenReady().then(async () => {
     state.startupResolved = !(await shouldSkipLocalServer());
     state.initScript = buildInitScript(localOrigin, state.bootOutcome, apiBaseUrl, clientToken, state.requestHeaders);
     log.info('[electron] started in background without window');
+    initialStartup.resolve();
     replayDeferredAppEvents();
     scheduleCompileCacheSettle();
     return;
@@ -6506,6 +6440,7 @@ app.whenReady().then(async () => {
     onPlainLocalBoot: startEarlyMainNavigation,
   });
   await activateMainWindow(initialUrl, localOrigin, bootOutcome, { apiBaseUrl, clientToken, requestHeaders });
+  initialStartup.resolve();
   replayDeferredAppEvents();
   scheduleCompileCacheSettle();
 

@@ -35,6 +35,7 @@
  * only a tab the calling session opened is passed to it; the user's tab and
  * another session's tab are refused, never closed.
  */
+import { z } from 'zod';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { subscribeOpenchamberEvents, type BrowserControlRequestContext } from '@/lib/openchamberEvents';
 import { normalizeContextPanelDirectoryKey } from '@/stores/useUIStore';
@@ -107,6 +108,14 @@ const callerOf = (context: BrowserControlRequestContext): Caller => ({
  * should ever notice.
  */
 const VIEW_ATTACH_TIMEOUT_MS = 2_000;
+/** What `browser.settle` tells about the page a new tab opened. */
+const settledPageSchema = z.object({ title: z.string(), settled: z.boolean() });
+/**
+ * How long an open into a new tab may take before it answers: the server gives
+ * up at 45 s (`openchamber-control/service.js`), and the answer still has to
+ * get there. What the attach and the resize used is taken off the settle wait.
+ */
+const OPEN_ANSWER_BUDGET_MS = 40_000;
 const VIEW_ATTACH_POLL_MS = 50;
 
 /**
@@ -480,6 +489,7 @@ const handleRequest = async (request: BrowserControlRequest): Promise<void> => {
       await answer(request, { ok: false, error: 'url is required' });
       return;
     }
+    const openStartedAt = Date.now();
     const openedTabId = isOpen && opener ? opener(url, request.context) : null;
     if (isOpen && !openedTabId && !targetTabId) {
       await answer(request, { ok: false, error: 'There is no browser here to open the page in.' });
@@ -493,15 +503,23 @@ const handleRequest = async (request: BrowserControlRequest): Promise<void> => {
       const requestedViewport = typeof request.parameters.viewport === 'string'
         ? request.parameters.viewport
         : '';
-      if (!requestedViewport || requestedViewport === 'fill') {
+      const resize = Boolean(requestedViewport) && requestedViewport !== 'fill';
+      // Only a host that drives its pages can say how the page came out.
+      const settle = canDriveBrowserPage();
+      if (!resize && !settle) {
         await answer(request, { ok: true, data: { url, opened: true, tabId: openedTabId } });
         return;
       }
 
       // The tab was just created, so its view is a few frames away. Waiting for
       // it lets the layout the agent asked for be applied to the page it is
-      // opening, rather than to the next call it has to make.
+      // opening, rather than to the next call it has to make, and lets the
+      // answer say whether that page has rendered.
       const attached = await waitForTab(openedTabId);
+      if (!attached && !resize) {
+        await answer(request, { ok: true, data: { url, opened: true, tabId: openedTabId, settled: false } });
+        return;
+      }
       if (!attached) {
         // Still no view. Reporting a plain success here would leave the agent
         // believing a size it asked for was applied to a page nobody is showing.
@@ -518,13 +536,25 @@ const handleRequest = async (request: BrowserControlRequest): Promise<void> => {
         return;
       }
 
-      const resized = await attached.run('browser.resize', { viewport: requestedViewport });
+      const resized = resize ? await attached.run('browser.resize', { viewport: requestedViewport }) : null;
       const viewport = resized && typeof resized === 'object'
         ? (resized as { viewport?: unknown }).viewport ?? null
         : null;
+      // The view loads the page itself; `browser.settle` waits it out the way
+      // an open in a named tab does and reports `title` and `settled`.
+      // The tab is open whatever the wait says, so a failed wait is `settled: false`, not an error.
+      const page = settle
+        ? settledPageSchema.safeParse(await attached.run('browser.settle', {
+          budgetMs: Math.max(0, OPEN_ANSWER_BUDGET_MS - (Date.now() - openStartedAt)),
+        }).catch(() => null))
+        : null;
       await answer(request, {
         ok: true,
-        data: { url, opened: true, tabId: openedTabId, viewportApplied: true, viewport },
+        data: Object.assign(
+          { url, opened: true, tabId: openedTabId },
+          resize ? { viewportApplied: true, viewport } : {},
+          page ? (page.success ? page.data : { settled: false }) : {},
+        ),
       });
       return;
     }

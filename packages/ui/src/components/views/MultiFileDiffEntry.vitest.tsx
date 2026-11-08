@@ -1,6 +1,14 @@
 import React, { act } from 'react';
 import { expect, test } from 'bun:test';
 import { Window } from 'happy-dom';
+import { OpenCode } from '@opencode/client';
+
+// The whole-file comment in each entry's header reads the session's directory
+// from sync; an empty client is enough for an entry with no session.
+const SYNC_SDK = OpenCode.make({
+  baseUrl: 'http://opencode.test',
+  fetch: async () => new Response('[]', { headers: { 'content-type': 'application/json' } }),
+});
 
 const installDom = () => {
   const dom = new Window({ url: 'http://localhost' });
@@ -35,6 +43,7 @@ test('hidden diff entries defer reads, retain completed content and refresh chan
   const { createRoot } = await import('react-dom/client');
   const { I18nProvider } = await import('@/lib/i18n');
   const { RuntimeAPIContext } = await import('@/contexts/runtimeAPIContext');
+  const { SyncProvider } = await import('@/sync/sync-context');
   const { createWebAPIs } = await import('../../../../web/src/api/index');
   const { MultiFileDiffEntry } = await import('./DiffView');
   const base = createWebAPIs();
@@ -49,11 +58,11 @@ test('hidden diff entries defer reads, retain completed content and refresh chan
   let visible = false;
   let insertions = 1;
   const render = () => act(async () => {
-    root.render(<I18nProvider><RuntimeAPIContext.Provider value={apis}>
+    root.render(<SyncProvider sdk={SYNC_SDK} directory="/repo"><I18nProvider><RuntimeAPIContext.Provider value={apis}>
       <MultiFileDiffEntry directory="/repo" file={{ path: 'test.bin', index: ' ', working_dir: 'M', insertions, deletions: 0, isNew: false }}
         visible={visible} layout="inline" wrapLines={false} isSelected={false} isExpanded isMounted
         onSelect={() => {}} onExpandedChange={() => {}} registerSectionRef={() => {}} />
-    </RuntimeAPIContext.Provider></I18nProvider>);
+    </RuntimeAPIContext.Provider></I18nProvider></SyncProvider>);
   });
   try {
     await render();
@@ -87,6 +96,7 @@ test('status paths without file contents render what git records instead of an e
   const { createRoot } = await import('react-dom/client');
   const { I18nProvider } = await import('@/lib/i18n');
   const { RuntimeAPIContext } = await import('@/contexts/runtimeAPIContext');
+  const { SyncProvider } = await import('@/sync/sync-context');
   const { createWebAPIs } = await import('../../../../web/src/api/index');
   const { GitPathUnavailableError } = await import('@/lib/api/git-path-diff');
   const { useGitStore } = await import('@/stores/useGitStore');
@@ -114,11 +124,11 @@ test('status paths without file contents render what git records instead of an e
   document.body.append(container);
   const root = createRoot(container);
   const render = (path: string) => act(async () => {
-    root.render(<I18nProvider><RuntimeAPIContext.Provider value={apis}>
+    root.render(<SyncProvider sdk={SYNC_SDK} directory="/repo"><I18nProvider><RuntimeAPIContext.Provider value={apis}>
       <MultiFileDiffEntry key={path} directory="/repo" file={{ path, index: ' ', working_dir: 'M', insertions: 0, deletions: 0, isNew: false }}
         layout="inline" wrapLines={false} isSelected={false} isExpanded isMounted
         onSelect={() => {}} onExpandedChange={() => {}} registerSectionRef={() => {}} />
-    </RuntimeAPIContext.Provider></I18nProvider>);
+    </RuntimeAPIContext.Provider></I18nProvider></SyncProvider>);
   });
   try {
     useGitStore.getState().setActiveDirectory('/repo');

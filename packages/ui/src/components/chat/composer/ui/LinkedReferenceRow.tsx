@@ -11,6 +11,8 @@
 import React from 'react';
 
 import { Icon } from '@/components/icon/Icon';
+import { useAvatarImage } from '@/hooks/useAvatarImage';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/lib/i18n';
 
 export interface LinkedReferenceRowProps {
@@ -40,26 +42,32 @@ export function LinkedReferenceRow(props: LinkedReferenceRowProps) {
         onReopenPicker,
         onRemove,
     } = props;
+    const { broken: authorBroken, onError } = useAvatarImage(author?.avatarUrl);
 
     return (
         <div
-            className="inline-flex h-7 max-w-full min-w-0 items-center gap-1.5 rounded-lg border border-border/80 bg-background ps-2 pe-1 text-xs"
-            title={title}
+            className="inline-flex h-7 max-w-full min-w-0 items-center gap-1.5 rounded-lg border border-edge bg-background ps-2 pe-1 text-xs"
         >
             <button
                 type="button"
                 onClick={onReopenPicker}
                 className="flex min-w-0 flex-1 items-center gap-1.5 text-start hover:opacity-80 transition-opacity"
+                title={title}
             >
-                {author?.avatarUrl ? (
+                {author?.avatarUrl && !authorBroken ? (
                     <img
                         src={author.avatarUrl}
                         alt={author.login}
                         className="h-4 w-4 rounded-full flex-shrink-0"
+                        onError={onError}
                     />
+                ) : author?.avatarUrl ? (
+                    <span className="flex h-4 w-4 flex-shrink-0 items-center justify-center rounded-full bg-surface-muted text-[0.625rem] leading-none">
+                        {author.login.slice(0, 1).toUpperCase()}
+                    </span>
                 ) : null}
                 <span className="text-muted-foreground flex-shrink-0">
-                    {numberLabel}
+                    {numberLabel === title ? null : numberLabel}
                     {author ? (
                         <span className="ms-1">
                             {t('chat.chatInput.linked.byAuthor', { author: author.login })}
@@ -74,24 +82,33 @@ export function LinkedReferenceRow(props: LinkedReferenceRowProps) {
                 ) : null}
             </button>
             <span className="flex items-center flex-shrink-0">
-                <a
-                    href={url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex items-center justify-center h-5 w-5 hover:bg-[var(--interactive-hover)] rounded-md transition-colors"
-                    aria-label={openInBrowserLabel}
-                >
-                    <Icon name="external-link" className="h-3.5 w-3.5 text-muted-foreground" />
-                </a>
-                <button
-                    type="button"
-                    onClick={onRemove}
-                    className="flex items-center justify-center h-5 w-5 hover:bg-[var(--interactive-hover)] rounded-md transition-colors"
-                    aria-label={removeLabel}
-                    title={removeLabel}
-                >
-                    <Icon name="close" className="h-3.5 w-3.5 text-muted-foreground" />
-                </button>
+                {url ? <Tooltip>
+                    <TooltipTrigger asChild>
+                        <a
+                            href={url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="flex items-center justify-center h-5 w-5 hover:bg-[var(--interactive-hover)] rounded-md transition-colors"
+                            aria-label={openInBrowserLabel}
+                        >
+                            <Icon name="external-link" className="h-3.5 w-3.5 text-muted-foreground" />
+                        </a>
+                    </TooltipTrigger>
+                    <TooltipContent side="top" sideOffset={6}>{openInBrowserLabel}</TooltipContent>
+                </Tooltip> : null}
+                <Tooltip>
+                    <TooltipTrigger asChild>
+                        <button
+                            type="button"
+                            onClick={onRemove}
+                            className="flex items-center justify-center h-5 w-5 hover:bg-[var(--interactive-hover)] rounded-md transition-colors"
+                            aria-label={removeLabel}
+                        >
+                            <Icon name="close" className="h-3.5 w-3.5 text-muted-foreground" />
+                        </button>
+                    </TooltipTrigger>
+                    <TooltipContent side="top" sideOffset={6}>{removeLabel}</TooltipContent>
+                </Tooltip>
             </span>
         </div>
     );

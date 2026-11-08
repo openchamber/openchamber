@@ -78,7 +78,7 @@ export function registerWalkthroughRoutes(app, { getWalkthroughService, validate
         code: 'INVALID_SOURCE_CONTROL_READ_CONTEXT',
       });
     }
-    return readContext;
+    return source.linked === true ? { ...readContext, linked: true } : readContext;
   };
 
   app.get('/api/walkthrough', async (req, res) => {
@@ -90,7 +90,7 @@ export function registerWalkthroughRoutes(app, { getWalkthroughService, validate
 
       const source = readSource(req.query.source);
       const readContext = await validatePullRequestContext(source, req.query, directory);
-      const { getWalkthrough, getPullRequestDiff } = await getWalkthroughService();
+      const { getWalkthrough, getPullRequestDiff, readWalkthroughInstructions } = await getWalkthroughService();
       const result = await getWalkthrough(
         {
           directory: readContext?.directory ?? directory,
@@ -101,7 +101,7 @@ export function registerWalkthroughRoutes(app, { getWalkthroughService, validate
           language: typeof req.query.language === 'string' ? req.query.language : undefined,
           readContext,
         },
-        { getPullRequestDiff },
+        { getPullRequestDiff, readWalkthroughInstructions },
       );
       res.json(result);
     } catch (error) {
@@ -155,6 +155,7 @@ export function registerWalkthroughRoutes(app, { getWalkthroughService, validate
         status,
         sourceRepo: source.sourceRepo ?? null,
         revision: source.revision,
+        binary: query.get('binary') === 'true',
       }));
     } catch (error) {
       respondWithError(res, error, 'Failed to load pull request file');
@@ -173,7 +174,7 @@ export function registerWalkthroughRoutes(app, { getWalkthroughService, validate
       }
 
       const readContext = await validatePullRequestContext(source, req.body, directory);
-      const { generateWalkthrough, getPullRequestDiff } = await getWalkthroughService();
+      const { generateWalkthrough, getPullRequestDiff, readWalkthroughInstructions } = await getWalkthroughService();
       const result = await generateWalkthrough(
         {
           directory: readContext?.directory ?? directory,
@@ -185,7 +186,7 @@ export function registerWalkthroughRoutes(app, { getWalkthroughService, validate
           language: typeof language === 'string' ? language : undefined,
           readContext,
         },
-        { getPullRequestDiff },
+        { getPullRequestDiff, readWalkthroughInstructions },
       );
       if (clientIsGone(res)) return;
       res.json(result);

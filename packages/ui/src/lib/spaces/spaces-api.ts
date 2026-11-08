@@ -10,6 +10,8 @@ import { runtimeFetch } from '@/lib/runtime-fetch';
 const SPACES_ROUTE = '/api/openchamber/spaces';
 
 const spaceIdSchema = z.string().regex(/^[0-9a-f]{12}$/);
+export const spaceTaskTitleSchema = z.object({ title: z.string().min(1).max(120), by: z.enum(['user', 'agent']) });
+export type SpaceTaskTitle = z.infer<typeof spaceTaskTitleSchema>;
 
 const failureSchema = z.object({
   code: z.string(),
@@ -137,11 +139,10 @@ const setupSchema = z.discriminatedUnion('state', [
   z.object({ state: z.literal('interrupted'), total: z.number().int().min(1) }),
 ]);
 
-export type SpaceSetup = z.infer<typeof setupSchema>;
-
 const spaceEntrySchema = z.object({
   id: spaceIdSchema,
   name: z.string(),
+  taskTitle: spaceTaskTitleSchema.nullish(),
   // The place the space lives on, as the host names it; the browser panel's container mark says it.
   placeId: z.string(),
   // The machine of a Docker over SSH place, as the user wrote it; null for this computer, and
@@ -308,7 +309,7 @@ export const setSpaceMachine = async (machine: string): Promise<SpacePlace | nul
   (await request(`${SPACES_ROUTE}/machine`, z.object({ place: placeSchema.nullable() }), { method: 'PUT', body: JSON.stringify({ machine }) })).place;
 
 // The disk a place's spaces take, in bytes: the image (null when it is not there), the tools and
-// the spaces' own volumes, and what a clean-up would free now, the image among it or not.
+// the spaces' own volumes in all and by space, and what a clean-up would free now, the image among it or not.
 const spaceDiskSchema = z.object({
   imageBytes: z.number().min(0).nullable(),
   // A download of the image under way on the host, and how the last one ended while the image is absent.
@@ -316,6 +317,8 @@ const spaceDiskSchema = z.object({
   imageFailure: failureSchema.nullable().default(null),
   toolsBytes: z.number().min(0),
   spacesBytes: z.number().min(0),
+  // Each space's own volumes by its id, what deleting it gives back; empty from a host before it was counted.
+  bytesBySpace: z.record(z.string(), z.number().min(0)).default({}),
   freeBytes: z.number().min(0),
   freesImage: z.boolean(),
 });
@@ -414,6 +417,10 @@ export const startSpace = (spaceId: string): Promise<SpaceEntry> =>
   request(`${SPACES_ROUTE}/${spaceId}/start`, spaceEntrySchema, { method: 'POST' });
 
 /** Stops a running space and its gatekeeper; its files stay. */
+export const setSpaceTaskTitle = async (spaceId: string, title: string): Promise<void> => {
+  await request(`${SPACES_ROUTE}/${spaceId}/task-title`, z.object({ applied: z.boolean(), taskTitle: spaceTaskTitleSchema.nullable() }), { method: 'PUT', body: JSON.stringify({ title }) });
+};
+
 export const stopSpace = (spaceId: string): Promise<SpaceEntry> =>
   request(`${SPACES_ROUTE}/${spaceId}/stop`, spaceEntrySchema, { method: 'POST' });
 

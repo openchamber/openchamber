@@ -4,6 +4,7 @@ import { createRoot, type Root } from 'react-dom/client';
 
 import {
     createHistoryState,
+    jumpToEntry,
     resetHistoryState,
     stepNewer,
     stepOlder,
@@ -237,6 +238,71 @@ describe('message history overlays', () => {
     });
 });
 
+describe('message history direct selection', () => {
+    test('loads the raw selected entry and replaces an edit at the same position', () => {
+        const storedAttachment = { id: 'stored-file' };
+        const history = [draft('oldest'), draft('middle', [storedAttachment]), draft('newest')];
+        const selected = jumpToEntry(
+            {
+                ...createState(history),
+                cursor: 1,
+                overlays: new Map([[1, draft('edited middle')]]),
+            },
+            history,
+            1,
+            draft('edited middle'),
+            history[1],
+        );
+
+        expect(selected.value).toBe(history[1]);
+        expect(selected.state.cursor).toBe(1);
+        expect(selected.state.overlays.has(1)).toBe(false);
+    });
+
+    test('preserves the live draft and unrelated recalled edits when jumping', () => {
+        const state = {
+            ...createState(),
+            cursor: HISTORY.length,
+            overlays: new Map([
+                [0, draft('edited oldest')],
+                [HISTORY.length, draft('live draft', [{ id: 'draft-file' }])],
+            ]),
+        };
+
+        const selected = jumpToEntry(state, HISTORY, 1, draft('live draft', [{ id: 'draft-file' }]), HISTORY[1]);
+        const newer = stepNewer(selected.state, HISTORY, draft('middle'));
+        const backToDraft = stepNewer(newer.state, HISTORY, draft('newest'));
+
+        expect(selected.value).toEqual(draft('middle'));
+        expect(selected.state.overlays.get(0)).toEqual(draft('edited oldest'));
+        expect(backToDraft.value).toEqual(draft('live draft', [{ id: 'draft-file' }]));
+    });
+
+    test('does not select a stale or invalid history entry', () => {
+        const state = createState();
+        const stale = jumpToEntry(state, HISTORY, 1, draft('live draft'), draft('different middle'));
+        const staleAttachments = jumpToEntry(state, HISTORY, 1, draft('live draft'), draft('middle', [{ id: 'different' }]));
+        const invalid = jumpToEntry(state, HISTORY, HISTORY.length, draft('live draft'), HISTORY[1]);
+
+        expect(stale.value).toBeNull();
+        expect(stale.state.cursor).toBe(HISTORY.length);
+        expect(staleAttachments.value).toBeNull();
+        expect(invalid.value).toBeNull();
+        expect(invalid.state.cursor).toBe(HISTORY.length);
+    });
+
+    test('synchronizes trimmed history before selecting its current index', () => {
+        const history = [draft('oldest'), draft('middle'), draft('newest')];
+        const browsingNewest = stepOlder(createState(history), history, draft('live draft')).state;
+        const trimmed = [draft('middle'), draft('newest'), draft('latest')];
+
+        const selected = jumpToEntry(browsingNewest, trimmed, 2, draft('newest'), trimmed[2]);
+
+        expect(selected.value).toEqual(draft('latest'));
+        expect(selected.state.cursor).toBe(2);
+    });
+});
+
 describe('message history synchronization', () => {
     test('resets when the active identity changes', () => {
         const state = createState();
@@ -304,6 +370,25 @@ describe('message history synchronization', () => {
 });
 
 describe('useMessageHistory', () => {
+    test('synchronizes identity and history before jumping to an expected entry', () => {
+        const rendered = renderMessageHistory(HISTORY, 'session-a');
+
+        try {
+            const nextHistory = [draft('other oldest'), draft('other newest')];
+            rendered.rerender(nextHistory, 'session-b');
+
+            let selected: MessageHistoryValue<Attachment> | null = null;
+            act(() => {
+                selected = rendered.current().jumpTo(1, draft('new draft'), nextHistory[1]);
+            });
+
+            expect(selected).toEqual(draft('other newest'));
+            expect(rendered.current().isBrowsing).toBe(true);
+        } finally {
+            rendered.teardown();
+        }
+    });
+
     test('round-trips edited recalled entries and the live draft through the generic API', () => {
         const rendered = renderMessageHistory(HISTORY, 'session-a');
 

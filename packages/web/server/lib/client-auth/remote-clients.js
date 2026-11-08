@@ -50,6 +50,12 @@ const constantTimeEqual = (left, right, crypto) => {
   return crypto.timingSafeEqual(leftBuffer, rightBuffer);
 };
 
+export const isActiveClient = (client, now = Date.now()) => {
+  if (client.revokedAt) return false;
+  const expires = Date.parse(client.expiresAt || '');
+  return !Number.isFinite(expires) || expires > now;
+};
+
 export const createRemoteClientAuthRuntime = ({ fsPromises, path, crypto, storePath }) => {
   const hashToken = (token) => crypto.createHash('sha256').update(token).digest('hex');
   const nowIso = () => new Date().toISOString();
@@ -145,13 +151,8 @@ export const createRemoteClientAuthRuntime = ({ fsPromises, path, crypto, storeP
   const hasActiveRelayClients = async () => {
     return withStoreMutation(async () => {
       const store = await readStore();
-      const now = Date.now();
-      return store.clients.some((client) => {
-        if (client.usesRelay !== true && client.lastTransport !== 'relay') return false;
-        if (client.revokedAt) return false;
-        const expires = Date.parse(client.expiresAt || '');
-        return !Number.isFinite(expires) || expires > now;
-      });
+      return store.clients.some((client) =>
+        (client.usesRelay === true || client.lastTransport === 'relay') && isActiveClient(client));
     });
   };
 

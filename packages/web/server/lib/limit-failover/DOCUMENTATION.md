@@ -26,7 +26,10 @@ same token.
 1. OpenCode calls the plugin's `session.retry` hook on every failed attempt,
    including failures it would not retry (`provider.quota`).
 2. For `provider.quota`, `provider.free-limit` (OpenCode's own free tier, a
-   separate type since OpenCode 2.1.2) and `provider.rate-limit` the plugin
+   separate type since OpenCode 2.1.2), `provider.budget-limit` and
+   `provider.model-budget-limit` (an OpenCode Console spend limit of the
+   workspace or of one model, separate types since 2.2) and
+   `provider.rate-limit` the plugin
    posts the error with OpenCode's `retryAfterMs`,
    OpenCode's proposed decision, the provider's stored accounts and the active
    one to `POST /api/openchamber/limit-failover`.

@@ -1,5 +1,6 @@
-// What the server can follow on a client's behalf: a change request or issue
-// on a registered source-control provider, or a work item on a tracker.
+// What the server can follow on a client's behalf: a change request, issue or
+// discussion on a registered source-control provider, or a work item on a
+// tracker. An older build drops a discussion it cannot read, never the list.
 // Parsed here once, at the boundary; everything past this file works with
 // these shapes and the key they produce.
 
@@ -12,6 +13,10 @@ const text = (value) => (isText(value) ? value.trim() : '');
 export const isPlainRecord = (value) => Object.prototype.toString.call(value) === '[object Object]';
 
 const THREAD_KINDS = new Set(['pull', 'issue']);
+// Only a provider that keeps discussions has one to follow.
+const threadKindOf = (kind, descriptor) => (
+  THREAD_KINDS.has(kind) || (kind === 'discussion' && descriptor.capabilities.discussions === true) ? kind : null
+);
 const WORK_ITEM_KIND = 'work-item';
 // A tracker's human key (Linear's ENG-12). Each tracker checks its own shape
 // when it reads; this only keeps the key and the batch request sane.
@@ -54,11 +59,11 @@ const parseWorkItem = (value, provider) => {
  * current account reads it (a linked item).
  */
 const parseThread = (value, descriptor) => {
-  const kind = text(value.kind);
+  const kind = threadKindOf(text(value.kind), descriptor);
   const owner = text(value.owner);
   const repo = text(value.repo);
   const number = positiveNumber(value.number);
-  if (!THREAD_KINDS.has(kind) || !SEGMENT.test(repo) || number === null) return null;
+  if (!kind || !SEGMENT.test(repo) || number === null) return null;
   // A path provider's top-level project (Gerrit's `demo`) has no owner.
   const topLevel = owner === '' && allowsTopLevelProjects(descriptor);
   if (!topLevel && !(descriptor.trackedItems.nestedOwners ? NAMESPACE : SEGMENT).test(owner)) return null;

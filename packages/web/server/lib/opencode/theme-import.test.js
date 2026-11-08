@@ -35,6 +35,28 @@ async function setup(overrides = {}) {
 }
 
 describe('theme import persistence', () => {
+  it('deletes a broken theme file that the list still shows from its last valid version', async () => {
+    const { app, runtime, themesDir } = await setup();
+    const theme = await runtime.saveImportedTheme(definition);
+    const file = path.join(themesDir, `${theme.metadata.id}.json`);
+    await request(app).get('/api/config/themes').expect(200);
+    await fs.writeFile(file, '{"metadata": {');
+    const listed = await request(app).get('/api/config/themes').expect(200);
+    expect(listed.body.themes.map((item) => item.metadata.id)).toEqual([theme.metadata.id]);
+    await request(app).delete(`/api/config/themes/${theme.metadata.id}`).expect(200);
+    expect(await fs.readdir(themesDir)).toEqual([]);
+  });
+
+  it('forgets last valid versions when the themes folder is removed', async () => {
+    const { runtime, themesDir } = await setup();
+    const theme = await runtime.saveImportedTheme(definition);
+    expect(await runtime.readCustomThemesFromDisk()).toHaveLength(1);
+    await fs.rm(themesDir, { recursive: true });
+    expect(await runtime.readCustomThemesFromDisk()).toEqual([]);
+    await fs.mkdir(themesDir);
+    await fs.writeFile(path.join(themesDir, `${theme.metadata.id}.json`), '{broken');
+    expect(await runtime.readCustomThemesFromDisk()).toEqual([]);
+  });
   it('deletes only imported files, leaves siblings intact and allows an identical reimport', async () => {
     const { app, runtime, themesDir } = await setup();
     const theme = await runtime.saveImportedTheme(definition);

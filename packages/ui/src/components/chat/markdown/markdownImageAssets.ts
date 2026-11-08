@@ -1,4 +1,5 @@
 import { runtimeFetch } from '@/lib/runtime-fetch';
+import { readAssetBlob } from '@/lib/runtime-asset';
 import { getRuntimeUrlResolver, type RuntimeUrlResolver } from '@/lib/runtime-url';
 import { isFilePathWithinDirectory, toAbsoluteFilePath } from '@/lib/path-utils';
 
@@ -212,16 +213,11 @@ export const resolveMarkdownImageSource = async (
   throw new Error('Local image has not been prepared');
 };
 
-/**
- * Reads an image through `/api/fs/raw` and returns it as a data URL, after the
- * same size and signature checks a drawn image gets. For a page that cannot
- * load the asset URL itself: an `openchamber_render` page runs in an opaque
- * origin, and the asset URL would hand its script the URL auth token.
- */
-const loadRawImageAsDataUrl = async (
+/** Reads an image through `/api/fs/raw`, after the same size and signature checks a drawn image gets. */
+const loadRawImageBlob = async (
   query: { path: string; directory: string; allowOutsideWorkspace?: string; outsideFileGrant?: string },
   signal: AbortSignal,
-): Promise<string> => {
+): Promise<Blob> => {
   const response = await runtimeFetch('/api/fs/raw', { query, signal });
   if (!response.ok) throw new Error(`Unable to load image (${response.status})`);
 
@@ -231,11 +227,21 @@ const loadRawImageAsDataUrl = async (
     throw new Error('Image is too large');
   }
 
-  const blob = await response.blob();
+  const blob = await readAssetBlob(response, MAX_MARKDOWN_IMAGE_BYTES, signal);
   await validateImageBlob(blob, mimeType);
   throwIfAborted(signal);
-  return blobToDataUrl(blob);
+  return blob;
 };
+
+/**
+ * An image as a data URL, for a page that cannot load the asset URL itself:
+ * an `openchamber_render` page runs in an opaque origin, and the asset URL
+ * would hand its script the URL auth token.
+ */
+const loadRawImageAsDataUrl = async (
+  query: { path: string; directory: string; allowOutsideWorkspace?: string; outsideFileGrant?: string },
+  signal: AbortSignal,
+): Promise<string> => blobToDataUrl(await loadRawImageBlob(query, signal));
 
 /**
  * VS Code has no OpenChamber server route for message-scoped temporary-file
@@ -280,6 +286,30 @@ export const getPreparedMarkdownImageUrl = (
     outsideFileGrant: image.outsideFileGrant,
   },
   );
+
+/**
+ * The own bytes, at full size, of a local image a message references, to save
+ * as a file: the grant that drew it, then the whole file.
+ */
+export const loadMessageImageBlob = async ({ source, directory, sessionId, messageId, signal }: {
+  source: string;
+  directory: string;
+  sessionId: string;
+  messageId: string;
+  signal: AbortSignal;
+}): Promise<Blob> => {
+  const resolver = getRuntimeUrlResolver();
+  const prepared = (await prepareLocalMarkdownImages({ sources: [source], directory, sessionId, messageId, signal })).get(source);
+  if (prepared?.status !== 'ready') throw new Error('Image is unavailable');
+  // The grant names a file on the server that issued it; another server may hold a different one at that path.
+  if (getRuntimeUrlResolver() !== resolver) throw new DOMException('Runtime changed', 'AbortError');
+  return loadRawImageBlob({
+    path: prepared.path,
+    directory,
+    allowOutsideWorkspace: prepared.outsideFileGrant ? 'true' : undefined,
+    outsideFileGrant: prepared.outsideFileGrant,
+  }, signal);
+};
 
 /** A prepared local image as a data URL, for a page that cannot load the asset URL (see loadRawImageAsDataUrl). */
 export const loadPreparedImageAsDataUrl = (

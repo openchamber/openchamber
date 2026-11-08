@@ -129,7 +129,9 @@ describe('Forgejo in the registry (smoke)', () => {
   it('is listed last, offers Codeberg without an account and answers disconnected', async () => {
     const app = express();
     app.use(express.json());
-    registerSourceControlRoutes(app, { configRoot: await tempDirectory() });
+    // Gitea's card asks gt for its logins; this machine's gt stays out of it.
+    const missingGt = async () => { throw Object.assign(new Error('spawn gt ENOENT'), { code: 'ENOENT' }); };
+    registerSourceControlRoutes(app, { configRoot: await tempDirectory(), gitea: { execFile: missingGt } });
 
     const providers = await request(app).get('/api/source-control/providers');
     expect(providers.body.providers.map((provider) => provider.id)).toEqual(['github', 'gitlab', 'gitea', 'gerrit', 'forgejo']);

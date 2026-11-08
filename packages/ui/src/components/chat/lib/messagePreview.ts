@@ -63,6 +63,7 @@ const contextSummary = (payload: ContextPartPayload, t: Translate, descriptorOf:
         case 'chat-quote':
             return t('chat.message.context.chatQuote');
         case 'repository-issue':
+        case 'repository-discussion':
             return `#${payload.number} ${payload.title}`;
         case 'change-request':
             return `${formatChangeRequestReference(descriptorOf(payload.provider), payload.number)} ${payload.title}`;
@@ -71,6 +72,10 @@ const contextSummary = (payload: ContextPartPayload, t: Translate, descriptorOf:
         case 'guest-issue':
         case 'guest-pr':
             return `${payload.id} ${payload.title}`;
+        case 'session':
+            return payload.title;
+        case 'session-message':
+            return payload.excerpt;
     }
 };
 
@@ -91,10 +96,13 @@ const contextBody = (payload: ContextPartPayload): string => {
         case 'chat-quote':
             return payload.quote;
         case 'repository-issue':
+        case 'repository-discussion':
         case 'change-request':
         case 'tracker-item':
         case 'guest-issue':
         case 'guest-pr':
+        case 'session':
+        case 'session-message':
             return '';
     }
 };

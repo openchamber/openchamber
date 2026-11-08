@@ -52,6 +52,29 @@ describe('session runtime', () => {
     expect(runtime.getPendingBlockingRequestsSnapshot()).toEqual({});
   });
 
+  it('drops a permission with its turn and keeps the session\'s other requests', () => {
+    const runtime = createSessionRuntime({
+      writeSseEvent() {},
+      getNotificationClients: () => new Set(),
+      broadcastEvent: () => {},
+    });
+    runtimes.push(runtime);
+    const form = { id: 'form-1', sessionID: 'session-1', title: 'Pick one', fields: {} };
+    const idle = (sessionID) => ({ type: 'session.status', properties: { sessionID, status: { type: 'idle' } } });
+    runtime.processOpenCodeSsePayload({ type: 'permission.asked', properties: { id: 'perm-1', sessionID: 'session-1', action: 'edit' } });
+    runtime.processOpenCodeSsePayload({ type: 'form.created', properties: { sessionID: 'session-1', form } });
+    runtime.processOpenCodeSsePayload({ type: 'permission.asked', properties: { id: 'perm-2', sessionID: 'session-2', action: 'edit' } });
+
+    runtime.processOpenCodeSsePayload(idle('session-1'));
+    expect(runtime.getPendingBlockingRequestsSnapshot()).toEqual({
+      'session-1': { permissions: [], forms: [form], pages: [] },
+      'session-2': { permissions: [{ id: 'perm-2', sessionID: 'session-2', action: 'edit' }], forms: [], pages: [] },
+    });
+
+    runtime.processOpenCodeSsePayload(idle('session-2'));
+    expect(Object.keys(runtime.getPendingBlockingRequestsSnapshot())).toEqual(['session-1']);
+  });
+
   it('drops pending requests when the session is deleted or OpenCode restarts', () => {
     const runtime = createSessionRuntime({
       writeSseEvent() {},
@@ -245,6 +268,7 @@ describe('session runtime', () => {
 
     expect(runtime.interruptBusySessionsAfterRestart()).toEqual({
       sessionIds: ['session-busy-1', 'session-busy-2', 'session-busy-3'],
+      autoResumeSessionIds: [],
     });
 
     expect(runtime.getActiveSessionCount()).toBe(0);
@@ -293,7 +317,7 @@ describe('session runtime', () => {
     expect(terminalEvents.some((event) => event.properties.sessionID === 'session-idle')).toBe(false);
 
     events.length = 0;
-    expect(runtime.interruptBusySessionsAfterRestart()).toEqual({ sessionIds: [] });
+    expect(runtime.interruptBusySessionsAfterRestart()).toEqual({ sessionIds: [], autoResumeSessionIds: [] });
     expect(events).toEqual([]);
   });
 

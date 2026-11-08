@@ -40,7 +40,7 @@ Katalog web uygulamasında ve masaüstü uygulamasında bulunur. [Kurumsal modda
 GitLab, Gitea, Forgejo ve Gerrit'in her birinin GitHub'ın yanında kendi kartı vardır. Bağlandıktan sonra issue'ları ve pull request'leri (GitLab'de merge request'ler, Gerrit'te değişiklikler) GitHub'ınkiler gibi [Issue'lar ve PR'lar](/tr/issues-and-prs/) panosunda ve sohbetin **+** menüsünde görünür.
 
 - **GitLab**: gitlab.com'da kısa bir cihaz koduyla, bir personal access token ile ya da sunucudaki `glab` oturumuyla giriş yapın. Self-managed bir GitLab için adresini ekleyin ve `api` kapsamlı bir personal access token yapıştırın. Orada cihaz koduyla giriş yalnızca sunucu `OPENCHAMBER_GITLAB_CLIENT_ID` değerini o instance'ta kayıtlı bir uygulamaya ayarladığında çalışır.
-- **Gitea**: instance'ınızın adresini ekleyin, örneğin `https://gitea.example.com`, ve `write:repository`, `write:issue` ve `read:user` kapsamlı bir personal access token yapıştırın. Kart, instance'ınızda bu jetonu oluşturan sayfaya bağlantı verir. Gitea'da cihaz koduyla ya da CLI ile giriş yoktur. Adresinin kökünden sunulan Gitea 1.21 veya daha yenisi gerekir.
+- **Gitea**: instance'ınızın adresini ekleyin, örneğin `https://gitea.example.com`, ve `write:repository`, `write:issue` ve `read:user` kapsamlı bir personal access token yapıştırın. Kart, instance'ınızda bu jetonu oluşturan sayfaya bağlantı verir. Sunucuda Gitea'nın `gt` CLI'ı ile giriş yaptıysanız (`gt auth login`), instance kartta kendiliğinden görünür: o girişle çalışmak için **gt CLI kullan** seçeneğini seçin. `gt` girişi issue ve pull request'leri kapsar; push ve pull için bir token bağlayın ya da Git'i kendiniz ayarlayın, örneğin `gt auth setup-git` ile. Adresinin kökünden sunulan Gitea 1.21 veya daha yenisi gerekir.
 - **Forgejo**: Codeberg kartta zaten var, bu yüzden bağlamak için yalnızca `write:repository`, `write:issue` ve `read:user` kapsamlı bir personal access token gerekir; kart, Codeberg'de bu jetonu oluşturan sayfaya bağlantı verir. Başka bir Forgejo sunucusu için adresini ekleyin, örneğin `https://forgejo.example.com`, ve aynı kapsamlara sahip bir jeton yapıştırın. Adresinin kökünden sunulan Forgejo 7.0 veya daha yenisi gerekir. Forgejo sunucusu bu kartta, Gitea sunucusu Gitea kartında bağlanır.
 - **Gerrit**: instance'ınızın adresini ekleyin, örneğin `https://gerrit.example.com`, ardından Gerrit kullanıcı adınızı ve bir HTTP parolası girin. Parolayı Gerrit'te **Settings → HTTP Credentials** altında oluşturun; kart oraya bağlantı verir. Giriş parolanız çalışmaz ve kullanıcı adı olmayan bir hesap bağlanamaz. Adresinin kökünden sunulan Gerrit 3.8 veya daha yenisi gerekir. İnceleme adresi Git adresinden farklı olan siteler, örneğin `.gitcookies` ile googlesource.com, desteklenmez.
 
@@ -90,6 +90,18 @@ Linear kartında **Session comments** açın; bir issue’dan başlatılan ya da
 4. **Set up** seçin ve giriş yapın. Modeller sonra sohbet model seçicisinde görünür.
 
 Integration'lar kullanıcı düzeyinde kurulur, bu yüzden her projede çalışır. Aynı karttan istediğiniz zaman güncelleyebilir ya da kaldırabilirsiniz.
+
+## Uzantı bildirim kanalları
+
+Bir [uzantı](/tr/extensions/) bildirimlerinizi Slack'e, Matrix'e ya da kendi sunucusuna iletebilir. **Settings → Extensions** içinde izin verdiğinizde bu sayfada **Extension accounts** altında bir kart alır. Hesabın token'ını ve kart istiyorsa sunucunun adresini oraya girin ve bağlayın: o andan sonra uzantı, [bildirim seçimlerinize](/tr/notifications/) göre telefonunuzun alacağı bildirimlerin aynısını alır. Token OpenChamber'da kalır; uzantının servisi OpenChamber üzerinden gönderir ve token'ı hiç görmez.
+
+Sunucu token'ı sonradan reddederse kart hesabın ilgi gerektirdiğini söyler; yeni bir token ile yeniden bağlayın. Uzantıyı kaldırmadan teslimatı durdurmak için bağlantıyı kesin ya da uzantıyı duraklatın. Uzantıyı kaldırmak hesabı unutur.
+
+## Uzantı izleyicileri
+
+Bir [uzantı](/tr/extensions/) Linear'ın yanına bir iş öğesi izleyicisi ekleyebilir. **Settings → Extensions** içinde izin verdiğinizde bu sayfada **Extension accounts** altında bir kart alır. Kart istiyorsa sunucunun adresini girin, sonra bir hesap bağlayın: bir token yapıştırın ya da izleyiciye kaydettirdiğiniz uygulamanın client id'sini kaydedip tarayıcıda oturum açın. İzleyici birden fazla hesap tutuyorsa **Add account** bir hesap daha bağlar, **Switch to** kullanılan hesabı değiştirir. Proje eşlemesi ve oturum yorumları, izleyici sunuyorsa Linear'da olduğu gibi kartta görünür.
+
+Öğeleri bundan sonra seçicide, sohbetin **+** menüsünde, New Worktree'de, bir oturumun bağlı öğelerinde ve takip ettiğiniz öğelerin canlı durumlarında görünür. Token'lar OpenChamber'da kalır; uzantının servisi izleyiciye OpenChamber üzerinden ulaşır ve onları hiç görmez. İzleyici bir kimlik bilgisini sonradan reddederse kart hesabın ilgi gerektirdiğini söyler; yeniden bağlayın. Uzantıyı duraklatmak izleyiciyi her yerden kaldırır ve hesapları tutar; kaldırmak hesapları unutur.
 
 ## Claude Code
 

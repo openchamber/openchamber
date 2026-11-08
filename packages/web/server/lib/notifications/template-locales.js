@@ -2,8 +2,9 @@
 //
 // The server cannot reach `packages/ui`, so the defaults the settings page
 // shows as placeholders (`settings.notifications.page.template.defaults.*`)
-// are mirrored here. A missing or unknown tag falls back to English, which is
-// what every build did before this list existed.
+// are mirrored here. The `review*` texts have no template: only the server
+// writes them, when an auto-review ends. A missing or unknown tag falls back
+// to English, which is what every build did before this list existed.
 
 const en = {
   readyTitle: '{agent_name} is ready',
@@ -16,6 +17,13 @@ const en = {
   permissionBody: 'Agent is waiting for your approval',
   planModeTitle: 'Switch to plan mode',
   buildModeTitle: 'Switch to build mode',
+  reviewCleanTitle: 'Review finished',
+  reviewCleanBody: 'No findings left',
+  reviewDisputedTitle: 'Review needs your decision',
+  reviewDisputedBody: 'Some findings are still disputed',
+  reviewLimitTitle: 'Review stopped after five rounds',
+  reviewLimitBody: 'Findings are still open',
+  reviewFailedTitle: 'Review failed',
 };
 
 const de = {
@@ -29,6 +37,13 @@ const de = {
   permissionBody: 'Der Agent wartet auf deine Freigabe',
   planModeTitle: 'Zum Planmodus wechseln',
   buildModeTitle: 'Zum Build-Modus wechseln',
+  reviewCleanTitle: 'Review abgeschlossen',
+  reviewCleanBody: 'Keine offenen Befunde',
+  reviewDisputedTitle: 'Review braucht deine Entscheidung',
+  reviewDisputedBody: 'Einige Befunde sind noch strittig',
+  reviewLimitTitle: 'Review nach fünf Runden beendet',
+  reviewLimitBody: 'Es sind noch Befunde offen',
+  reviewFailedTitle: 'Review fehlgeschlagen',
 };
 
 const fr = {
@@ -42,6 +57,13 @@ const fr = {
   permissionBody: "L'agent attend votre autorisation",
   planModeTitle: 'Passer en mode plan',
   buildModeTitle: 'Passer en mode build',
+  reviewCleanTitle: 'Revue terminée',
+  reviewCleanBody: 'Plus aucun point en suspens',
+  reviewDisputedTitle: 'La revue attend ta décision',
+  reviewDisputedBody: 'Certains points restent contestés',
+  reviewLimitTitle: 'Revue arrêtée après cinq tours',
+  reviewLimitBody: 'Des points restent ouverts',
+  reviewFailedTitle: 'La revue a échoué',
 };
 
 const nl = {
@@ -55,6 +77,13 @@ const nl = {
   permissionBody: 'De agent wacht op je goedkeuring',
   planModeTitle: 'Naar planmodus schakelen',
   buildModeTitle: 'Naar buildmodus schakelen',
+  reviewCleanTitle: 'Review klaar',
+  reviewCleanBody: 'Geen bevindingen meer',
+  reviewDisputedTitle: 'Review wacht op je beslissing',
+  reviewDisputedBody: 'Over sommige bevindingen is nog onenigheid',
+  reviewLimitTitle: 'Review gestopt na vijf rondes',
+  reviewLimitBody: 'Er staan nog bevindingen open',
+  reviewFailedTitle: 'Review mislukt',
 };
 
 const zhCN = {
@@ -68,6 +97,13 @@ const zhCN = {
   permissionBody: '智能体正在等待你的批准',
   planModeTitle: '切换到 Plan 模式',
   buildModeTitle: '切换到 Build 模式',
+  reviewCleanTitle: '审查完成',
+  reviewCleanBody: '没有剩余问题',
+  reviewDisputedTitle: '审查需要你来决定',
+  reviewDisputedBody: '部分问题仍有争议',
+  reviewLimitTitle: '审查在五轮后停止',
+  reviewLimitBody: '仍有未解决的问题',
+  reviewFailedTitle: '审查失败',
 };
 
 const zhTW = {
@@ -81,6 +117,13 @@ const zhTW = {
   permissionBody: '智慧體正在等待你的核准',
   planModeTitle: '切換到 Plan 模式',
   buildModeTitle: '切換到 Build 模式',
+  reviewCleanTitle: '審查完成',
+  reviewCleanBody: '沒有剩餘問題',
+  reviewDisputedTitle: '審查需要你來決定',
+  reviewDisputedBody: '部分問題仍有爭議',
+  reviewLimitTitle: '審查在五輪後停止',
+  reviewLimitBody: '仍有未解決的問題',
+  reviewFailedTitle: '審查失敗',
 };
 
 const uk = {
@@ -94,6 +137,13 @@ const uk = {
   permissionBody: 'Агент чекає на ваше схвалення',
   planModeTitle: 'Перейти в режим планування',
   buildModeTitle: 'Перейти в режим збирання',
+  reviewCleanTitle: 'Ревʼю завершено',
+  reviewCleanBody: 'Зауважень не лишилось',
+  reviewDisputedTitle: 'Ревʼю чекає твого рішення',
+  reviewDisputedBody: 'Щодо деяких зауважень досі суперечка',
+  reviewLimitTitle: 'Ревʼю зупинено після пʼяти кіл',
+  reviewLimitBody: 'Зауваження ще відкриті',
+  reviewFailedTitle: 'Ревʼю не вдалося',
 };
 
 const es = {
@@ -107,6 +157,13 @@ const es = {
   permissionBody: 'El agente espera tu aprobación',
   planModeTitle: 'Cambiar al modo plan',
   buildModeTitle: 'Cambiar al modo build',
+  reviewCleanTitle: 'Revisión terminada',
+  reviewCleanBody: 'No quedan hallazgos',
+  reviewDisputedTitle: 'La revisión necesita tu decisión',
+  reviewDisputedBody: 'Algunos hallazgos siguen en disputa',
+  reviewLimitTitle: 'Revisión detenida tras cinco rondas',
+  reviewLimitBody: 'Todavía hay hallazgos abiertos',
+  reviewFailedTitle: 'La revisión falló',
 };
 
 const ptBR = {
@@ -120,6 +177,13 @@ const ptBR = {
   permissionBody: 'O agente está aguardando sua aprovação',
   planModeTitle: 'Mudar para o modo plano',
   buildModeTitle: 'Mudar para o modo build',
+  reviewCleanTitle: 'Revisão concluída',
+  reviewCleanBody: 'Nenhum apontamento restante',
+  reviewDisputedTitle: 'A revisão precisa da sua decisão',
+  reviewDisputedBody: 'Alguns apontamentos ainda estão em disputa',
+  reviewLimitTitle: 'Revisão parada após cinco rodadas',
+  reviewLimitBody: 'Ainda há apontamentos em aberto',
+  reviewFailedTitle: 'A revisão falhou',
 };
 
 const ko = {
@@ -133,6 +197,13 @@ const ko = {
   permissionBody: '에이전트가 승인을 기다리고 있습니다',
   planModeTitle: 'Plan 모드로 전환',
   buildModeTitle: 'Build 모드로 전환',
+  reviewCleanTitle: '리뷰 완료',
+  reviewCleanBody: '남은 지적 사항 없음',
+  reviewDisputedTitle: '리뷰에 결정이 필요합니다',
+  reviewDisputedBody: '일부 지적 사항에 아직 이견이 있습니다',
+  reviewLimitTitle: '5회 반복 후 리뷰 중단',
+  reviewLimitBody: '아직 열린 지적 사항이 있습니다',
+  reviewFailedTitle: '리뷰 실패',
 };
 
 const pl = {
@@ -146,6 +217,13 @@ const pl = {
   permissionBody: 'Agent czeka na Twoją zgodę',
   planModeTitle: 'Przełącz na tryb planowania',
   buildModeTitle: 'Przełącz na tryb budowania',
+  reviewCleanTitle: 'Przegląd zakończony',
+  reviewCleanBody: 'Nie zostały żadne uwagi',
+  reviewDisputedTitle: 'Przegląd czeka na twoją decyzję',
+  reviewDisputedBody: 'Część uwag jest nadal sporna',
+  reviewLimitTitle: 'Przegląd zatrzymany po pięciu rundach',
+  reviewLimitBody: 'Nadal są otwarte uwagi',
+  reviewFailedTitle: 'Przegląd się nie powiódł',
 };
 
 const ja = {
@@ -159,6 +237,13 @@ const ja = {
   permissionBody: 'エージェントが承認を待っています',
   planModeTitle: 'Plan モードに切り替え',
   buildModeTitle: 'Build モードに切り替え',
+  reviewCleanTitle: 'レビュー完了',
+  reviewCleanBody: '残っている指摘はありません',
+  reviewDisputedTitle: 'レビューにあなたの判断が必要です',
+  reviewDisputedBody: '一部の指摘はまだ意見が分かれています',
+  reviewLimitTitle: '5 回でレビューを停止しました',
+  reviewLimitBody: '未解決の指摘があります',
+  reviewFailedTitle: 'レビューに失敗しました',
 };
 
 const tr = {
@@ -172,6 +257,13 @@ const tr = {
   permissionBody: 'Ajan onayınızı bekliyor',
   planModeTitle: 'Plan moduna geç',
   buildModeTitle: 'Build moduna geç',
+  reviewCleanTitle: 'İnceleme bitti',
+  reviewCleanBody: 'Açık bulgu kalmadı',
+  reviewDisputedTitle: 'İnceleme kararını bekliyor',
+  reviewDisputedBody: 'Bazı bulgular hâlâ tartışmalı',
+  reviewLimitTitle: 'İnceleme beş turdan sonra durdu',
+  reviewLimitBody: 'Hâlâ açık bulgular var',
+  reviewFailedTitle: 'İnceleme başarısız oldu',
 };
 
 const ar = {
@@ -185,6 +277,13 @@ const ar = {
   permissionBody: 'الوكيل بانتظار موافقتك',
   planModeTitle: 'التبديل إلى وضع التخطيط',
   buildModeTitle: 'التبديل إلى وضع البناء',
+  reviewCleanTitle: 'اكتملت المراجعة',
+  reviewCleanBody: 'لم تتبقَّ ملاحظات',
+  reviewDisputedTitle: 'المراجعة تحتاج إلى قرارك',
+  reviewDisputedBody: 'بعض الملاحظات ما زالت موضع خلاف',
+  reviewLimitTitle: 'توقفت المراجعة بعد خمس جولات',
+  reviewLimitBody: 'ما زالت هناك ملاحظات مفتوحة',
+  reviewFailedTitle: 'فشلت المراجعة',
 };
 
 const he = {
@@ -198,6 +297,13 @@ const he = {
   permissionBody: 'הסוכן ממתין לאישורך',
   planModeTitle: 'מעבר למצב תכנון',
   buildModeTitle: 'מעבר למצב בנייה',
+  reviewCleanTitle: 'הסקירה הסתיימה',
+  reviewCleanBody: 'לא נותרו ממצאים',
+  reviewDisputedTitle: 'הסקירה מחכה להחלטה שלך',
+  reviewDisputedBody: 'על חלק מהממצאים עדיין יש מחלוקת',
+  reviewLimitTitle: 'הסקירה נעצרה אחרי חמישה סבבים',
+  reviewLimitBody: 'עדיין יש ממצאים פתוחים',
+  reviewFailedTitle: 'הסקירה נכשלה',
 };
 
 export const NOTIFICATION_TEXT_BY_LOCALE = {

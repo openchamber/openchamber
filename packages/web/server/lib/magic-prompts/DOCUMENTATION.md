@@ -6,6 +6,11 @@ Server storage for Magic Prompt overrides in two scopes: global (`<data dir>/mag
 
 `service.js` handles every request for both transports: `routes.js` adapts Express, and the VS Code extension host (`packages/vscode/src/magic-prompts.ts`) calls it with its own project list and owner resolution. Keep `runtime.js` and `service.js` free of imports outside this folder, so the extension bundle takes nothing else from the server.
 
+`routes.js` returns `overridesForDirectory` for server features whose prompt
+runs on the server. The walkthrough reads `walkthrough.instructions` through it
+(`../walkthrough/DOCUMENTATION.md`); that prompt has no built-in text, so the
+server needs none.
+
 ## Invariants
 
 - **Project over global over built-in, by key presence.** An empty string is a value and wins. A directory no registered project owns gets the global map alone.

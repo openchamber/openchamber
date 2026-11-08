@@ -63,6 +63,8 @@ export const useProjectSetup = (projectRef: ProjectRef): ProjectSetupState => {
       hiddenSharedActionIds: async (ids) => notifyActions(await updateProjectSetup(projectRef, { hiddenSharedActionIds: ids })),
       personalCommands: (setupWorktree) => updateProjectSetup(projectRef, { setupWorktree }),
       sharedCommands: async (setupWorktree) => (await updateSharedProjectSetup(projectRef, { setupWorktree })) !== null,
+      personalTeardownCommands: (teardownWorktree) => updateProjectSetup(projectRef, { teardownWorktree }),
+      sharedTeardownCommands: async (teardownWorktree) => (await updateSharedProjectSetup(projectRef, { teardownWorktree })) !== null,
     };
   }, [projectRef]);
 

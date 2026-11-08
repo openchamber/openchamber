@@ -11,9 +11,8 @@ Make the smallest complete change and validate at the narrowest level that cover
 
 ## Before Editing
 
-1. Inspect nearby implementation, callers, and tests before introducing a pattern.
-2. Classify every applicable change risk below.
-3. Identify every affected consumer, runtime, persisted format, and public export. This step is complete only when each risk has an owner and required validation.
+1. Classify every applicable change risk below.
+2. Identify every affected consumer, runtime, persisted format, and public export. This step is complete only when each risk has an owner and required validation.
 
 
 ## Risk Classification
@@ -37,7 +36,6 @@ Apply every matching category. Do not escalate local work into workspace-wide ri
 - Follow local TypeScript types; avoid `any`, blind casts, and guessed payload shapes.
 - Reject invalid inputs and broken preconditions early so the valid path stays flat. Do not force a numeric happy-path/error-path ratio when correctness requires substantial failure handling.
 - Require evidence before adding retries, caches, compatibility paths, lifecycle machinery, or generalized race handling. Security, data-loss, destructive-operation, and concurrency invariants still require proactive design when the risk is inherent to the operation.
-- Make partial failure, rollback, cleanup, and user-visible outcomes explicit for destructive or multi-step work.
 
 ## Review Prompts
 
@@ -61,18 +59,30 @@ For persisted data, require a migration only when existing stored data needs con
 
 Do not hide a required architectural migration behind a local heuristic. Do not turn a local fix into a speculative rewrite.
 
+## Answering Review Findings
+
+When a reviewer (a subagent, a review session, a bot) reports on your change, you own the change and the reviewer advises. Review loops grow a change one cheap-looking fix at a time; hold it at the size its goal needs.
+
+- Weigh every finding yourself before acting. A problem the change neither causes nor set out to fix (another path, a rare case, a small cost that was there before) is a nit, whatever label it came with. A regression this change introduces is never a nit, however rare its case.
+- Fix what is wrong in the case the change is for, with the smallest fix. A fix that deletes or narrows code beats a new guard, helper, option, or test the goal does not need.
+- A finding you think is wrong stays unfixed, with evidence: file and line, a test, command output. Decline nits and out-of-scope items in one line each; a real problem outside the change goes to the report as a follow-up.
+- Never agree with a finding just to end the review.
+- A finding still disputed after you and the reviewer have each answered twice goes to the maintainer, with both positions in two or three lines each. Do not argue a third round.
+- After the fixes, compare the diff size with the one before review. If review grew it, cut first.
+
 ## Validation Matrix
 
 | Change | Minimum validation |
 |---|---|
-| Executable source | Focused tests for the changed behavior; type-check and lint come from the pre-commit gate. TypeScript and lint do not cover server JS, CLI JS, Electron helpers, or native code: run `node --check`, focused tests, or the build for those |
+| Executable source | Proof of the changed behavior (*Proof*, below); type-check and lint come from the pre-commit gate. TypeScript and lint do not cover server JS, CLI JS, Electron helpers, or native code: run `node --check`, focused tests, or the build for those |
 | Cross-workspace/shared contract | Workspace-wide type-check and lint plus affected builds/tests |
 | Added/deleted/renamed source file, export/type/entrypoint/import shape | Relevant checks; dead code comes from the pre-commit gate |
-| Persisted or external contract | Compatibility and round-trip tests plus the applicable failure/ordering cases: missing-versus-empty, malformed data, stale reads versus newer mutations, out-of-order writes, lifecycle handling for debounced writes, conversion, and failed-write/migration rollback |
+| Persisted or external contract | Compatibility and round-trip tests plus the persisted-state cases in `sync-state-invariants`, *Persisted Snapshot Ordering*, and failed-write rollback |
 | Dependency or lockfile | Workspace-wide checks and affected builds |
 | Added, renamed, or removed `packages/*` workspace | Mirror it in the Dockerfile `deps` stage, which copies those manifests by name, then run `docker build .`: a `COPY` of a missing workspace fails the build, and a workspace another one depends on fails the frozen install when absent. CI does not build the image. |
 | Generated asset | Regeneration check plus consumer build/test |
 | Docs-only or isolated config | Narrow syntax/schema/link validation; do not run unrelated full suites |
+| UI or server behavior a user sees | Run it and look before calling it done, where the change lives (*Where to run it*, below) |
 | Platform/runtime behavior | Relevant runtime build or manual/integration check; static checks are insufficient |
 | Desktop update or quit/install sequence | A real update run; read `references/updater-testing.md` first, because a run done the obvious way completes the update and reports success while testing nothing |
 
@@ -80,11 +90,34 @@ Do not hide a required architectural migration behind a local heuristic. Do not 
 
 When several agents edit one checkout in parallel, they edit and run single test files only. The coordinator runs type-check, lint, builds and full suites once, serially, on the combined diff: each type-check holds over a gigabyte, parallel copies have frozen the machine, and a check run mid-edit reports the other agents' half-finished work.
 
-Use a sufficiently long timeout for broad checks. Report exactly what ran and what did not.
-
-Choose affected builds/tests by tracing real consumers and runtime boundaries, not by running everything reflexively.
+Use a sufficiently long timeout for broad checks.
 
 For type-only shared contracts, validate compile-time consumers. Add runtime serialization tests when the contract crosses a process, persistence, network, or untyped JavaScript boundary.
+
+## Proof
+
+A test is proof when it is deterministic and fails without the change: a pure function, a page script, a reducer. Behavior that lives in a runtime is proven by running that runtime and watching the scenario; a test there that only mirrors the implementation through mocks or races real timers adds upkeep and flakes, and the run already shows more.
+
+Pick the scenarios before counting them. First run the plain path a user takes, end to end in the running app; then break it the ordinary ways it breaks: a credential the server stops accepting, a server that is down, a sign-in the user cancels or that fails, an empty or slow answer. Look at what the user sees each time. These ordinary breaks are where shipped bugs sit, so they come before rare races and exotic inputs, which earn coverage only with a concrete reason. Tests then pin what the runs found.
+
+## Where to run it
+
+Run the scenario in the runtime that executes the changed code. Every route below starts its own instance on free ports, beside the user's own app and dev servers.
+
+| Change lives in | Run it with |
+|---|---|
+| Shared UI or server (also what desktop and VS Code render) | `OPENCHAMBER_HMR_UI_PORT=<port> OPENCHAMBER_HMR_API_PORT=<port> bun run dev`, then the browser panel at `http://localhost:<ui-port>` |
+| Mobile web | The same server at `/mobile.html`, the panel at the mobile viewport |
+| Electron main, preload, native windows | `electron:dev` with a debugging port, driven over CDP (`desktop-shell`, *Validation*) |
+| The in-app browser panel and its agent actions | `electron:dev`, then the actions through that instance's control route (`packages/web/server/lib/browser-control/DOCUMENTATION.md`) |
+| VS Code extension host or webview | `vscode:dev` with a debugging port, driven over CDP (`packages/vscode/README.md`) |
+| Behavior only the packaged app has: client auth headers, the updater | The installed app over CDP (`desktop-shell`, *Validation*) |
+| Capacitor shell | The iOS Simulator (`serve-sim`); timing, motion and keyboard latency on a device (`performance-engineering`, `references/ios-webkit.md`) |
+| Pure logic | A deterministic test that fails without the change |
+
+Use `localhost`, never `127.0.0.1`, for the web server: the desktop app lifts Chromium's connection cap for `127.0.0.1`, and the panel then overruns Vite and resets connections. Build the desktop app only for a change that lives in its shell. Stop each instance by its own process id or process group, never by a name pattern that would stop someone else's.
+
+The panel's browser actions run in the app the agent itself works from, so they cannot reach a change to the panel's own code until that app is rebuilt; the `electron:dev` route above covers it before.
 
 ## Test Design
 
@@ -109,8 +142,7 @@ The document describes the module as it is now. When a decision changes, rewrite
 ## Completion Standard
 
 - Implement the behavior end to end, including rollback and cleanup.
-- Run focused regression tests for the changed contract; when no test can cover it, say so in the report.
+- Prove the changed behavior (*Proof*): the reproduction passes, and the report says what the proof did not cover.
 - Preserve unrelated changes encountered in shared files.
 - The owning `DOCUMENTATION.md` is true of the new code and has a decision entry for every non-obvious choice the change made; a new module that meets the bar in *Module Documentation* has its own document.
 - Perform a final simplification pass over your own diff, hardest after a rework or a removal: every branch, condition, prop, parameter, export, key, and helper the change made unreachable, always-true, or single-valued is gone, along with speculative branches, shallow wrappers, stale compatibility, and names that do not clarify intent.
-- Before a commit, the pre-commit gate passes.

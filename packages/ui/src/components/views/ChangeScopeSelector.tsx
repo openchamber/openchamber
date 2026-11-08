@@ -7,6 +7,7 @@ import {
     DropdownMenuRadioItem,
     DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { HoverTooltip } from '@/components/ui/row-tooltip';
 import { useI18n } from '@/lib/i18n';
 import { changeRequestCopy } from '@/lib/source-control/changeRequestCopy';
 import type { ChangeRequestTerm } from '@/lib/source-control/providers/descriptor';
@@ -16,7 +17,7 @@ interface ChangeScopeSelectorProps {
     scope: PendingDiffScope;
     workingCount: number;
     stagedCount: number;
-    turnCount: number;
+    turnCount: number | null;
     branchCount: number | null;
     commitCount: number | null;
     prCount: number | null;
@@ -56,18 +57,20 @@ export const ChangeScopeSelector = React.memo<ChangeScopeSelectorProps>(({
 
     return (
         <DropdownMenu open={open} onOpenChange={setOpen}>
-            <DropdownMenuTrigger asChild>
-                <button
-                    type="button"
-                    className="flex h-7 flex-shrink-0 items-center gap-1.5 rounded-md px-2 typography-ui-label font-semibold text-foreground outline-none hover:bg-interactive-hover focus-visible:ring-2 focus-visible:ring-ring"
-                    aria-label={t('diffView.scope.selectorAria')}
-                >
-                    <span className="whitespace-nowrap">
-                        {currentLabel}{currentCount !== null && <span className="diff-toolbar__scope-count">: {currentCount}</span>}
-                    </span>
-                    <Icon name="arrow-down-s" className="size-4 flex-shrink-0 opacity-60" />
-                </button>
-            </DropdownMenuTrigger>
+            <HoverTooltip label={t('contextTooltips.diff.scope')} side="bottom">
+                <DropdownMenuTrigger asChild>
+                    <button
+                        type="button"
+                        className="flex h-7 flex-shrink-0 items-center gap-1.5 rounded-md px-2 typography-ui-label font-semibold text-foreground outline-none hover:bg-interactive-hover focus-visible:ring-2 focus-visible:ring-ring"
+                        aria-label={t('diffView.scope.selectorAria')}
+                    >
+                        <span className="whitespace-nowrap">
+                            {currentLabel}{currentCount !== null && <span className="diff-toolbar__scope-count">: {currentCount}</span>}
+                        </span>
+                        <Icon name="arrow-down-s" className="size-4 flex-shrink-0 opacity-60" />
+                    </button>
+                </DropdownMenuTrigger>
+            </HoverTooltip>
             <DropdownMenuContent align="start" className="w-40">
                 <DropdownMenuRadioGroup
                     value={scope}
@@ -78,6 +81,12 @@ export const ChangeScopeSelector = React.memo<ChangeScopeSelectorProps>(({
                         }
                     }}
                 >
+                    <DropdownMenuRadioItem value="turn">
+                        <span className="flex min-w-0 flex-1 items-center justify-between gap-3">
+                            <span>{t('diffView.scope.lastTurn')}</span>
+                            <span className="typography-meta text-muted-foreground">{turnCount ?? '…'}</span>
+                        </span>
+                    </DropdownMenuRadioItem>
                     <DropdownMenuRadioItem value="working">
                         <span className="flex min-w-0 flex-1 items-center justify-between gap-3">
                             <span>{t('diffView.scope.changed')}</span>
@@ -90,20 +99,6 @@ export const ChangeScopeSelector = React.memo<ChangeScopeSelectorProps>(({
                             <span className="typography-meta text-muted-foreground">{stagedCount}</span>
                         </span>
                     </DropdownMenuRadioItem>
-                    <DropdownMenuRadioItem value="turn">
-                        <span className="flex min-w-0 flex-1 items-center justify-between gap-3">
-                            <span>{t('diffView.scope.lastTurn')}</span>
-                            <span className="typography-meta text-muted-foreground">{turnCount}</span>
-                        </span>
-                    </DropdownMenuRadioItem>
-                    {showBranchOption ? (
-                        <DropdownMenuRadioItem value="branch">
-                            <span className="flex min-w-0 flex-1 items-center justify-between gap-3">
-                                <span>{t('diffView.scope.branch')}</span>
-                                <span className="typography-meta text-muted-foreground">{branchCount ?? '…'}</span>
-                            </span>
-                        </DropdownMenuRadioItem>
-                    ) : null}
                     {showCommitOption && (
                         <DropdownMenuRadioItem value="commit">
                             <span className="flex min-w-0 flex-1 items-center justify-between gap-3">
@@ -112,6 +107,14 @@ export const ChangeScopeSelector = React.memo<ChangeScopeSelectorProps>(({
                             </span>
                         </DropdownMenuRadioItem>
                     )}
+                    {showBranchOption ? (
+                        <DropdownMenuRadioItem value="branch">
+                            <span className="flex min-w-0 flex-1 items-center justify-between gap-3">
+                                <span>{t('diffView.scope.branch')}</span>
+                                <span className="typography-meta text-muted-foreground">{branchCount ?? '…'}</span>
+                            </span>
+                        </DropdownMenuRadioItem>
+                    ) : null}
                     {showCommitOption && <DropdownMenuRadioItem value="pr">
                         <span className="flex min-w-0 flex-1 items-center justify-between gap-3">
                             <span>{t(changeRequestCopy('session.githubIntegration.tabs.pullRequests', changeRequestTerm))}</span>

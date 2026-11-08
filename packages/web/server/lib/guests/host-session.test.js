@@ -35,6 +35,7 @@ describe('toGuestAuthResponse', () => {
         tokenUrl: 'https://gitlab.com/oauth/token',
         apiOrigin: 'https://gitlab.com',
       },
+      settings: [{ id: 'project-path', label: 'Project' }],
     }, {
       accessToken: 'tok',
       account: 'ada',
@@ -48,6 +49,7 @@ describe('toGuestAuthResponse', () => {
       account: 'ada',
       hasClient: true,
       settings: { 'project-path': 'group/project' },
+      secretsSet: [],
     });
   });
 

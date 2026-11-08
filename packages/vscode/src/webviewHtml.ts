@@ -87,12 +87,9 @@ export function getWebviewHtml(options: WebviewHtmlOptions): string {
 
   // Use VS Code CSS variables for proper theme integration
   // These variables are automatically provided by VS Code to webviews
-  // 
-  // Logo geometry matches OpenChamberLogo.tsx:
-  // edge=48, cos30=0.866, sin30=0.5, centerY=50
-  // top=(50, 2), left=(8.432, 26), right=(91.568, 26), center=(50, 50)
-  // bottomLeft=(8.432, 74), bottomRight=(91.568, 74), bottom=(50, 98)
-  // topFaceCenterY = (2 + 26 + 50 + 26) / 4 = 26
+  //
+  // The logo markup between the brand:flat-logo markers is written by
+  // scripts/brand/generate.mjs, the same drawing as OpenChamberLogo.tsx.
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -125,28 +122,9 @@ export function getWebviewHtml(options: WebviewHtmlOptions): string {
       opacity: 0;
       pointer-events: none;
     }
-    /* The OpenCode mark on the cube's top face glows on and off once a second
-       (the script below) to signal loading without text. */
-    #initial-loading .logo-inner.glow-on {
-      filter: drop-shadow(0 0 4px var(--vscode-foreground));
-    }
-    @media (prefers-reduced-motion: reduce) {
-      #initial-loading .logo-inner.glow-on { filter: none; }
-    }
-    /* Logo colors use VS Code foreground color */
-    #initial-loading .logo-stroke {
-      stroke: var(--vscode-foreground);
-    }
-    #initial-loading .logo-fill {
-      fill: var(--vscode-foreground);
-      opacity: 0.15;
-    }
-    #initial-loading .logo-fill-solid {
-      fill: var(--vscode-foreground);
-    }
-    #initial-loading .logo-fill-dim {
-      fill: var(--vscode-foreground);
-      opacity: 0.4;
+    /* The logo is drawn in currentColor: the VS Code foreground. */
+    #initial-loading .logo {
+      color: var(--vscode-foreground);
     }
     #initial-loading .status-text {
       font-size: 13px;
@@ -163,21 +141,10 @@ export function getWebviewHtml(options: WebviewHtmlOptions): string {
   <title>OpenChamber</title>
 </head>
 <body>
-  <!-- Initial loading screen with simplified OpenChamber logo -->
+  <!-- Initial loading screen with the OpenChamber logo -->
   <div id="initial-loading">
-    <svg class="logo" width="70" height="70" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
-      <!-- Left face -->
-      <path class="logo-fill logo-stroke" d="M50 50 L8.432 26 L8.432 74 L50 98 Z" stroke-width="2" stroke-linejoin="round"/>
-      <!-- Right face -->
-      <path class="logo-fill logo-stroke" d="M50 50 L91.568 26 L91.568 74 L50 98 Z" stroke-width="2" stroke-linejoin="round"/>
-      <!-- Top face (no fill, stroke only) -->
-      <path class="logo-stroke" d="M50 2 L8.432 26 L50 50 L91.568 26 Z" fill="none" stroke-width="2" stroke-linejoin="round"/>
-      
-      <!-- OpenCode logo on top face -->
-      <g class="logo-inner" transform="matrix(0.866, 0.5, -0.866, 0.5, 50, 26) scale(0.75)">
-        <path class="logo-fill-solid" fill-rule="evenodd" clip-rule="evenodd" d="M-16 -20 L16 -20 L16 20 L-16 20 Z M-8 -12 L-8 12 L8 12 L8 -12 Z"/>
-        <path class="logo-fill-dim" d="M-8 -4 L8 -4 L8 12 L-8 12 Z"/>
-      </g>
+    <svg class="logo" width="70" height="70" viewBox="-50 -50 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <!-- brand:flat-logo:start --><defs><linearGradient id="oc-logo-l" gradientUnits="userSpaceOnUse" x1="-42" y1="-20" x2="-2" y2="12"><stop offset="0" stop-color="currentColor" stop-opacity="0.025"/><stop offset="0.72" stop-color="currentColor" stop-opacity="0.143"/><stop offset="1" stop-color="currentColor" stop-opacity="0.198"/></linearGradient><linearGradient id="oc-logo-r" gradientUnits="userSpaceOnUse" x1="40" y1="3" x2="3" y2="-16"><stop offset="0" stop-color="currentColor" stop-opacity="0.071"/><stop offset="0.68" stop-color="currentColor" stop-opacity="0.174"/><stop offset="1" stop-color="currentColor" stop-opacity="0.223"/></linearGradient></defs><path d="M-41.568 -24 L-41.568 24 L0 0 Z" fill="url(#oc-logo-l)"/><path d="M41.568 -24 L0 0 L41.568 24 Z" fill="url(#oc-logo-r)"/><path d="M0 -48 L41.568 -24 L0 0 L-41.568 -24 Z" fill="currentColor" fill-opacity="0.08"/><path data-tier="0" data-rest="0.12" data-lit="0.55" d="M0 -43.2 L33.254 -24 L0 -4.8 L-33.254 -24 Z" fill="currentColor" fill-opacity="0.22"/><path data-tier="1" data-rest="0.15" data-lit="0.48" d="M0 -37.92 L24.109 -24 L0 -10.08 L-24.109 -24 Z" fill="currentColor" fill-opacity="0.27"/><path data-tier="2" data-rest="0.38" data-lit="0.85" d="M0 -32.64 L14.964 -24 L0 -15.36 L-14.964 -24 Z" fill="currentColor" fill-opacity="0.85"/><g fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round"><path d="M0 -48 L-41.568 -24 L0 0 L41.568 -24 Z"/><path d="M-41.568 -24 L-41.568 24 L0 48 L41.568 24 L41.568 -24"/><path d="M0 0 L0 48"/></g><!-- brand:flat-logo:end -->
     </svg>
     <!-- Status text stays empty while things are fine; populated only on error. -->
     <div class="status-text" id="loading-status"></div>
@@ -186,18 +153,28 @@ export function getWebviewHtml(options: WebviewHtmlOptions): string {
   
   <div id="root"></div>
   <script>
-    // Polyfill process for Node.js modules running in browser
-    // The splash glow steps once a second until the splash fades; a smooth CSS
-    // glow repainted the logo on every frame.
+    // While the splash shows, the roof tiers light up one at a time, one step a
+    // second, like the app's own startup logo; a smooth CSS animation repainted
+    // the logo on every frame.
     (function () {
-      var timer = setInterval(function () {
+      if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+      var step = 0;
+      var timer = null;
+      var tick = function () {
         var splash = document.getElementById('initial-loading');
-        var logo = splash && splash.querySelector('.logo-inner');
-        if (!logo || splash.classList.contains('fade-out')) { clearInterval(timer); return; }
-        logo.classList.toggle('glow-on');
-      }, 1000);
+        var tiers = splash ? splash.querySelectorAll('[data-tier]') : [];
+        if (!tiers.length || splash.classList.contains('fade-out')) { clearInterval(timer); return; }
+        var lit = step % tiers.length;
+        tiers.forEach(function (tier, i) {
+          tier.setAttribute('fill-opacity', tier.getAttribute(i === lit ? 'data-lit' : 'data-rest'));
+        });
+        step += 1;
+      };
+      tick();
+      timer = setInterval(tick, 1000);
     })();
 
+    // Polyfill process for Node.js modules running in browser
     window.process = window.process || { env: { NODE_ENV: 'production' }, platform: '', version: '', browser: true };
 
     window.__VSCODE_CONFIG__ = {

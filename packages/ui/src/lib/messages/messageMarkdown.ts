@@ -47,10 +47,13 @@ function formatContext(payload: ContextPartPayload, originalText: string, fieldL
     case 'terminal':
       return quoteContext(`Terminal ${payload.terminalLabel}, lines ${payload.startLine}-${payload.endLine}:`, payload.output, '', fieldLimit, '');
     case 'repository-issue':
+    case 'repository-discussion':
     case 'change-request':
     case 'tracker-item':
     case 'guest-issue':
     case 'guest-pr':
+    case 'session':
+    case 'session-message':
       return fieldLimit ? excerptMarkdown(originalText, fieldLimit) : originalText;
   }
 }

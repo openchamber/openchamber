@@ -3,6 +3,7 @@ import { AnimatePresence } from 'motion/react';
 import { ComposerFloatingPanel } from '../composer/ui/ComposerFloatingPanel';
 import type { Message, Part } from '@/lib/opencode/model';
 import { getLastConversationRecord, isIncompleteAssistantTurn } from '@/lib/opencode/model';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/lib/i18n';
 import { isIMECompositionEvent } from '@/lib/ime';
 import { cn } from '@/lib/utils';
@@ -19,17 +20,19 @@ import {
     useSessionStatus,
     useScopedBlockingPermissions,
     useScopedBlockingForms,
+    useRecoveredQuestions,
 } from '@/sync/sync-context';
 import { useStreamingStore } from '@/sync/streaming';
-import { ScrollShadow } from '@/components/ui/ScrollShadow';
 import { destroyBtwSession, filterBtwTailMessages, promoteBtwSession, type BtwSessionRef } from '@/lib/btw';
 import type { BtwPanelState } from './useBtwPanelState';
 import { ChatSurfaceProvider } from '../ChatSurfaceContext';
+import { ChatTranscriptDirectoryContext } from '../chatColumnSession';
 import { useMobileAutocompleteMaxHeight } from '../useMobileAutocompleteMaxHeight';
 import ChatMessage from '../ChatMessage';
 import { PermissionCard } from '../PermissionCard';
 import { FormCard } from '../FormCard';
 import { SessionErrorNotice } from '../SessionErrorNotice';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 
 const IDLE_SESSION_STATUS = { type: 'idle' as const };
 
@@ -87,16 +90,20 @@ const BtwPanelView: React.FC<{ parentSessionId: string; panel: BtwPanelState; hi
                 draftHint={t('chat.btw.draftHint')}
                 collapsed={panel.collapsed}
                 actions={(
-                    <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        onClick={onExit}
-                        aria-label={t('chat.btw.cancelAria')}
-                        title={t('chat.btw.cancelAria')}
-                    >
-                        <Icon name="close" className="size-4" />
-                    </Button>
+                    <Tooltip>
+                        <TooltipTrigger asChild>
+                            <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon"
+                                onClick={onExit}
+                                aria-label={t('chat.btw.cancelAria')}
+                            >
+                                <Icon name="close" className="size-4" />
+                            </Button>
+                        </TooltipTrigger>
+                        <TooltipContent side="top" sideOffset={6}>{t('chat.btw.cancelAria')}</TooltipContent>
+                    </Tooltip>
                 )}
             />
         );
@@ -123,6 +130,7 @@ type BtwSessionData = {
     activeStreamingPhase: 'streaming' | 'cooldown' | 'completed' | null;
     sessionPermissions: ReturnType<typeof useScopedBlockingPermissions>;
     sessionForms: ReturnType<typeof useScopedBlockingForms>;
+    sessionRecoveredQuestions: ReturnType<typeof useRecoveredQuestions>;
     isEmpty: boolean;
 };
 
@@ -156,6 +164,7 @@ const useBtwSessionData = (
     );
     const sessionPermissions = useScopedBlockingPermissions(sessionId, directory);
     const sessionForms = useScopedBlockingForms(sessionId, directory);
+    const sessionRecoveredQuestions = useRecoveredQuestions(sessionId, directory);
 
     const tailRecords = React.useMemo(
         () => filterBtwTailMessages(messageRecords, boundaryMessageID),
@@ -182,6 +191,7 @@ const useBtwSessionData = (
         activeStreamingPhase,
         sessionPermissions,
         sessionForms,
+        sessionRecoveredQuestions,
         isEmpty: tailRecords.length === 0,
     };
 };
@@ -249,20 +259,24 @@ const BtwFrame: React.FC<{
 }> = ({ actions, onTitleClick, titleClickLabel, collapsed, headerSpinner, draftHint, children }) => (
     <ComposerFloatingPanel role="dialog" ariaLabel="btw" compact={collapsed} header={<>
             {onTitleClick ? (
-                <button
-                    type="button"
-                    onClick={onTitleClick}
-                    aria-label={titleClickLabel}
-                    title={titleClickLabel}
-                    className="flex min-w-0 items-center gap-2 text-start text-muted-foreground transition-colors hover:text-foreground"
-                >
-                    {headerSpinner ? (
-                        <Spinner className="size-3.5 shrink-0" />
-                    ) : (
-                        <Icon name="chat-ai-3" className="size-3.5 shrink-0" />
-                    )}
-                    <Icon name={collapsed ? 'arrow-up-s' : 'arrow-down-s'} className="size-4 shrink-0" />
-                </button>
+                <Tooltip>
+                    <TooltipTrigger asChild>
+                        <button
+                            type="button"
+                            onClick={onTitleClick}
+                            aria-label={titleClickLabel}
+                            className="flex min-w-0 items-center gap-2 text-start text-muted-foreground transition-colors hover:text-foreground"
+                        >
+                            {headerSpinner ? (
+                                <Spinner className="size-3.5 shrink-0" />
+                            ) : (
+                                <Icon name="chat-ai-3" className="size-3.5 shrink-0" />
+                            )}
+                            <Icon name={collapsed ? 'arrow-up-s' : 'arrow-down-s'} className="size-4 shrink-0" />
+                        </button>
+                    </TooltipTrigger>
+                    <TooltipContent side="top" sideOffset={6}>{titleClickLabel}</TooltipContent>
+                </Tooltip>
             ) : (
                 <span className="flex min-w-0 items-center gap-2 text-muted-foreground">
                     <Icon name="chat-ai-3" className="size-3.5 shrink-0" />
@@ -302,28 +316,36 @@ const BtwSheet: React.FC<{
     const headerButtonClass = 'size-7 rounded-lg text-muted-foreground transition-colors hover:text-foreground hover:!bg-transparent active:!bg-transparent';
     const actions = (
         <div className="flex shrink-0 items-center gap-0.5">
-            <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                className={headerButtonClass}
-                onClick={handlePromote}
-                aria-label={t('chat.btw.promoteAria')}
-                title={t('chat.btw.promoteAria')}
-            >
-                <Icon name="external-link" className="size-3.5" />
-            </Button>
-            <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                className={headerButtonClass}
-                onClick={handleDestroy}
-                aria-label={t('chat.btw.destroyAria')}
-                title={t('chat.btw.destroyAria')}
-            >
-                <Icon name="close" className="size-4" />
-            </Button>
+            <Tooltip>
+                <TooltipTrigger asChild>
+                    <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className={headerButtonClass}
+                        onClick={handlePromote}
+                        aria-label={t('chat.btw.promoteAria')}
+                    >
+                        <Icon name="external-link" className="size-3.5" />
+                    </Button>
+                </TooltipTrigger>
+                <TooltipContent side="top" sideOffset={6}>{t('chat.btw.promoteAria')}</TooltipContent>
+            </Tooltip>
+            <Tooltip>
+                <TooltipTrigger asChild>
+                    <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className={headerButtonClass}
+                        onClick={handleDestroy}
+                        aria-label={t('chat.btw.destroyAria')}
+                    >
+                        <Icon name="close" className="size-4" />
+                    </Button>
+                </TooltipTrigger>
+                <TooltipContent side="top" sideOffset={6}>{t('chat.btw.destroyAria')}</TooltipContent>
+            </Tooltip>
         </div>
     );
 
@@ -403,14 +425,16 @@ const BtwExpandedSheet: React.FC<{
     return (
         <BtwFrame actions={actions} onTitleClick={onTitleClick} titleClickLabel={titleClickLabel} collapsed={false}>
             <ChatSurfaceProvider mode="peek">
-                <BtwMessages
-                    sessionRef={sessionRef}
-                    data={data}
-                    bodyRef={bodyRef}
-                    contentRef={contentRef}
-                    onBodyScroll={handleBodyScroll}
-                    maxHeight={mobileMaxHeight}
-                />
+                <ChatTranscriptDirectoryContext.Provider value={sessionRef.directory}>
+                    <BtwMessages
+                        sessionRef={sessionRef}
+                        data={data}
+                        bodyRef={bodyRef}
+                        contentRef={contentRef}
+                        onBodyScroll={handleBodyScroll}
+                        maxHeight={mobileMaxHeight}
+                    />
+                </ChatTranscriptDirectoryContext.Provider>
             </ChatSurfaceProvider>
         </BtwFrame>
     );
@@ -436,14 +460,17 @@ const BtwMessages: React.FC<{
     }
 
     return (
-        <ScrollShadow
+        <ScrollableOverlay
             ref={bodyRef}
             onScroll={onBodyScroll}
-            size={32}
+            useScrollShadow
+            scrollShadowSize={32}
             data-scroll-shadow="true"
             data-selection-menu-boundary="true"
-            className="max-h-[min(55vh,520px)] min-h-0 overflow-y-auto px-3 py-1"
-            style={maxHeight !== undefined ? { maxHeight } : undefined}
+            outerClassName="max-h-[min(55vh,520px)] min-h-0"
+            outerStyle={maxHeight !== undefined ? { maxHeight } : undefined}
+            className="px-3 py-1"
+            disableHorizontal
         >
             <div ref={contentRef}>
                 {data.messageRecords.map((record, index) => (
@@ -457,10 +484,13 @@ const BtwMessages: React.FC<{
                         }
                     />
                 ))}
-                {data.sessionForms.length > 0 || data.sessionPermissions.length > 0 ? (
+                {data.sessionForms.length > 0 || data.sessionPermissions.length > 0 || data.sessionRecoveredQuestions.length > 0 ? (
                     <div>
                         {data.sessionForms.map((form) => (
                             <FormCard key={form.id} form={form} />
+                        ))}
+                        {data.sessionRecoveredQuestions.map((question) => (
+                            <FormCard key={question.form.id} form={question.form} recovered={question} />
                         ))}
                         {data.sessionPermissions.map((permission) => (
                             <PermissionCard key={permission.id} permission={permission} />
@@ -487,7 +517,7 @@ const BtwMessages: React.FC<{
                     <span>{t('chat.btw.working')}</span>
                 </div>
             </div>
-        </ScrollShadow>
+        </ScrollableOverlay>
     );
 };
 

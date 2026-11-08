@@ -2,10 +2,7 @@ import * as React from 'react';
 
 import { Icon } from '@/components/icon/Icon';
 import type { IconName } from '@/components/icon/icons';
-import {
-  SettingsSection,
-  SettingsCheckboxRow,
-} from '@/components/sections/shared/SettingsSection';
+import { SettingsSection } from '@/components/sections/shared/SettingsSection';
 import { SettingsInfoHint } from '@/components/sections/shared/SettingsInfoHint';
 import { Switch } from '@/components/ui/switch';
 import {
@@ -18,6 +15,7 @@ import {
 import { BUILTIN_BROWSER_PROVIDER, browserProviderGuests } from '@/lib/guests/browser-providers';
 import { loadGuestCatalog } from '@/lib/guests/load-catalog';
 import { useGuestsStore } from '@/lib/guests/store';
+import { opencodeClient } from '@/lib/opencode/client';
 import { updateDesktopSettings } from '@/lib/persistence';
 import { useAgentMemoryStore } from '@/stores/useAgentMemoryStore';
 import { useUIStore } from '@/stores/useUIStore';
@@ -84,18 +82,27 @@ export const OpenChamberToolsSettings: React.FC = () => {
   const setBrowserProvider = useUIStore((state) => state.setBrowserProvider);
   const guests = useGuestsStore((state) => state.guests);
   const agentMemoryToolEnabled = useUIStore((state) => state.agentMemoryToolEnabled);
-  // Absent, not merely off: the feature is finished but unreleased, and a
-  // visible switch invites turning on something that was never announced.
+  // Absent where no OpenChamber server answers settings (VS Code).
   const agentMemoryAvailable = useUIStore((state) => state.agentMemoryFeatureAvailable);
   const setAgentMemoryToolEnabled = useUIStore((state) => state.setAgentMemoryToolEnabled);
   const agentKnowledgeToolEnabled = useUIStore((state) => state.agentKnowledgeToolEnabled);
   const setAgentKnowledgeToolEnabled = useUIStore((state) => state.setAgentKnowledgeToolEnabled);
   const agentNotifyToolEnabled = useUIStore((state) => state.agentNotifyToolEnabled);
   const setAgentNotifyToolEnabled = useUIStore((state) => state.setAgentNotifyToolEnabled);
+  const agentUsageToolEnabled = useUIStore((state) => state.agentUsageToolEnabled);
+  const setAgentUsageToolEnabled = useUIStore((state) => state.setAgentUsageToolEnabled);
   const agentRenderToolEnabled = useUIStore((state) => state.agentRenderToolEnabled);
   const setAgentRenderToolEnabled = useUIStore((state) => state.setAgentRenderToolEnabled);
-  const agentToolsCodeMode = useUIStore((state) => state.agentToolsCodeMode);
-  const setAgentToolsCodeMode = useUIStore((state) => state.setAgentToolsCodeMode);
+  const agentImageToolEnabled = useUIStore((state) => state.agentImageToolEnabled);
+  const setAgentImageToolEnabled = useUIStore((state) => state.setAgentImageToolEnabled);
+  const agentImageModel = useUIStore((state) => state.agentImageModel);
+  const setAgentImageModel = useUIStore((state) => state.setAgentImageModel);
+  const agentSecretToolEnabled = useUIStore((state) => state.agentSecretToolEnabled);
+  const setAgentSecretToolEnabled = useUIStore((state) => state.setAgentSecretToolEnabled);
+  // Absent without an OpenChamber server, like memory.
+  const agentWorkflowAvailable = useUIStore((state) => state.agentWorkflowFeatureAvailable);
+  const agentWorkflowToolEnabled = useUIStore((state) => state.agentWorkflowToolEnabled);
+  const setAgentWorkflowToolEnabled = useUIStore((state) => state.setAgentWorkflowToolEnabled);
 
   const handleAgentControlToolChange = React.useCallback((enabled: boolean) => {
     setAgentControlToolEnabled(enabled);
@@ -117,20 +124,55 @@ export const OpenChamberToolsSettings: React.FC = () => {
     void updateDesktopSettings({ agentNotifyToolEnabled: enabled });
   }, [setAgentNotifyToolEnabled]);
 
+  const handleAgentUsageToolChange = React.useCallback((enabled: boolean) => {
+    setAgentUsageToolEnabled(enabled);
+    void updateDesktopSettings({ agentUsageToolEnabled: enabled });
+  }, [setAgentUsageToolEnabled]);
+
   const handleAgentRenderToolChange = React.useCallback((enabled: boolean) => {
     setAgentRenderToolEnabled(enabled);
     void updateDesktopSettings({ agentRenderToolEnabled: enabled });
   }, [setAgentRenderToolEnabled]);
+
+  const handleAgentImageToolChange = React.useCallback((enabled: boolean) => {
+    setAgentImageToolEnabled(enabled);
+    void updateDesktopSettings({ agentImageToolEnabled: enabled });
+  }, [setAgentImageToolEnabled]);
+
+  // Read by the server on every call; no OpenCode restart involved.
+  const handleAgentImageModelChange = React.useCallback((value: string) => {
+    setAgentImageModel(value);
+    void updateDesktopSettings({ agentImageModel: value });
+  }, [setAgentImageModel]);
+
+  // Only models that generate images, read when the page opens: a provider
+  // connected meanwhile shows up on the next visit.
+  const [imageModels, setImageModels] = React.useState<{ status: 'loading' | 'failed' } | { status: 'ready'; models: Array<{ value: string; name: string; providerID: string }> }>({ status: 'loading' });
+  React.useEffect(() => {
+    let cancelled = false;
+    opencodeClient.listImageModels().then(
+      (models) => { if (!cancelled) setImageModels({ status: 'ready', models }); },
+      () => { if (!cancelled) setImageModels({ status: 'failed' }); },
+    );
+    return () => { cancelled = true; };
+  }, []);
+  const imageModelOptions = imageModels.status === 'ready' ? imageModels.models : [];
+  const imageModelKnown = imageModelOptions.some((model) => model.value === agentImageModel);
+
+  const handleAgentSecretToolChange = React.useCallback((enabled: boolean) => {
+    setAgentSecretToolEnabled(enabled);
+    void updateDesktopSettings({ agentSecretToolEnabled: enabled });
+  }, [setAgentSecretToolEnabled]);
 
   const handleAgentKnowledgeToolChange = React.useCallback((enabled: boolean) => {
     setAgentKnowledgeToolEnabled(enabled);
     void updateDesktopSettings({ agentKnowledgeToolEnabled: enabled });
   }, [setAgentKnowledgeToolEnabled]);
 
-  const handleAgentToolsCodeModeChange = React.useCallback((enabled: boolean) => {
-    setAgentToolsCodeMode(enabled);
-    void updateDesktopSettings({ agentToolsCodeMode: enabled });
-  }, [setAgentToolsCodeMode]);
+  const handleAgentWorkflowToolChange = React.useCallback((enabled: boolean) => {
+    setAgentWorkflowToolEnabled(enabled);
+    void updateDesktopSettings({ agentWorkflowToolEnabled: enabled });
+  }, [setAgentWorkflowToolEnabled]);
 
   // The dropdown lists installed extensions, so the catalog has to be loaded
   // here too: this page can be the first thing opened after a fresh start.
@@ -256,6 +298,17 @@ export const OpenChamberToolsSettings: React.FC = () => {
         />
 
         <ToolRow
+          icon="bar-chart-2"
+          settingsItem="sessions.agent-usage-tool"
+          checked={agentUsageToolEnabled}
+          onChange={handleAgentUsageToolChange}
+          title={t('settings.openchamber.tools.field.agentUsageTool')}
+          summary={t('settings.openchamber.tools.field.agentUsageToolSummary')}
+          info={t('settings.openchamber.tools.field.agentUsageToolInfo')}
+          ariaLabel={t('settings.openchamber.tools.field.agentUsageToolAria')}
+        />
+
+        <ToolRow
           icon="bar-chart-box"
           settingsItem="sessions.agent-render-tool"
           checked={agentRenderToolEnabled}
@@ -264,6 +317,78 @@ export const OpenChamberToolsSettings: React.FC = () => {
           summary={t('settings.openchamber.tools.field.agentRenderToolSummary')}
           info={t('settings.openchamber.tools.field.agentRenderToolInfo')}
           ariaLabel={t('settings.openchamber.tools.field.agentRenderToolAria')}
+        />
+
+        {/* One group, so no divider separates the image tool from its model. */}
+        <div>
+          <ToolRow
+            icon="image"
+            settingsItem="sessions.agent-image-tool"
+            checked={agentImageToolEnabled}
+            onChange={handleAgentImageToolChange}
+            title={t('settings.openchamber.tools.field.agentImageTool')}
+            summary={t('settings.openchamber.tools.field.agentImageToolSummary')}
+            info={t('settings.openchamber.tools.field.agentImageToolInfo')}
+            ariaLabel={t('settings.openchamber.tools.field.agentImageToolAria')}
+          />
+
+          <div
+            data-settings-item="sessions.agent-image-model"
+            className={cn('flex min-w-0 items-center gap-2 pb-3 pe-4', TOOL_ROW_TEXT_INSET_CLASS)}
+          >
+            <span className="truncate typography-meta text-muted-foreground">
+              {t('settings.openchamber.tools.imageModel.label')}
+            </span>
+            <SettingsInfoHint>{t('settings.openchamber.tools.imageModel.info')}</SettingsInfoHint>
+            <Select<string>
+              value={agentImageModel}
+              onValueChange={handleAgentImageModelChange}
+              disabled={!agentImageToolEnabled || imageModelOptions.length === 0}
+            >
+              <SelectTrigger
+                className="ms-auto w-auto min-w-0 max-w-[16rem]"
+                aria-label={t('settings.openchamber.tools.imageModel.aria')}
+              >
+                <SelectValue>
+                  {(value) => {
+                    if (imageModels.status === 'failed' && !value) return t('settings.openchamber.tools.imageModel.loadFailed');
+                    if (imageModels.status === 'ready' && imageModelOptions.length === 0 && !value) return t('settings.openchamber.tools.imageModel.empty');
+                    if (!value) return t('settings.openchamber.tools.imageModel.placeholder');
+                    const known = imageModelOptions.find((model) => model.value === value);
+                    if (known) return known.name;
+                    // A model gone from the catalog stays named rather than swapped for another.
+                    return imageModels.status === 'ready'
+                      ? t('settings.openchamber.tools.imageModel.unavailable', { model: value })
+                      : value;
+                  }}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                {agentImageModel && !imageModelKnown && imageModels.status === 'ready' ? (
+                  <SelectItem value={agentImageModel} disabled>
+                    {t('settings.openchamber.tools.imageModel.unavailable', { model: agentImageModel })}
+                  </SelectItem>
+                ) : null}
+                {imageModelOptions.map((model) => (
+                  <SelectItem key={model.value} value={model.value}>
+                    <span className="truncate">{model.name}</span>
+                    <span className="ms-2 truncate typography-meta text-muted-foreground">{model.providerID}</span>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+
+        <ToolRow
+          icon="shield-keyhole"
+          settingsItem="sessions.agent-secret-tool"
+          checked={agentSecretToolEnabled}
+          onChange={handleAgentSecretToolChange}
+          title={t('settings.openchamber.tools.field.agentSecretTool')}
+          summary={t('settings.openchamber.tools.field.agentSecretToolSummary')}
+          info={t('settings.openchamber.tools.field.agentSecretToolInfo')}
+          ariaLabel={t('settings.openchamber.tools.field.agentSecretToolAria')}
         />
 
         <ToolRow
@@ -289,17 +414,20 @@ export const OpenChamberToolsSettings: React.FC = () => {
             ariaLabel={t('settings.openchamber.tools.field.agentMemoryToolAria')}
           />
         ) : null}
-      </div>
 
-      <SettingsCheckboxRow
-        className="mt-4"
-        settingsItem="sessions.agent-tools-code-mode"
-        checked={agentToolsCodeMode}
-        onChange={handleAgentToolsCodeModeChange}
-        label={t('settings.openchamber.tools.field.agentToolsCodeMode')}
-        ariaLabel={t('settings.openchamber.tools.field.agentToolsCodeModeAria')}
-        info={t('settings.openchamber.tools.field.agentToolsCodeModeInfo')}
-      />
+        {agentWorkflowAvailable ? (
+          <ToolRow
+            icon="flow-chart"
+            settingsItem="sessions.agent-workflow-tool"
+            checked={agentWorkflowToolEnabled}
+            onChange={handleAgentWorkflowToolChange}
+            title={t('settings.openchamber.tools.field.agentWorkflowTool')}
+            summary={t('settings.openchamber.tools.field.agentWorkflowToolSummary')}
+            info={t('settings.openchamber.tools.field.agentWorkflowToolInfo')}
+            ariaLabel={t('settings.openchamber.tools.field.agentWorkflowToolAria')}
+          />
+        ) : null}
+      </div>
     </SettingsSection>
   );
 };

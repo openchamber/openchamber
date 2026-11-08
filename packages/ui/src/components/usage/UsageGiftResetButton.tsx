@@ -73,7 +73,7 @@ export const UsageGiftResetButton: React.FC<{
   const handleActivate = async () => {
     setPending(true);
     try {
-      await activateGiftReset(providerId, giftReset.recordId, resetType);
+      await activateGiftReset(providerId, giftReset.recordId, resetType, giftReset.grantType);
       toast.success(t("settings.usage.page.window.giftResetActivated"));
       void fetchProviderQuota(providerId);
     } catch (error) {

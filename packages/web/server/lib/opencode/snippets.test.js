@@ -8,6 +8,7 @@ import {
   expandSnippets,
   getSnippet,
   listSnippets,
+  previewSnippet,
   updateSnippet,
 } from './snippets.js';
 
@@ -89,6 +90,51 @@ describe('snippets', () => {
     writeSnippet('.opencode/snippet/review.md', '<prepend>Before</prepend>Review #base<append>After</append>');
 
     expect(expandSnippets('Please #review', projectDir)).toBe('Before\n\nPlease Review Base text\n\nAfter');
+  });
+
+  test('refuses a new snippet under a name or alias already in use', () => {
+    writeSnippet('.opencode/snippet/review.md', '---\naliases: [rev]\n---\nOriginal');
+
+    expect(() => createSnippet('review', { content: 'Other' }, projectDir, 'project')).toThrow('already exists');
+    expect(() => createSnippet('rev', { content: 'Other' }, projectDir, 'project')).toThrow('already exists');
+    expect(getSnippet('review', projectDir)?.content).toBe('Original');
+  });
+
+  test('renames a snippet with its fields', () => {
+    writeSnippet('.opencode/snippet/old-name.md', '---\naliases: [on]\n---\nBody');
+
+    expect(updateSnippet('old-name', { name: 'new-name', content: 'Changed' }, projectDir)).toEqual(
+      expect.objectContaining({ name: 'new-name', content: 'Changed', aliases: ['on'], source: 'project' }),
+    );
+    expect(fs.existsSync(path.join(projectDir, '.opencode', 'snippet', 'old-name.md'))).toBe(false);
+    expect(getSnippet('on', projectDir)).toEqual(expect.objectContaining({ name: 'new-name' }));
+  });
+
+  test('renames a snippet by case alone', () => {
+    writeSnippet('.opencode/snippet/fix-pr.md', 'Body');
+
+    expect(updateSnippet('fix-pr', { name: 'Fix-PR' }, projectDir)).toEqual(expect.objectContaining({ name: 'Fix-PR', content: 'Body' }));
+    expect(fs.readdirSync(path.join(projectDir, '.opencode', 'snippet'))).toEqual(['Fix-PR.md']);
+  });
+
+  test('refuses a rename onto a name or alias in use and keeps the snippet', () => {
+    writeSnippet('.opencode/snippet/first.md', 'One');
+    writeSnippet('.opencode/snippet/second.md', '---\naliases: [two]\n---\nTwo');
+
+    expect(() => updateSnippet('first', { name: 'second', content: 'Lost' }, projectDir)).toThrow('already exists');
+    expect(() => updateSnippet('first', { name: 'two' }, projectDir)).toThrow('already exists');
+    expect(getSnippet('first', projectDir)?.content).toBe('One');
+    expect(getSnippet('second', projectDir)?.content).toBe('Two');
+  });
+
+  test('previews an unsaved body with its blocks and the snippets it names', () => {
+    const body = '<prepend>Before</prepend>Use #base<append>After</append>';
+    writeSnippet('.opencode/snippet/base.md', '<append>Base after</append>Base text');
+
+    expect(previewSnippet(body, projectDir)).toBe('Before\n\nUse Base text\n\nAfter\n\nBase after');
+    // The same body saved and used sends the same text.
+    writeSnippet('.opencode/snippet/saved.md', body);
+    expect(expandSnippets('#saved', projectDir)).toBe(previewSnippet(body, projectDir));
   });
 
   test('rejects invalid snippet names', () => {

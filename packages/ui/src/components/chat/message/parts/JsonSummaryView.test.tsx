@@ -1,8 +1,11 @@
 import React from 'react';
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, mock, test } from 'bun:test';
 import { renderToStaticMarkup } from 'react-dom/server';
 
-import { JsonSummaryView } from './JsonSummaryView';
+mock.module('@/hooks/useEffectiveDirectory', () => ({ useEffectiveDirectory: () => '/project' }));
+mock.module('../../useOpenChatLink', () => ({ useOpenChatLink: () => () => undefined }));
+
+const { JsonSummaryView } = await import('./JsonSummaryView');
 
 describe('JsonSummaryView', () => {
     test('prioritizes a record identity and makes URLs navigable', () => {

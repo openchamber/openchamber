@@ -1,16 +1,20 @@
 import React from 'react';
 import { FireworksAnimation } from '@/components/ui/FireworksAnimation';
+import type { CelebrationOptions } from '@/components/ui/fireworksShows';
 import { useFireworks } from '@/hooks/useFireworks';
 
 interface FireworksContextValue {
-  triggerFireworks: () => void;
+  triggerFireworks: (options?: CelebrationOptions) => void;
   dismissFireworks: () => void;
 }
 
 const FireworksContext = React.createContext<FireworksContextValue | undefined>(undefined);
 
+// A surface mounted without the overlay (Mini Chat, a test) celebrates nothing.
+const NO_FIREWORKS: FireworksContextValue = { triggerFireworks: () => {}, dismissFireworks: () => {} };
+
 export const FireworksProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { isActive, burstKey, triggerFireworks, dismissFireworks } = useFireworks();
+  const { isActive, burstKey, show, triggerFireworks, dismissFireworks } = useFireworks();
 
   const value = React.useMemo<FireworksContextValue>(
     () => ({ triggerFireworks, dismissFireworks }),
@@ -20,16 +24,10 @@ export const FireworksProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   return (
     <FireworksContext.Provider value={value}>
       {children}
-      <FireworksAnimation isActive={isActive} burstKey={burstKey} />
+      <FireworksAnimation isActive={isActive} burstKey={burstKey} show={show} />
     </FireworksContext.Provider>
   );
 };
 
 // oxlint-disable-next-line react/only-export-components
-export const useFireworksCelebration = (): FireworksContextValue => {
-  const context = React.useContext(FireworksContext);
-  if (!context) {
-    throw new Error('useFireworksCelebration must be used within FireworksProvider');
-  }
-  return context;
-};
+export const useFireworksCelebration = (): FireworksContextValue => React.useContext(FireworksContext) ?? NO_FIREWORKS;

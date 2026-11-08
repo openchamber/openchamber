@@ -17,7 +17,7 @@ import { useSourceControlProvider } from '@/lib/source-control/providers/registr
 import { useSourceControlAuthEntry, useSourceControlAuthStore } from '@/stores/useSourceControlAuthStore';
 import { ProviderIcon } from './ProviderIcon';
 
-const AVATAR_CLASS = 'flex h-6 w-6 items-center justify-center overflow-hidden rounded-full border border-border/60 bg-muted/80';
+const AVATAR_CLASS = 'flex h-6 w-6 items-center justify-center overflow-hidden rounded-full border border-edge bg-muted/80';
 
 
 /**
@@ -115,12 +115,12 @@ export const SourceControlAccountControl: React.FC<{ className?: string; identit
                 <img
                   src={accountUser.avatarUrl}
                   alt={accountUser.username ? t('header.sourceControl.avatarWithLogin', { login: accountUser.username }) : t('header.sourceControl.avatar', { provider })}
-                  className="h-6 w-6 rounded-full border border-border/60 bg-muted object-cover"
+                  className="h-6 w-6 rounded-full border border-edge bg-muted object-cover"
                   loading="lazy"
                   referrerPolicy="no-referrer"
                 />
               ) : (
-                <div className="flex h-6 w-6 items-center justify-center rounded-full border border-border/60 bg-muted">
+                <div className="flex h-6 w-6 items-center justify-center rounded-full border border-edge bg-muted">
                   <ProviderIcon descriptor={descriptor} variant="fill" className="h-3 w-3 text-muted-foreground" />
                 </div>
               )}

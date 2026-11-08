@@ -83,6 +83,7 @@ export const AgentSelector: React.FC<AgentSelectorProps> = ({
   }, [defaultAgentName, disabled, onChange, selectableAgents, value]);
 
   const selectValue = value.trim().length > 0 ? value : undefined;
+  const selectedAgent = selectableAgents.find((agent) => agent.name === selectValue);
 
   return (
     <Select
@@ -94,7 +95,9 @@ export const AgentSelector: React.FC<AgentSelectorProps> = ({
         id={id}
         className={cn('max-w-full', className)}
       >
-        <SelectValue placeholder={t('multirun.agentSelector.placeholder')} />
+        <SelectValue placeholder={t('multirun.agentSelector.placeholder')}>
+          {selectedAgent ? agentLabel(selectedAgent) : undefined}
+        </SelectValue>
       </SelectTrigger>
       <SelectContent fitContent portalToBody={portalToBody}>
         {selectableAgents.length > 0 && (

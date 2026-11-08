@@ -1,0 +1,54 @@
+---
+title: Workflows
+description: Permita que um agente distribua uma tarefa grande entre muitos agentes que rodam em segundo plano.
+---
+
+# Workflows
+
+Um workflow divide uma tarefa grande em muitas partes pequenas e entrega cada parte a um agente próprio. O agente da sua sessão escreve um script curto que diz quais agentes iniciar e o que perguntar a cada um. O OpenChamber roda o script em segundo plano, então sua sessão fica livre enquanto os agentes trabalham. Quando a execução termina, o relatório volta para a sessão.
+
+Workflows servem para trabalhos com muitas partes parecidas e independentes: a revisão de cada arquivo alterado, a auditoria de cada rota da API, uma migração em muitos arquivos ou uma pesquisa em que cada fonte é verificada separadamente. Uma única funcionalidade ou poucos passos saem mais rápido em uma só sessão.
+
+## Ativar
+
+A ferramenta de workflows vem desativada por padrão. Abra **Configurações → Geral → Ferramentas do OpenChamber** e ative **Ferramenta de workflows**. Sessões em andamento passam a tê-la no próximo turno; desativá-la de novo remove a ferramenta e as instruções sobre ela de todas as sessões e oculta o painel Workflows. As execuções que você já tem voltam quando você a ativa de novo.
+
+Workflows precisam do servidor OpenCode do próprio OpenChamber. Eles não ficam disponíveis quando o OpenChamber se conecta a um servidor OpenCode externo via `OPENCODE_HOST` ou skip-start, nem dentro da extensão do VS Code.
+
+## Executar um workflow
+
+1. Peça um em linguagem natural, por exemplo "Rode um workflow que revise cada arquivo alterado neste branch e liste os bugs que encontrar."
+2. O agente propõe um plano e um modelo para cada fase. Combine os modelos antes de a execução começar: veja [Modelos e custo](#modelos-e-custo).
+3. Um card com o plano aparece no chat. Selecione **Executar workflow** para iniciá-lo ou **Não executar** para descartá-lo. Nada roda até você escolher.
+4. Durante a execução, o card mostra cada fase e cada agente. A linha da sessão na barra lateral mostra **Workflow em execução**, e a seção **Workflows** do painel de status de trabalho lista a execução. Selecione **Parar** para encerrá-la antes.
+5. Quando a execução termina, o relatório chega à sessão como uma mensagem. Uma execução concluída ou que falhou acorda o agente para que ele aja sobre o resultado; uma execução que você parou ou recusou não acorda.
+
+Uma execução parada ou que falhou pode continuar com **Retomar**. Os agentes que já responderam mantêm suas respostas, e só os demais rodam de novo.
+
+Agentes de um workflow em execução não podem iniciar um workflow próprio.
+
+## Modelos e custo
+
+Todo agente de um workflow roda no modelo da sua sessão, a menos que o script indique outro. Dezenas de agentes em um modelo de ponta custam muitas vezes mais do que o mesmo trabalho em um modelo pequeno. Por isso o agente sugere um modelo por fase: um barato para ler e conferir contra uma lista fixa, um mais forte onde a fase exige julgamento ou escreve o que entra no seu projeto. Altere a escolha antes de aprovar a execução se ela não servir para você.
+
+No máximo 8 agentes trabalham ao mesmo tempo, e uma execução inicia no máximo 200 agentes somando todas as suas tentativas.
+
+## O painel Workflows
+
+O painel **Workflows** na barra lateral direita mostra as execuções do projeto: os agentes, o log, o resultado e o script, com o modelo e o uso de tokens de cada agente. Abra a sessão de qualquer agente por ali ou pelo card no chat para ler a conversa completa. O ícone aparece assim que o projeto tem uma execução ou um workflow salvo.
+
+Agentes de workflow não aparecem na barra lateral de sessões, já que uma execução pode iniciar uma centena deles. Eles continuam acessíveis pelo card da execução e pelo painel Workflows.
+
+**Excluir execução** remove uma execução terminada do painel. As sessões dos agentes continuam.
+
+## Workflows salvos
+
+Peça ao agente para salvar um workflow que você quer rodar de novo. Ele fica guardado como `.openchamber/workflows/<name>.js` no projeto, então você pode fazer commit dele junto com o resto do repositório.
+
+Rode um workflow salvo em **Workflows salvos**, no seletor de execuções do painel. Ele começa na hora, na sessão aberta ou em uma nova, e o relatório volta para essa sessão. Você também pode pedir ao agente que o rode pelo nome.
+
+## Relacionado
+
+- [Ferramenta de controle para agentes](/pt-br/agent-control-tool/): as outras ferramentas do OpenChamber que os agentes recebem
+- [Notas, Tarefas e Planos do Projeto](/pt-br/notes-todos-plans/): as ferramentas de conhecimento e memória do projeto
+- [Uso e Cotas](/pt-br/usage/): quanto custam suas sessões

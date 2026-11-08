@@ -59,7 +59,10 @@ const part: ToolPartData = {
       toolCalls: [
         { tool: 'linear.list_issues', status: 'completed', input: { teamId: 'OPE' } },
         { tool: 'linear.list_issues', status: 'error', input: { teamId: 'OPE' } },
-        { tool: 'linear.get_workspace', status: 'completed' },
+        { tool: 'openchamber_web', status: 'completed', input: { action: 'browser.open' } },
+        { tool: 'openchamber_web', status: 'completed', input: { action: 'browser.capture' } },
+        { tool: 'opencode.worktree_list', status: 'completed', input: {} },
+        { tool: 'opencode.session_rename', status: 'error', input: { title: 'x' } },
       ],
     },
     time: { start: 1, end: 2 },
@@ -121,13 +124,46 @@ test('a Code Mode call shows its script, the tools it called, and the truncation
     expect(container.querySelector('use[href="#oc-braces"]')).not.toBeNull();
 
     // The description names the called tools, deduplicated and counted.
-    expect(container.textContent).toContain('linear.list_issues \u00d72, linear.get_workspace');
+    expect(container.textContent).toContain('linear.list_issues \u00d72, OpenChamber Web ×2, Listed worktrees, session_rename');
+    // The failed OpenCode call (session_rename) keeps its tool's name: its verb would claim it happened.
 
     // The body lists every call with its input, and reports the truncated output.
     expect(container.textContent).toContain('Tool calls');
     expect(container.textContent).toContain('{"teamId":"OPE"}');
     expect(container.textContent).toContain('Output was truncated');
     expect(container.textContent).toContain('/tmp/oc-script-output.json');
+
+    // A script whose calls all went to one namespace carries its name and mark.
+    const namespacePart: ToolPartData = {
+      ...part,
+      id: 'prt_namespace',
+      state: {
+        status: 'completed',
+        input: { code: 'await tools.opencode.worktree_list({})' },
+        output: '"done"',
+        metadata: {
+          toolCalls: [
+            { tool: 'opencode.worktree_list', status: 'completed', input: {} },
+            { tool: 'opencode.session_rename', status: 'completed', input: { title: 'x' } },
+          ],
+        },
+        time: { start: 1, end: 2 },
+      },
+    };
+    await act(async () => {
+      root.render(
+        <SyncProvider sdk={sdk} directory="">
+          <I18nProvider>
+            <ThemeSystemContext.Provider value={themeContext}>
+              <ToolPart part={namespacePart} isExpanded={false} isMobile={false} onToggle={() => {}} />
+            </ThemeSystemContext.Provider>
+          </I18nProvider>
+        </SyncProvider>,
+      );
+    });
+    expect(container.textContent).toContain('OpenCodeListed worktrees, Renamed the session');
+    expect(container.textContent).not.toContain('Script');
+    expect(container.querySelector('use[href="#oc-opencode"]')).not.toBeNull();
   } finally {
     await act(async () => { root.unmount(); });
     await happyWindow.happyDOM.abort();

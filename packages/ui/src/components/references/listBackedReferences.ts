@@ -35,6 +35,7 @@ import type { ListPage } from './referenceCache';
 type ListBackedReads = Pick<SourceControlAPI, 'issuesList' | 'changeRequestsList' | 'issueComments' | 'changeRequestContext' | 'issueGet'>;
 
 const BODY_LIMIT = 20_000;
+const NO_LISTED_DISCUSSIONS = 'Discussions are read through the provider\'s own search';
 
 const author = (user: SourceControlUser | null | undefined) => (
     user ? { login: user.username, avatarUrl: user.avatarUrl } : null
@@ -141,6 +142,8 @@ export const fetchListBackedReferencePage = async (
     text: string,
     cursor: string | null,
 ): Promise<ListPage<RepositoryReference>> => {
+    // Discussions come only from a provider's own search; no neutral list holds them.
+    if (kind === 'discussion') throw new Error(NO_LISTED_DISCUSSIONS);
     const page = cursor ? Number(cursor) : 1;
     // A number or a link names one item, as on a searched page: it is read,
     // not searched for (list searches match titles and descriptions only).
@@ -267,6 +270,7 @@ export const fetchListBackedReferenceDetail = async (
     reference: RepositoryReference,
     revision?: string,
 ): Promise<RepositoryReferenceDetail> => {
+    if (reference.kind === 'discussion') throw new Error(NO_LISTED_DISCUSSIONS);
     const project = { owner: reference.sourceRepo.owner, name: reference.sourceRepo.repo };
     if (reference.kind === 'issue') {
         const comments = (await reads.issueComments(context, reference.number, project)).map(toComment).sort(byCreation);

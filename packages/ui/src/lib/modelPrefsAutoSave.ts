@@ -12,6 +12,7 @@ type ModelPrefsPayload = {
   recentAgents: string[];
   favoriteAgents: string[];
   recentEfforts: Record<string, string[]>;
+  lastUsedEfforts: Record<string, string | null>;
   customProviderIcons: Record<string, CustomProviderIcon>;
 };
 
@@ -41,6 +42,13 @@ const recentEffortsEqual = (a: Record<string, string[]>, b: Record<string, strin
   return aKeys.every((key) => Array.isArray(b[key]) && stringsEqual(a[key], b[key]));
 };
 
+const lastUsedEffortsEqual = (a: Record<string, string | null>, b: Record<string, string | null>): boolean => {
+  if (a === b) return true;
+  const aKeys = Object.keys(a);
+  if (aKeys.length !== Object.keys(b).length) return false;
+  return aKeys.every((key) => Object.prototype.hasOwnProperty.call(b, key) && a[key] === b[key]);
+};
+
 const customProviderIconsEqual = (a: Record<string, CustomProviderIcon>, b: Record<string, CustomProviderIcon>): boolean => {
   if (a === b) return true;
   const keys = Object.keys(a);
@@ -57,6 +65,7 @@ const snapshotModelPrefs = (): ModelPrefsPayload => {
     recentAgents: state.recentAgents,
     favoriteAgents: state.favoriteAgents,
     recentEfforts: state.recentEfforts,
+    lastUsedEfforts: state.lastUsedEfforts,
     customProviderIcons: state.customProviderIcons,
   };
 };
@@ -69,6 +78,7 @@ const modelPrefsEqual = (a: ModelPrefsPayload, b: ModelPrefsPayload): boolean =>
   stringsEqual(a.recentAgents, b.recentAgents) &&
   stringsEqual(a.favoriteAgents, b.favoriteAgents) &&
   recentEffortsEqual(a.recentEfforts, b.recentEfforts) &&
+  lastUsedEffortsEqual(a.lastUsedEfforts, b.lastUsedEfforts) &&
   customProviderIconsEqual(a.customProviderIcons, b.customProviderIcons)
 );
 
@@ -80,6 +90,7 @@ const cloneModelPrefs = (prefs: ModelPrefsPayload): ModelPrefsPayload => ({
   recentAgents: prefs.recentAgents.slice(),
   favoriteAgents: prefs.favoriteAgents.slice(),
   recentEfforts: Object.fromEntries(Object.entries(prefs.recentEfforts).map(([key, variants]) => [key, variants.slice()])),
+  lastUsedEfforts: { ...prefs.lastUsedEfforts },
   customProviderIcons: { ...prefs.customProviderIcons },
 });
 
@@ -115,6 +126,7 @@ export const startModelPrefsAutoSave = () => {
       recentAgents: state.recentAgents,
       favoriteAgents: state.favoriteAgents,
       recentEfforts: state.recentEfforts,
+      lastUsedEfforts: state.lastUsedEfforts,
       customProviderIcons: state.customProviderIcons,
     };
     const prev = {
@@ -125,6 +137,7 @@ export const startModelPrefsAutoSave = () => {
       recentAgents: prevState.recentAgents,
       favoriteAgents: prevState.favoriteAgents,
       recentEfforts: prevState.recentEfforts,
+      lastUsedEfforts: prevState.lastUsedEfforts,
       customProviderIcons: prevState.customProviderIcons,
     };
     if (modelPrefsEqual(next, prev)) {

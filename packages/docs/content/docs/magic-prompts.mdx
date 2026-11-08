@@ -43,6 +43,7 @@ Every prompt below lists where it runs and the trigger that fires it. Check the 
 | --- | --- | --- |
 | Commit generation | The generate button in the git view's commit box, and the mobile Changes screen | You generate a commit message. The selected files and the branch's recent commit subjects are filled in, so the subject matches your repo's existing style. |
 | PR generation | The create-pull-request form in the git view's PR tab | You generate a PR title and body. Filled with the base and head branches, the commits and changed files between them, your additional context, and the repo's PR template when one exists. |
+| Walkthrough | The Changes walkthrough panel | You generate a walkthrough. Empty by default. Whatever you write is added to the walkthrough prompt as your preferences for tone, emphasis and what to dwell on; it can't change the walkthrough's format. |
 | Merge/rebase conflict resolution | The conflicts dialog in the git view, when a merge or rebase stops on conflicts | You pick "Resolve in current session" or "Resolve in new session". The agent reads the conflicted files, proposes a per-file resolution strategy, and waits for your confirmation before editing, staging, or continuing the operation. |
 | Cherry-pick conflict resolution | The "Re-integrate commits" section for a worktree session | Moving the session's commits onto the target branch hits a conflict and you hand it to the agent. The agent resolves inside the temporary worktree, stages the resolved files, and continues the cherry-pick. |
 

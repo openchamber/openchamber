@@ -9,7 +9,8 @@ const TEACUP_PATH = 'M2 6h15v5.5a6.5 6.5 0 0 1-6.5 6.5h-2A6.5 6.5 0 0 1 2 11.5z'
 /**
  * Gitea's static description: synchronous and dependency-free. Gitea is
  * always self-hosted here, so there is no default instance; every instance
- * comes from an account the user connected with a personal access token.
+ * comes from an account the user connected with a personal access token, or
+ * from a login of Gitea's `gt` CLI.
  */
 export const giteaDescriptor = Object.freeze({
   id: 'gitea',
@@ -38,6 +39,8 @@ export const giteaDescriptor = Object.freeze({
     reviewers: true,
     // Gitea's API can neither answer nor resolve a review thread.
     reviewThreads: Object.freeze({ start: false, reply: false, resolve: false }),
+    // A review comment needs a line: Gitea's API has no comment on a whole file.
+    reviewDrafts: Object.freeze({ fileComments: false }),
     // Attachments are served to a browser session, not to a token.
     uploads: false,
     stacks: false,
@@ -46,7 +49,7 @@ export const giteaDescriptor = Object.freeze({
     referencePicker: false,
     multipleAccounts: true,
   }),
-  authMethods: Object.freeze({ device: false, pat: true, cli: false }),
+  authMethods: Object.freeze({ device: false, pat: true, cli: Object.freeze({ tool: 'gt' }) }),
   transport: Object.freeze({
     // Gitea takes the token as the password of the account's own login.
     httpsUsername: Object.freeze({ kind: 'login' }),
@@ -71,6 +74,12 @@ export const giteaDescriptor = Object.freeze({
   identity: Object.freeze({ noReplyEmail: null }),
   settings: Object.freeze([
     Object.freeze({ key: 'instance', type: 'instance-url', secret: false, scope: 'instance' }),
+    // Gitea's SSH clone host is set apart from its web address (`SSH_DOMAIN`).
+    // The address is optional and belongs to the instance, so every account on
+    // it recognises the same remotes. `instance-url` keeps the published field
+    // a kind older clients already know and ignore; the client draws it from
+    // its id, not its kind.
+    Object.freeze({ key: 'sshUrl', type: 'instance-url', secret: false, scope: 'instance' }),
     Object.freeze({ key: 'token', type: 'personal-access-token', secret: true, scope: 'instance' }),
   ]),
   instances: Object.freeze({ legacyFlow: null }),
@@ -83,6 +92,7 @@ export const giteaDescriptor = Object.freeze({
       multiple: true, allowLoopbackHttp: true, allowPort: true,
       reserved: Object.freeze([]), placeholder: 'https://gitea.example.com',
     }),
+    // A gt login serves API reads only; Git transport needs a stored account.
     cliTransport: false,
     token: Object.freeze({
       scopes: Object.freeze(['write:repository', 'write:issue', 'read:user']),
@@ -91,11 +101,13 @@ export const giteaDescriptor = Object.freeze({
     urls: Object.freeze({
       changeRequest: Object.freeze(['/{owner}/{repo}/pulls/{number}']),
       issue: Object.freeze(['/{owner}/{repo}/issues/{number}']),
+      commit: Object.freeze(['/{owner}/{repo}/commit/{sha}']),
+      user: Object.freeze(['/{user}']),
     }),
     features: Object.freeze({
       referenceSearch: false, referenceDetail: false, listStatuses: false, referencesAcross: false,
       // Gitea refuses a review of your own pull request.
-      startThread: false, authorCanReview: false, projectUploads: false, issueCloseReason: false,
+      startThread: false, reviewDrafts: true, reviewDraftFileComments: false, authorCanReview: false, projectUploads: false, issueCloseReason: false,
       changeRequestTemplates: Object.freeze([
         '.gitea/pull_request_template.md',
         '.gitea/PULL_REQUEST_TEMPLATE.md',

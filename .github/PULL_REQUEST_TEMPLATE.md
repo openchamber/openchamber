@@ -1,19 +1,14 @@
 <!--
-Bug fix or small improvement? Fill in the sections below and open it.
+Every PR links an issue in "What and why" below:
+- `Fixes #N` for a bug report, or for a whole feature request the maintainer
+  marked `accepted`;
+- `Part of #N` for one piece of an accepted feature request.
 
-New feature, behavior change, or rework? It needed an Ideas discussion before
-the code: https://github.com/openchamber/openchamber/discussions/categories/ideas
-Link it here. That post asks about the problem in your own words; it is not a
-summary of this PR. A discussion opened after the implementation, describing
-what you already built, closes together with the PR behind it, because it
-arrives after the only moment when talking could have changed anything.
-Without a discussion at all, a large PR gets parked with `needs-discussion`
-until the product side is settled.
-
-A PR that carries a product decision with no discussion behind it and no
-maintainer go-ahead is not getting reviewed. Don't spend the evening on it. A "yes, go ahead"
-from a maintainer in the discussion is what makes the PR worth writing.
-See CONTRIBUTING.md.
+A new feature or behavior change starts as a feature request, and building
+starts after it is `accepted`. A PR with no linked bug report or accepted
+feature request is closed automatically with `needs-accepted-issue`, and
+reopens once its description links one. Documentation-only and test-only
+PRs need no issue. See CONTRIBUTING.md, "Before you start".
 
 Keep one change per PR. Unrelated fixes in the same diff wait for the biggest one.
 Size labels count changed lines without tests, lockfiles and translation
@@ -27,7 +22,8 @@ catalogs, so a small change with many locale files stays small.
      - what was wrong or missing, as the user saw it
      - what the user sees now instead
      - why this way, if there was a real choice
-     Link the issue or Ideas discussion.
+     Link the issue: `Fixes #N` if this PR fixes all of it, so GitHub closes
+     it on merge; `Part of #N` if it fixes only part.
      If nearby behavior is deliberately left alone and a reader might expect it
      changed, say so in a line.
 
@@ -65,8 +61,11 @@ catalogs, so a small change with many locale files stays small.
 <!-- User-visible change: current before/after screenshots or recordings for the
      affected desktop/mobile, narrow/wide, theme, and interaction states.
      Attach them here in the description; never commit them to the branch.
-     No visible change: one concrete sentence on why the diff cannot affect
-     rendered behavior. -->
+     From an agent: `node scripts/pr-evidence.mjs` uploads them to a secret
+     gist and prints the Markdown.
+     A UI change with no screenshot here is labeled `needs-visual-evidence`
+     and waits. No visible change: one concrete sentence on why the diff
+     cannot affect rendered behavior; the maintainer lifts the label. -->
 
 ## Risks
 

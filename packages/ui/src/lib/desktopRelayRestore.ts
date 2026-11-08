@@ -13,6 +13,20 @@ const DIRECT_PROBE_HEADSTART_MS = 1_500;
 
 let candidateRefreshInFlight = false;
 
+// Native storage adds a trailing slash to bare origins; candidates omit it.
+const canonicalEndpoint = (value: string | null | undefined): string | null => {
+  const trimmed = String(value ?? '').trim();
+  if (!trimmed) return null;
+  try {
+    const parsed = new URL(trimmed);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null;
+    parsed.hash = '';
+    return parsed.toString();
+  } catch {
+    return null;
+  }
+};
+
 /**
  * Background candidate refresh for a relay-connected desktop host: ask the
  * server (over the live authenticated transport) for its CURRENT LAN addresses,
@@ -62,13 +76,21 @@ const refreshDesktopHostCandidates = async (hostId: string): Promise<void> => {
     if (lanUrls.length === 0) return;
 
     const nextApiUrl = currentApiUrl && lanUrls.includes(currentApiUrl) ? currentApiUrl : lanUrls[0];
-    if (nextApiUrl !== currentApiUrl) {
+    const nextEndpoint = canonicalEndpoint(nextApiUrl);
+    if (nextEndpoint && nextEndpoint !== canonicalEndpoint(currentApiUrl)) {
       await desktopHostsSet({
         hosts: config.hosts.map((entry) => (entry.id === hostId ? { ...entry, apiUrl: nextApiUrl } : entry)),
         defaultHostId: config.defaultHostId,
         initialHostChoiceCompleted: config.initialHostChoiceCompleted,
       }).catch(() => undefined);
     }
+
+    // Older native builds may drop apiUrl. Stay on relay unless the origin guard
+    // can find the learned endpoint in storage.
+    const storedConfig = await desktopHostsGet().catch(() => null);
+    const storedHost = storedConfig?.hosts.find((entry) => entry.id === hostId) ?? null;
+    if (!storedHost) return;
+    if (!nextEndpoint || canonicalEndpoint(storedHost.apiUrl) !== nextEndpoint) return;
 
     // We are on the relay for this host (the refresh call itself proves the
     // tunnel works) — if the fresh direct address answers AND proves the same

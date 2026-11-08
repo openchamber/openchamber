@@ -9,6 +9,7 @@ import type { SessionListOptions, SessionPage } from '@/lib/opencode/client'
 
 const DIRECTORY = '/repo/discovery'
 const cursorsSeenOnDiscoveryCalls: Array<string | undefined> = []
+const parentsSeenOnDiscoveryCalls: Array<string | null | undefined> = []
 const parentMessageFetches: string[] = []
 let activeStatusReads = 0
 let readActiveStatuses = async (_directory: string): Promise<Record<string, SessionStatus> | null> => ({})
@@ -35,6 +36,7 @@ const listSessionsPage = async (options: SessionListOptions = {}): Promise<Sessi
   if (options.limit === 200) {
     if (readDiscoveryPage) return readDiscoveryPage(options)
     cursorsSeenOnDiscoveryCalls.push(options.cursor)
+    parentsSeenOnDiscoveryCalls.push(options.parentID)
     if (options.cursor === undefined) {
       // Page 1: a full page of root sessions, so the child on page 2 sits
       // beyond the pre-fix one-shot cutoff.
@@ -200,6 +202,7 @@ describe('SyncProvider child-session discovery pagination', () => {
   test('discovers a child session on page 2 beyond the 200 cutoff and materializes its parent', async () => {
     const dom = installHookTestDomWithStorage()
     cursorsSeenOnDiscoveryCalls.length = 0
+    parentsSeenOnDiscoveryCalls.length = 0
     parentMessageFetches.length = 0
     const sdk = OpenCode.make({ baseUrl: 'http://discovery.test', fetch: () => hang<Response>() })
 
@@ -240,6 +243,8 @@ describe('SyncProvider child-session discovery pagination', () => {
       // helper paginates past the first full page, carrying the cursor page 1
       // returned. The pre-fix one-shot fetch never issued this second request.
       expect(cursorsSeenOnDiscoveryCalls).toEqual([undefined, 'cursor_page_2'])
+      // Both pages list the live parent's children only, never the whole directory.
+      expect(parentsSeenOnDiscoveryCalls).toEqual(['ses_parent', 'ses_parent'])
       // Parent materialization was enqueued so the Task tool part refreshes.
       expect(materialized).toBe(true)
 

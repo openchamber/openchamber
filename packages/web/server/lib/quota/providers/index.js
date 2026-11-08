@@ -6,6 +6,8 @@
  */
 
 import { readOpenCodeCredentials } from '../../opencode/auth.js';
+import { extensionQuotaProvider, extensionQuotaProviderEntries } from '../extension-registry.js';
+import { QuotaRouteError } from '../route-error.js';
 import { buildResult } from '../utils/index.js';
 
 import * as claude from './claude/index.js';
@@ -33,6 +35,7 @@ import * as zenmux from './zenmux.js';
 import * as ollamaCloud from './ollama-cloud.js';
 import * as wafer from './wafer.js';
 import * as opencodeGo from './opencode-go.js';
+import * as opencode from './opencode.js';
 import * as xai from './xai.js';
 
 const registry = {
@@ -168,6 +171,12 @@ const registry = {
     isConfigured: opencodeGo.isConfigured,
     fetchQuota: opencodeGo.fetchQuota
   },
+  opencode: {
+    providerId: opencode.providerId,
+    providerName: opencode.providerName,
+    isConfigured: opencode.isConfigured,
+    fetchQuota: opencode.fetchQuota
+  },
   neuralwatt: {
     providerId: neuralwatt.providerId,
     providerName: neuralwatt.providerName,
@@ -183,7 +192,8 @@ const registry = {
   zenmux: {
     providerId: zenmux.providerId,
     providerName: zenmux.providerName,
-    isConfigured: zenmux.isConfigured,
+    // ZenMux reads its own managed credential; the list's OpenCode auth is not for it.
+    isConfigured: () => zenmux.isConfigured(),
     fetchQuota: zenmux.fetchQuota
   },
   xai: {
@@ -194,7 +204,27 @@ const registry = {
   }
 };
 
+export { attachExtensionQuotaProvider, detachExtensionQuotaProvider } from '../extension-registry.js';
+
+// `hasOwn`, so an id such as `constructor` never resolves to the object's own prototype members.
+const providerOf = (providerId) => (Object.hasOwn(registry, providerId) ? registry[providerId] : extensionQuotaProvider(providerId));
+const providerEntries = () => [...Object.entries(registry), ...extensionQuotaProviderEntries()];
+
 const pendingFetches = new Map();
+
+// The registry entries Settings > Usage never reads. Its built-in list
+// (`QUOTA_PROVIDERS` in packages/ui/src/lib/quota/providers/index.ts) shows
+// GitHub Copilot once; the add-on entry asks GitHub a second time.
+const NOT_ON_USAGE_PAGE = new Set([copilot.providerIdAddon]);
+
+/**
+ * The providers Settings > Usage reads, built-ins first, then the attached
+ * extensions: what an agent reading usage may ask, so it never makes a
+ * request the page does not make.
+ */
+export const listUsagePageProviders = () => providerEntries()
+  .filter(([id]) => !NOT_ON_USAGE_PAGE.has(id))
+  .map(([providerId, provider]) => ({ providerId, providerName: provider.providerName }));
 
 
 /**
@@ -206,7 +236,7 @@ export const listConfiguredQuotaProviders = async () => {
   const auth = await readOpenCodeCredentials();
   const configured = [];
 
-  for (const [id, provider] of Object.entries(registry)) {
+  for (const [id, provider] of providerEntries()) {
     try {
       if (provider.isConfigured(auth)) {
         configured.push(id);
@@ -220,7 +250,7 @@ export const listConfiguredQuotaProviders = async () => {
 };
 
 const fetchQuotaForProviderUncoalesced = async (providerId) => {
-  const provider = registry[providerId];
+  const provider = providerOf(providerId);
 
   if (!provider) {
     return buildResult({
@@ -235,6 +265,8 @@ const fetchQuotaForProviderUncoalesced = async (providerId) => {
   try {
     return await provider.fetchQuota();
   } catch (error) {
+    // The extension layer's own answer for a service reply OpenChamber cannot use: the route answers its status and code.
+    if (error instanceof QuotaRouteError) throw error;
     return buildResult({
       providerId: provider.providerId,
       providerName: provider.providerName,
@@ -277,3 +309,4 @@ export const fetchMinimaxCnCodingPlanQuota = minimaxCnCodingPlan.fetchQuota;
 export const fetchOllamaCloudQuota = ollamaCloud.fetchQuota;
 export const fetchWaferQuota = wafer.fetchQuota;
 export const fetchZhipuaiQuota = zhipuaiCodingPlan.fetchQuota;
+export const fetchOpenCodeQuota = opencode.fetchQuota;

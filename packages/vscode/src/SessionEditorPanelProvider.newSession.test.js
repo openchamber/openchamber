@@ -144,14 +144,16 @@ describe('SessionEditorPanelProvider.createOrShowNewSession', () => {
     );
   });
 
-  it('does not open a panel or post a newSession command when no workspace folder is open', () => {
+  it('opens a projectless draft when no workspace folder is open', () => {
     workspaceFolders = [];
     createWebviewPanel.mockClear();
 
     const provider = createProvider();
     provider.createOrShowNewSession();
 
-    expect(createWebviewPanel).not.toHaveBeenCalled();
+    expect(createWebviewPanel).toHaveBeenCalledTimes(1);
+    expect(panel.webview.html).toContain('workspaceFolder: ""');
+    expect(panel.webview.html).toContain('workspaceFolders: []');
     const newSessionMessage = postMessages.find(
       (message) => message.type === 'command' && message.command === 'newSession'
     );

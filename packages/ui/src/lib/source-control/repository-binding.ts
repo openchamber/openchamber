@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from 'react';
 import type { SourceControlAPI, SourceControlBindingRead, SourceControlReadContext } from '@/lib/api/types';
 import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
-import { waitForWorktreeGitReady } from '@/lib/worktrees/worktreeBootstrap';
+import { getWorktreeBootstrapState, waitForWorktreeGitReady } from '@/lib/worktrees/worktreeBootstrap';
 import { defaultSourceControlIdentities, getBoundSourceControlReadContexts } from './identity';
 import { useSourceControlProviderRegistry } from './providers/registry';
 import { getSourceControlAuthKey, useSourceControlAuthStore } from '@/stores/useSourceControlAuthStore';
@@ -17,6 +17,12 @@ type BindingState = (
   | { status: 'error'; read: SourceControlBindingRead | null; error: Error }
 ) & { contexts: SourceControlReadContext[] };
 const EMPTY_CONTEXTS: SourceControlReadContext[] = [];
+
+// A worktree whose checkout failed is still a repository, and its binding is
+// what the recovery controls (Remote, Download again) repair it with.
+const waitForCheckoutToSettle = (directory: string): Promise<void> => waitForWorktreeGitReady(directory).catch((error) => {
+  if (getWorktreeBootstrapState(directory)?.status !== 'failed') throw error;
+});
 const IDLE: BindingState = { status: 'idle', read: null, error: null, contexts: EMPTY_CONTEXTS };
 type Entry = {
   scope: BindingScope;
@@ -39,7 +45,7 @@ export class RepositoryBindingOwner {
   constructor(
     private runtimeKey = getRuntimeKey,
     private idleLimit = 64,
-    private waitForRepository: (directory: string) => Promise<void> = waitForWorktreeGitReady,
+    private waitForRepository: (directory: string) => Promise<void> = waitForCheckoutToSettle,
   ) {}
 
   scope(directory: string): BindingScope {

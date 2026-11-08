@@ -5,6 +5,7 @@ import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useGlobalSessionStatusStore } from '@/sync/global-session-status';
 import {
   buildSessionRetentionCandidates,
+  inWorkKeepsSessions,
   isSessionKeptByUser,
   RETENTION_INTERVAL_MS,
   RETENTION_KEEP_RECENT,
@@ -33,6 +34,7 @@ export const useSessionAutoCleanup = ({ autoRun = true, enabled = true }: Cleanu
   const isRunning = useSessionRetentionRunStore((state) => state.isRunning);
   // Pin changes must refresh the Settings preview of what cleanup would take.
   const pinnedIds = useSessionPinnedStore((state) => state.ids);
+  const workKeeps = useUIStore(inWorkKeepsSessions);
 
   React.useEffect(() => {
     if (needsGlobalSessions) void ensureGlobalSessionsLoaded();
@@ -45,8 +47,8 @@ export const useSessionAutoCleanup = ({ autoRun = true, enabled = true }: Cleanu
     action,
     onlyArchived,
     activeSessionIds,
-    isKept: (session) => isSessionKeptByUser(session, pinnedIds),
-  }), [activeSessions, archivedSessions, currentSessionId, autoDeleteAfterDays, action, onlyArchived, activeSessionIds, pinnedIds]);
+    isKept: (session) => isSessionKeptByUser(session, pinnedIds, workKeeps),
+  }), [activeSessions, archivedSessions, currentSessionId, autoDeleteAfterDays, action, onlyArchived, activeSessionIds, pinnedIds, workKeeps]);
 
   React.useEffect(() => {
     if (!enabled || !autoRun || !autoDeleteEnabled || autoDeleteAfterDays <= 0

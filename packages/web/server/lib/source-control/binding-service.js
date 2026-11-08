@@ -5,8 +5,10 @@ import { sourceControlProviderDescriptors } from './provider-descriptors.js';
 import { resolvePrivateRepositoryIdentity } from './repository-identity.js';
 import { fingerprintRemoteUrl, redactRemoteUrl } from './url-redaction.js';
 import { createHttpsCredentialReference, endpointIsInstanceOrigin, normalizeGitRemoteEndpoint, parseGitCredentialReference } from '../git/credential-resolver.js';
+import { sshHostReaches, sshUserOf } from '../git/ssh-host-alias.js';
 import { bindingSummary, isSafeRepositoryEndpoint, resolveBindingReadiness } from './binding-contract.js';
 import { allowsTopLevelProjects, splitProjectPath } from './project-path.js';
+import { parseSshUrl } from './ssh-url.js';
 
 const bindingInputError = (message) => {
   const error = new Error(message);
@@ -34,15 +36,31 @@ const providerOrigin = (provider, instance) => {
   return descriptor.instance.origin(instance);
 };
 
-const providerRepositoryForEndpoint = (provider, instance, endpoint) => {
+/**
+ * The repository an approved endpoint names on one instance, or throws.
+ *
+ * An SSH endpoint counts when its host is the instance hostname, when it is an
+ * alias the server user's SSH configuration resolves to that hostname, or when
+ * its host and port are the instance's separate SSH address `sshUrl`.
+ */
+const providerRepositoryForEndpoint = async (provider, instance, endpoint, { reachesInstance = sshHostReaches, sshUrl = null } = {}) => {
   if (!isSafeRepositoryEndpoint(endpoint)) throw bindingInputError('provider endpoint is invalid');
   let normalized;
   try { normalized = normalizeGitRemoteEndpoint(endpoint.displayUrl); }
   catch { throw bindingInputError('provider endpoint is invalid'); }
   const origin = providerOrigin(provider, instance);
+  const hostname = origin.hostname.toLowerCase();
   const expectedPort = Number(origin.port || (origin.protocol === 'http:' ? 80 : 443));
-  if (normalized.host !== origin.hostname.toLowerCase()
-    || (normalized.protocol !== 'ssh' && normalized.port !== expectedPort)) {
+  const configuredSsh = parseSshUrl(sshUrl);
+  const hostMatches = normalized.host === hostname
+    || ((provider === 'gitea' || provider === 'forgejo') && normalized.protocol === 'ssh'
+      // URL display metadata strips the SSH user. Without the raw endpoint,
+      // Match user cannot establish which service Git would reach.
+      && !endpoint.displayUrl.includes('://')
+      && await reachesInstance(normalized.host, hostname, sshUserOf(endpoint.displayUrl)))
+    || (normalized.protocol === 'ssh' && configuredSsh !== null
+      && normalized.host === configuredSsh.host && normalized.port === configuredSsh.port);
+  if (!hostMatches || (normalized.protocol !== 'ssh' && normalized.port !== expectedPort)) {
     throw bindingInputError('provider instance does not match the selected remote host');
   }
   const descriptor = sourceControlProviderDescriptors.get(provider);
@@ -66,10 +84,15 @@ const assignRepository = (association, repository) => {
   else delete association.repository;
 };
 
-const parseProviders = (value, repositoryRemotes) => {
+/**
+ * The provider associations an approved binding input names, or throws. Each
+ * instance answers with its own SSH address, read by the caller, so one remote
+ * on a split host does not make every instance match it.
+ */
+const parseProviders = async (value, repositoryRemotes, { reachesInstance = sshHostReaches, sshUrls = new Map() } = {}) => {
   if (!Array.isArray(value)) throw bindingInputError('providers must be an array');
   const availableRemotes = new Set(repositoryRemotes.map((remote) => remote.name));
-  const bindings = value.map((provider) => {
+  const bindings = await Promise.all(value.map(async (provider) => {
     if (!isPlainObject(provider) || !hasExactKeys(provider,
       ['provider', 'instance', 'accountId', 'primaryRemote'], ['repository'])) throw bindingInputError('provider binding is invalid');
     const name = requiredString(provider.provider, 'provider');
@@ -79,7 +102,8 @@ const parseProviders = (value, repositoryRemotes) => {
     const endpoint = repositoryRemotes.find((remote) => remote.name === primaryRemote)?.fetch;
     if (!endpoint) throw bindingInputError(`remote ${primaryRemote} does not have a fetch endpoint`);
     const instance = normalizeProviderInstance(name, provider.instance);
-    const repository = providerRepositoryForEndpoint(name, instance, endpoint);
+    const repository = await providerRepositoryForEndpoint(name, instance, endpoint,
+      { reachesInstance, sshUrl: sshUrls.get(`${name}\0${instance}`) ?? null });
     const result = {
       provider: name,
       instance,
@@ -103,7 +127,7 @@ const parseProviders = (value, repositoryRemotes) => {
       }
     }
     return result;
-  });
+  }));
   const keys = bindings.map((binding) => `${binding.provider}\0${binding.instance}\0${binding.primaryRemote}`);
   if (new Set(keys).size !== keys.length) throw bindingInputError('provider bindings must be unique');
   return bindings;
@@ -178,6 +202,17 @@ const parseAuxiliary = (value) => {
 };
 
 /**
+ * A managed credential can serve only the protocol it was issued for.
+ */
+const credentialServesEndpoint = (credentialId, rawEndpoint) => {
+  try {
+    return parseGitCredentialReference(credentialId).transport === normalizeGitRemoteEndpoint(rawEndpoint).protocol;
+  } catch {
+    return false;
+  }
+};
+
+/**
  * The grant a submodule or LFS endpoint inherits when none names it.
  *
  * A checkout's submodules and LFS objects are fetched the way the checkout
@@ -201,9 +236,15 @@ const inheritedAuxiliaryGrant = (binding, parentRemote, rawEndpoint) => {
     return null;
   }
   if (!endpointHost || endpointHost !== parentHost) return null;
-  return parent.mode === 'managed'
-    ? { mode: 'managed', readiness: 'ready', credentialId: parent.credentialId }
-    : { mode: parent.mode, readiness: 'ready' };
+  if (parent.mode === 'managed') {
+    // An SSH key cannot authenticate an HTTPS LFS or submodule endpoint, and
+    // an HTTPS credential cannot authenticate an SSH one. The endpoint needs
+    // its own grant when the parent's transport cannot serve it.
+    return parent.credentialId && credentialServesEndpoint(parent.credentialId, rawEndpoint)
+      ? { mode: 'managed', readiness: 'ready', credentialId: parent.credentialId }
+      : null;
+  }
+  return { mode: parent.mode, readiness: 'ready' };
 };
 
 /**
@@ -380,6 +421,8 @@ export function createBindingService({
   validateManagedSshCredential,
   readManagedSshCredentialPresentation,
   resolveCheckoutAuxiliary,
+  sshHostReaches: reachesInstance = sshHostReaches,
+  readProviderSshUrl,
 }) {
   const resolveWith = async (directory, resolver) => {
     const normalizedDirectory = requiredString(directory, 'directory');
@@ -393,6 +436,41 @@ export function createBindingService({
     return context;
   };
   const resolve = (directory) => resolveWith(directory, resolveRepository);
+  /**
+   * The SSH address of each named provider instance, when the provider keeps
+   * one. A read failure leaves it out: the instance then matches only its web
+   * host, the pre-change behavior, never a guessed address.
+   */
+  const readSshUrls = async (pairs) => {
+    const urls = new Map();
+    if (!(readProviderSshUrl instanceof Function)) return urls;
+    for (const [provider, instance] of pairs) {
+      const key = `${provider}\0${instance}`;
+      if (urls.has(key)) continue;
+      let sshUrl = null;
+      try { sshUrl = await readProviderSshUrl({ provider, instance }); }
+      catch { sshUrl = null; }
+      urls.set(key, sshUrl);
+    }
+    return urls;
+  };
+  const sshUrlsFor = async (providers) => (Array.isArray(providers) ? readSshUrls(providers.map((entry) => {
+    let instance;
+    try { instance = normalizeProviderInstance(entry.provider, entry.instance); }
+    catch { instance = entry.instance; }
+    return [entry.provider, instance];
+  })) : new Map());
+  const endpointMatchesSshUrl = (displayUrl, sshUrl) => {
+    if (!sshUrl) return false;
+    const configured = parseSshUrl(sshUrl);
+    if (!configured) return false;
+    try {
+      const endpoint = normalizeGitRemoteEndpoint(displayUrl);
+      return endpoint.protocol === 'ssh' && endpoint.host === configured.host && endpoint.port === configured.port;
+    } catch {
+      return false;
+    }
+  };
   const readCurrent = async (context) => {
     const record = await store.read(context.repositoryId);
     return { repository: publicContext(context), revision: record.revision,
@@ -506,7 +584,14 @@ export function createBindingService({
         && normalizeProviderInstance(candidate.provider, candidate.instance) === instance);
       const remote = context.remotes.find((candidate) => candidate.name === primaryRemote);
       const remoteHost = remote ? hostOf(remote.fetch.displayUrl) : null;
-      if (boundToHost || !remoteHost || remoteHost !== hostOf(instance)) {
+      const onWebHost = Boolean(remoteHost) && remoteHost === hostOf(instance);
+      if (!onWebHost && remote) {
+        const sshUrl = (await readSshUrls([[provider, instance]])).get(`${provider}\0${instance}`) ?? null;
+        if (!endpointMatchesSshUrl(remote.fetch.displayUrl, sshUrl)) {
+          throw readContextError('SOURCE_CONTROL_BINDING_CONTEXT_MISMATCH', 'Source control repository binding context does not match', 409);
+        }
+      }
+      if (boundToHost || !remoteHost) {
         throw readContextError('SOURCE_CONTROL_BINDING_CONTEXT_MISMATCH', 'Source control repository binding context does not match', 409);
       }
       return { directory, repositoryId, provider, instance, accountId, bindingRevision, primaryRemote };
@@ -716,8 +801,10 @@ export function createBindingService({
       // answer a second time before issues and change requests work.
       // The transport resolver carries the raw URL alongside the redacted
       // endpoint; the provider contract accepts only the redacted pair.
+      const cloneSshUrls = providerAccount ? await sshUrlsFor([providerAccount]) : new Map();
       const providers = providerAccount
-        ? parseProviders([{ ...providerAccount, primaryRemote: 'origin' }], [{ name: 'origin', fetch: endpoint, push: endpoint }])
+        ? await parseProviders([{ ...providerAccount, primaryRemote: 'origin' }], [{ name: 'origin', fetch: endpoint, push: endpoint }],
+          { reachesInstance, sshUrls: cloneSshUrls })
         : [];
       return store.compareAndSwap(context.repositoryId, 0, {
         configRevision: context.configRevision, providers, remotes: [selected], auxiliary,
@@ -1046,12 +1133,14 @@ export function createBindingService({
             || !hasExactKeys(input.provider.repository, ['owner', 'name'])))) {
           throw bindingInputError('Provider binding is invalid');
         }
-        const [provider] = parseProviders([input.provider], context.remotes);
+        const sshUrls = await sshUrlsFor([{ provider: input.provider.provider, instance: input.provider.instance }]);
+        const [provider] = await parseProviders([input.provider], context.remotes, { reachesInstance, sshUrls });
         const previous = providers[targetIndex];
         // Account repair retains the approved endpoint. A changed destination needs a new association.
         if (previous?.endpoint && previous.primaryRemote === provider.primaryRemote) {
           provider.endpoint = previous.endpoint;
-          assignRepository(provider, providerRepositoryForEndpoint(provider.provider, provider.instance, previous.endpoint));
+          assignRepository(provider, await providerRepositoryForEndpoint(provider.provider, provider.instance, previous.endpoint,
+            { reachesInstance, sshUrl: sshUrls.get(`${provider.provider}\0${provider.instance}`) ?? null }));
         }
         if (providers.some((candidate, index) => index !== targetIndex && candidate.provider === provider.provider
           && normalizeProviderInstance(candidate.provider, candidate.instance) === provider.instance
@@ -1090,7 +1179,8 @@ export function createBindingService({
         || current.revision !== expectedRevision) throw conflict();
       if (binding.state !== 'bound' && binding.state !== 'needs-attention') throw bindingInputError('binding state is invalid');
       const state = binding.state;
-      const providers = parseProviders(binding.providers, context.remotes);
+      const sshUrls = await sshUrlsFor(binding.providers);
+      const providers = await parseProviders(binding.providers, context.remotes, { reachesInstance, sshUrls });
       const remotes = parseRemotes(binding.remotes, context.remotes);
       const auxiliary = parseAuxiliary(binding.auxiliary);
       const latest = await resolve(directory);

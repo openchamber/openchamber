@@ -37,6 +37,21 @@ export const useChatSessionSelection = (): ChatColumnSession => {
 };
 
 /**
+ * The store directory of a transcript nested in a column that renders from
+ * another store: a `/btw` fork sits in its parent's column and reads its
+ * records from the fork's directory. Everything else in that transcript still
+ * acts on the column's session, so this stays apart from the column context.
+ */
+export const ChatTranscriptDirectoryContext = React.createContext<string | null>(null);
+
+/** The directory of the store the transcript around this component renders from. */
+export const useChatTranscriptDirectory = (): string | null => {
+  const nested = React.useContext(ChatTranscriptDirectoryContext);
+  const { directory } = useChatSessionSelection();
+  return nested ?? directory;
+};
+
+/**
  * What a column does on behalf of the chat inside it. The app's main chat
  * acts on the global selection and the global panels; a pinned column (a chat
  * opened in the side panel) keeps its own session, navigates inside itself,
@@ -62,23 +77,27 @@ export const ChatColumnActionsContext = React.createContext<ChatColumnActions>(M
 export const useChatColumnActions = (): ChatColumnActions => React.useContext(ChatColumnActionsContext);
 
 /**
- * Whether the composer is expanded to fill the column (focus mode). The main
- * chat keeps it as an app-wide preference; a pinned column keeps its own, so
- * expanding one composer leaves the other chat as it was.
+ * Whether the composer is expanded to fill the column (focus mode). Only the
+ * main chat has it, as an app-wide preference toggled by the `expand_input`
+ * shortcut; a pinned column's composer never expands, so the shortcut leaves
+ * the side panel as it was.
  */
-export type ChatColumnExpandedInput = {
+type ChatColumnExpandedInput = {
   expanded: boolean;
   setExpanded: (expanded: boolean) => void;
 };
 
-export const ChatColumnExpandedInputContext = React.createContext<ChatColumnExpandedInput | null>(null);
+const PINNED_COLUMN_EXPANDED_INPUT: ChatColumnExpandedInput = {
+  expanded: false,
+  setExpanded: () => {},
+};
 
 export const useChatColumnExpandedInput = (): ChatColumnExpandedInput => {
-  const column = React.useContext(ChatColumnExpandedInputContext);
-  const globalExpanded = useUIStore((state) => (column ? false : state.isExpandedInput));
+  const { pinned } = useChatColumnActions();
+  const globalExpanded = useUIStore((state) => (pinned ? false : state.isExpandedInput));
   const setGlobalExpanded = useUIStore((state) => state.setExpandedInput);
   return React.useMemo(
-    () => column ?? { expanded: globalExpanded, setExpanded: setGlobalExpanded },
-    [column, globalExpanded, setGlobalExpanded],
+    () => (pinned ? PINNED_COLUMN_EXPANDED_INPUT : { expanded: globalExpanded, setExpanded: setGlobalExpanded }),
+    [pinned, globalExpanded, setGlobalExpanded],
   );
 };

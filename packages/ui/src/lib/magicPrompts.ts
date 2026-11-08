@@ -18,6 +18,7 @@ export type MagicPromptId =
   | 'git.commit.generate.instructions'
   | 'git.pr.generate.visible'
   | 'git.pr.generate.instructions'
+  | 'walkthrough.instructions'
   | 'git.conflict.resolve.visible'
   | 'git.conflict.resolve.instructions'
   | 'git.integrate.cherrypick.resolve.visible'
@@ -156,6 +157,15 @@ Commits in range (base...head):
 
 Files changed across these commits:
 {{changed_files}}{{additional_context_block}}{{pr_template_block}}`,
+  },
+  {
+    id: 'walkthrough.instructions',
+    title: 'Walkthrough Instructions',
+    group: 'Git',
+    description: 'Your preferences for Changes walkthroughs: tone, emphasis, what to dwell on or leave out. The server adds them to its own prompt, so they cannot change the walkthrough format. Empty means none.',
+    // No built-in text, on purpose: the server reads only the override, so a
+    // default here would be text the server never sends.
+    template: '',
   },
   {
     id: 'git.conflict.resolve.visible',
@@ -523,7 +533,9 @@ Focus on correctness, regressions, missing implementation, missing tests, and wh
     ],
     template: `Another agent reviewed your changes and left the feedback below.
 
-Fix the findings you agree with. When you think a finding is wrong, leave the code as it is and explain why. Then list what you changed and which findings you declined, with the reason for each.
+Weigh each finding yourself before you act on it. A problem your change neither causes nor set out to fix, such as another path, a rare case or a small cost that was there before, is a nit whatever label it came with. Something your change breaks is never a nit, however rare. Fix what is wrong in the case this change is for, with the smallest fix: one that deletes or narrows code beats a new guard, helper, option or test the goal does not need. When you think a finding is wrong, leave the code as it is and say why, with evidence: file and line, a test, command output. Decline nits and anything outside the change in one line each. Do not agree with a finding just to end the review.
+
+Then list what you changed and which findings you declined, with the reason for each.
 
 {{review_feedback}}`,
   },
@@ -876,16 +888,19 @@ During this session, save no new memories: you only restructure what is already 
 1. Go through every entry. For project entries, check the files, flags, commands, routes and decisions they name against the project: the code, git history, docs, instructions and skills, plans and notes, and whatever else you can reach, such as issues and linked trackers. A reference to something that is gone is a sign the entry is stale, not proof: a decision can outlive renamed code.
 
 2. Decide what changes. The first test for every entry: would an agent that reads the relevant code, docs and skills learn everything this entry says, including why it is so and whether it may be changed? If yes, the entry only duplicates the project and drifts from it over time: delete it. Where the entry and a doc or skill disagree, the doc or skill is current. Code shows what was done, not why, nor that it was deliberate: an entry that holds a decision, its reason, a rejected alternative or a "leave this as it is" that the project does not state stays, trimmed to that part if the rest is readable elsewhere. Do not move anything into docs or skills; this session changes memory only.
-- Obsolete: what it describes is gone or was reversed. Delete it.
+- Obsolete: what it describes is gone. Delete it.
+- Reversed: a decision the project or a later entry replaced. Rewrite it by memoryId to the decision that holds now, with one line on what it replaced and why when the reason is known: the abandoned choice and the reason for leaving it are what the code will never show.
+- Contradicting entries: the dates settle most of them. When the newer one records a decision or a correction, it holds: merge the two into one entry as under Reversed. When the newer one only discusses or proposes a change, the older one still holds; that pair is a question for the user.
 - Duplicates and overlapping entries: merge them into one entry, rewritten with memory.save and the surviving entry's memoryId, then delete the rest.
 - Partly outdated: rewrite it by memoryId with what is true now.
 - Wrong scope: something about this project filed under the user (global), or the other way round. Save it in the right scope, then delete the original.
 - One-off task state and anything the save rules exclude: delete.
-- A date in a title that only records when a decision was made: keep the decision; drop the date if the title needs the room.
+- A title with a date, or cut off mid-word: rewrite it by memoryId without the date, in at most 60 characters. The store keeps the dates, and they are what settles a contradiction.
+- A title that names only a topic ("Product decisions, part 2", "Feedback: what is still open"): rewrite it by memoryId to name what the entry holds, so an agent can tell from the session index whether to read it. Do not split the entry to do so.
 - Entries marked flagged: leave them alone; the user decides on those.
 An entry nothing contradicts still holds. Leave it as it is.
 
-3. Ask the user only about a real discrepancy you cannot settle from the project: two entries that contradict each other, or an entry the project contradicts while it may record a decision the project has not caught up with yet. Put all such questions in one question form, a handful at most. Never ask the user to re-confirm a standing preference or fact that nothing contradicts; assume it still holds. Entries about the user can rarely be checked against anything, so this applies to them most of all.
+3. Ask the user only about a real discrepancy you cannot settle from the project or the dates: two entries that contradict each other where the newer one only proposes a change or the dates do not tell which came later, or an entry the project contradicts while it may record a decision the project has not caught up with yet. Put all such questions in one question form, a handful at most. Never ask the user to re-confirm a standing preference or fact that nothing contradicts; assume it still holds. Entries about the user can rarely be checked against anything, so this applies to them most of all.
 
 4. Apply every change.
 

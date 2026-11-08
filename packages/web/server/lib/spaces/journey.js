@@ -349,11 +349,21 @@ export function createSpaceJourney({
     const delivery = settingsTurn.then(async () => {
       await writeIdleStop(spaceId, await readIdleStop());
       await writePermissionDefault(spaceId, await readPermissionDefault());
+      await deliverUserTaskTitle(spaceId);
     });
     settingsTurn = delivery.catch(() => {});
     return delivery.catch((error) => {
       logger.warn?.(`[spaces] space ${spaceId} keeps its settings: ${error?.code ?? error?.message ?? error}`);
     });
+  };
+
+  const deliverUserTaskTitle = async (spaceId) => {
+    const taskTitle = records.read(spaceId).record?.taskTitle;
+    try {
+      await serverInside.writeUserTaskTitle(spaceId, { title: taskTitle?.by === 'user' ? taskTitle.title : '' });
+    } catch (error) {
+      logger.warn?.(`[spaces] space ${spaceId} keeps its copy of the user task title: ${error?.code ?? error?.message ?? error}`);
+    }
   };
 
   const sendHistoryInBackground = ({ repository, spaceId, spacePath, base }) => {
@@ -747,6 +757,7 @@ export function createSpaceJourney({
   const describePending = (entry) => ({
     id: entry.id,
     name: entry.name,
+    taskTitle: records.read(entry.id).record?.taskTitle ?? null,
     placeId: entry.placeId,
     machine: places.get(entry.placeId)?.machine ?? null,
     projectDirectory: entry.projectDirectory,
@@ -800,6 +811,7 @@ export function createSpaceJourney({
       return {
         id: space.id,
         name: space.name,
+        taskTitle: record?.taskTitle ?? null,
         placeId: space.placeId,
         // The machine of a Docker over SSH place, for the screens; null locally and for a place that is gone.
         machine: places.get(space.placeId)?.machine ?? null,
@@ -857,6 +869,18 @@ export function createSpaceJourney({
     const space = (await listSpaces()).find((entry) => entry.id === spaceId);
     if (!space) throw new SpaceError('space_not_found', `There is no space ${spaceId}`);
     return space;
+  };
+
+  const setTaskTitle = async (spaceId, title) => {
+    const space = await requireListed(spaceId);
+    const result = records.setTaskTitle(spaceId, { title, by: 'user' });
+    announce(spaceId, { type: 'openchamber:space-task-title.updated', properties: { spaceId, taskTitle: result.taskTitle } });
+    if (space.state === 'running') {
+      const delivery = settingsTurn.then(() => deliverUserTaskTitle(spaceId));
+      settingsTurn = delivery.catch(() => {});
+      await delivery;
+    }
+    return result;
   };
 
   /**
@@ -923,6 +947,7 @@ export function createSpaceJourney({
     const space = await requireListed(spaceId);
     if (space.state !== 'running') throw new SpaceError('space_not_running', 'OpenCode runs inside a running space. Start the space.');
     await restartOpenCodeInside(spaceId);
+    await deliverUserTaskTitle(spaceId);
     onSpacesChanged();
     return requireListed(spaceId);
   });
@@ -1315,5 +1340,5 @@ export function createSpaceJourney({
     return { brought, applied, removal, kept };
   });
 
-  return { createSpace, listSpaces, startSpace, stopSpace, restartSpace, restartOpenCode, removeSpace, stopAllSpaces, reopen, isIdle, grantAccess, sayLogin, readHostLogins, readHostCustomProviders, openDomain, restoreLostGrants, readJournal, previewApply, applySpace, readIdleStopSetting, changeIdleStop, changePermissionDefault, runSetup, readSetup, readDisk, cleanUpDisk, pullImage };
+  return { createSpace, listSpaces, setTaskTitle, startSpace, stopSpace, restartSpace, restartOpenCode, removeSpace, stopAllSpaces, reopen, isIdle, grantAccess, sayLogin, readHostLogins, readHostCustomProviders, openDomain, restoreLostGrants, readJournal, previewApply, applySpace, readIdleStopSetting, changeIdleStop, changePermissionDefault, runSetup, readSetup, readDisk, cleanUpDisk, pullImage };
 }

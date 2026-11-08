@@ -2,15 +2,13 @@
  * OpenChamber session state for the VS Code runtime: archive flags and
  * per-session metadata.
  *
- * OpenCode holds archive state since 2.1 (`PATCH /api/session/{id}` with
- * `archived`), and every archive goes there first. OpenCode cannot change a
- * session whose directory was deleted (`LocationNotFoundError`); those keep
- * their state in the archive file the OpenChamber server uses
- * (`packages/web/server/lib/openchamber-sessions/session-archive.js`), kept
- * here in the shared OpenChamber config directory, which is also the web
- * server's default data directory. The file's entries win over OpenCode's
- * record, so a session OpenCode took leaves the file. The web server pushes
- * entries an older OpenChamber wrote.
+ * OpenCode holds archive state (`PATCH /api/session/{id}` with `archived`),
+ * and since 2.2 also for a session whose directory was deleted, so every
+ * archive goes there. The archive file the OpenChamber server uses
+ * (`packages/web/server/lib/openchamber-sessions/session-archive.js`), in the
+ * shared OpenChamber config directory, still holds entries an older
+ * OpenChamber wrote. They win over OpenCode's record, so archiving or
+ * restoring a session drops its entry, and the web server pushes the rest.
  *
  * Metadata lives on the OpenCode session record (`PATCH /api/session/{id}`,
  * OpenCode 2.0.15+). Before that it lived in `sessions-metadata.json` in the
@@ -66,40 +64,27 @@ export type SessionMetadataOnOpenCode = {
   write: (sessionID: string, metadata: SessionMetadata) => Promise<void>;
 };
 
-/**
- * Archive state on OpenCode. `setArchived` throws OpenCode's tagged error;
- * `relocate` moves a session whose directory is gone to its project's main
- * folder and sets its state there, resolving false when it could not.
- */
+/** Archive state on OpenCode. `setArchived` throws OpenCode's tagged error. */
 export type SessionArchiveOnOpenCode = {
   setArchived: (sessionID: string, archived: boolean) => Promise<void>;
-  relocate: (sessionID: string, archived: boolean) => Promise<boolean>;
 };
 
 /** PATCHes in flight at once; one batch is a worktree's sessions. */
 const ARCHIVE_CONCURRENCY = 6;
 
-const isLocationNotFound = (error: Error): boolean => error.name === 'LocationNotFoundError';
-
-type ArchiveOutcome = 'opencode' | 'location-gone' | 'failed';
-
-const pushArchiveState = async (openCode: SessionArchiveOnOpenCode, ids: string[], archived: boolean): Promise<ArchiveOutcome[]> => {
-  const outcomes: ArchiveOutcome[] = new Array(ids.length);
+/** Sets each session's state on OpenCode; true where it took. */
+const pushArchiveState = async (openCode: SessionArchiveOnOpenCode, ids: string[], archived: boolean): Promise<boolean[]> => {
+  const took: boolean[] = new Array(ids.length);
   let next = 0;
   const lane = async () => {
     while (next < ids.length) {
       const index = next;
       next += 1;
-      try {
-        await openCode.setArchived(ids[index], archived);
-        outcomes[index] = 'opencode';
-      } catch (error) {
-        outcomes[index] = error instanceof Error && isLocationNotFound(error) ? 'location-gone' : 'failed';
-      }
+      took[index] = await openCode.setArchived(ids[index], archived).then(() => true, () => false);
     }
   };
   await Promise.all(Array.from({ length: Math.min(ARCHIVE_CONCURRENCY, ids.length) }, lane));
-  return outcomes;
+  return took;
 };
 
 type SessionStateStoreOptions = {
@@ -306,69 +291,25 @@ export const createSessionStateStore = ({
     }
   };
 
-  const writeEntries = async (ids: string[], archivedAt: number | null): Promise<boolean> => {
-    if (ids.length === 0) return true;
-    const current = await readArchived();
-    if (!current) return false;
-    const next = { ...current };
-    for (const id of ids) next[id] = archivedAt;
-    try {
-      await writeJsonObjectFile(archivePath, next);
-      return true;
-    } catch (error) {
-      console.warn('[openchamber-sessions] failed to persist archive state:', describeError(error));
-      return false;
-    }
-  };
-
-  const relocateAll = async (openCode: SessionArchiveOnOpenCode, ids: string[], archived: boolean) => {
-    const moved: string[] = [];
-    for (const id of ids) {
-      if (await openCode.relocate(id, archived).catch(() => false)) moved.push(id);
-    }
-    return moved;
-  };
-
   /**
-   * Sets a batch's archive state on OpenCode. A session whose directory is
-   * gone moves to its project's main folder first; when archiving, the file
-   * marks it archived before the move, so it never shows as active while
-   * OpenCode announces the move. The file keeps a session that cannot move.
-   * `null` restores. Resolves the ids whose state now holds and the ids that
-   * failed.
+   * Sets a batch's archive state on OpenCode, which since 2.2 also works for a
+   * session whose directory is gone, and drops the file entries an older
+   * OpenChamber wrote for them. `null` restores. Resolves the ids whose state
+   * now holds and the ids that failed.
    */
   const applyArchive = async (ids: string[], archivedAt: number | null, openCode: SessionArchiveOnOpenCode) => {
     const targets = asSessionIdList(ids);
     if (targets.length === 0) return { applied: [] as string[], failedIds: [] as string[] };
-    const archived = archivedAt !== null;
-    const outcomes = await pushArchiveState(openCode, targets, archived);
-    const onOpenCode = targets.filter((_, index) => outcomes[index] === 'opencode');
-    const gone = targets.filter((_, index) => outcomes[index] === 'location-gone');
-    const refused = targets.filter((_, index) => outcomes[index] === 'failed');
+    const took = await pushArchiveState(openCode, targets, archivedAt !== null);
+    const onOpenCode = targets.filter((_, index) => took[index]);
+    const refused = targets.filter((_, index) => !took[index]);
 
     // A stale entry would override what OpenCode now holds; an unreadable file
     // is not folded onto reads, so OpenCode's state shows either way.
     const forgotten = await forgetEntries(onOpenCode);
     const current = forgotten ? null : await readArchived();
     const stale = current ? onOpenCode.filter((id) => id in current) : [];
-    const applied = onOpenCode.filter((id) => !stale.includes(id));
-    const failedIds = [...stale, ...refused];
-    if (gone.length === 0) return { applied, failedIds };
-
-    if (archived) {
-      if (!(await writeEntries(gone, archivedAt))) return { applied, failedIds: [...failedIds, ...gone] };
-      const moved = await relocateAll(openCode, gone, true);
-      await forgetEntries(moved);
-      return { applied: [...applied, ...gone], failedIds };
-    }
-    const moved = await relocateAll(openCode, gone, false);
-    const kept = gone.filter((id) => !moved.includes(id));
-    const movedForgotten = await forgetEntries(moved);
-    const keptWritten = await writeEntries(kept, null);
-    return {
-      applied: [...applied, ...(movedForgotten ? moved : []), ...(keptWritten ? kept : [])],
-      failedIds: [...failedIds, ...(movedForgotten ? [] : moved), ...(keptWritten ? [] : kept)],
-    };
+    return { applied: onOpenCode.filter((id) => !stale.includes(id)), failedIds: [...stale, ...refused] };
   };
 
   return {

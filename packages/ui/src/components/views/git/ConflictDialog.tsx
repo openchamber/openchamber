@@ -15,6 +15,7 @@ import { Icon } from "@/components/icon/Icon";
 import { getConflictDetails, type MergeConflictDetails } from '@/lib/gitApi';
 import { loadMagicPrompts } from '@/lib/magicPrompts';
 import { useI18n } from '@/lib/i18n';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 
 interface ConflictDialogProps {
   open: boolean;
@@ -215,7 +216,7 @@ export const ConflictDialog: React.FC<ConflictDialogProps> = ({
                   {displayFiles.length}
                 </span>
               </div>
-              <div className="bg-[var(--surface-elevated)] rounded-lg p-3 max-h-40 overflow-y-auto overflow-x-hidden">
+              <ScrollableOverlay outerClassName="max-h-40 rounded-lg bg-[var(--surface-elevated)]" className="p-3" disableHorizontal>
                 <ul className="space-y-1">
                   {displayFiles.map((file) => (
                     <li
@@ -227,16 +228,16 @@ export const ConflictDialog: React.FC<ConflictDialogProps> = ({
                     </li>
                   ))}
                 </ul>
-              </div>
+              </ScrollableOverlay>
             </div>
           )}
 
           {conflictDetails?.headInfo && (
             <div className="space-y-1 overflow-hidden">
               <p className="typography-meta text-muted-foreground">{t('gitView.conflict.headInfo')}</p>
-              <div className="typography-micro text-foreground font-mono bg-[var(--surface-elevated)] rounded-lg p-3 max-h-24 overflow-y-auto break-words whitespace-pre-wrap">
+              <ScrollableOverlay outerClassName="max-h-24 rounded-lg bg-[var(--surface-elevated)]" className="typography-micro text-foreground font-mono p-3 break-words whitespace-pre-wrap" disableHorizontal>
                 {conflictDetails.headInfo}
-              </div>
+              </ScrollableOverlay>
             </div>
           )}
 

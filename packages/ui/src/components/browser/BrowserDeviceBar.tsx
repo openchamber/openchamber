@@ -53,23 +53,31 @@ export const BrowserDeviceBar: React.FC<{
 
   return (
     <div className="flex items-center gap-1.5 border-b border-border bg-[var(--surface-background)] px-2 py-1">
-      <select
-        value={presetId}
-        onChange={(event) => {
-          const next = presetViewport(event.target.value);
-          onViewportChange(next ?? FILL_VIEWPORT);
-        }}
-        aria-label={t('contextPanel.browser.device.preset')}
-        className={cn(
-          'oc-raised oc-field h-6 shrink-0 rounded-full bg-[var(--surface-elevated)] px-2',
-          'typography-micro text-foreground outline-none',
-        )}
-      >
-        <option value="">{t('contextPanel.browser.device.responsive')}</option>
-        {VIEWPORT_PRESETS.map((preset) => (
-          <option key={preset.id} value={preset.id}>{preset.label}</option>
-        ))}
-      </select>
+      {/* This bar's tooltips open above it: below sits the page. */}
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span className="inline-flex shrink-0">
+            <select
+              value={presetId}
+              onChange={(event) => {
+                const next = presetViewport(event.target.value);
+                onViewportChange(next ?? FILL_VIEWPORT);
+              }}
+              aria-label={t('contextPanel.browser.device.preset')}
+              className={cn(
+                'oc-raised oc-field h-6 shrink-0 rounded-full bg-[var(--surface-elevated)] px-2',
+                'typography-micro text-foreground outline-none',
+              )}
+            >
+              <option value="">{t('contextPanel.browser.device.responsive')}</option>
+              {VIEWPORT_PRESETS.map((preset) => (
+                <option key={preset.id} value={preset.id}>{preset.label}</option>
+              ))}
+            </select>
+          </span>
+        </TooltipTrigger>
+        <TooltipContent sideOffset={6}>{t('contextPanel.browser.device.preset')}</TooltipContent>
+      </Tooltip>
 
       <input
         value={size ? String(size.width) : ''}
@@ -91,17 +99,20 @@ export const BrowserDeviceBar: React.FC<{
 
       <Tooltip>
         <TooltipTrigger asChild>
-          <Button
-            type="button"
-            variant="ghost"
-            size="xs"
-            className="w-6 shrink-0 rounded-full px-0 text-muted-foreground hover:text-foreground"
-            onClick={() => onViewportChange(rotateViewport(viewport))}
-            disabled={!size}
-            aria-label={t('contextPanel.browser.device.rotate')}
-          >
-            <Icon name="refresh" className="size-3.5" aria-hidden="true" />
-          </Button>
+          {/* The span keeps the tooltip on a disabled button, which takes no pointer events. */}
+          <span className="inline-flex shrink-0">
+            <Button
+              type="button"
+              variant="ghost"
+              size="xs"
+              className="w-6 shrink-0 rounded-full px-0 text-muted-foreground hover:text-foreground"
+              onClick={() => onViewportChange(rotateViewport(viewport))}
+              disabled={!size}
+              aria-label={t('contextPanel.browser.device.rotate')}
+            >
+              <Icon name="refresh" className="size-3.5" aria-hidden="true" />
+            </Button>
+          </span>
         </TooltipTrigger>
         <TooltipContent sideOffset={6}>{t('contextPanel.browser.device.rotate')}</TooltipContent>
       </Tooltip>
@@ -115,24 +126,34 @@ export const BrowserDeviceBar: React.FC<{
 
       <div className="ms-auto flex shrink-0 items-center gap-1">
         {(['system', 'light', 'dark'] as const).map((scheme) => (
-          <Button
-            key={scheme}
-            type="button"
-            variant={colorScheme === scheme ? 'secondary' : 'ghost'}
-            size="xs"
-            className={cn(
-              'shrink-0 rounded-full px-2.5 typography-micro',
-              colorScheme === scheme ? 'text-foreground' : 'text-muted-foreground hover:text-foreground',
-            )}
-            onClick={() => onColorSchemeChange(scheme)}
-            aria-pressed={colorScheme === scheme}
-          >
-            {t(scheme === 'system'
-              ? 'contextPanel.browser.device.schemeSystem'
-              : scheme === 'light'
-                ? 'contextPanel.browser.device.schemeLight'
-                : 'contextPanel.browser.device.schemeDark')}
-          </Button>
+          <Tooltip key={scheme}>
+            <TooltipTrigger asChild>
+              <Button
+                type="button"
+                variant={colorScheme === scheme ? 'secondary' : 'ghost'}
+                size="xs"
+                className={cn(
+                  'shrink-0 rounded-full px-2.5 typography-micro',
+                  colorScheme === scheme ? 'text-foreground' : 'text-muted-foreground hover:text-foreground',
+                )}
+                onClick={() => onColorSchemeChange(scheme)}
+                aria-pressed={colorScheme === scheme}
+              >
+                {t(scheme === 'system'
+                  ? 'contextPanel.browser.device.schemeSystem'
+                  : scheme === 'light'
+                    ? 'contextPanel.browser.device.schemeLight'
+                    : 'contextPanel.browser.device.schemeDark')}
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent sideOffset={6}>
+              {t(scheme === 'system'
+                ? 'contextTooltips.terminalBrowser.device.schemeSystem'
+                : scheme === 'light'
+                  ? 'contextTooltips.terminalBrowser.device.schemeLight'
+                  : 'contextTooltips.terminalBrowser.device.schemeDark')}
+            </TooltipContent>
+          </Tooltip>
         ))}
       </div>
     </div>

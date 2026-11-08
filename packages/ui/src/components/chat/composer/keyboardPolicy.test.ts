@@ -2,10 +2,12 @@ import { describe, expect, test } from 'bun:test';
 
 import {
     restoreDeferredEnterModifiers,
+    shouldPreserveDeferredEnterShift,
     shouldSubmitEnter,
     type EnterKeyPolicyInput,
     type EnterModifierState,
 } from './keyboardPolicy';
+import { getOrderedListContinuationEdit } from './text';
 
 const policy = (overrides: Partial<EnterKeyPolicyInput>): EnterKeyPolicyInput => ({
     isMobile: false,
@@ -15,28 +17,36 @@ const policy = (overrides: Partial<EnterKeyPolicyInput>): EnterKeyPolicyInput =>
     shiftKey: false,
     ctrlKey: false,
     metaKey: false,
+    altKey: false,
     ...overrides,
 });
 
 const enterPolicyCases: Array<[string, Partial<EnterKeyPolicyInput>, boolean]> = [
         ['mobile default Enter inserts a newline', { isMobile: true }, false],
         ['desktop default Enter sends', {}, true],
+        ['desktop default Alt+Enter inserts a newline', { altKey: true }, false],
+        ['desktop default Ctrl+Alt+Enter sends', { ctrlKey: true, altKey: true }, true],
         ['desktop focus mode default Enter inserts a newline', { isDesktopExpanded: true }, false],
         ['configured enabled Enter sends on desktop', { enterToSendConfigured: true, enterToSend: true }, true],
+        ['configured enabled Alt+Enter inserts a newline', { enterToSendConfigured: true, enterToSend: true, altKey: true }, false],
         ['configured enabled Shift+Enter inserts a newline', { enterToSendConfigured: true, enterToSend: true, shiftKey: true }, false],
         ['configured disabled Enter inserts a newline', { enterToSendConfigured: true, enterToSend: false }, false],
         ['configured disabled Shift+Enter inserts a newline', { enterToSendConfigured: true, enterToSend: false, shiftKey: true }, false],
         ['configured disabled Ctrl+Enter sends', { enterToSendConfigured: true, enterToSend: false, ctrlKey: true }, true],
+        ['configured disabled Ctrl+Alt+Enter sends', { enterToSendConfigured: true, enterToSend: false, ctrlKey: true, altKey: true }, true],
         ['configured disabled Cmd+Shift+Enter sends', { enterToSendConfigured: true, enterToSend: false, shiftKey: true, metaKey: true }, true],
         ['configured Ctrl+Enter sends on desktop', { enterToSendConfigured: true, isDesktopExpanded: true, shiftKey: true, ctrlKey: true }, true],
         ['configured Meta+Enter sends on desktop', { enterToSendConfigured: true, isDesktopExpanded: true, shiftKey: true, metaKey: true }, true],
         ['expanded composer Enter inserts a newline when Enter-to-send is enabled', { isDesktopExpanded: true, enterToSendConfigured: true, enterToSend: true }, false],
+        ['expanded composer Alt+Enter inserts a newline', { isDesktopExpanded: true, altKey: true }, false],
         ['expanded composer Shift+Enter inserts a newline when Enter-to-send is disabled', { isDesktopExpanded: true, enterToSendConfigured: true, enterToSend: false, shiftKey: true }, false],
         ['expanded composer Ctrl+Enter sends despite Enter-to-send being disabled', { isDesktopExpanded: true, enterToSendConfigured: true, ctrlKey: true }, true],
         ['expanded composer Cmd+Enter sends despite Enter-to-send being enabled', { isDesktopExpanded: true, enterToSendConfigured: true, enterToSend: true, metaKey: true }, true],
         ['mobile expanded Ctrl+Enter sends', { enterToSendConfigured: true, isMobile: true, isDesktopExpanded: true, shiftKey: true, ctrlKey: true }, true],
         ['mobile expanded Meta+Enter sends', { enterToSendConfigured: true, isMobile: true, isDesktopExpanded: true, shiftKey: true, metaKey: true }, true],
         ['mobile return-key send Enter sends', { isMobile: true, returnKeySends: true }, true],
+        ['mobile return-key send Alt+Enter inserts a newline', { isMobile: true, returnKeySends: true, altKey: true }, false],
+        ['mobile Ctrl+Alt+Enter sends', { isMobile: true, ctrlKey: true, altKey: true }, true],
         ['mobile return-key send Shift+Enter inserts a newline', { isMobile: true, returnKeySends: true, shiftKey: true }, false],
         ['mobile return-key send off keeps Enter a newline', { isMobile: true, returnKeySends: false }, false],
         ['mobile return-key send keeps Ctrl+Enter sending', { isMobile: true, returnKeySends: true, ctrlKey: true }, true],
@@ -81,18 +91,19 @@ describe('Enter key policy', () => {
 });
 
 const deferredModifierCases: Array<[string, EnterModifierState]> = [
-        ['Shift', { shiftKey: true, ctrlKey: false, metaKey: false }],
-        ['Ctrl', { shiftKey: false, ctrlKey: true, metaKey: false }],
-        ['Meta', { shiftKey: false, ctrlKey: false, metaKey: true }],
-        ['Shift+Ctrl+Meta', { shiftKey: true, ctrlKey: true, metaKey: true }],
+        ['Shift', { shiftKey: true, ctrlKey: false, metaKey: false, altKey: false }],
+        ['Ctrl', { shiftKey: false, ctrlKey: true, metaKey: false, altKey: false }],
+        ['Meta', { shiftKey: false, ctrlKey: false, metaKey: true, altKey: false }],
+        ['Alt', { shiftKey: false, ctrlKey: false, metaKey: false, altKey: true }],
+        ['Shift+Ctrl+Meta+Alt', { shiftKey: true, ctrlKey: true, metaKey: true, altKey: true }],
 ];
 
 describe('deferred Enter modifiers', () => {
     test('Android deferred Enter ignores the synced desktop preference and keeps Ctrl/Cmd', () => {
         for (const enterToSend of [false, true]) {
             for (const modifiers of deferredModifierCases.map(([, value]) => value)) {
-                const event = { shiftKey: false, ctrlKey: false, metaKey: false };
-                // Configured mobile autocapitalization deliberately skips Shift restoration.
+                const event = { shiftKey: false, ctrlKey: false, metaKey: false, altKey: false };
+                // A soft keyboard's Shift is not restored, because autocapitalization fakes it.
                 restoreDeferredEnterModifiers(event, modifiers, false);
                 expect(shouldSubmitEnter(policy({
                     isMobile: true,
@@ -106,7 +117,7 @@ describe('deferred Enter modifiers', () => {
 
     for (const modifiers of [{ shiftKey: true, ctrlKey: true, metaKey: false }, { shiftKey: true, ctrlKey: false, metaKey: true }]) {
         test(`mobile deferred Ctrl/Cmd submits even with Shift: ${JSON.stringify(modifiers)}`, () => {
-            const event = { shiftKey: false, ctrlKey: false, metaKey: false };
+            const event = { shiftKey: false, ctrlKey: false, metaKey: false, altKey: false };
             restoreDeferredEnterModifiers(event, modifiers, true);
             expect(shouldSubmitEnter(policy({ isMobile: true, ...event }))).toBe(true);
         });
@@ -114,7 +125,7 @@ describe('deferred Enter modifiers', () => {
 
     for (const [name, modifiers] of deferredModifierCases) {
         test(`preserves ${name}`, () => {
-        const event = { shiftKey: false, ctrlKey: false, metaKey: false };
+        const event = { shiftKey: false, ctrlKey: false, metaKey: false, altKey: false };
 
         restoreDeferredEnterModifiers(event, modifiers);
 
@@ -123,17 +134,17 @@ describe('deferred Enter modifiers', () => {
     }
 
     test('does not restore iOS auto-capitalization as Shift', () => {
-        const event = { shiftKey: false, ctrlKey: false, metaKey: false };
+        const event = { shiftKey: false, ctrlKey: false, metaKey: false, altKey: false };
 
         restoreDeferredEnterModifiers(event, { shiftKey: true, ctrlKey: false, metaKey: false }, false);
 
-        expect(event).toEqual({ shiftKey: false, ctrlKey: false, metaKey: false });
+        expect(event).toEqual({ shiftKey: false, ctrlKey: false, metaKey: false, altKey: false });
     });
 
     test('return-key send submits the soft keyboard even when the real Enter reported Shift', () => {
         // iOS autocapitalization reports a phantom Shift at sentence
         // starts; with only a soft keyboard, the Send keycap must send.
-        const event = { shiftKey: false, ctrlKey: false, metaKey: false };
+        const event = { shiftKey: false, ctrlKey: false, metaKey: false, altKey: false };
 
         restoreDeferredEnterModifiers(event, { shiftKey: true, ctrlKey: false, metaKey: false }, false);
 
@@ -142,7 +153,7 @@ describe('deferred Enter modifiers', () => {
 
     test('return-key send keeps a hardware Shift+Enter newline', () => {
         // A hardware keyboard's Shift is real, so it is restored.
-        const event = { shiftKey: false, ctrlKey: false, metaKey: false };
+        const event = { shiftKey: false, ctrlKey: false, metaKey: false, altKey: false };
 
         restoreDeferredEnterModifiers(event, { shiftKey: true, ctrlKey: false, metaKey: false }, true);
 
@@ -152,7 +163,7 @@ describe('deferred Enter modifiers', () => {
     test('return-key send cannot strip a Shift already on the synthetic Enter', () => {
         // iOS carries stashed modifiers through the re-dispatch, so the
         // synthetic event already holds the real hardware Shift.
-        const event = { shiftKey: true, ctrlKey: false, metaKey: false };
+        const event = { shiftKey: true, ctrlKey: false, metaKey: false, altKey: false };
 
         restoreDeferredEnterModifiers(event, { shiftKey: true, ctrlKey: false, metaKey: false }, false);
 
@@ -160,10 +171,44 @@ describe('deferred Enter modifiers', () => {
     });
 
     test('return-key send keeps deferred Ctrl+Enter submitting', () => {
-        const event = { shiftKey: false, ctrlKey: false, metaKey: false };
+        const event = { shiftKey: false, ctrlKey: false, metaKey: false, altKey: false };
 
         restoreDeferredEnterModifiers(event, { shiftKey: true, ctrlKey: true, metaKey: false }, false);
 
         expect(shouldSubmitEnter(policy({ isMobile: true, returnKeySends: true, ...event }))).toBe(true);
+    });
+
+    describe('Shift+Enter in a numbered list on mobile', () => {
+        const deferredShiftEnter = (hasHardwareKeyboard: boolean) => {
+            const event = { shiftKey: false, ctrlKey: false, metaKey: false, altKey: false };
+            restoreDeferredEnterModifiers(
+                event,
+                { shiftKey: true, ctrlKey: false, metaKey: false },
+                shouldPreserveDeferredEnterShift({ isMobile: true, hasHardwareKeyboard }),
+            );
+            return event;
+        };
+
+        for (const returnKeySends of [false, true]) {
+            test(`a hardware keyboard continues the list without sending, returnKeySends=${returnKeySends}`, () => {
+                const event = deferredShiftEnter(true);
+
+                expect(event.shiftKey).toBe(true);
+                expect(shouldSubmitEnter(policy({ isMobile: true, enterToSendConfigured: true, returnKeySends, ...event }))).toBe(false);
+                expect(getOrderedListContinuationEdit('1. item', 7, 7)?.insert).toBe('\n2. ');
+            });
+        }
+
+        test('a soft keyboard phantom Shift stays out of both Return modes', () => {
+            const event = deferredShiftEnter(false);
+
+            expect(event.shiftKey).toBe(false);
+            expect(shouldSubmitEnter(policy({ isMobile: true, enterToSendConfigured: true, returnKeySends: false, ...event }))).toBe(false);
+            expect(shouldSubmitEnter(policy({ isMobile: true, enterToSendConfigured: true, returnKeySends: true, ...event }))).toBe(true);
+        });
+
+        test('desktop always keeps the deferred Shift', () => {
+            expect(shouldPreserveDeferredEnterShift({ isMobile: false, hasHardwareKeyboard: false })).toBe(true);
+        });
     });
 });

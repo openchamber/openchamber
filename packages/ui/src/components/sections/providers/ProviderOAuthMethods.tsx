@@ -9,6 +9,7 @@ import { cn } from '@/lib/utils';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { openExternalUrl } from '@/lib/url';
 import { opencodeClient } from '@/lib/opencode/client';
+import { getIntegrationClient } from '@/lib/opencode/integration-catalog';
 import {
   collectFieldAnswer,
   defaultFieldValues,
@@ -30,9 +31,10 @@ interface ProviderOAuthMethodsProps {
   /** Called once a credential has been stored, so the caller can reload providers. */
   onConnected: () => void | Promise<void>;
   /**
-   * Location the integration belongs to. Provider integrations are global;
-   * an MCP server's OAuth integration exists only in the Location whose config
-   * declares the server, so its requests must resolve that directory.
+   * Location the integration belongs to. An MCP server's OAuth integration
+   * exists only in the Location whose config declares the server, so its
+   * requests must resolve that directory. Without one, requests go where the
+   * integration list is read (`getIntegrationClient`).
    */
   directory?: string | null;
   /** Layout only — the caller owns separation from whatever sits above. */
@@ -41,6 +43,10 @@ interface ProviderOAuthMethodsProps {
   autoStart?: boolean;
   /** Off when a surrounding card already names the method. */
   showMethodLabels?: boolean;
+  /** The start button's text, when the surface has a more specific word than "Connect". */
+  connectLabel?: string;
+  /** Off when the caller starts the sign-in from its own button; only the attempt's progress and errors show. */
+  showStartButton?: boolean;
 }
 
 type Flow =
@@ -81,15 +87,27 @@ export const ProviderOAuthMethods: React.FC<ProviderOAuthMethodsProps> = ({
   className,
   autoStart = false,
   showMethodLabels = true,
+  connectLabel,
+  showStartButton = true,
 }) => {
   const { t } = useI18n();
-  const sdk = React.useCallback(
-    () => (directory ? opencodeClient.getScopedSdkClient(directory) : opencodeClient.getSdkClient()),
+  // Picked once per directory prop: OpenCode keeps an OAuth attempt in the
+  // location that started it, so status, complete and cancel must not follow
+  // the app to another project mid-flow.
+  const client = React.useMemo(
+    () => (directory ? opencodeClient.getScopedSdkClient(directory) : getIntegrationClient()),
     [directory],
   );
+  const sdk = React.useCallback(() => client, [client]);
   const [flow, setFlow] = React.useState<Flow>(IDLE);
   const [fieldValues, setFieldValues] = React.useState<Record<string, FormValue>>({});
   const [codeInput, setCodeInput] = React.useState('');
+  /** The address pasted into a waiting `paste` attempt, and how handing it over went. */
+  const [redirectInput, setRedirectInput] = React.useState('');
+  const [redirectSubmit, setRedirectSubmit] = React.useState<{ submitting: boolean; error: string | null }>({
+    submitting: false,
+    error: null,
+  });
   /** Set while a poll loop is live; clearing it stops the loop at its next tick. */
   const activeAttemptRef = React.useRef<string | null>(null);
 
@@ -100,9 +118,15 @@ export const ProviderOAuthMethods: React.FC<ProviderOAuthMethodsProps> = ({
       .catch(() => undefined);
   }, [integrationId, sdk]);
 
-  React.useEffect(() => () => {
-    const pending = activeAttemptRef.current;
-    if (pending) cancelAttempt(pending);
+  /** An attempt that starts after unmount is cancelled instead of opening a browser tab nobody follows. */
+  const unmountedRef = React.useRef(false);
+  React.useEffect(() => {
+    unmountedRef.current = false;
+    return () => {
+      unmountedRef.current = true;
+      const pending = activeAttemptRef.current;
+      if (pending) cancelAttempt(pending);
+    };
   }, [cancelAttempt]);
 
   const activeMethodID = flow.phase === 'idle' ? null : flow.methodID;
@@ -194,12 +218,22 @@ export const ProviderOAuthMethods: React.FC<ProviderOAuthMethodsProps> = ({
         methodID: method.id,
         ...(Object.keys(answer).length > 0 ? { answer } : {}),
       });
-      attempt = { attemptID: data.attemptID, mode: data.mode, url: data.url, instructions: data.instructions };
+      attempt = {
+        attemptID: data.attemptID,
+        mode: data.mode,
+        url: data.url,
+        instructions: data.instructions,
+        paste: data.paste === true,
+      };
     } catch (error) {
       fail(method.id, error, 'settings.providers.page.toast.oauthStartFailed');
       return;
     }
 
+    if (unmountedRef.current) {
+      cancelAttempt(attempt.attemptID);
+      return;
+    }
     activeAttemptRef.current = attempt.attemptID;
 
     // Claude Code CLI owns its OAuth flow and opens the browser itself. Its
@@ -215,6 +249,8 @@ export const ProviderOAuthMethods: React.FC<ProviderOAuthMethodsProps> = ({
       return;
     }
 
+    setRedirectInput('');
+    setRedirectSubmit({ submitting: false, error: null });
     setFlow({ phase: 'waiting', methodID: method.id, attempt });
     await pollAttempt(method.id, attempt.attemptID);
   };
@@ -272,6 +308,29 @@ export const ProviderOAuthMethods: React.FC<ProviderOAuthMethodsProps> = ({
       await succeed();
     } catch (error) {
       fail(methodID, error, 'settings.providers.page.toast.oauthCompleteFailed');
+    }
+  };
+
+  /**
+   * Hands a waiting attempt the address the browser landed on. OpenCode settles
+   * the attempt through its status, which the poll loop already watches; a
+   * rejected address leaves the attempt waiting, so the user can paste again.
+   */
+  const submitRedirect = async () => {
+    if (flow.phase !== 'waiting') return;
+    const address = redirectInput.trim();
+    if (!address) return;
+    const { attemptID } = flow.attempt;
+    setRedirectSubmit({ submitting: true, error: null });
+    // Accepted, it stays submitting until the poll loop reads the result.
+    try {
+      await sdk().integration.oauth.complete({ integrationID: integrationId, attemptID, code: address });
+    } catch (error) {
+      if (activeAttemptRef.current !== attemptID) return;
+      setRedirectSubmit({
+        submitting: false,
+        error: describeOAuthError(error, t, 'settings.providers.page.toast.oauthCompleteFailed'),
+      });
     }
   };
 
@@ -359,18 +418,20 @@ export const ProviderOAuthMethods: React.FC<ProviderOAuthMethodsProps> = ({
 
         return (
           <div key={method.id} className="space-y-3">
-            <div className="flex items-center justify-between gap-2">
-              {showMethodLabels ? <div className="typography-ui-label text-foreground">{method.label}</div> : null}
-              <Button
-                variant="outline"
-                size="xs"
-                className="!font-normal shrink-0"
-                onClick={() => beginConnect(method)}
-                disabled={busy}
-              >
-                {t('settings.providers.page.actions.connect')}
-              </Button>
-            </div>
+            {showStartButton ? (
+              <div className="flex items-center justify-between gap-2">
+                {showMethodLabels ? <div className="typography-ui-label text-foreground">{method.label}</div> : null}
+                <Button
+                  variant="outline"
+                  size="xs"
+                  className="!font-normal shrink-0"
+                  onClick={() => beginConnect(method)}
+                  disabled={busy}
+                >
+                  {connectLabel ?? t('settings.providers.page.actions.connect')}
+                </Button>
+              </div>
+            ) : null}
 
             {isActive && flow.phase === 'prompting' && (
               <div className="space-y-3">
@@ -417,6 +478,38 @@ export const ProviderOAuthMethods: React.FC<ProviderOAuthMethodsProps> = ({
                 <p className="typography-meta text-muted-foreground">
                   {t('settings.providers.page.auth.oauth.waitingHint')}
                 </p>
+                {flow.attempt.paste && (
+                  <div className="space-y-2">
+                    <p className="typography-meta text-muted-foreground">
+                      {t('settings.providers.page.auth.oauth.pasteRedirectHint')}
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <Input
+                        value={redirectInput}
+                        onChange={(event) => setRedirectInput(event.target.value)}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Enter') void submitRedirect();
+                        }}
+                        placeholder={t('settings.providers.page.auth.oauth.pasteRedirectPlaceholder')}
+                        aria-label={t('settings.providers.page.auth.oauth.pasteRedirectPlaceholder')}
+                        className="font-mono text-xs"
+                        disabled={redirectSubmit.submitting}
+                      />
+                      <Button
+                        size="xs"
+                        className="!font-normal shrink-0"
+                        onClick={() => void submitRedirect()}
+                        disabled={redirectSubmit.submitting || redirectInput.trim().length === 0}
+                      >
+                        {t('settings.providers.page.actions.complete')}
+                      </Button>
+                    </div>
+                    {/* Reserved, so an error does not push what follows. */}
+                    <p className="typography-meta min-h-[1lh] text-[var(--status-error)]">
+                      {redirectSubmit.error}
+                    </p>
+                  </div>
+                )}
               </div>
             )}
 
@@ -460,14 +553,16 @@ export const ProviderOAuthMethods: React.FC<ProviderOAuthMethodsProps> = ({
             {isActive && flow.phase === 'failed' && (
               <div className="space-y-2">
                 <p className="typography-meta text-[var(--status-error)]">{flow.message}</p>
-                <Button
-                  variant="outline"
-                  size="xs"
-                  className="!font-normal"
-                  onClick={() => beginConnect(method)}
-                >
-                  {t('settings.providers.page.actions.tryAgain')}
-                </Button>
+                {showStartButton ? (
+                  <Button
+                    variant="outline"
+                    size="xs"
+                    className="!font-normal"
+                    onClick={() => beginConnect(method)}
+                  >
+                    {t('settings.providers.page.actions.tryAgain')}
+                  </Button>
+                ) : null}
               </div>
             )}
           </div>

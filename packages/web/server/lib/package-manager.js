@@ -5,6 +5,7 @@ import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { fetchUpdateNotes } from './changelog/update-notes.js';
+import { compareVersions } from './version-order.js';
 import { isEnterpriseMode } from './enterprise-mode.js';
 
 import { resolveNpmRegistryRequest } from './opencode/npm-registry-config.js';
@@ -90,37 +91,37 @@ function normalizeArch(value) {
   return mapArch(process.arch);
 }
 
-async function resolveAndroidApkUrl(version, candidateUrl) {
-  if (typeof candidateUrl === 'string') {
-    try {
-      if (new URL(candidateUrl).pathname.toLowerCase().endsWith('.apk')) return candidateUrl;
-    } catch {
-      // Resolve malformed or non-APK values from the authoritative release assets below.
-    }
-  }
+// The Android APK the Canary workflow puts in the canary pre-release.
+const CANARY_ANDROID_APK_RE = /^OpenChamber-(\d+\.\d+\.\d+-canary\.\d+\.\d+)-\d+-android\.apk$/;
 
+/**
+ * The newest Android APK in the canary pre-release: `{ newest }`, where
+ * newest is null when none is published, or null when GitHub could not be read.
+ */
+async function fetchCanaryAndroidApk() {
   try {
-    const response = await fetch(`${GITHUB_RELEASES_API_URL}/tags/v${version}`, {
+    const response = await fetch(`${GITHUB_RELEASES_API_URL}/tags/canary`, {
       headers: {
         Accept: 'application/vnd.github+json',
         'User-Agent': 'openchamber-update-check',
       },
       signal: AbortSignal.timeout(10000),
     });
-    if (!response.ok) return undefined;
+    if (response.status === 404) return { newest: null };
+    if (!response.ok) return null;
 
     const release = await response.json();
-    const apkAssets = Array.isArray(release?.assets)
-      ? release.assets.filter((asset) => (
-        typeof asset?.name === 'string'
-        && asset.name.toLowerCase().endsWith('.apk')
-        && typeof asset.browser_download_url === 'string'
-      ))
-      : [];
-    const canonicalAsset = apkAssets.find((asset) => /^OpenChamber-.+-android\.apk$/i.test(asset.name));
-    return (canonicalAsset || apkAssets[0])?.browser_download_url;
+    let newest = null;
+    for (const asset of Array.isArray(release?.assets) ? release.assets : []) {
+      const match = typeof asset?.name === 'string' ? CANARY_ANDROID_APK_RE.exec(asset.name) : null;
+      if (!match || typeof asset.browser_download_url !== 'string') continue;
+      if (!newest || compareVersions(match[1], newest.version) > 0) {
+        newest = { version: match[1], url: asset.browser_download_url };
+      }
+    }
+    return { newest };
   } catch {
-    return undefined;
+    return null;
   }
 }
 
@@ -140,7 +141,10 @@ async function checkForUpdatesFromApi(currentVersion, options = {}) {
       deviceClass: normalizeDeviceClass(options.deviceClass),
       platform,
       arch,
-      channel: 'stable',
+      // A Canary build (2.5.4-canary.20261030.123) checks in as such, so the
+      // usage counts tell the channels apart. Updates themselves come from
+      // the desktop updater, which reads the channel the person chose.
+      channel: /-canary\./.test(currentVersion) ? 'canary' : 'stable',
       currentVersion,
       installId: reportUsage ? (options.installId || getOrCreateInstallId(appType)) : undefined,
       instanceMode: options.instanceMode || 'unknown',
@@ -165,22 +169,13 @@ async function checkForUpdatesFromApi(currentVersion, options = {}) {
     if (versionComparison < 0) return null;
 
     const releaseUrl = `${GITHUB_RELEASES_URL}/tag/v${data.latestVersion}`;
-    const downloadUrl = typeof data.downloadUrl === 'string'
-      ? data.downloadUrl
-      : typeof data.download?.url === 'string'
-        ? data.download.url
-        : undefined;
     const updateAvailable = Boolean(data.updateAvailable) && versionComparison > 0;
-    const mobileDownloadUrl = updateAvailable && appType === 'mobile-capacitor' && platform === 'android'
-      ? await resolveAndroidApkUrl(data.latestVersion, downloadUrl)
-      : undefined;
     return {
       available: updateAvailable,
       version: data.latestVersion,
       currentVersion,
       body: typeof data.releaseNotes === 'string' ? data.releaseNotes : undefined,
       releaseUrl: typeof data.releaseNotesUrl === 'string' ? data.releaseNotesUrl : releaseUrl,
-      downloadUrl: mobileDownloadUrl,
       nextSuggestedCheckInSec:
         typeof data.nextSuggestedCheckInSec === 'number' && Number.isFinite(data.nextSuggestedCheckInSec)
           ? data.nextSuggestedCheckInSec
@@ -513,7 +508,7 @@ export function detectPackageManager() {
 function detectPackageManagerFromInstallPath(pkgPath) {
   if (!pkgPath) return null;
   const normalized = pkgPath.replace(/\\/g, '/').toLowerCase();
-  if (normalized.includes('/.pnpm/') || normalized.includes('/pnpm/')) return 'pnpm';
+  if (normalized.includes('/.pnpm/') || normalized.includes('/pnpm/') || normalized.includes('/pnpm-store/')) return 'pnpm';
   if (normalized.includes('/.yarn/')) return 'yarn';
   if (normalized.includes('/.bun/') || normalized.includes('/bun/install/')) return 'bun';
   if (normalized.includes('/node_modules/')) return 'npm';
@@ -713,10 +708,36 @@ export function getCurrentVersion() {
   }
 }
 
+const UPDATE_CHANNELS = new Set(['stable', 'canary']);
+
+/** A nightly Canary build: 2.5.4-canary.20261030.123. */
+const isCanaryVersion = (version) => /-canary\./.test(String(version || ''));
+
+function getSettingsFilePath() {
+  const dataDir = process.env.OPENCHAMBER_DATA_DIR?.trim();
+  return path.join(dataDir ? path.resolve(dataDir) : path.join(os.homedir(), '.config', 'openchamber'), 'settings.json');
+}
+
 /**
- * Fetch latest version from npm registry
+ * The channel this install takes its updates from: the one picked in
+ * Settings → About (`serverUpdateChannel`). Without a pick, a Canary build
+ * (installed with `npm i -g @openchamber/web@canary`) follows Canary, so its
+ * first check does not offer the release as a way back nobody asked for.
  */
-async function getLatestVersion() {
+export function readUpdateChannel(currentVersion = getCurrentVersion()) {
+  try {
+    const settings = JSON.parse(fs.readFileSync(getSettingsFilePath(), 'utf8'));
+    if (UPDATE_CHANNELS.has(settings?.serverUpdateChannel)) return settings.serverUpdateChannel;
+  } catch {
+  }
+  return isCanaryVersion(currentVersion) ? 'canary' : 'stable';
+}
+
+/**
+ * The package's npm dist-tags (`latest`, and `canary` once the nightly
+ * published one), or null when the registry could not be read.
+ */
+async function fetchDistTags() {
   try {
     const request = resolveNpmRegistryRequest(PACKAGE_NAME);
     const response = await fetch(request.url, {
@@ -729,45 +750,17 @@ async function getLatestVersion() {
     }
 
     const data = await response.json();
-    return data['dist-tags']?.latest || null;
+    return data?.['dist-tags'] ?? {};
   } catch (error) {
     return null;
   }
 }
 
 /**
- * Compare semver-like version strings.
+ * Fetch latest version from npm registry
  */
-function parseVersionForComparison(value) {
-  const normalized = String(value || '').replace(/^v/, '').split('+')[0];
-  const prereleaseIndex = normalized.indexOf('-');
-  const core = prereleaseIndex >= 0 ? normalized.slice(0, prereleaseIndex) : normalized;
-  const parts = core.split('.').map((part) => {
-    const parsed = Number.parseInt(part || '0', 10);
-    return Number.isFinite(parsed) ? parsed : 0;
-  });
-
-  return {
-    parts,
-    prerelease: prereleaseIndex >= 0,
-  };
-}
-
-function compareVersions(left, right) {
-  const a = parseVersionForComparison(left);
-  const b = parseVersionForComparison(right);
-  const length = Math.max(a.parts.length, b.parts.length);
-
-  for (let index = 0; index < length; index += 1) {
-    const diff = (a.parts[index] || 0) - (b.parts[index] || 0);
-    if (diff !== 0) return diff;
-  }
-
-  if (a.prerelease !== b.prerelease) {
-    return a.prerelease ? -1 : 1;
-  }
-
-  return 0;
+async function getLatestVersion() {
+  return (await fetchDistTags())?.latest || null;
 }
 
 /** Release notes between the installed and the offered version, or undefined. */
@@ -775,11 +768,76 @@ async function fetchChangelogNotes(fromVersion, toVersion) {
   return (await fetchUpdateNotes(fromVersion, toVersion, compareVersions)) ?? undefined;
 }
 
+/**
+ * Canary, and the way back from it. The target is what the channel's npm
+ * dist-tag points at; Stable from a Canary build offers the release even
+ * though it is older. The website still gets the check-in, so usage counts
+ * include it, but its answer is about releases only.
+ */
+async function checkChannelForUpdates(channel, currentVersion, options) {
+  const [, distTags] = await Promise.all([
+    checkForUpdatesFromApi(currentVersion, options),
+    fetchDistTags(),
+  ]);
+  if (!distTags) {
+    return { available: false, currentVersion, error: 'Unable to determine versions' };
+  }
+  const target = normalizeTargetVersion(channel === 'canary' ? distTags.canary : distTags.latest);
+  // No Canary published yet: nothing to install, which is not an error.
+  if (!target) {
+    return { available: false, currentVersion };
+  }
+  const available = channel === 'canary' ? compareVersions(target, currentVersion) > 0 : target !== currentVersion;
+  return {
+    available,
+    version: target,
+    currentVersion,
+    body: available ? await fetchChangelogNotes(currentVersion, target) : undefined,
+    releaseUrl: channel === 'canary' ? `${GITHUB_RELEASES_URL}/tag/canary` : `${GITHUB_RELEASES_URL}/tag/v${target}`,
+  };
+}
+
 export async function checkForUpdates(options = {}) {
   const currentVersion = options.currentVersion || getCurrentVersion();
   const pm = detectPackageManager();
   const appType = normalizeAppType(options.appType);
   const platform = normalizePlatform(options.platform);
+
+  // The channel belongs to the npm server; the desktop app, VS Code and the
+  // phones ask about their own builds.
+  if (appType === 'web' && currentVersion !== 'unknown') {
+    const channel = readUpdateChannel(currentVersion);
+    if (channel === 'canary' || isCanaryVersion(currentVersion)) {
+      return {
+        ...await checkChannelForUpdates(channel, currentVersion, options),
+        packageManager: pm,
+        updateCommand: 'openchamber update',
+      };
+    }
+  }
+
+  // The Android app ships only as Canary for now (.github/workflows/canary.yml):
+  // its next build is the newest APK in the canary pre-release, also for an
+  // APK from an earlier release, whose releases carry no APK any more. iOS
+  // updates through TestFlight and needs nothing from here.
+  if (appType === 'mobile-capacitor' && platform === 'android' && currentVersion !== 'unknown') {
+    const [, canary] = await Promise.all([
+      checkForUpdatesFromApi(currentVersion, options),
+      fetchCanaryAndroidApk(),
+    ]);
+    if (!canary) {
+      return { available: false, currentVersion, error: 'Unable to determine versions' };
+    }
+    const available = Boolean(canary.newest) && compareVersions(canary.newest.version, currentVersion) > 0;
+    return {
+      available,
+      version: canary.newest?.version,
+      currentVersion,
+      body: available ? await fetchChangelogNotes(currentVersion, canary.newest.version) : undefined,
+      releaseUrl: `${GITHUB_RELEASES_URL}/tag/canary`,
+      downloadUrl: available ? canary.newest.url : undefined,
+    };
+  }
 
   if (currentVersion !== 'unknown') {
     const remote = await checkForUpdatesFromApi(currentVersion, options);
@@ -809,14 +867,7 @@ export async function checkForUpdates(options = {}) {
   }
 
   const available = compareVersions(latestVersion, currentVersion) > 0;
-  let changelog;
-  let downloadUrl;
-  if (available) {
-    changelog = await fetchChangelogNotes(currentVersion, latestVersion);
-    if (appType === 'mobile-capacitor' && platform === 'android') {
-      downloadUrl = await resolveAndroidApkUrl(latestVersion);
-    }
-  }
+  const changelog = available ? await fetchChangelogNotes(currentVersion, latestVersion) : undefined;
 
   return {
     available,
@@ -824,7 +875,6 @@ export async function checkForUpdates(options = {}) {
     currentVersion,
     body: changelog,
     releaseUrl: `${GITHUB_RELEASES_URL}/tag/v${latestVersion}`,
-    downloadUrl,
     packageManager: pm,
     // Show our CLI command, not raw package manager command
     updateCommand: 'openchamber update',

@@ -4,6 +4,9 @@ import { parseSource, sourceKey, loadSourceSections } from './sources.js';
 describe('repository-qualified PR sources', () => {
   it('keeps old cache keys and separates equal PR numbers in different repositories', () => {
     expect(sourceKey(parseSource({ kind: 'pr', number: 42 }))).toBe('pr:42');
+    expect(parseSource({ kind: 'pr', number: 42, sourceRepo: { owner: 'dotnet', repo: 'runtime' }, linked: true }))
+      .toEqual({ kind: 'pr', number: 42, sourceRepo: { owner: 'dotnet', repo: 'runtime' }, linked: true });
+    expect(parseSource({ kind: 'pr', number: 42, linked: 'yes' })).toEqual({ kind: 'pr', number: 42 });
     const upstream = parseSource({ kind: 'pr', number: 42, sourceRepo: { owner: 'upstream', repo: 'project' } });
     const fork = parseSource({ kind: 'pr', number: 42, sourceRepo: { owner: 'fork', repo: 'project' } });
     expect(sourceKey(upstream)).not.toBe(sourceKey(fork));

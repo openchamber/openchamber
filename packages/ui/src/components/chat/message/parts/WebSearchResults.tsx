@@ -2,8 +2,7 @@ import React from 'react';
 import { Icon } from '@/components/icon/Icon';
 import { useI18n, getCurrentIntlLocale } from '@/lib/i18n';
 import type { WebSearchOutput, WebSearchResult } from '@/lib/opencode/websearch';
-import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
-import { useOpenChatLink } from '../../useOpenChatLink';
+import { ChatExternalLink } from './ChatExternalLink';
 import { useWebSearchStore } from '@/stores/useWebSearchStore';
 
 /**
@@ -48,26 +47,13 @@ const SiteIcon: React.FC<{ url: string }> = ({ url }) => {
 };
 
 const ResultCard: React.FC<{ result: WebSearchResult }> = ({ result }) => {
-    const openChatLink = useOpenChatLink(useEffectiveDirectory() ?? '');
     const published = result.published ? formatPublished(result.published) : null;
     const snippet = result.snippet?.replace(/\s+/g, ' ').trim() ?? '';
 
-    // Plain primary clicks open the page the same way chat links do
-    // (useOpenChatLink); modified clicks keep the browser default.
-    const handleClick = (event: React.MouseEvent<HTMLAnchorElement>) => {
-        if (event.button !== 0 || event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return;
-        event.preventDefault();
-        event.stopPropagation();
-        openChatLink(result.url);
-    };
-
     return (
         <li>
-            <a
+            <ChatExternalLink
                 href={result.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                onClick={handleClick}
                 className="group flex min-w-0 gap-2 rounded-lg px-2 py-1.5 transition-colors hover:bg-interactive-hover/30"
             >
                 <span className="mt-1 flex size-3.5 shrink-0 items-center justify-center">
@@ -85,7 +71,7 @@ const ResultCard: React.FC<{ result: WebSearchResult }> = ({ result }) => {
                         <span className="mt-0.5 line-clamp-2 break-words typography-meta text-muted-foreground">{snippet}</span>
                     ) : null}
                 </span>
-            </a>
+            </ChatExternalLink>
         </li>
     );
 };
@@ -112,7 +98,7 @@ export const WebSearchResults: React.FC<{ output: WebSearchOutput; providerId: s
                 </ul>
             )}
             {providerName ? (
-                <div className="px-2 typography-micro text-muted-foreground/80">
+                <div className="px-2 typography-micro text-muted-foreground">
                     {t('chat.webSearch.provider', { provider: providerName })}
                 </div>
             ) : null}

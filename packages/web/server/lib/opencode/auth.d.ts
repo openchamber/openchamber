@@ -1,4 +1,4 @@
-import type { CredentialCreateInput, CredentialEntry, IntegrationInfo, JsonValue } from '@opencode/client';
+import type { CredentialCreateInput, CredentialEntry, IntegrationInfo, JsonValue, UsageLimitsInfo } from '@opencode/client';
 
 export type LegacyAuthEntry =
   | { type: 'api'; key: string; metadata?: { [key: string]: JsonValue } }
@@ -13,6 +13,8 @@ export type CredentialSource = {
   remove?: (credentialID: string) => Promise<void>;
   /** Variable keys by integration id; absent when the environment is unknown. */
   listEnvironmentKeys?: () => Promise<Record<string, string>>;
+  /** The Console usage limits of the active `opencode` sign-in, null without one. */
+  readUsageLimits?: () => Promise<UsageLimitsInfo | null>;
 };
 
 export function configureOpenCodeCredentials(next: CredentialSource | null): void;
@@ -20,11 +22,13 @@ export function openCodeCredentialSource(connection: {
   buildOpenCodeUrl: (path: string, prefix?: string) => string;
   getOpenCodeAuthHeaders: () => Record<string, string>;
   getLaunchEnvironment?: () => Record<string, string | undefined> | null;
+  getDefaultDirectory?: () => string | null;
 }): CredentialSource;
 export function projectEnvironmentKeys(integrations: IntegrationInfo[], environment: Record<string, string | undefined>): Record<string, string>;
 export function projectCredentialEntries(entries: CredentialEntry[]): LegacyAuthFile;
 export function readOpenCodeCredentials(): Promise<LegacyAuthFile>;
 export function getProviderAuth(providerId: string): Promise<LegacyAuthEntry | null>;
+export function readOpenCodeUsageLimits(): Promise<UsageLimitsInfo | null>;
 
 /** A browser login as OpenCode stores it, read for an isolated space's gatekeeper. */
 export type StoredLogin = {

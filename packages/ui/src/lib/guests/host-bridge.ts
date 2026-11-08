@@ -96,6 +96,8 @@ type HostBridgeEffects = {
   openCommit: (sha: string) => Promise<GuestOpenCommitResult>;
   /** Content height the guest asked for; only the Work Status section sizes its frame from it. */
   resize: (height: number) => void;
+  /** A `block` frame answers the agent; a rejection carries what to tell the frame. */
+  answerBlock: (text: string) => Promise<void>;
   /** The guest answered a host `resolve` with this id. Not a request, so no `result` goes back. */
   resolveResult: (id: string, payload: ResolveResultPayload) => void;
   openPopover?: (request: GuestPopoverRequest) => void;
@@ -295,6 +297,11 @@ export const answerGuestMessage = async (
       const opened = await effects.openUrl(message.payload.url);
       return opened ? okResult(message.id) : errorResult(message.id, 'Could not open URL.');
     }
+    case 'block-answer':
+      return effects.answerBlock(message.payload.text).then(
+        () => okResult(message.id),
+        (error: Error) => errorResult(message.id, error.message, 'HOST_REJECTED'),
+      );
     case 'open-surface': {
       if (!isContextPanelMode(message.payload.surfaceId)) {
         return errorResult(message.id, 'Unknown surface.');

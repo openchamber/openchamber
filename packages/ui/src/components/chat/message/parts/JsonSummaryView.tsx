@@ -3,6 +3,7 @@ import React from 'react';
 import { Icon } from '@/components/icon/Icon';
 import { cn } from '@/lib/utils';
 import { BlockLine } from './BlockLine';
+import { ChatExternalLink } from './ChatExternalLink';
 
 const IDENTITY_KEYS = new Set(['id', 'identifier', 'title', 'name']);
 
@@ -119,7 +120,7 @@ const JsonSummaryValue = React.memo(({
 
     const text = value === null ? 'null' : typeof value === 'boolean' ? (value ? 'true' : 'false') : String(value);
     const renderedValue = typeof value === 'string' && isUrl(value) ? (
-        <a href={value} target="_blank" rel="noopener noreferrer" className="truncate text-[var(--status-info)] underline underline-offset-2 hover:opacity-80" title={value}>{value}</a>
+        <ChatExternalLink href={value} className="truncate text-[var(--status-info)] underline underline-offset-2 hover:opacity-80" title={value}>{value}</ChatExternalLink>
     ) : (
         <span className={cn('min-w-0 break-words', value === null ? 'text-muted-foreground' : 'text-foreground')}>{text}</span>
     );

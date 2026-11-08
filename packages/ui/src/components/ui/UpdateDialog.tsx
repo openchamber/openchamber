@@ -11,10 +11,12 @@ import { Icon } from "@/components/icon/Icon";
 import { Spinner } from "@/components/ui/spinner";
 import { cn } from '@/lib/utils';
 import type { UpdateInfo, UpdateProgress } from '@/lib/desktop';
+import { updateProgressPercent } from './updateProgress';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { openExternalUrl } from '@/lib/url';
 import { getCurrentIntlLocale, useI18n } from '@/lib/i18n';
 import { installWebUpdate, waitForUpdateApplied } from '@/lib/web-update';
+import { formatCanaryBuild, parseCanaryVersion } from '@/lib/updateChannel';
 
 type WebUpdateState = 'idle' | 'updating' | 'restarting' | 'reconnecting' | 'error';
 
@@ -36,6 +38,8 @@ interface UpdateDialogProps {
 
 const GITHUB_RELEASES_URL = 'https://github.com/openchamber/openchamber/releases';
 
+type NotesGroup = { heading: string; bullets: string[] };
+
 type ChangelogSection = {
   version: string;
   date: string;
@@ -53,7 +57,8 @@ type ParsedChangelog =
   | {
       kind: 'sections';
       title: string;
-      sections: Array<{ version: string; dateLabel: string; content: string }>;
+      // A Canary night comes as groups, each folded to CANARY_GROUP_LIMIT lines.
+      sections: Array<{ version: string; dateLabel: string; content: string; canaryGroups: NotesGroup[] | null }>;
     };
 
 function formatIsoDateForUI(isoDate: string): string {
@@ -91,7 +96,8 @@ function compareSemverDesc(a: string, b: string): number {
 }
 
 function parseChangelogSections(body: string): ChangelogSection[] {
-  const re = /^## \[(\d+\.\d+\.\d+)\] - (\d{4}-\d{2}-\d{2})\s*$/gm;
+  // A Canary night is headed by its build's version: 2.5.4-canary.20261031.5.
+  const re = /^## \[(\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?)\] - (\d{4}-\d{2}-\d{2})\s*$/gm;
   const matches: Array<{ version: string; date: string; start: number }> = [];
 
   let m: RegExpExecArray | null;
@@ -114,6 +120,47 @@ function parseChangelogSections(body: string): ChangelogSection[] {
   });
 }
 
+// A Canary night can list well over a hundred commits; each group shows this
+// many until the person asks for the rest.
+const CANARY_GROUP_LIMIT = 8;
+
+/** The `### Group` and `- bullet` lines of one night, or null for any other shape. */
+function splitNotesGroups(content: string): NotesGroup[] | null {
+  const groups: NotesGroup[] = [];
+  for (const line of content.split('\n')) {
+    const heading = /^### (.+)$/.exec(line);
+    if (heading) {
+      groups.push({ heading: heading[1] ?? '', bullets: [] });
+    } else if (line.startsWith('- ') && groups.length > 0) {
+      groups[groups.length - 1]?.bullets.push(line);
+    } else if (line.trim()) {
+      return null;
+    }
+  }
+  return groups.length > 0 ? groups : null;
+}
+
+const NotesGroupList: React.FC<{ group: NotesGroup }> = ({ group }) => {
+  const { t } = useI18n();
+  const [expanded, setExpanded] = useState(false);
+  const hidden = group.bullets.length - CANARY_GROUP_LIMIT;
+  const shown = expanded || hidden <= 0 ? group.bullets : group.bullets.slice(0, CANARY_GROUP_LIMIT);
+  return (
+    <div className="[&+&]:mt-4">
+      <SimpleMarkdownRenderer content={`### ${group.heading}\n\n${shown.join('\n')}`} disableLinkSafety={true} enableFileReferences={false} />
+      {hidden > 0 && (
+        <button
+          type="button"
+          className="mt-1 typography-meta text-[var(--primary-base)] hover:underline"
+          onClick={() => setExpanded((value) => !value)}
+        >
+          {expanded ? t('updateDialog.changelog.showLess') : t('updateDialog.changelog.showMore', { count: hidden })}
+        </button>
+      )}
+    </div>
+  );
+};
+
 export const UpdateDialog: React.FC<UpdateDialogProps> = ({
   open,
   onOpenChange,
@@ -132,14 +179,27 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
   const [webUpdateState, setWebUpdateState] = useState<WebUpdateState>('idle');
   const [webError, setWebError] = useState<string | null>(null);
 
+  // Every Canary build is on the one `canary` pre-release.
   const releaseUrl = info?.version
-    ? (info.releaseUrl || `${GITHUB_RELEASES_URL}/tag/v${info.version}`)
+    ? (info.releaseUrl || `${GITHUB_RELEASES_URL}/tag/${parseCanaryVersion(info.version) ? 'canary' : `v${info.version}`}`)
     : GITHUB_RELEASES_URL;
+  const describeChangeCount = (groups: NotesGroup[]) => {
+    const count = groups.reduce((total, group) => total + group.bullets.length, 0);
+    return count === 1 ? t('updateDialog.changelog.changeCountSingle') : t('updateDialog.changelog.changeCountPlural', { count });
+  };
+  // "2.5.4 Canary · Oct 31" for 2.5.4-canary.20261031.5. Between two Canary
+  // builds the header names the channel once: "Canary: 2.5.4 · Oct 29 → 2.5.4 · Oct 31",
+  // and two builds of one day add their build numbers: "Oct 31 #123 → Oct 31 #124".
+  const bothCanary = Boolean(parseCanaryVersion(info?.currentVersion) && parseCanaryVersion(info?.version));
+  const describeVersion = (version: string, beside: string | undefined) => {
+    const canary = parseCanaryVersion(version);
+    if (!canary) return version;
+    const values = { version: canary.release, date: formatCanaryBuild(canary, getCurrentIntlLocale(), parseCanaryVersion(beside)) };
+    return bothCanary ? t('updateDialog.canary.build', values) : t('updateDialog.canary.version', values);
+  };
   const mobileUpdateUrl = info?.downloadUrl || releaseUrl;
 
-  const progressPercent = progress?.total
-    ? Math.round((progress.downloaded / progress.total) * 100)
-    : 0;
+  const progressPercent = updateProgressPercent(progress);
 
   const isWebRuntime = runtimeType === 'web';
   // A desktop host installed from a Linux package asks for the password on its own screen.
@@ -225,11 +285,23 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
     return {
       kind: 'sections',
       title: t('updateDialog.changelog.title'),
-      sections: sorted.map((section) => ({
-        version: section.version,
-        dateLabel: formatIsoDateForUI(section.date),
-        content: processChangelogMentions(stripChangelogHeading(section.raw) || body),
-      })),
+      sections: sorted.map((section, index) => {
+        const content = processChangelogMentions(stripChangelogHeading(section.raw) || body);
+        const canary = parseCanaryVersion(section.version);
+        // Another build of the same day among the sections adds the build number.
+        const sameDayBuild = canary
+          ? sorted
+            .filter((_, other) => other !== index)
+            .map((other) => parseCanaryVersion(other.version))
+            .find((other) => other?.builtOn.getTime() === canary.builtOn.getTime())
+          : null;
+        return {
+          version: section.version,
+          dateLabel: canary ? formatCanaryBuild(canary, getCurrentIntlLocale(), sameDayBuild) : formatIsoDateForUI(section.date),
+          content,
+          canaryGroups: canary ? splitNotesGroups(content) : null,
+        };
+      }),
     };
   }, [info?.body, t]);
 
@@ -251,14 +323,17 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
           {/* Version Diff */}
           {(info?.currentVersion || info?.version) && (
             <div className="flex items-center gap-2 font-mono text-sm ms-3">
+              {bothCanary && (
+                <span className="text-muted-foreground">{t('updateDialog.canary.pair')}</span>
+              )}
               {info?.currentVersion && (
-                <span className="text-muted-foreground">{info.currentVersion}</span>
+                <span className="text-muted-foreground">{describeVersion(info.currentVersion, info.version)}</span>
               )}
               {info?.currentVersion && info?.version && (
                 <span className="text-muted-foreground/50">→</span>
               )}
               {info?.version && (
-                <span className="text-[var(--primary-base)] font-medium">{info.version}</span>
+                <span className="text-[var(--primary-base)] font-medium">{describeVersion(info.version, info.currentVersion)}</span>
               )}
             </div>
           )}
@@ -312,10 +387,10 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
                       <div key={section.version} className="p-4">
                         <div className="flex items-center gap-3 mb-3">
                           <span className="typography-ui-label font-mono text-[var(--primary-base)] bg-[var(--primary-base)]/10 px-1.5 py-0.5 rounded">
-                            v{section.version}
+                            {section.canaryGroups ? t('updateDialog.canary.night', { date: section.dateLabel }) : `v${section.version}`}
                           </span>
                           <span className="text-sm font-medium text-muted-foreground">
-                            {section.dateLabel}
+                            {section.canaryGroups ? describeChangeCount(section.canaryGroups) : section.dateLabel}
                           </span>
                         </div>
                         <div
@@ -330,7 +405,9 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
                             }
                           }}
                         >
-                          <SimpleMarkdownRenderer content={section.content} disableLinkSafety={true} enableFileReferences={false} />
+                          {section.canaryGroups
+                            ? section.canaryGroups.map((group) => <NotesGroupList key={group.heading} group={group} />)
+                            : <SimpleMarkdownRenderer content={section.content} disableLinkSafety={true} enableFileReferences={false} />}
                         </div>
                       </div>
                     ))}
@@ -348,9 +425,9 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
                 <span>{t('updateDialog.fallback.updateViaTerminal')}</span>
               </div>
               <div className="flex items-center gap-2 p-1 ps-3 bg-surface-elevated/50 rounded-md border border-border">
-                <code className="flex-1 font-mono text-sm text-foreground overflow-x-auto whitespace-nowrap">
+                <ScrollableOverlay as="code" outerClassName="overlay-scrollbar-wrapper--no-gutter flex-1 min-w-0" fillContainer={false} className="font-mono text-sm text-foreground whitespace-nowrap">
                   {updateCommand}
-                </code>
+                </ScrollableOverlay>
                 <button
                   onClick={handleCopyCommand}
                   className={cn(

@@ -17,7 +17,7 @@ describe('VS Code credential source', () => {
   });
 
   it('throws while OpenCode has no API URL instead of answering empty', async () => {
-    configureOpenCodeCredentials(openCodeCredentialSource({ getApiUrl: () => null, getOpenCodeAuthHeaders: () => ({}), getManagedLaunchEnvironment: () => null }));
+    configureOpenCodeCredentials(openCodeCredentialSource({ getApiUrl: () => null, getOpenCodeAuthHeaders: () => ({}), getManagedLaunchEnvironment: () => null, getWorkingDirectory: () => '' }));
     await assert.rejects(readOpenCodeCredentials(), /API URL is not available/);
   });
 });

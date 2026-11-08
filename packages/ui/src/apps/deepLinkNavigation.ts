@@ -5,8 +5,7 @@ import { subscribeToNativeShortcutRequests } from '@/lib/nativeShortcutRequests'
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useInputStore } from '@/sync/input-store';
 import { useSessionUIStore } from '@/sync/session-ui-store';
-import { requestMessageFocus } from '@/lib/router/messageFocus';
-import { openSessionLink } from '@/lib/router/openSessionFromRoute';
+import { openSession } from '@/lib/router/openSessionFromRoute';
 
 import { parseDeepLink, type DeepLinkIntent, type SessionsFilter, type ViewTarget } from './deepLinks';
 
@@ -14,8 +13,8 @@ import { parseDeepLink, type DeepLinkIntent, type SessionsFilter, type ViewTarge
  * Navigation layer for {@link DeepLinkIntent}s — the only place that knows how to *apply* a
  * deep link. Producers (notification taps, widget `widgetURL`, Live Activities) feed intents
  * in via {@link useDeepLinkSource}; the surfaces that can satisfy them register imperative
- * handlers via {@link useDeepLinkHandlers}. Session/new-session navigation goes straight to
- * the session store (always available), so those resolve even before the shell has mounted.
+ * handlers via {@link useDeepLinkHandlers}. Session opens use the shared opener; new-session
+ * navigation uses the session store. Both are available before the shell has mounted.
  *
  * Intents that arrive before the app is ready (cold launch from a tap/widget) or before their
  * handler is registered are stashed in a module-level holder that survives the connect flow
@@ -75,13 +74,9 @@ const execute = (intent: NavigationIntent): boolean => {
       return true;
 
     case 'session':
-      // A message link carries no directory; the route opener resolves it.
-      if (intent.messageId && !intent.directory) {
-        void openSessionLink(intent.sessionId, intent.messageId);
-        return true;
-      }
-      if (intent.messageId) requestMessageFocus(intent.sessionId, intent.messageId);
-      void useSessionUIStore.getState().setCurrentSession(intent.sessionId, intent.directory ?? null);
+      // The opener resolves a directory the link omits and opens a `/btw` fork
+      // as the parent session that holds its panel.
+      void openSession(intent.sessionId, { directory: intent.directory ?? null, messageId: intent.messageId ?? null });
       return true;
 
     case 'new-session': {

@@ -58,7 +58,7 @@ export function onFrameScroll(container: HTMLElement, listener: (direction: Fram
 }
 
 // The reader opened a row (a tool, an agent task, a reasoning block, folded
-// work). The row raises this event from its element as it opens, so the
+// work, a long user message). The row raises this event from its element as it opens, so the
 // timeline holding it lets go of the end before the row grows: the content
 // opens below the header the reader clicked, instead of the end pulling the
 // header up and out of view.
@@ -72,6 +72,59 @@ export function dispatchRowExpand(row: HTMLElement | null): void {
 export function onRowExpand(container: HTMLElement, listener: () => void): () => void {
     container.addEventListener(ROW_EXPAND_EVENT, listener);
     return () => container.removeEventListener(ROW_EXPAND_EVENT, listener);
+}
+
+// Something about to move the viewport itself (a quote reveal stepping
+// through a long answer's rows) asks the list's navigation hold on a target
+// to let go, as the reader's own scroll would.
+const NAVIGATION_RELEASE_EVENT = 'openchamber:navigation-release';
+
+export function dispatchNavigationRelease(scroller: HTMLElement): void {
+    scroller.dispatchEvent(new CustomEvent(NAVIGATION_RELEASE_EVENT));
+}
+
+export function onNavigationRelease(scroller: HTMLElement, listener: () => void): () => void {
+    scroller.addEventListener(NAVIGATION_RELEASE_EVENT, listener);
+    return () => scroller.removeEventListener(NAVIGATION_RELEASE_EVENT, listener);
+}
+
+// A page waiting for the reader's answer (`openchamber_render` with
+// `awaitAnswer`) raises this from its block when it appears and whenever its
+// height changes, so the timeline holding it can bring it into view. The
+// block names its page in `data-waiting-page`.
+const PAGE_WAITING_EVENT = 'openchamber:page-waiting';
+
+export function dispatchPageWaiting(block: HTMLElement | null): void {
+    block?.dispatchEvent(new CustomEvent(PAGE_WAITING_EVENT, { bubbles: true }));
+}
+
+/** Listens for waiting pages inside `container`. */
+export function onPageWaiting(container: HTMLElement, listener: (block: HTMLElement, pageId: string) => void): () => void {
+    const handle = (event: Event) => {
+        const block = event.target;
+        const pageId = block instanceof HTMLElement ? block.dataset.waitingPage : undefined;
+        if (block instanceof HTMLElement && pageId) listener(block, pageId);
+    };
+    container.addEventListener(PAGE_WAITING_EVENT, handle);
+    return () => container.removeEventListener(PAGE_WAITING_EVENT, handle);
+}
+
+// The reader pressed Next on a waiting form's Tabs. The Tabs raise this from
+// their element once the next tab has drawn, so the timeline can bring its
+// start into view: the reader was at the end of the tab they left.
+const TAB_STEP_EVENT = 'openchamber:tab-step';
+
+export function dispatchTabStep(tabs: HTMLElement | null): void {
+    tabs?.dispatchEvent(new CustomEvent(TAB_STEP_EVENT, { bubbles: true }));
+}
+
+/** Listens for Tabs stepping to their next tab inside `container`. */
+export function onTabStep(container: HTMLElement, listener: (tabs: HTMLElement) => void): () => void {
+    const handle = (event: Event) => {
+        if (event.target instanceof HTMLElement) listener(event.target);
+    };
+    container.addEventListener(TAB_STEP_EVENT, handle);
+    return () => container.removeEventListener(TAB_STEP_EVENT, handle);
 }
 
 // Middle-button press starts the platform's autoscroll pan (Windows/Linux

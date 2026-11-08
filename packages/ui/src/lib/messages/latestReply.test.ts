@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import type { AssistantMessage } from '@/lib/opencode/model';
 
-import { findLatestCompletedReply, type LatestReplyRecord } from './latestReply';
+import { findCompletedReplyIds, findLatestCompletedReply, type LatestReplyRecord } from './latestReply';
 
 const userMessage = (id: string): LatestReplyRecord => ({
     info: {
@@ -97,5 +97,31 @@ describe('findLatestCompletedReply', () => {
         ]);
 
         expect(reply).toEqual({ messageId: 'assistant_1', text: 'The answer' });
+    });
+});
+
+describe('findCompletedReplyIds', () => {
+    test('returns every finished answer in history, across turns', () => {
+        const ids = findCompletedReplyIds([
+            userMessage('user_1'),
+            assistantMessage('assistant_1', 'First answer', { finish: 'stop', completed: 10 }),
+            userMessage('user_2'),
+            assistantMessage('assistant_2', 'Progress note', { finish: 'tool-calls', completed: 20 }),
+            assistantMessage('assistant_3', 'Second answer', { finish: 'stop', completed: 30 }),
+        ]);
+
+        expect(ids).toEqual(['assistant_1', 'assistant_3']);
+    });
+
+    test('leaves out unfinished, aborted, and empty messages', () => {
+        const ids = findCompletedReplyIds([
+            userMessage('user_1'),
+            assistantMessage('assistant_1', 'Still streaming', { finish: 'stop' }),
+            assistantMessage('assistant_2', 'Partial text', { finish: 'error', completed: 10 }),
+            assistantMessage('assistant_3', '', { finish: 'stop', completed: 20 }),
+            assistantMessage('assistant_4', 'The answer', { finish: 'stop', completed: 30 }),
+        ]);
+
+        expect(ids).toEqual(['assistant_4']);
     });
 });

@@ -1,5 +1,6 @@
 import express from 'express';
 import { normalizeCustomOpenAIBaseURL } from './base-url.js';
+import { normalizeEndpointPath } from './endpoint-path.js';
 import { summarizeText, sanitizeForTTS, sanitizeForNote } from '../text/summarization.js';
 
 import { detectTextLanguage, languageOfLocale, pickVoiceForLanguage } from './language-detect.js';
@@ -71,13 +72,22 @@ export function registerTtsRoutes(app, { sayTTSCapability }) {
   // Server-side TTS endpoint - streams audio from OpenAI TTS API
   app.post('/api/tts/speak', async (req, res) => {
     try {
-      const { text, voice = 'nova', model = 'gpt-4o-mini-tts', speed = 0.9, instructions, providerId, modelId, apiKey, baseURL } = req.body || {};
+      const { text, voice = 'nova', model = 'gpt-4o-mini-tts', speed = 0.9, instructions, providerId, modelId, apiKey, baseURL, endpointPath } = req.body || {};
 
       const normalizedBaseURLResult = normalizeCustomOpenAIBaseURL(baseURL);
       if (normalizedBaseURLResult.error) {
         return res.status(400).json({ error: normalizedBaseURLResult.error });
       }
       const normalizedBaseURL = normalizedBaseURLResult.value;
+
+      const endpointPathResult = normalizeEndpointPath(endpointPath);
+      if (endpointPathResult.error) {
+        return res.status(400).json({ error: endpointPathResult.error });
+      }
+      const normalizedEndpointPath = endpointPathResult.value;
+      if (normalizedEndpointPath && !normalizedBaseURL) {
+        return res.status(400).json({ error: 'A custom endpoint path needs a custom server URL' });
+      }
 
       console.log('[TTS] Request received:', { voice, model, speed, textLength: text?.length, hasApiKey: !!apiKey, hasBaseURL: !!baseURL });
 
@@ -122,6 +132,7 @@ export function registerTtsRoutes(app, { sayTTSCapability }) {
         instructions,
         apiKey: clientKey,
         baseURL: hasCustomBaseURL ? normalizedBaseURL : undefined,
+        endpointPath: hasCustomBaseURL ? normalizedEndpointPath : undefined,
       });
 
       res.setHeader('Content-Type', result.contentType);
@@ -281,6 +292,11 @@ export function registerTtsRoutes(app, { sayTTSCapability }) {
         const language = typeof req.headers['x-language'] === 'string' && req.headers['x-language'].trim().length > 0
           ? req.headers['x-language'].trim()
           : undefined;
+        const endpointPathResult = normalizeEndpointPath(req.headers['x-endpoint-path']);
+        if (endpointPathResult.error) {
+          return res.status(400).json({ error: endpointPathResult.error });
+        }
+        const endpointPath = endpointPathResult.value;
         const authHeader = typeof req.headers['authorization'] === 'string' ? req.headers['authorization'].trim() : '';
         const apiKey = (authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : undefined) || readVoiceKey('stt');
 
@@ -308,6 +324,7 @@ export function registerTtsRoutes(app, { sayTTSCapability }) {
           baseURL,
           apiKey,
           language,
+          endpointPath,
         });
 
         console.log('[STT] Transcript:', transcript?.slice(0, 120));
