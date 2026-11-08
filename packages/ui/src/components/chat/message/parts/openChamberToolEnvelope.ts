@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 import type { ToolInput } from '@/lib/opencode/model';
+import { workflowRunSchema, workflowRunStateSchema } from '@/lib/workflows/model';
 
 /**
  * Reading what OpenChamber's own agent tools answered, for the chat to show
@@ -215,6 +216,115 @@ export const tightestWindow = (provider: UsageProviderRow): { key: string; windo
   return best;
 };
 
+export const memoryReadSchema = z.object({
+  memory: z.object({
+    title: text,
+    body: text,
+    type: z.enum(['fact', 'preference', 'reference']).optional().catch(undefined),
+    scope: z.enum(['global', 'project']).optional().catch(undefined),
+  }),
+});
+
+const deletedSchema = z.object({ deleted: z.literal(true) });
+const knowledgeShownSchema = z.object({ planId: z.string(), shown: z.literal(true) });
+
+export const sessionStatusSchema = z.object({
+  sessionId: z.string().min(1),
+  directory: text,
+  sessionStatus: z.object({ type: z.enum(['idle', 'busy', 'waiting']) }),
+});
+
+export const sessionMessagesSchema = z.object({
+  sessionId: z.string().min(1),
+  directory: text,
+  messages: z.array(z.object({
+    id: z.string(),
+    role: z.enum(['user', 'assistant']),
+    createdAt: z.number().nullable().catch(null),
+    model: z.string().nullable().catch(null),
+    text: z.string(),
+  })),
+});
+
+export const prWatchedSchema = z.object({
+  watching: z.object({
+    url: z.string().url(),
+    number: z.number().nullable().optional().catch(undefined),
+    title: z.string().optional().catch(undefined),
+    status: z.enum(['waking', 'unknown', 'pending', 'passed', 'failed', 'open']).optional().catch(undefined),
+  }),
+});
+
+const prUnwatchedSchema = z.object({ watching: z.literal(false), stopped: z.boolean() });
+
+export const workNamedSchema = z.object({
+  title: text,
+  named: z.boolean(),
+  reason: text,
+  branch: text,
+});
+
+export const fileOpenedSchema = z.object({ path: z.string().trim().min(1), opened: z.literal(true) });
+
+export const scheduleRanSchema = z.object({
+  task: scheduledTaskSchema,
+  sessionId: z.string().min(1),
+  directory: text,
+  // The run started but its record was not saved.
+  persistError: text,
+});
+
+const scheduleDeletedSchema = z.object({ deleted: z.literal(true), tasks: z.array(z.unknown()) });
+
+const pageSchema = z.object({ url: z.string().url().optional().catch(undefined) });
+
+export const browserSnapshotSchema = pageSchema.extend({
+  title: text,
+  elements: z.array(z.unknown()).catch([]),
+  viewport: z.object({ width: z.number().nullable(), height: z.number().nullable() }).optional().catch(undefined),
+  consoleProblems: z.array(z.object({ level: z.string(), message: z.string() })).optional().catch(undefined),
+});
+
+export const browserClickedSchema = pageSchema.extend({ clicked: text, label: text });
+export const browserTypedSchema = pageSchema.extend({ selector: z.string().min(1) });
+export const browserSelectedSchema = pageSchema.extend({ selector: z.string().min(1), label: text, value: z.string().optional().catch(undefined) });
+export const browserScrolledSchema = z.object({
+  scrollY: z.number(),
+  maxScrollY: z.number(),
+  atTop: z.boolean().optional().catch(undefined),
+  atBottom: z.boolean().optional().catch(undefined),
+});
+export const browserNavigatedSchema = z.object({ title: z.string(), settled: z.boolean().optional().catch(undefined) });
+export const browserInspectedSchema = z.object({
+  selector: z.string().min(1),
+  tag: text,
+  label: text,
+  styles: z.record(z.string(), z.string()).catch({}),
+});
+export const browserResizedSchema = z.object({
+  viewport: z.object({ width: z.number().nullable(), height: z.number().nullable() }),
+});
+const browserClosedSchema = z.object({ closed: z.literal(true) });
+
+export const workflowCheckedSchema = z.object({
+  name: z.string(),
+  description: text,
+  phases: z.array(z.string()).catch([]),
+});
+
+export const workflowListedSchema = z.object({
+  workflows: z.array(z.object({ name: z.string(), description: text, error: text })).catch([]),
+  runs: z.array(z.object({ runId: z.string(), name: z.string(), state: workflowRunStateSchema.optional().catch(undefined) })).catch([]),
+});
+
+export const workflowResultSchema = z.union([
+  z.object({ runId: z.string(), agent: z.object({ label: z.string(), state: z.string(), result: z.json().optional().catch(undefined), error: text }) }),
+  z.object({ runId: z.string(), state: workflowRunStateSchema, result: z.json().optional().catch(undefined), error: text }),
+]);
+
+export const workflowStoppedSchema = z.object({ runId: z.string(), state: z.string(), reused: z.number().optional().catch(undefined) });
+export const workflowSavedSchema = z.object({ name: z.string(), path: z.string() });
+
 const VIEW_SCHEMAS: ReadonlyMap<string, z.ZodType> = new Map<string, z.ZodType>([
   ['session.link', linkedSchema],
   ['session.create', dispatchedSchema],
@@ -236,6 +346,36 @@ const VIEW_SCHEMAS: ReadonlyMap<string, z.ZodType> = new Map<string, z.ZodType>(
   ['schedule.list', scheduleListedSchema],
   ['browser.open', pageOpenedSchema],
   ['browser.capture', screenshotSchema],
+  ['memory.read', memoryReadSchema],
+  ['memory.delete', deletedSchema],
+  ['knowledge.show', knowledgeShownSchema],
+  ['knowledge.delete', deletedSchema],
+  ['session.status', sessionStatusSchema],
+  ['session.messages', sessionMessagesSchema],
+  ['pr.watch', prWatchedSchema],
+  ['pr.unwatch', prUnwatchedSchema],
+  ['work.name', workNamedSchema],
+  ['file.open', fileOpenedSchema],
+  ['schedule.run', scheduleRanSchema],
+  ['schedule.delete', scheduleDeletedSchema],
+  ['schedule.toggle', scheduledSchema],
+  ['browser.snapshot', browserSnapshotSchema],
+  ['browser.click', browserClickedSchema],
+  ['browser.type', browserTypedSchema],
+  ['browser.select', browserSelectedSchema],
+  ['browser.scroll', browserScrolledSchema],
+  ['browser.back', browserNavigatedSchema],
+  ['browser.forward', browserNavigatedSchema],
+  ['browser.inspect', browserInspectedSchema],
+  ['browser.resize', browserResizedSchema],
+  ['browser.close', browserClosedSchema],
+  ['workflow.check', workflowCheckedSchema],
+  ['workflow.status', workflowRunSchema],
+  ['workflow.result', workflowResultSchema],
+  ['workflow.list', workflowListedSchema],
+  ['workflow.stop', workflowStoppedSchema],
+  ['workflow.resume', workflowStoppedSchema],
+  ['workflow.save', workflowSavedSchema],
 ]);
 
 /**
@@ -387,6 +527,8 @@ const callFields = z.object({
   title: text,
   body: text,
   carry: z.array(z.string()).optional().catch(undefined),
+  // What `knowledge.delete` removed.
+  kind: z.enum(['note', 'todo', 'plan']).optional().catch(undefined),
 });
 const callInputSchema = callFields.extend({ parameters: callFields.optional().catch(undefined) }).catch({});
 
@@ -400,5 +542,6 @@ export const readOpenChamberCallInput = (input: ToolInput | undefined): OpenCham
     title: parsed.parameters?.title ?? parsed.title,
     body: parsed.parameters?.body ?? parsed.body,
     carry: parsed.parameters?.carry ?? parsed.carry,
+    kind: parsed.parameters?.kind ?? parsed.kind,
   };
 };

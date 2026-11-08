@@ -39,6 +39,21 @@ describe('hasOpenChamberView', () => {
     expect(hasOpenChamberView({ ok: true, action: 'browser.capture', data: { path: '.openchamber/screenshots/a.jpg', url: null, title: null }, errorMessage: undefined })).toBe(true);
     expect(hasOpenChamberView({ ok: true, action: 'browser.capture', data: { url: 'https://example.com' }, errorMessage: undefined })).toBe(false);
     expect(hasOpenChamberView({ ok: true, action: 'browser.open', data: { url: 'http://localhost:3000/', title: '', opened: true }, errorMessage: undefined })).toBe(true);
+    // Shapes the server answers for the rest of the actions.
+    const view = (action: string, data: { [key: string]: JsonValue }) => hasOpenChamberView({ ok: true, action, data, errorMessage: undefined });
+    expect(view('memory.read', { memory: { memoryId: 'm1', title: 'Uses bun', type: 'preference', scope: 'global', body: 'Always bun.' } })).toBe(true);
+    expect(view('memory.delete', { deleted: true, memoryId: 'm1' })).toBe(true);
+    expect(view('session.status', { sessionId: 'ses_1', directory: '/repo', sessionStatus: { type: 'waiting' } })).toBe(true);
+    expect(view('session.messages', { sessionId: 'ses_1', directory: '/repo', role: 'all', messages: [{ id: 'm', role: 'assistant', createdAt: 1, completedAt: 2, model: 'a/b', text: 'Done.' }] })).toBe(true);
+    expect(view('pr.watch', { watching: { url: 'https://github.com/a/b/pull/1', number: 1, title: 'Fix', status: 'pending' }, next: 'x' })).toBe(true);
+    expect(view('pr.unwatch', { watching: false, stopped: true })).toBe(true);
+    expect(view('work.name', { task: 'worktree', title: 'Login timeout', named: true, branch: 'fix/login' })).toBe(true);
+    expect(view('file.open', { path: '/repo/a.md', size: 10, opened: true })).toBe(true);
+    expect(view('browser.click', { ok: true, clicked: 'button', label: 'Save', url: 'http://localhost:3000/' })).toBe(true);
+    expect(view('browser.scroll', { ok: true, scrollY: 400, maxScrollY: 1200, atTop: false, atBottom: false })).toBe(true);
+    expect(view('browser.inspect', { ok: true, selector: '#save', tag: 'button', label: 'Save', styles: { color: 'red' } })).toBe(true);
+    expect(view('browser.resize', { viewport: { mode: 'mobile', width: 390, height: 844 } })).toBe(true);
+    expect(view('session.status', { sessionId: 'ses_1', sessionStatus: { type: 'asleep' } })).toBe(false);
     // A saved entry with nothing to show keeps the plain output.
     expect(hasOpenChamberView({ ok: true, action: 'knowledge.save', data: {}, errorMessage: undefined })).toBe(false);
     expect(hasOpenChamberView({ ok: true, action: 'knowledge.save', data: { todo: 'broken' }, errorMessage: undefined })).toBe(false);
