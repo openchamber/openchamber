@@ -27,6 +27,12 @@ interface SettingsPageLayoutProps {
   /** Show persistence feedback for instant-save settings. */
   showSaveStatus?: boolean;
   /**
+   * A page opened from the settings sidebar, which already names it: the title
+   * stays for screen readers and focus, the description is not shown, and only
+   * the header's actions and save status stay on screen.
+   */
+  namedBySidebar?: boolean;
+  /**
    * Commit-on-blur for autosaving pages: fires for every focus leaving the
    * page content, so a text field does not need its own handler.
    */
@@ -56,6 +62,7 @@ export const SettingsPageLayout: React.FC<SettingsPageLayoutProps> = ({
   description,
   headerEnd,
   showSaveStatus = false,
+  namedBySidebar = false,
   onBlurCapture,
   fillHeight = false,
 }) => {
@@ -84,7 +91,24 @@ export const SettingsPageLayout: React.FC<SettingsPageLayoutProps> = ({
         )}
         onBlurCapture={onBlurCapture}
       >
-        {hasHeader && (
+        {namedBySidebar ? (
+          <>
+            {title != null ? <h1 data-settings-page-heading tabIndex={-1} className="sr-only">{title}</h1> : null}
+            {headerEnd != null ? (
+              <div className="mb-6 flex flex-wrap items-center justify-end gap-3">
+                {headerEnd}
+                {showSaveStatus && <SettingsSaveStatus />}
+              </div>
+            ) : showSaveStatus ? (
+              // Without actions the status floats in the corner, so it never pushes the page down.
+              <div className="pointer-events-none sticky top-0 z-10 flex h-0 justify-end">
+                <div className="pointer-events-auto rounded-md bg-background px-1">
+                  <SettingsSaveStatus />
+                </div>
+              </div>
+            ) : null}
+          </>
+        ) : hasHeader && (
           // Wraps rather than squeezes. The action cluster never shrinks, so on
           // a narrow pane it used to starve the title until the name was a
           // single letter and an ellipsis; giving the title block a basis lets

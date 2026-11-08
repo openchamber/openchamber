@@ -20,7 +20,7 @@ import {
   SettingsCardChip,
   SettingsCardIcon,
   SettingsCardPill,
-  SettingsCardSearch,
+  SettingsCardToolbar,
   type SettingsCardTone,
 } from '@/components/sections/shared/SettingsCards';
 import { useSettingsDirectory } from '@/hooks/useSettingsDirectory';
@@ -171,27 +171,27 @@ export const McpGrid: React.FC = () => {
   return (
     <SettingsPageLayout
       title={t('settings.page.mcp.title')}
-      description={t('settings.mcp.grid.description')}
-      headerEnd={(
-        <div className="flex w-full items-center gap-2 @xl:w-auto">
-          <SettingsProjectSelector className="min-w-0 flex-1 @xl:w-56 @xl:flex-none" />
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-9 w-9 shrink-0 text-muted-foreground"
-            disabled={isRefreshing}
-            onClick={handleRefresh}
-            aria-label={t('settings.mcp.sidebar.actions.refreshStatusAria')}
-            title={t('settings.mcp.sidebar.actions.refreshStatusTitle')}
-          >
-            <Icon name="refresh" className={cn('size-4', isRefreshing && 'animate-spin')} />
-          </Button>
-        </div>
-      )}
+      namedBySidebar
     >
-      {rows.length > 0 ? (
-        <SettingsCardSearch value={query} onChange={setQuery} placeholder={t('settings.mcp.grid.searchPlaceholder')} />
-      ) : null}
+      <SettingsCardToolbar
+        search={rows.length > 0 ? { value: query, onChange: setQuery, placeholder: t('settings.mcp.grid.searchPlaceholder') } : null}
+        actions={(
+          <>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="w-7 shrink-0 px-0 text-muted-foreground"
+              disabled={isRefreshing}
+              onClick={handleRefresh}
+              aria-label={t('settings.mcp.sidebar.actions.refreshStatusAria')}
+              title={t('settings.mcp.sidebar.actions.refreshStatusTitle')}
+            >
+              <Icon name="refresh" className={cn('size-4', isRefreshing && 'animate-spin')} />
+            </Button>
+            <SettingsProjectSelector className="min-w-0 w-56" />
+          </>
+        )}
+      />
 
       {rows.length === 0 ? (
         <p className="py-6 typography-meta text-muted-foreground">{t('settings.mcp.grid.empty')}</p>

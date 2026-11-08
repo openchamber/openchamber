@@ -104,6 +104,7 @@ export function ThemeAppearancePicker({ children }: ThemeAppearancePickerProps) 
         title={t('settings.openchamber.visual.section.colorMode')}
         divider={false}
         settingsItem="appearance.color-mode"
+        className="pb-6"
       >
         {/* Divs, not buttons: index.css clears the fill of every svg shape inside a button (a WebKit icon fix). */}
         <div role="radiogroup" aria-label={t('settings.openchamber.visual.section.colorMode')} className="grid grid-cols-3 gap-2 @xl:gap-3">
@@ -156,8 +157,10 @@ export function ThemeAppearancePicker({ children }: ThemeAppearancePickerProps) 
         </div>
       </SettingsSection>
 
+      {/* The cards show the themes picked below: one block, no divider between them. */}
       <SettingsSection
         title={t('settings.openchamber.visual.section.themes')}
+        divider={false}
         info={t('settings.openchamber.visual.field.themeImportInfoTooltip')}
         headerAction={<ThemeImportButton />}
       >

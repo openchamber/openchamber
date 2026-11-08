@@ -87,24 +87,10 @@ export const OpenChamberPage: React.FC<OpenChamberPageProps> = ({ section }) => 
         spaces: t('settings.openchamber.spaces.title'),
     }[section];
 
-    const pageDescription = {
-        general: t('settings.page.general.description'),
-        visual: t('settings.page.appearance.description'),
-        chat: t('settings.page.chat.description'),
-        sessions: t('settings.page.sessions.description'),
-        shortcuts: t('settings.page.shortcuts.description'),
-        git: undefined,
-        github: undefined,
-        notifications: t('settings.page.notifications.description'),
-        voice: t('settings.page.voice.description'),
-        tunnel: t('settings.page.tunnel.description'),
-        spaces: undefined,
-    }[section];
-
     return (
         <SettingsPageLayout
             title={pageTitle}
-            description={pageDescription}
+            namedBySidebar
             showSaveStatus
             className="openchamber-page-body"
         >

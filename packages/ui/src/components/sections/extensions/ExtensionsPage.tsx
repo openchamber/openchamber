@@ -1170,7 +1170,7 @@ export const ExtensionsPage: React.FC = () => {
     <>
       <SettingsPageLayout
         title={t('settings.page.extensions.title')}
-        description={t('settings.page.extensions.description')}
+        namedBySidebar
         headerEnd={unsupported ? null : (
           <div className="flex items-center gap-2">
             {/* Enterprise mode installs only from approved repositories, so the public list stays out of it. */}

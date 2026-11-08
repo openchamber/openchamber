@@ -125,6 +125,7 @@ export const GitPage: React.FC = () => {
       <SettingsPageLayout
         title={t('settings.page.git.title')}
         showSaveStatus
+        namedBySidebar
         className="px-4 @xl:px-6 @3xl:px-12"
       >
         <SettingsSection
