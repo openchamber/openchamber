@@ -303,6 +303,7 @@ export const KeyboardShortcutsSettings: React.FC = () => {
             settingsItem={isFirstVisible ? 'shortcuts.keyboard-shortcuts' : undefined}
             title={t(`settings.openchamber.keyboardShortcuts.category.${category}`)}
             divider={!isFirstVisible}
+            className={isFirstVisible ? '!pt-8' : undefined}
             info={isFirstVisible ? t('settings.openchamber.keyboardShortcuts.tooltip') : undefined}
           >
             <div>
