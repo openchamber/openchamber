@@ -19,6 +19,7 @@ import {
   GUEST_FILESYSTEM_PATTERN_MAX,
   GUEST_MENTIONS_LABEL_MAX,
   GUEST_ORIGINS_MAX,
+  GUEST_PROVIDER_LOGOS_MAX,
   GUEST_SERVICE_PROVIDES,
   GUEST_TOOLS_MAX,
   GUEST_TOOL_COLUMNS_MAX,
@@ -33,6 +34,7 @@ import {
   hasGuestPage,
   isGuestFilesystemPattern,
   isGuestPackageSvgIcon,
+  isGuestProviderLogoPath,
   isSafeAssetPath,
   resolveIntegrationAuth,
   type ServicePermissions,
@@ -568,6 +570,12 @@ const toolSchema = z.object({
 
 const toolsSchema = z.array(toolSchema).min(1).max(GUEST_TOOLS_MAX);
 
+const providerLogosSchema = z.record(z.string().refine(isOpenCodeProviderId), z.string().trim().refine(isGuestProviderLogoPath))
+  .refine((logos) => {
+    const count = Object.keys(logos).length;
+    return count >= 1 && count <= GUEST_PROVIDER_LOGOS_MAX;
+  });
+
 const fileEditorSchema = z.object({
   id: z.string().trim().regex(PANEL_ID),
   title: z.string().trim().min(1).max(GUEST_FILE_EDITOR_TITLE_MAX),
@@ -625,6 +633,7 @@ const contributesSchema = z.object({
   actions: actionsSchema.optional(),
   commands: commandsSchema.optional(),
   tools: toolsSchema.optional(),
+  providerLogos: providerLogosSchema.optional(),
   fileEditors: fileEditorsSchema.optional(),
   sourceControl: sourceControlSchema.optional(),
   sessionEvents: z.object({
@@ -832,7 +841,7 @@ export const openChamberManifestSchema = z.object({
     ctx.addIssue({
       code: 'custom',
       path: ['panel'],
-      message: `${needsRuntime.map((key) => `contributes.${key}`).join(', ')} needs panel.entry or background.entry; an extension without either may only declare tools.`,
+      message: `${needsRuntime.map((key) => `contributes.${key}`).join(', ')} needs panel.entry or background.entry; an extension without either may only declare tools and provider logos.`,
     });
   }),
 });
@@ -991,6 +1000,12 @@ const failureFromIssue = (issue: { path: ReadonlyArray<PropertyKey>; code: strin
     return fail(
       'invalid-tools',
       'contributes.tools lists up to 16 entries with a match of 1 to 128 characters ([A-Za-z0-9_.:-], "*" only at the end), optional name (1 to 40), icon (Remixicon name or package .svg path), title and subtitle templates (1 to 200), output "auto" | "text" | "json" | "markdown" | "code" | "table", language (code only), and columns (table only, 1 to 16).',
+    );
+  }
+  if (path.startsWith('contributes.providerLogos')) {
+    return fail(
+      'invalid-provider-logos',
+      `contributes.providerLogos maps 1 to ${GUEST_PROVIDER_LOGOS_MAX} OpenCode provider ids, like "openrouter", to a .svg or .png file inside the package.`,
     );
   }
   if (path.startsWith('contributes.fileEditors')) {

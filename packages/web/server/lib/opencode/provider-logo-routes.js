@@ -15,6 +15,15 @@ export const PROVIDER_LOGO_MIMES = Object.freeze([...PROVIDER_LOGO_EXTENSIONS.ke
 export const PROVIDER_LOGO_MAX_BYTES = 1024 * 1024;
 const SVG_THEME_COLORS = new Map([['light', '#111111'], ['dark', '#f5f5f5']]);
 
+/**
+ * An SVG logo's markup with its CSS colour set for `theme`, so `currentColor`
+ * reads on either background. Null for anything but `light` or `dark`.
+ */
+export const themedLogoSvg = (data, theme) => {
+  const color = SVG_THEME_COLORS.get(theme);
+  return color ? injectSvgRootColor(data.toString('utf8'), color) : null;
+};
+
 // The settings sanitizer keeps provider IDs up to 128 characters.
 const providerIdSchema = z.string().trim().min(1).max(128);
 const readProviderId = (req) => providerIdSchema.safeParse(req.params.providerId).data ?? null;
@@ -141,9 +150,8 @@ export const registerProviderLogoRoutes = (app, dependencies) => {
       }
 
       const theme = Array.isArray(req.query?.theme) ? req.query.theme[0] : req.query?.theme;
-      const color = SVG_THEME_COLORS.get(theme);
       res.setHeader('Content-Type', 'image/svg+xml; charset=utf-8');
-      return res.send(color ? injectSvgRootColor(data.toString('utf8'), color) : data);
+      return res.send(themedLogoSvg(data, theme) ?? data);
     } catch (error) {
       console.warn('Failed to read provider logo:', error);
       return res.status(500).json({ error: 'Failed to read provider logo' });

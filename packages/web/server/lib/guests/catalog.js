@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
-import { hasGuestPage, requestedGuestCapabilities, resolveAttachEntry, resolveAttachMode, resolvePageEntry, resolveStatusSectionEntry, resolveStatusSectionSource, toPublicNotifications,
+import { GUEST_PROVIDER_LOGO_BYTES_MAX, hasGuestPage, requestedGuestCapabilities, resolveAttachEntry, resolveAttachMode, resolvePageEntry, resolveStatusSectionEntry, resolveStatusSectionSource, toPublicNotifications,
   toPublicQuota, toPublicTracker, toPublicService, toPublicSessionEvents, toPublicSourceControl, toPublicIntegration, hostMeetsOpenChamberEngine, openChamberEngineMinimum } from '@openchamber/sdk';
 import { parseManifestJson } from '@openchamber/sdk/schemas';
 
@@ -159,6 +159,14 @@ const guestBuiltScriptsReady = async (packageRoot, entry) => {
     }
   }
   return true;
+};
+
+// Every list in the app reads a provider's logo, so its size counts against each of them.
+const isDrawableProviderLogo = async (packageRoot, relativePath) => {
+  const resolved = await resolveGuestAssetPath(packageRoot, relativePath);
+  if (!resolved) return false;
+  const { size } = await fs.stat(resolved);
+  return size > 0 && size <= GUEST_PROVIDER_LOGO_BYTES_MAX;
 };
 
 export const inspectGuestPackage = async (packageRoot, { openchamberVersion, skipEngineCheck } = {}) => {
@@ -330,6 +338,15 @@ export const inspectGuestPackage = async (packageRoot, { openchamberVersion, ski
   if (parsed.manifest.contributes.tools?.length) {
     guest.tools = parsed.manifest.contributes.tools.map((tool) => ({ ...tool }));
   }
+  const providerLogos = parsed.manifest.contributes.providerLogos;
+  if (providerLogos) {
+    for (const logo of Object.values(providerLogos)) {
+      if (!await isDrawableProviderLogo(packageRoot, logo)) {
+        return { ok: false, code: 'invalid-manifest' };
+      }
+    }
+    guest.providerLogos = { ...providerLogos };
+  }
   if (parsed.manifest.contributes.service) {
     const serviceEntry = await resolveGuestAssetPath(packageRoot, parsed.manifest.contributes.service.entry);
     if (!serviceEntry) {
@@ -500,6 +517,9 @@ export const toPublicGuest = (guest) => {
   }
   if (Array.isArray(guest.tools) && guest.tools.length > 0) {
     row.tools = guest.tools.map((tool) => ({ ...tool }));
+  }
+  if (guest.providerLogos) {
+    row.providerLogos = { ...guest.providerLogos };
   }
   const granted = Array.isArray(guest.capabilityGrants) ? guest.capabilityGrants : [];
   row.capabilities = {

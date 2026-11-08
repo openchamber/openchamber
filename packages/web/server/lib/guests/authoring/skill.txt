@@ -96,6 +96,7 @@ Limits the package fails on:
 | `service.schedule` | 8 entries |
 | `setInstructions` text | 4,096 characters |
 | `@` rows | 20, title and subtitle up to 120 |
+| `providerLogos` | 8, each file up to 1 MB |
 
 Everything a page touches goes through `capabilities` (`prompt`, `sessions`, `files`, `model`, `shells`) or `origins` (https origins it may fetch). `sessionControl`, `instructions`, `skills`, `opencodePlugin`, `sessionEvents` and `service` need nothing there: declaring them is the request. The user approves all of it once, and an update that asks for more asks again.
 
@@ -189,6 +190,10 @@ A click posts `{ id, value? }` to the same path. A line's `content` can be `{ ki
 ### OpenCode plugin
 
 For agent tools the extension should carry with it. `"opencodePlugin": "plugin"` points to a folder with `index.js` or `server.js` at its root, or a `package.json` whose `name` and `exports` lead to the entry; `main` is ignored. The entry default-exports `{ id, setup }` and imports nothing. It runs inside OpenCode with the user's full access, while the extension is on.
+
+### A provider's logo
+
+For a model provider the extension's OpenCode plugin registers. `"providerLogos": { "acme-cloud": "assets/acme-cloud.svg" }` under `contributes` maps the provider ID OpenCode reports to a `.svg` or `.png` in the package. It needs no page and no capability. The image keeps its colours, and `currentColor` in an SVG follows the theme. It replaces a logo the app ships for that ID, and what the user set for that provider comes first.
 
 ### `@` rows
 

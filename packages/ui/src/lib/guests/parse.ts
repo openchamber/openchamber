@@ -22,7 +22,9 @@ import {
   GUEST_TOOL_MATCH,
   GUEST_TOOL_OUTPUTS,
   isFileEditorPattern,
+  isGuestProviderLogoPath,
   isGuestRequestPath,
+  isOpenCodeProviderId,
 } from '@openchamber/sdk';
 import { z } from 'zod';
 
@@ -221,6 +223,8 @@ const installedGuestSchema = z.object({
   actions: z.array(guestActionSchema).max(GUEST_ACTIONS_MAX).optional(),
   commands: z.array(guestCommandSchema).max(GUEST_COMMANDS_MAX).optional(),
   tools: z.array(guestToolSchema).max(GUEST_TOOLS_MAX).optional(),
+  // A row with logos this build cannot read keeps the rest of the extension.
+  providerLogos: z.record(z.string().refine(isOpenCodeProviderId), z.string().refine(isGuestProviderLogoPath)).optional().catch(undefined),
   fileEditors: z.array(guestFileEditorSchema).max(GUEST_FILE_EDITORS_MAX).optional(),
   capabilities: z.object({
     requested: z.array(z.enum(GUEST_CAPABILITIES)),

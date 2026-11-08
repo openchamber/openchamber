@@ -131,6 +131,11 @@ export type GuestCommandContribution = {
   description?: string;
 };
 
+/** How many `contributes.providerLogos` entries a package may declare. */
+export const GUEST_PROVIDER_LOGOS_MAX = 8;
+/** Bytes of one `contributes.providerLogos` file; a larger one fails the install. */
+export const GUEST_PROVIDER_LOGO_BYTES_MAX = 1024 * 1024;
+
 /** How many `contributes.tools` entries a package may declare. */
 export const GUEST_TOOLS_MAX = 16;
 /** Characters in a `contributes.tools` `match`. */
@@ -945,6 +950,8 @@ export type OpenChamberContributes = {
   commands?: GuestCommandContribution[];
   /** How the extension's tool calls look in the chat. */
   tools?: GuestToolContribution[];
+  /** OpenCode provider id to a package `.svg` or `.png`, drawn as that provider's logo, in place of one the app ships. */
+  providerLogos?: Record<string, string>;
   /** Editors the Files view opens matching files in. */
   fileEditors?: FileEditorContribution[];
   /** The Git host a `source-control` service provides; present exactly when it does. */
@@ -1131,6 +1138,7 @@ export type ParseManifestErrorCode =
   | 'invalid-actions'
   | 'invalid-commands'
   | 'invalid-tools'
+  | 'invalid-provider-logos'
   | 'invalid-file-editors';
 
 export type ParseManifestFailure = {
@@ -1162,6 +1170,11 @@ export const isSafeAssetPath = (value: string): boolean => {
 /** Package SVG path for the rail, e.g. `icon.svg`. Remixicon names use `PANEL_ID`. */
 export const isGuestPackageSvgIcon = (value: string): boolean => (
   isSafeAssetPath(value) && value.toLowerCase().endsWith('.svg')
+);
+
+/** A `contributes.providerLogos` file: the two image types the host serves from a package. */
+export const isGuestProviderLogoPath = (value: string): boolean => (
+  isSafeAssetPath(value) && /\.(?:svg|png)$/i.test(value)
 );
 
 export const toPublicIntegration = (integration: IntegrationContribution): PublicIntegration => {

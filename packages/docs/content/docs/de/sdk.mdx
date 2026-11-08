@@ -322,7 +322,19 @@ Wenn dein OpenCode-Plugin oder MCP-Server ein Tool hinzufügt, zeigt der Chat de
 
 `match` ist der Tool-Name, wie OpenCode ihn meldet; ein `*` am Ende passt auf ein Präfix. `icon` ist ein Remixicon-Name oder eine `.svg`-Datei in deinem Paket, wie bei `panel.icon`. `title` und `subtitle` sind Vorlagen über `input`, `output` und `metadata` des Aufrufs. `output` bestimmt, wie der Inhalt dargestellt wird: `text`, `json` (als Baum), `markdown`, `code` mit einer `language`, `table` mit `columns` (die Zeilen kommen aus dem Ausgabe-Array oder aus `output.items`) oder `auto` für die Standarddarstellung. Ein exaktes `match` schlägt einen Platzhalter, und bei Gleichstand gewinnt die zuerst installierte Erweiterung. Eine Berechtigung ist nicht nötig: das ändert nur, wie Daten gezeichnet werden, die ohnehin schon im Chat sind.
 
-Eine Erweiterung, die nur Tools gestaltet, braucht gar keine Seite: lass `panel.entry` weg, dann hat sie kein Icon in der Leiste, nur eine Karte unter Einstellungen → Erweiterungen. Ohne Seite darf sie `tools` und sonst nichts deklarieren. Die andere Ausnahme ist ein Work-Status-Abschnitt oder ein Datei-Editor mit eigenem `entry`, siehe oben.
+Eine Erweiterung, die nur Tools gestaltet, braucht gar keine Seite: lass `panel.entry` weg, dann hat sie kein Icon in der Leiste, nur eine Karte unter Einstellungen → Erweiterungen. Ohne Seite darf sie `tools` und `providerLogos` und sonst nichts deklarieren. Die andere Ausnahme ist ein Work-Status-Abschnitt oder ein Datei-Editor mit eigenem `entry`, siehe oben.
+
+## Das Logo deines Anbieters
+
+Wenn dein OpenCode-Plugin einen Modellanbieter registriert, zeigen die Modellauswahl und die Einstellungen meist ein generisches Zeichen. Lege das Logo in dein Paket und nenne den Anbieter, ganz ohne Code:
+
+```json
+"providerLogos": {
+  "acme-cloud": "assets/acme-cloud.svg"
+}
+```
+
+Der Schlüssel ist die Anbieter-ID, wie OpenCode sie meldet. Der Wert ist eine `.svg`- oder `.png`-Datei in deinem Paket, bis zu 1 MB. Fehlt die Datei, ist sie leer oder größer, schlägt die Installation fehl. Ein Paket nennt bis zu 8 Anbieter. Das Logo behält seine eigenen Farben, und `currentColor` in einer SVG folgt dem hellen oder dunklen Design. Es ersetzt ein Logo, das die App für diese ID mitbringt. Alles, was der Nutzer für diesen Anbieter festgelegt hat, geht vor. Bei einem Gleichstand gewinnt die zuerst installierte Erweiterung. Es ist keine Berechtigung nötig. VS Code und das Smartphone laden keine Erweiterungen und zeigen diese Logos daher nicht.
 
 ## Die ersten Zeilen im Panel
 

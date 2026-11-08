@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { GUEST_PROVIDER_LOGO_BYTES_MAX } from '@openchamber/sdk';
 import { guestAssetContentType, hasGuestFrame, inspectGuestPackage, listInstalledGuests, noteGuestPackageChanged, resolveGuestAssetPath, resolveGuestServedFile, toPublicGuest } from './catalog.js';
 import { setCapabilityGrants, writeExtensionPaths } from './persist.js';
 
@@ -456,6 +457,46 @@ describe('an OpenCode plugin in the package', () => {
       // The plugin folder stays on the server: the row says only that there is one.
       expect(JSON.stringify(row)).not.toContain(path.join(root, 'plugin'));
     }
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+});
+
+describe('provider logos in the package', () => {
+  const writeLogoGuest = async (root, files) => {
+    await fs.rm(root, { recursive: true, force: true });
+    await fs.mkdir(root, { recursive: true });
+    await fs.writeFile(path.join(root, 'package.json'), JSON.stringify({
+      name: '@openchamber/logos', version: '1.0.0',
+      openchamber: { apiVersion: 1, contributes: { panel: { id: 'logos', name: 'Logos', icon: 'cup' }, providerLogos: { acme: 'acme.svg' } } },
+    }));
+    for (const [file, body] of Object.entries(files)) await fs.writeFile(path.join(root, file), body);
+  };
+
+  test('the install refuses a logo that cannot be drawn', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-guest-logos-'));
+    const root = path.join(dir, 'logos');
+    const cases = [{}, { 'acme.svg': '' }, { 'acme.svg': 'x'.repeat(GUEST_PROVIDER_LOGO_BYTES_MAX + 1) }];
+    for (const files of cases) {
+      await writeLogoGuest(root, files);
+      expect(await inspectGuestPackage(root)).toEqual({ ok: false, code: 'invalid-manifest' });
+    }
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+
+  test('a page-less package lists them on its row and serves them, asking for no capability', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-guest-logos-'));
+    const root = path.join(dir, 'logos');
+    await writeLogoGuest(root, { 'acme.svg': '<svg/>' });
+
+    const inspected = await inspectGuestPackage(root);
+    expect(inspected.ok).toBe(true);
+    if (inspected.ok) {
+      const row = toPublicGuest({ ...inspected.guest, source: 'path', path: root, capabilityGrants: [] });
+      expect(row.providerLogos).toEqual({ acme: 'acme.svg' });
+      expect(row.capabilities).toEqual({ requested: [], granted: [] });
+      expect(hasGuestFrame(inspected.guest)).toBe(false);
+    }
+    expect((await resolveGuestServedFile(root, 'acme.svg', { hasRuntime: false }))?.contentType).toBe('image/svg+xml');
     await fs.rm(dir, { recursive: true, force: true });
   });
 });
