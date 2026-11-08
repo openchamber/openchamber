@@ -751,7 +751,11 @@ chevron, while its saved collapse stays and its delete dialog counts the members
   session's project, directory, worktree and branch label: it resolves the
   project through the session ownership index first (managed worktrees live
   outside the project path), falls back to a path-prefix match, and finds the
-  containing worktree by longest prefix. Branch labels are live-first.
+  containing worktree by longest prefix. Branch labels are live-first; a
+  session in a project subdirectory outside every worktree takes the nearest
+  live branch inside the project (the project root's when no closer directory
+  is known), so a chat moved into a folder inside its project keeps its
+  branch line.
 - A detailed zone row has two lines of fixed height (20px and 16px). An empty
   second line is omitted; a project icon, branch, goal, linked reference,
   waiting request or expansion chevron keeps it visible. The first holds the title and the action indicator, pin, done hint,

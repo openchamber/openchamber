@@ -23,11 +23,13 @@ const resolveLocations = (
   availableWorktreesByProject: Map<string, WorktreeMetadata[]>,
   gitBranches: ReadonlyMap<string, string | null> = new Map(),
   hideBranchMatchingProjectLabel = true,
+  rootBranchByProjectId: ReadonlyMap<string, string | null> = new Map(),
 ) => {
   const ownership = createSessionOwnershipIndex(records, projects, availableWorktreesByProject, false);
   return resolveSidebarSessionLocations({
     sessions: records, projects, ownerBySessionId: ownership.bySessionId,
     availableWorktreesByProject, gitBranches, homeDirectory: null,
+    rootBranchByProjectId,
     hideBranchMatchingProjectLabel,
   });
 };
@@ -86,6 +88,73 @@ describe('resolveSidebarSessionLocations', () => {
     });
     expect(locations.has('unowned')).toBe(false);
     expect(locations.get('detached')?.branchLabel).toBeNull();
+  });
+
+  test('labels a session in a project subdirectory with the project root branch', () => {
+    const nested = session('nested', '/repo/packages/app');
+    const locations = resolveLocations([nested], new Map(), new Map([['/repo', 'main']]));
+
+    expect(locations.get('nested')?.projectId).toBe('repo');
+    expect(locations.get('nested')?.branchLabel).toBe('main');
+    expect(locations.get('nested')?.worktree).toBeNull();
+    expect(locations.get('nested')?.groupDirectory).toBe('/repo/packages/app');
+  });
+
+  test('falls back to the resolved project root branch before its live status loads', () => {
+    const nested = session('nested', '/repo/packages/app');
+    const locations = resolveLocations(
+      [nested], new Map(), new Map(), false, new Map([['repo', 'main']]),
+    );
+
+    expect(locations.get('nested')?.branchLabel).toBe('main');
+  });
+
+  test('keeps a containing worktree branch ahead of the project root branch', () => {
+    const nested = session('nested', '/worktrees/feature/sub');
+    const worktree = worktreeMeta('/worktrees/feature', 'feature-1');
+    const locations = resolveLocations(
+      [nested], new Map([['/repo', [worktree]]]), new Map([['/repo', 'main']]),
+    );
+
+    expect(locations.get('nested')?.worktree).toBe(worktree);
+    expect(locations.get('nested')?.branchLabel).toBe('feature-1');
+  });
+
+  test('takes the nearest live branch inside the project for nested checkouts', () => {
+    const nested = session('nested', '/repo/vendor/lib/src');
+    const plain = session('plain', '/repo/docs/app');
+    const locations = resolveLocations(
+      [nested, plain],
+      new Map(),
+      new Map([['/repo', 'main'], ['/repo/vendor/lib', 'release/2.x']]),
+    );
+
+    expect(locations.get('nested')?.branchLabel).toBe('release/2.x');
+    expect(locations.get('plain')?.branchLabel).toBe('main');
+  });
+
+  test('prefers the live project root branch over the resolved root branch', () => {
+    const nested = session('nested', '/repo/docs');
+    const locations = resolveLocations(
+      [nested], new Map(), new Map([['/repo', 'live']]), false, new Map([['repo', 'stored']]),
+    );
+
+    expect(locations.get('nested')?.branchLabel).toBe('live');
+  });
+
+  test('does not give a session outside the project its root branch', () => {
+    const restored = session('restored', '/worktrees/deleted');
+    const ownership = createSessionOwnershipIndex(
+      [restored], projects, new Map(), false, [], [{ id: 'opencode-repo', worktree: '/repo' }],
+    );
+    const locations = resolveSidebarSessionLocations({
+      sessions: [restored], projects, ownerBySessionId: ownership.bySessionId,
+      availableWorktreesByProject: new Map(), gitBranches: new Map([['/repo', 'main']]),
+      rootBranchByProjectId: new Map([['repo', 'main']]), homeDirectory: null,
+      hideBranchMatchingProjectLabel: false,
+    });
+
+    expect(locations.get(restored.id)?.branchLabel).toBeNull();
   });
 
   test('resolves worktree metadata for sessions inside <worktree>/sub through the longest prefix', () => {

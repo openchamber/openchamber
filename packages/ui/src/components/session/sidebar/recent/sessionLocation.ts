@@ -2,7 +2,7 @@ import type { Session } from '@/lib/opencode/model';
 import type { WorktreeMetadata } from '@/types/worktree';
 import type { DirectoryOwner } from '../sessions/sessionOwnership';
 import { formatDirectoryName } from '@/lib/utils';
-import { formatProjectLabel, normalizePath } from '../utils';
+import { formatProjectLabel, isPathWithinProject, normalizePath } from '../utils';
 import { buildWorktreeByPathIndex, findPrefixWorktreeEntry, resolveBranchLiveFirst } from '../worktreeIndex';
 
 type SidebarSessionLocationProject = {
@@ -34,9 +34,9 @@ type ResolveArgs = {
   gitBranches: ReadonlyMap<string, string | null>;
   homeDirectory: string | null;
   /**
-   * Live branch of each project's root directory. Supplied by surfaces that
-   * show the branch for root-directory sessions too; Recent omits it because
-   * it only labels worktree rows.
+   * Resolved branch of each project's root directory, used when no live
+   * status for the root is loaded yet. It also labels sessions in a project
+   * subdirectory that has no live branch of its own.
    */
   rootBranchByProjectId?: ReadonlyMap<string, string | null>;
   /**
@@ -50,6 +50,26 @@ type ResolveArgs = {
    * branch, and its group is the space's directory.
    */
   spaceLabelById?: ReadonlyMap<string, string>;
+};
+
+// The live branch of the nearest directory at or above `directory` inside the
+// project: a session can sit in a nested checkout of the project, whose branch
+// differs from the project root's, and a status read for that checkout (or a
+// directory inside it) already knows the right one.
+const liveBranchAtOrAbove = (
+  directory: string,
+  projectRoot: string,
+  gitBranches: ReadonlyMap<string, string | null>,
+): string | null => {
+  let current = directory;
+  while (current.startsWith(`${projectRoot}/`)) {
+    const branch = gitBranches.get(current)?.trim();
+    if (branch) return branch;
+    const separator = current.lastIndexOf('/');
+    if (separator <= 0) break;
+    current = current.slice(0, separator);
+  }
+  return gitBranches.get(projectRoot)?.trim() || null;
 };
 
 // One owner for "where does this session live": the project it belongs to, the
@@ -107,8 +127,16 @@ export const resolveSidebarSessionLocations = ({
     const worktreeHit = findPrefixWorktreeEntry(directory, worktreeByPath);
     const worktree = worktreeHit && worktreeHit.project.id === owner.id ? worktreeHit.meta : null;
     const projectLabel = formatProjectLabel(owner.label?.trim() || formatDirectoryName(owner.normalizedPath, homeDirectory) || owner.normalizedPath);
-    const rootBranch = normalizePath(owner.normalizedPath) === directory
-      ? rootBranchByProjectId?.get(owner.id)?.trim() || null
+    const projectRoot = normalizePath(owner.normalizedPath);
+    // A session can live in a subdirectory of its project (a chat started in
+    // a folder inside the repo). It has no worktree of its own and no git
+    // status is read for that directory, so the nearest live branch inside
+    // the project is the branch above it. A containing worktree still owns
+    // its sessions, even when that branch is not known yet.
+    const rootBranch = !worktree && projectRoot && isPathWithinProject(directory, projectRoot)
+      ? liveBranchAtOrAbove(directory, projectRoot, gitBranches)
+        || rootBranchByProjectId?.get(owner.id)?.trim()
+        || null
       : null;
     // Live-first: a live git status wins over discovered worktree metadata.
     const branch = resolveBranchLiveFirst(
