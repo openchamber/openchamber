@@ -16,6 +16,7 @@ import { useMcpConfigStore } from '@/stores/useMcpConfigStore';
 import { useSnippetsStore } from '@/stores/useSnippetsStore';
 import { projectSettingsTabForSearchTarget, useProjectSettingsTabStore } from '@/components/sections/projects/projectSettingsTabs';
 import { chatSettingsTabForSearchTarget, useChatSettingsTabStore } from '@/components/sections/openchamber/chatSettingsTabs';
+import { themeVariantForSearchTarget, useThemeVariantTabStore } from '@/components/sections/openchamber/themeVariantTab';
 import { useSkillsStore } from '@/stores/useSkillsStore';
 import { useSkillsCatalogStore } from '@/stores/useSkillsCatalogStore';
 import { Tooltip, TooltipTrigger } from '@/components/ui/tooltip';
@@ -81,10 +82,12 @@ const SETTINGS_SPLIT_SIDEBAR_WIDTH = 280;
 // The desktop close button: top-1 offset plus its h-7 height.
 const SETTINGS_CLOSE_BUTTON_CLEARANCE = 32;
 const SETTINGS_DETAIL_HISTORY_KEY = '__openchamberSettingsDetail';
-/** The Chat page shows one tab at a time: open the one that holds the item. */
-const openChatSettingsTabFor = (itemId: string): void => {
+/** Pages that show one tab at a time (Chat, the Appearance theme list): open the one that holds the item. */
+const openSettingsTabFor = (itemId: string): void => {
   const chatTab = chatSettingsTabForSearchTarget(itemId);
   if (chatTab) useChatSettingsTabStore.getState().setTab(chatTab);
+  const themeVariant = themeVariantForSearchTarget(itemId);
+  if (themeVariant) useThemeVariantTabStore.getState().setVariant(themeVariant);
 };
 
 /** How long (in frames, ~0.5 s) a search result or a link waits for its item to render. */
@@ -466,7 +469,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
       useProjectSettingsTabStore.getState().setTab(projectTab);
     }
 
-    openChatSettingsTabFor(result.id);
+    openSettingsTabFor(result.id);
 
     return result.id;
   }, []);
@@ -568,7 +571,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
       return;
     }
     useUIStore.getState().clearSettingsJumpRequest();
-    if (settingsJumpRequest.itemId) openChatSettingsTabFor(settingsJumpRequest.itemId);
+    if (settingsJumpRequest.itemId) openSettingsTabFor(settingsJumpRequest.itemId);
     setPendingSearchItemId(settingsJumpRequest.itemId);
     openPage(resolveSettingsSlug(settingsJumpRequest.page));
     if (isMobile) {

@@ -76,6 +76,13 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['calendar', 'monday', 'sunday'],
   },
   {
+    id: 'appearance.color-mode',
+    page: 'appearance',
+    titleKey: 'settings.openchamber.visual.section.colorMode',
+    keywords: ['theme', 'system', 'light mode', 'dark mode', 'appearance'],
+    isAvailable: (ctx) => !ctx.isVSCode,
+  },
+  {
     id: 'appearance.light-theme',
     page: 'appearance',
     titleKey: 'settings.openchamber.visual.field.lightTheme',
@@ -94,7 +101,7 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     page: 'appearance',
     titleKey: 'settings.themeImport.action',
     descriptionKey: 'settings.themeImport.catalogHint',
-    keywords: ['theme', 'import', 'vscode', 'open vsx', 'openvsx', 'json', 'jsonc', 'syntax', 'palette'],
+    keywords: ['theme', 'import', 'browse', 'catalog', 'vs code', 'vscode', 'open vsx', 'openvsx', 'json', 'jsonc', 'syntax', 'palette'],
     isAvailable: (ctx) => !ctx.isVSCode,
   },
   {
@@ -109,10 +116,20 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
   },
   {
     id: 'appearance.scrollbars',
+    page: 'general',
+    titleKey: 'settings.openchamber.visual.field.alwaysShowScrollbars',
+    descriptionKey: 'settings.openchamber.visual.field.alwaysShowScrollbarsHint',
+    keywords: ['scrollbar', 'scrollbars', 'scroll', 'mouse', 'wheel', 'accessibility', 'always visible'],
+    isAvailable: (ctx) => !ctx.isVSCode,
+  },
+  {
+    // VS Code has no Panels section in General, so the checkbox stays on Appearance there.
+    id: 'appearance.scrollbars-vscode',
     page: 'appearance',
     titleKey: 'settings.openchamber.visual.field.alwaysShowScrollbars',
     descriptionKey: 'settings.openchamber.visual.field.alwaysShowScrollbarsHint',
     keywords: ['scrollbar', 'scrollbars', 'scroll', 'mouse', 'wheel', 'accessibility', 'always visible'],
+    isAvailable: (ctx) => ctx.isVSCode,
   },
   {
     id: 'appearance.pwa-install-name',

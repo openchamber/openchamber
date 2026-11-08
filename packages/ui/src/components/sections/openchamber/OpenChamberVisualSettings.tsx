@@ -1,12 +1,8 @@
 import React from 'react';
-import { ThemeImportButton } from './ThemeImportButton';
-import { ThemePicker } from './ThemePicker';
+import { ThemeAppearancePicker } from './ThemeAppearancePicker';
 
-import { useThemeSystem } from '@/contexts/useThemeSystem';
-import type { ThemeMode } from '@/types/theme';
 import { useUIStore } from '@/stores/useUIStore';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
-import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { NumberInput } from '@/components/ui/number-input';
 import { Input } from '@/components/ui/input';
@@ -41,8 +37,6 @@ import {
     SettingsFieldRow,
     SettingsInset,
     SettingsCheckboxRow,
-    SettingsRadioGroup,
-    SettingsRadioOption,
     SettingsChipGroup,
     SETTINGS_SELECT_TRIGGER_CLASS,
     SETTINGS_ICON_BUTTON_CLASS,
@@ -54,31 +48,12 @@ import {
     SETTINGS_OPTION_STACK_CLASS,
     SETTINGS_HELPER_CLASS,
 } from '@/components/sections/shared/SettingsSection';
-import { SettingsInfoHint } from '@/components/sections/shared/SettingsInfoHint';
 
 interface Option<T extends string> {
     id: T;
     labelKey: string;
     descriptionKey?: string;
 }
-
-const THEME_MODE_OPTIONS: Array<{ value: ThemeMode; labelKey: string; descriptionKey: string }> = [
-    {
-        value: 'system',
-        labelKey: 'settings.openchamber.visual.option.themeMode.system',
-        descriptionKey: 'settings.openchamber.visual.option.themeMode.system.description',
-    },
-    {
-        value: 'light',
-        labelKey: 'settings.openchamber.visual.option.themeMode.light',
-        descriptionKey: 'settings.openchamber.visual.option.themeMode.light.description',
-    },
-    {
-        value: 'dark',
-        labelKey: 'settings.openchamber.visual.option.themeMode.dark',
-        descriptionKey: 'settings.openchamber.visual.option.themeMode.dark.description',
-    },
-];
 
 const DEFAULT_PWA_INSTALL_NAME = 'OpenChamber - AI Coding Assistant';
 const PWA_ORIENTATION_OPTIONS: Option<'system' | 'portrait' | 'landscape'>[] = [
@@ -217,20 +192,6 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     const setTimeFormatPreference = useUIStore(state => state.setTimeFormatPreference);
     const weekStartPreference = useUIStore(state => state.weekStartPreference);
     const setWeekStartPreference = useUIStore(state => state.setWeekStartPreference);
-    const {
-        themeMode,
-        setThemeMode,
-        availableThemes,
-        customThemesLoading,
-        reloadCustomThemes,
-        lightThemeId,
-        darkThemeId,
-        setLightThemePreference,
-        setDarkThemePreference,
-    } = useThemeSystem();
-
-    const [themesReloading, setThemesReloading] = React.useState(false);
-
     // macOS-desktop-only dock badge that counts chats with unseen activity.
     // The tray sync (mac-only) pumps the count to the main process, so the
     // toggle is offered only where it actually has an effect. No relaunch needed.
@@ -278,45 +239,6 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
         setWeekStartPreference(value);
         void updateDesktopSettings({ weekStartPreference: value });
     }, [setWeekStartPreference]);
-
-    const lightThemes = React.useMemo(
-        () => availableThemes
-            .filter((theme) => theme.metadata.variant === 'light')
-            .sort((a, b) => a.metadata.name.localeCompare(b.metadata.name)),
-        [availableThemes],
-    );
-
-    const darkThemes = React.useMemo(
-        () => availableThemes
-            .filter((theme) => theme.metadata.variant === 'dark')
-            .sort((a, b) => a.metadata.name.localeCompare(b.metadata.name)),
-        [availableThemes],
-    );
-
-    const selectedLightTheme = React.useMemo(
-        () => lightThemes.find((theme) => theme.metadata.id === lightThemeId) ?? lightThemes[0],
-        [lightThemes, lightThemeId],
-    );
-
-    const selectedDarkTheme = React.useMemo(
-        () => darkThemes.find((theme) => theme.metadata.id === darkThemeId) ?? darkThemes[0],
-        [darkThemes, darkThemeId],
-    );
-
-    const formatThemeLabel = React.useCallback((themeName: string, variant: 'light' | 'dark') => {
-        const suffix = variant === 'dark' ? ' Dark' : ' Light';
-        return themeName.endsWith(suffix) ? themeName.slice(0, -suffix.length) : themeName;
-    }, []);
-
-    const lightThemeOptions = React.useMemo(
-        () => lightThemes.map((theme) => ({ id: theme.metadata.id, label: formatThemeLabel(theme.metadata.name, 'light') })),
-        [lightThemes, formatThemeLabel],
-    );
-
-    const darkThemeOptions = React.useMemo(
-        () => darkThemes.map((theme) => ({ id: theme.metadata.id, label: formatThemeLabel(theme.metadata.name, 'dark') })),
-        [darkThemes, formatThemeLabel],
-    );
 
     const shouldShow = (setting: VisibleSetting): boolean => {
         if (!visibleSettings) return true;
@@ -450,13 +372,15 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
         };
     }, [setMobileKeyboardMode, showMobileKeyboardModeSetting, showPwaInstallNameSetting, showPwaOrientationSetting]);
 
-    const scrollbarSetting = shouldShow('scrollbars') ? (
+    // General's "Panels and links" holds this checkbox; VS Code has no such
+    // section, so there it stays with the layout settings here.
+    const scrollbarSetting = shouldShow('scrollbars') && !hasThemeSettings ? (
         <SettingsCheckboxRow
             checked={alwaysShowScrollbars}
             onChange={setAlwaysShowScrollbars}
             label={t('settings.openchamber.visual.field.alwaysShowScrollbars')}
             info={t('settings.openchamber.visual.field.alwaysShowScrollbarsHint')}
-            settingsItem="appearance.scrollbars"
+            settingsItem="appearance.scrollbars-vscode"
         />
     ) : null;
 
@@ -467,80 +391,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                 {hasAppearanceSettings && (
                     <div className="space-y-0">
                         {hasThemeSettings && (
-                            <SettingsSection title={t('settings.openchamber.visual.section.colorModeAndTheme')} divider={false}>
-                                <SettingsTwoColumn>
-                                    <div className={SETTINGS_FIELDS_STACK_CLASS}>
-                                        <SettingsRadioGroup aria-label={t('settings.openchamber.visual.section.colorMode')}>
-                                            {THEME_MODE_OPTIONS.map((option) => (
-                                                <SettingsRadioOption
-                                                    key={option.value}
-                                                    selected={themeMode === option.value}
-                                                    onSelect={() => setThemeMode(option.value)}
-                                                    label={tUnsafe(option.labelKey)}
-                                                    ariaLabel={tUnsafe(option.labelKey)}
-                                                />
-                                            ))}
-                                        </SettingsRadioGroup>
-
-                                    </div>
-
-                                    <div className={SETTINGS_FIELDS_STACK_CLASS}>
-                                        <SettingsStackedField
-                                            label={t('settings.openchamber.visual.field.lightTheme')}
-                                            settingsItem="appearance.light-theme"
-                                        >
-                                            <ThemePicker
-                                                options={lightThemeOptions}
-                                                value={selectedLightTheme?.metadata.id ?? ''}
-                                                onValueChange={setLightThemePreference}
-                                                placeholder={t('settings.openchamber.visual.field.selectThemePlaceholder')}
-                                                ariaLabel={t('settings.openchamber.visual.field.selectLightThemeAria')}
-                                            />
-                                        </SettingsStackedField>
-                                        <SettingsStackedField
-                                            label={t('settings.openchamber.visual.field.darkTheme')}
-                                            settingsItem="appearance.dark-theme"
-                                        >
-                                            <ThemePicker
-                                                options={darkThemeOptions}
-                                                value={selectedDarkTheme?.metadata.id ?? ''}
-                                                onValueChange={setDarkThemePreference}
-                                                placeholder={t('settings.openchamber.visual.field.selectThemePlaceholder')}
-                                                ariaLabel={t('settings.openchamber.visual.field.selectDarkThemeAria')}
-                                            />
-                                        </SettingsStackedField>
-
-                                        <div className="flex items-center gap-2 pt-1">
-                                            <button
-                                                type="button"
-                                                disabled={customThemesLoading || themesReloading}
-                                                onClick={() => {
-                                                    const startedAt = Date.now();
-                                                    setThemesReloading(true);
-                                                    void reloadCustomThemes().finally(() => {
-                                                        const elapsed = Date.now() - startedAt;
-                                                        if (elapsed < 500) {
-                                                            window.setTimeout(() => {
-                                                                setThemesReloading(false);
-                                                            }, 500 - elapsed);
-                                                            return;
-                                                        }
-                                                        setThemesReloading(false);
-                                                    });
-                                                }}
-                                                className="typography-settings-link inline-flex items-center gap-1.5 disabled:cursor-not-allowed disabled:opacity-50 disabled:no-underline"
-                                            >
-                                                <Icon name="restart" className={cn('h-3.5 w-3.5', themesReloading && 'animate-spin')} />
-                                                {themesReloading ? t('settings.openchamber.visual.actions.reloadingThemes') : t('settings.openchamber.visual.actions.reloadThemes')}
-                                            </button>
-                                            <SettingsInfoHint>
-                                                {t('settings.openchamber.visual.field.themeImportInfoTooltip')}
-                                            </SettingsInfoHint>
-                                        </div>
-                                        <ThemeImportButton />
-                                    </div>
-                                </SettingsTwoColumn>
-
+                            <ThemeAppearancePicker>
                                 {dockBadgeSupported && (
                                     <SettingsInset settingsItem="appearance.dock-badge">
                                         <SettingsCheckboxRow
@@ -552,8 +403,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                         />
                                     </SettingsInset>
                                 )}
-                                {scrollbarSetting && <SettingsInset>{scrollbarSetting}</SettingsInset>}
-                            </SettingsSection>
+                            </ThemeAppearancePicker>
                         )}
 
                         {showWindowControlsPositionSetting && (
@@ -1106,7 +956,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                 )}
                             </SettingsTwoColumn>
                         ) : null}
-                        {!hasThemeSettings && scrollbarSetting}
+                        {scrollbarSetting}
                     </SettingsSection>
                 )}
 
