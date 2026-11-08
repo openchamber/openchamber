@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { fetchQuota as fetchDeepinfraQuota } from './deepinfra.js';
+import { fetchPrices as fetchDeepinfraPrices, fetchQuota as fetchDeepinfraQuota } from './deepinfra.js';
 
 const readCredentials = async () => ({ deepinfra: { type: 'api', key: 'test-token' } });
 const fetchQuota = () => fetchDeepinfraQuota({ readCredentials });
@@ -138,5 +138,73 @@ describe('DeepInfra quota provider', () => {
     expect(result.configured).toBe(true);
     expect(result.error).toBe('No quota data in response');
     expect(result.usage).toBeNull();
+  });
+});
+
+// Documented shape of GET https://api.deepinfra.com/v1/models: each entry
+// carries metadata.pricing per million tokens and metadata.discount as the
+// share taken off (0.51 = 51 % off), which the pricing page shows as a struck
+// through list price beside the campaign price.
+const modelEntry = (id, pricing, discount) => ({
+  id,
+  object: 'model',
+  metadata: { pricing, ...(discount === undefined ? {} : { discount }) },
+});
+
+const TOKEN_PRICING = { input_tokens: 0.2, output_tokens: 0.6, cache_read_tokens: 0.006 };
+
+describe('DeepInfra model prices', () => {
+  const fetchPrices = (modelIds, fetchImpl = vi.fn()) => fetchDeepinfraPrices({ modelIds, readCredentials, fetchImpl });
+
+  it('takes the campaign discount off input, output and the cached read', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(mockResponse({
+      data: [modelEntry('deepseek-ai/DeepSeek-V4.1-Flash-1017', TOKEN_PRICING, 0.51)],
+    }));
+
+    const costs = await fetchPrices(['deepseek-ai/DeepSeek-V4.1-Flash-1017'], fetchImpl);
+
+    expect(costs).toEqual({
+      'deepseek-ai/DeepSeek-V4.1-Flash-1017': { input: 0.098, output: 0.294, cache_read: 0.00294 },
+    });
+  });
+
+  it('keeps the list price when the provider reports no campaign', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(mockResponse({
+      data: [modelEntry('deepseek-ai/DeepSeek-V4.1-Flash', TOKEN_PRICING, null)],
+    }));
+
+    const costs = await fetchPrices(['deepseek-ai/DeepSeek-V4.1-Flash'], fetchImpl);
+
+    expect(costs).toEqual({
+      'deepseek-ai/DeepSeek-V4.1-Flash': { input: 0.2, output: 0.6, cache_read: 0.006 },
+    });
+  });
+
+  it('prices only the configured models and skips models without token pricing', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(mockResponse({
+      data: [
+        modelEntry('deepseek-ai/DeepSeek-V4.1-Flash-1017', TOKEN_PRICING, 0.51),
+        modelEntry('other/model', TOKEN_PRICING, 0.51),
+        modelEntry('image/model', { image_tokens: 1 }, 0.2),
+      ],
+    }));
+
+    const costs = await fetchPrices(['deepseek-ai/DeepSeek-V4.1-Flash-1017'], fetchImpl);
+
+    expect(Object.keys(costs)).toEqual(['deepseek-ai/DeepSeek-V4.1-Flash-1017']);
+  });
+
+  it('asks the provider nothing without a configured model', async () => {
+    const fetchImpl = vi.fn();
+
+    expect(await fetchPrices([], fetchImpl)).toEqual({});
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it('reports a failing model list as an error the caller can ignore', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue({ ok: false, status: 503, json: async () => ({}) });
+
+    await expect(fetchPrices(['deepseek-ai/DeepSeek-V4.1-Flash-1017'], fetchImpl))
+      .rejects.toThrow('DeepInfra model list: 503');
   });
 });

@@ -7,6 +7,7 @@ import { asNonEmptyString } from '../shared/guards.js';
 import { fetchQuota as fetchZenmuxQuota } from './providers/zenmux.js';
 import { listExtensionQuotaProviders } from './extension-registry.js';
 import { QuotaRouteError } from './route-error.js';
+import { refreshProviderPrices } from './model-prices.js';
 
 // Keyed by the same provider ids as `normalizers`: a provider with a normalizer
 // but no validator would be stored without ever being checked.
@@ -33,7 +34,7 @@ const credentialError = (res, error) => res.status(400).json({
   error: error instanceof Error ? error.message : 'Credential validation failed',
 });
 
-export function registerQuotaRoutes(app, { getQuotaProviders }) {
+export function registerQuotaRoutes(app, { getQuotaProviders, refreshModelPrices = refreshProviderPrices }) {
   // The usage providers installed extensions serve right now (id, name, icon,
   // extension), which the UI draws beside its built-in list. Every client reads
   // this on each stream connect, so it answers from memory and asks OpenCode nothing.
@@ -106,6 +107,11 @@ export function registerQuotaRoutes(app, { getQuotaProviders }) {
       if (!providerId) return res.status(400).json({ error: 'Provider ID is required' });
       const { fetchQuotaForProvider } = await getQuotaProviders();
       res.json(await fetchQuotaForProvider(providerId));
+      // The provider read that answered the panel also answers its price list
+      // (`model-prices.js`): a campaign price reaches the model card and the
+      // session cost without a second round trip from the UI. It never rejects
+      // and never delays this answer.
+      void refreshModelPrices(providerId);
     } catch (error) {
       // An extension's answer OpenChamber cannot use (`extension-quota.js`): the UI shows the message as the refresh failure, never an empty result.
       if (error instanceof QuotaRouteError) return res.status(error.status).json({ code: error.code, error: error.message });

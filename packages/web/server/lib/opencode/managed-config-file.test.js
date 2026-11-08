@@ -13,8 +13,9 @@ afterEach(async () => {
 
 const DENIAL = { action: 'integration.use', resource: 'plugin:leakshield', effect: 'deny' };
 
-const createHarness = async ({ settings = {}, env = {}, listExtensionSkillDirectories, listExtensionPluginDirectories, openchamberVersion, readPluginDenials } = {}) => {
-  const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'openchamber-managed-config-'));
+const createHarness = async ({ settings = {}, env = {}, listExtensionSkillDirectories, listExtensionPluginDirectories, openchamberVersion, readPluginDenials, dataDir: existingDataDir } = {}) => {
+  const dataDir = existingDataDir ?? await fs.mkdtemp(path.join(os.tmpdir(), 'openchamber-managed-config-'));
+  if (!existingDataDir) temporaryDirectories.push(dataDir);
   temporaryDirectories.push(dataDir);
   const agentToolRuntime = {
     pluginDirectory: path.join(dataDir, 'agent-tool', 'openchamber-agent-tool'),
@@ -418,5 +419,67 @@ describe('managed OpenCode config file', () => {
       plugins: ['-opencode.browser', agentToolRuntime.pluginDirectory, titleDirectory],
       policies: [DENIAL],
     });
+  });
+
+  it('writes the campaign price a provider reported beside its plugins', async () => {
+    const { runtime, readConfigFile } = await createHarness({ settings: {} });
+    await runtime.buildManagedChildEnv();
+
+    const written = await runtime.setProviderModelCosts('deepinfra', {
+      'deepseek-ai/DeepSeek-V4.1-Flash-1017': { input: 0.098, output: 0.294, cache_read: 0.00294 },
+    });
+
+    expect(written).toBe(true);
+    const config = await readConfigFile();
+    expect(config.providers).toEqual({
+      deepinfra: {
+        models: {
+          'deepseek-ai/DeepSeek-V4.1-Flash-1017': {
+            cost: { input: 0.098, output: 0.294, cache: { read: 0.00294 } },
+          },
+        },
+      },
+    });
+    // The plugin list stays where it was: the price rides the same layer.
+    expect(config.plugins).toEqual(expect.arrayContaining(['-opencode.browser']));
+  });
+
+  it('leaves the layer alone when the price did not change', async () => {
+    const { runtime } = await createHarness({ settings: {} });
+    await runtime.buildManagedChildEnv();
+    const costs = { 'model/test': { input: 0.2, output: 0.6 } };
+
+    expect(await runtime.setProviderModelCosts('deepinfra', costs)).toBe(true);
+    expect(await runtime.setProviderModelCosts('deepinfra', costs)).toBe(false);
+  });
+
+  it('keeps the last campaign price across a restart', async () => {
+    const first = await createHarness({ settings: {} });
+    await first.runtime.buildManagedChildEnv();
+    await first.runtime.setProviderModelCosts('deepinfra', {
+      'model/test': { input: 0.098, output: 0.294, cache_read: 0.00294 },
+    });
+
+    const second = await createHarness({ settings: {}, dataDir: first.dataDir });
+    await second.runtime.buildManagedChildEnv();
+
+    expect((await second.readConfigFile()).providers).toEqual({
+      deepinfra: {
+        models: {
+          'model/test': { cost: { input: 0.098, output: 0.294, cache: { read: 0.00294 } } },
+        },
+      },
+    });
+  });
+
+  it('keeps the prices out of a config file the user owns', async () => {
+    const { runtime, dataDir } = await createHarness({
+      settings: {},
+      env: { OPENCODE_CONFIG: '/home/user/opencode.json', OPENCODE_CONFIG_CONTENT: '{}' },
+    });
+    await runtime.buildManagedChildEnv();
+
+    expect(await runtime.setProviderModelCosts('deepinfra', { 'model/test': { input: 0.1, output: 0.2 } })).toBe(false);
+    await expect(fs.readdir(dataDir)).resolves.not.toContain(MANAGED_CONFIG_FILE_NAME);
   });
 });

@@ -16,13 +16,96 @@ export const MANAGED_CONFIG_FILE_NAME = 'opencode.managed.json';
  * `opencode.browser` still re-enables it, because that layer sits above ours.
  */
 const DISABLED_BUILTIN_PLUGINS = ['-opencode.browser'];
-
 /**
  * OpenCode's own `experimental_image_generate` tool (2.2.1+, on by default
  * since 2.2.2), switched off while `openchamber_image` is
  * on, so the agent sees one image tool, the one using the model the user chose.
  */
 const BUILTIN_IMAGE_PLUGIN = '-opencode.tool.image-generate';
+
+/**
+ * Campaign prices a provider reports beside its quota (`quota/model-prices.js`).
+ *
+ * OpenCode takes its price list from models.dev, which carries the list price,
+ * while DeepInfra bills a discount campaign. The usage read hands the reported
+ * prices here, and they are written as `providers.<id>.models.<id>.cost` into
+ * this layer: OpenCode watches the file, so the model card and the cost of the
+ * running session show what the provider charges. Only the models the user
+ * configured are written, because OpenCode reads a `models` entry as a model to
+ * offer.
+ */
+
+/** A price is USD per million tokens; six decimals hold a campaign price. */
+const roundPrice = (value) => Math.round(value * 1e6) / 1e6;
+
+/**
+ * Costs in the shape the quota providers report: `input` and `output` are
+ * required, the cache prices optional. Anything else is dropped.
+ *
+ * @param {Record<string, {input?: number, output?: number, cache_read?: number, cache_write?: number}>} costs
+ * @returns {Record<string, {input: number, output: number, cache_read?: number, cache_write?: number}>}
+ */
+const normalizeModelCosts = (costs) => {
+  if (!costs || typeof costs !== 'object') return {};
+  const normalized = {};
+  for (const [modelId, cost] of Object.entries(costs)) {
+    if (!modelId.trim() || !cost || typeof cost !== 'object') continue;
+    const entry = {};
+    for (const field of ['input', 'output', 'cache_read', 'cache_write']) {
+      const value = cost[field];
+      if (typeof value === 'number' && Number.isFinite(value) && value >= 0) entry[field] = roundPrice(value);
+    }
+    if (entry.input === undefined || entry.output === undefined) continue;
+    normalized[modelId] = entry;
+  }
+  return normalized;
+};
+
+/** v2 model cost: `cache` nests the read and the write price. */
+const toConfigModelCost = (cost) => {
+  const cache = {};
+  if (cost.cache_read !== undefined) cache.read = cost.cache_read;
+  if (cost.cache_write !== undefined) cache.write = cost.cache_write;
+  return {
+    input: cost.input,
+    output: cost.output,
+    ...(Object.keys(cache).length ? { cache } : {})
+  };
+};
+
+/** The inverse of `toConfigModelCost`: the prices this layer wrote last run. */
+const fromConfigModelCost = (cost) => {
+  if (!cost || typeof cost !== 'object') return null;
+  const cache = cost.cache && typeof cost.cache === 'object' ? cost.cache : {};
+  return normalizeModelCosts({
+    model: { input: cost.input, output: cost.output, cache_read: cache.read, cache_write: cache.write }
+  }).model ?? null;
+};
+
+/**
+ * The prices an existing layer already holds, so a restart keeps the last
+ * campaign price until the first provider read refreshes it.
+ *
+ * @param {object} config the parsed layer file
+ * @returns {Record<string, Record<string, object>>} provider id to model costs
+ */
+const readModelCostsFromConfig = (config) => {
+  const providers = {};
+  const sections = [config?.providers, config?.provider].filter((section) => section && typeof section === 'object');
+  for (const section of sections) {
+    for (const [providerId, entry] of Object.entries(section)) {
+      const models = entry && typeof entry === 'object' ? entry.models : null;
+      if (!models || typeof models !== 'object') continue;
+      const costs = {};
+      for (const [modelId, model] of Object.entries(models)) {
+        const cost = fromConfigModelCost(model?.cost);
+        if (cost) costs[modelId] = cost;
+      }
+      if (Object.keys(costs).length > 0) providers[providerId] = { ...(providers[providerId] ?? {}), ...costs };
+    }
+  }
+  return providers;
+};
 
 /**
  * The managed OpenCode config layer.
@@ -41,7 +124,10 @@ const BUILTIN_IMAGE_PLUGIN = '-opencode.tool.image-generate';
  * everywhere but in the sessions that allow it. OpenCode appends every layer's
  * permissions to each agent, so ours add to the user's rules and replace none.
  * `skills` lists our extension-writing skill and the folders active extensions
- * ship, and `commands` the command that starts extension work. It sits above
+ * ship, and `commands` the command that starts extension work. `providers`
+ * carries the campaign prices a quota provider reports for the models the user
+ * configured (`quota/model-prices.js`), so OpenCode bills what the provider
+ * charges instead of the models.dev list price. It sits above
  * the user's global `opencode.json` and below their project config, so it never
  * shadows a project-level choice. The plugin folders active extensions ship
  * come after OpenChamber's own plugins: OpenCode loads in list order, so an
@@ -80,6 +166,36 @@ export const createManagedConfigRuntime = ({
 }) => {
   const filePath = path.join(instanceDir, MANAGED_CONFIG_FILE_NAME);
 
+  /** Prices the providers reported, provider id to model id to cost. */
+  const providerModelCosts = new Map();
+  let providerCostsLoaded = null;
+
+  const ensureProviderModelCosts = async () => {
+    if (providerCostsLoaded) return providerCostsLoaded;
+    providerCostsLoaded = (async () => {
+      try {
+        const parsed = JSON.parse(await fsPromises.readFile(filePath, 'utf8'));
+        for (const [providerId, costs] of Object.entries(readModelCostsFromConfig(parsed))) {
+          providerModelCosts.set(providerId, costs);
+        }
+      } catch {
+        // No layer yet, or one we cannot read: the first provider read fills it.
+      }
+    })();
+    return providerCostsLoaded;
+  };
+
+  /** The `providers` section of the layer, or null while no price is known. */
+  const providerCostsSection = () => {
+    const providers = {};
+    for (const [providerId, costs] of providerModelCosts) {
+      const models = {};
+      for (const [modelId, cost] of Object.entries(costs)) models[modelId] = { cost: toConfigModelCost(cost) };
+      if (Object.keys(models).length > 0) providers[providerId] = { models };
+    }
+    return Object.keys(providers).length > 0 ? providers : null;
+  };
+
   /** The user owns `OPENCODE_CONFIG` when their environment already set it. */
   const ownsConfigFile = () => (env.OPENCODE_CONFIG ?? '').trim().length === 0;
 
@@ -88,6 +204,8 @@ export const createManagedConfigRuntime = ({
     const config = { plugins: [...disabled, ...directories, ...extensionPlugins], skills, commands };
     if (policies.length > 0) config.policies = policies;
     if (permissions.length > 0) config.permissions = permissions;
+    const providers = providerCostsSection();
+    if (providers) config.providers = providers;
     const text = `${JSON.stringify(config, null, 2)}\n`;
     // Temp + rename: OpenCode reacts to the write immediately, and a partial
     // read would make it drop every managed plugin until the next change.
@@ -155,12 +273,38 @@ export const createManagedConfigRuntime = ({
     writing = (async () => {
       do {
         writeAgain = false;
+        await ensureProviderModelCosts();
         await writeConfigFile(await materializeEnabledPlugins());
       } while (writeAgain);
     })().finally(() => {
       writing = null;
     });
     return writing;
+  };
+
+  /**
+   * Record what a provider charges for the models the user configured and, when
+   * that differs from the layer on disk, rewrite it so the running OpenCode
+   * bills the new price. A no-op when the user owns `OPENCODE_CONFIG`: their
+   * prices stay theirs and the next write of the file carries ours only if
+   * OpenChamber ever owns it.
+   *
+   * @param {string} providerId
+   * @param {Record<string, {input: number, output: number, cache_read?: number, cache_write?: number}>} costs
+   * @returns {Promise<boolean>} whether the layer was rewritten
+   */
+  const setProviderModelCosts = async (providerId, costs) => {
+    const id = typeof providerId === 'string' ? providerId.trim() : '';
+    if (!id) return false;
+    await ensureProviderModelCosts();
+    const normalized = normalizeModelCosts(costs);
+    const next = Object.keys(normalized).length > 0 ? normalized : null;
+    if (JSON.stringify(providerModelCosts.get(id) ?? null) === JSON.stringify(next)) return false;
+    if (next) providerModelCosts.set(id, next);
+    else providerModelCosts.delete(id);
+    if (!ownsConfigFile()) return false;
+    await writeLatestConfigFile();
+    return true;
   };
 
   /**
@@ -205,5 +349,6 @@ export const createManagedConfigRuntime = ({
     ownsConfigFile,
     buildManagedChildEnv,
     refreshManagedConfigFile,
+    setProviderModelCosts,
   };
 };

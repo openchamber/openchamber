@@ -183,6 +183,7 @@ import { createDevServerScanner } from './lib/dev-servers/routes.js';
 import { createDevTunnelRuntime } from './lib/dev-tunnel/runtime.js';
 import { registerBrowserControlRoutes } from './lib/browser-control/routes.js';
 import { createManagedConfigRuntime } from './lib/opencode/managed-config-file.js';
+import { modelPriceProviders, refreshProviderPrices, registerModelPriceSink } from './lib/quota/model-prices.js';
 import { openCodePluginDelivery } from './lib/guests/opencode-plugin.js';
 import { createLimitFailoverRuntime } from './lib/limit-failover/runtime.js';
 import { prepareInstanceDir } from './lib/opencode/instance-dir.js';
@@ -2462,6 +2463,14 @@ async function main(options = {}) {
     openchamberVersion: OPENCHAMBER_VERSION,
     readPluginDenials: () => pluginSwitchStore.denials(),
   });
+  // Prices a provider reports beside its quota reach the config layer OpenCode
+  // watches, so the model card and the session cost show what it bills. The
+  // usage panel refreshes a provider every few minutes; at start nothing has
+  // asked yet, so the campaign price of the last run is refreshed once here.
+  registerModelPriceSink((providerId, costs) => managedConfigRuntime.setProviderModelCosts(providerId, costs));
+  for (const priceProviderId of modelPriceProviders()) {
+    void refreshProviderPrices(priceProviderId);
+  }
   // A policy that changes while the app runs: the managed file lists what the
   // catalog now refuses until it is rewritten, and every card re-reads the catalog.
   stopEnterprisePolicyWatch = watchEnterprisePolicy({
