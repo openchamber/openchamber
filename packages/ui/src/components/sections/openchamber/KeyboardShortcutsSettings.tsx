@@ -158,7 +158,7 @@ export const KeyboardShortcutsSettings: React.FC = () => {
 
   return (
     <>
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="mb-6 flex flex-wrap items-center gap-2">
         <div className="relative min-w-52 flex-1">
           <Icon
             name="search"
