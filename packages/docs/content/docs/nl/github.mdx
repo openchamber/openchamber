@@ -7,7 +7,7 @@ description: Verbind GitHub, GitLab, Gitea, Forgejo of Gerrit en werk vanuit Ope
 
 Verbind een account op de host waar uw project staat. OpenChamber kan dan de issues en pull requests ervan tonen, er een sessie vanuit starten en pull requests voor u openen, reviewen en mergen. Er zijn vijf hosts ingebouwd: GitHub, inclusief GitHub Enterprise; GitLab, inclusief zelfbeheerde GitLab; Gitea; Forgejo, inclusief Codeberg; en Gerrit. Een [extensie](/nl/extensions/#een-extensie-als-git-host) kan er nog een toevoegen.
 
-De remote van het project bepaalt met welke host OpenChamber praat. Een project waarvan `origin` op gitlab.com staat, gebruikt uw GitLab-account voor het bord, het pull-request-label bij de branches en de Git-weergave. Een remote op een hostalias uit `~/.ssh/config`, zoals `github.com-work`, wordt aan geen enkele host gekoppeld.
+De remote van het project bepaalt met welke host OpenChamber praat. Een project waarvan `origin` op gitlab.com staat, gebruikt uw GitLab-account voor het bord, het pull-request-label bij de branches en de Git-weergave. Een remote op een hostalias uit `~/.ssh/config`, zoals `github.com-work`, wordt aan geen enkele host gekoppeld. Gitea en Forgejo koppelen een alias waarvan de SSH-configuratie naar het webadres van de instantie wijst, en een remote op het SSH-cloneadres van de instantie zodra u dat adres invoert in **Settings → Integrations**.
 
 De woorden volgen de host. GitLab spreekt van merge requests, Gerrit van wijzigingen.
 

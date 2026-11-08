@@ -1,6 +1,8 @@
 import React from 'react';
 
-import { Icon } from '@/components/icon/Icon';
+import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
+import { ContentLoadingState, ContentState } from '@/components/ui/content-state';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { useI18n } from '@/lib/i18n';
 import { ArtifactMetaBar } from './ArtifactMetaBar';
 import { formatArtifactSize } from './artifactMeta';
@@ -49,16 +51,15 @@ export const FontArtifact: React.FC<{
     <div className="flex h-full min-h-0 flex-col">
       <ArtifactMetaBar items={[name, formatArtifactSize(sizeBytes)]} />
       {status === 'failed' ? (
-        <div className="flex flex-1 items-center justify-center p-6 text-center typography-ui text-muted-foreground">
-          {t('filesView.artifact.font.loadFailed')}
-        </div>
+        <ContentState
+          icon={<FileTypeIcon filePath={name} className="size-10" />}
+          title={name}
+          description={t('filesView.artifact.font.loadFailed')}
+        />
       ) : status === 'loading' ? (
-        <div className="flex items-center gap-2 p-3 typography-ui text-muted-foreground">
-          <Icon name="loader-4" className="size-4 animate-spin" />
-          {t('common.loading')}
-        </div>
+        <ContentLoadingState label={t('filesView.artifact.state.loading')} />
       ) : (
-        <div className="min-h-0 flex-1 overflow-auto p-4" style={{ fontFamily: `"${family}"` }}>
+        <ScrollableOverlay outerClassName="min-h-0 flex-1" className="p-4" style={{ fontFamily: `"${family}"` }}>
           <div className="flex flex-col gap-4">
             {SAMPLE_SIZES.map((size) => (
               <div key={size} className="flex items-baseline gap-3">
@@ -68,11 +69,11 @@ export const FontArtifact: React.FC<{
                 </span>
               </div>
             ))}
-            <div className="mt-2 flex flex-col gap-1 border-t border-border/40 pt-4 text-foreground" style={{ fontSize: '20px' }}>
+            <div className="mt-2 flex flex-col gap-1 border-t border-edge-muted pt-4 text-foreground" style={{ fontSize: '20px' }}>
               {GLYPH_ROWS.map((row) => <div key={row} className="break-all leading-relaxed">{row}</div>)}
             </div>
           </div>
-        </div>
+        </ScrollableOverlay>
       )}
     </div>
   );

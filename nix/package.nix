@@ -3,6 +3,8 @@
   stdenv,
   makeWrapper,
   bun,
+  bun2nix,
+  callPackage,
   nodejs,
   git,
   openssh,
@@ -59,22 +61,26 @@ let
       ];
   };
 
-  # Fixed-output derivation pinning the whole bun dependency tree.
-  # Mirrors the Dockerfile deps stage: bun install --frozen-lockfile
-  # --ignore-scripts. Patches from package.json patchedDependencies are
-  # applied by bun itself; native builds are skipped, matching Docker.
+  bunCache = callPackage ./bun-cache.nix { inherit bun2nix; } src;
+
   bunDeps = stdenv.mkDerivation {
     pname = "openchamber-bun-deps";
     inherit version src;
 
-    nativeBuildInputs = [ bun ];
+    nativeBuildInputs = [
+      bun
+      bun2nix.hook
+    ];
+    bunDeps = bunCache;
+    dontRunLifecycleScripts = true;
+    dontUseBunPatch = true;
+    bunInstallFlags = [
+      "--offline"
+      "--frozen-lockfile"
+    ];
 
     configurePhase = ":";
-    buildPhase = ''
-      export HOME="$PWD/.bun-home"
-      mkdir -p "$HOME"
-      bun install --frozen-lockfile --ignore-scripts
-    '';
+    buildPhase = ":";
     installPhase = ''
       mkdir -p "$out"
       cp -a node_modules "$out/node_modules"
@@ -84,15 +90,6 @@ let
       done
     '';
 
-    outputHashMode = "recursive";
-    outputHashAlgo = "sha256";
-    # The baked hashes live in one data file (nix/hashes.json) so the
-    # automated bake PR touches a single file.
-    outputHash = (builtins.fromJSON (builtins.readFile ./hashes.json)).bunDeps;
-
-    # Keep node_modules byte-identical to what bun produced (Docker parity):
-    # no shebang rewriting, no patchelf, no symlink checks. Workspace .bin
-    # symlinks only resolve once this is overlaid on the full source tree.
     dontFixup = true;
   };
 
@@ -182,8 +179,10 @@ stdenv.mkDerivation {
     homepage = "https://github.com/openchamber/openchamber";
     license = lib.licenses.mit;
     mainProgram = "openchamber";
-    # x86_64-linux only: the aarch64 dependency hash is unverified (see the
-    # flake-level comment on the opencode input's per-system hashes).
-    platforms = [ "x86_64-linux" ];
+    platforms = [
+      "x86_64-linux"
+      "aarch64-linux"
+      "aarch64-darwin"
+    ];
   };
 }

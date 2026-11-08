@@ -51,17 +51,54 @@ describe('ChildStoreManager.subscribeAllSelected', () => {
     manager.disposeAll();
   });
 
-  test('notifies when the child-store registry changes', () => {
+  test('notifies when the child-store registry changes, after the creating call returns', async () => {
     const manager = new ChildStoreManager();
     let notifications = 0;
     const unsubscribe = manager.subscribeAllSelected((state) => state.session, () => {
       notifications += 1;
     });
 
+    // A sidebar row creates stores during render; notifying React there
+    // updates another component mid-render.
     manager.ensureChild('/workspace', { bootstrap: false });
+    manager.ensureChild('/other', { bootstrap: false });
+    expect(notifications).toBe(0);
+    await settle();
     expect(notifications).toBe(1);
 
     unsubscribe();
+    manager.disposeAll();
+  });
+
+  test('a new store is watched at once, before the deferred registry notification', async () => {
+    const manager = new ChildStoreManager();
+    let notifications = 0;
+    const unsubscribe = manager.subscribeAllSelected((state) => state.session, () => {
+      notifications += 1;
+    });
+
+    const child = manager.ensureChild('/workspace', { bootstrap: false });
+    child.setState({ session: [...child.getState().session] });
+    expect(notifications).toBe(1);
+    await settle();
+    expect(notifications).toBe(2);
+
+    unsubscribe();
+    manager.disposeAll();
+  });
+
+  test('an unsubscribed reader gets no deferred registry notification', async () => {
+    const manager = new ChildStoreManager();
+    let notifications = 0;
+    const unsubscribe = manager.subscribeAll(() => {
+      notifications += 1;
+    });
+
+    manager.ensureChild('/workspace', { bootstrap: false });
+    unsubscribe();
+    await settle();
+    expect(notifications).toBe(0);
+
     manager.disposeAll();
   });
 

@@ -279,6 +279,34 @@ export const buildLinkedGuestIssue = (input: {
   return next;
 };
 
+/**
+ * The stored snapshot of a discussion. A discussion has no entry of its own:
+ * it is an external link, which every client keeps when it rewrites the list
+ * (one that knows no discussion entry would drop it), named by its canonical
+ * address the way an agent's link to it is (`session-link.js`), so the two
+ * are one entry. A newer client reads it as a discussion by that address
+ * (`getRepositoryThreadRef`).
+ */
+export const buildLinkedDiscussion = (input: { url: string; number: number; title: string; linkedAt: number }): LinkedExternalItem => {
+  let canonical = input.url;
+  try {
+    const parsed = new URL(input.url);
+    const thread = /^\/[^/]+\/[^/]+\/discussions\/\d+/.exec(parsed.pathname);
+    if (thread) canonical = `${parsed.origin}${thread[0]}`;
+  } catch {
+    // The URL itself stays a stable id for malformed provider data.
+  }
+  return {
+    id: `link:${canonical}`,
+    kind: 'external',
+    thread: 'issue',
+    identifier: `#${input.number}`,
+    title: input.title,
+    url: input.url,
+    linkedAt: input.linkedAt,
+  };
+};
+
 /** The stored snapshot of a tracker's work item; the id keeps the identifier's case (`linear:ENG-12`). */
 export const buildLinkedTrackerItem = (input: {
   provider: string;
@@ -320,7 +348,7 @@ export const getLinkedIssues = (session: Session | null | undefined): LinkedIssu
 };
 
 /**
- * A linked issue or change request on a source-control provider, read from
+ * A linked issue, discussion or change request on a source-control provider, read from
  * its address against the providers' URL patterns. `owner` is the namespace
  * path where the provider nests them (GitLab subgroups). `key` names the thread
  * across every way it can be linked (a repository attach, an agent's link, an
@@ -333,7 +361,7 @@ export type RepositoryThreadRef = {
   owner: string;
   repo: string;
   number: number;
-  thread: 'pull' | 'issue';
+  thread: 'pull' | 'issue' | 'discussion';
 };
 
 /**
@@ -406,6 +434,8 @@ export const getLinkedSidebarChanges = (session: Session | null | undefined, mat
   return getLinkedIssues(session).flatMap((entry): LinkedSidebarChange[] => {
     if (!isLinkedChange(entry)) return [];
     const repository = getRepositoryThreadRef(entry, matcher);
+    // A discussion an agent called a change is an issue all the same: its address says so.
+    if (repository?.thread === 'discussion') return [];
     if (repository) {
       if (seen.has(repository.key)) return [];
       seen.add(repository.key);
@@ -419,14 +449,15 @@ export const getLinkedSidebarChanges = (session: Session | null | undefined, mat
   });
 };
 
-/** An issue linked to a session, as the sidebar shows it. */
+/** An issue linked to a session, as the sidebar shows it; a discussion is one of its repository issues. */
 export type LinkedSidebarIssue =
-  | { source: 'repository'; key: string; ref: RepositoryThreadRef; identifier: string; url: string; title: string }
+  | { source: 'repository'; key: string; ref: RepositoryThreadRef & { thread: 'issue' | 'discussion' }; identifier: string; url: string; title: string }
   | { source: 'tracker'; provider: string; key: string; identifier: string; url: string; title: string }
   | { source: 'guest' | 'external'; key: string; identifier: string; url: string; title: string };
 
 /**
- * Issues linked to a session, in link order. Repository issues carry their
+ * Issues linked to a session, in link order, discussions among them.
+ * Repository issues carry their
  * thread, so their state can be looked up, each once; tracker items carry
  * their tracker, whose live state is looked up by identifier; extension
  * items are shown by identifier. Change requests, including extension
@@ -435,14 +466,15 @@ export type LinkedSidebarIssue =
 export const getLinkedSidebarIssues = (session: Session | null | undefined, matcher: RepositoryUrlMatcher): LinkedSidebarIssue[] => {
   const seen = new Set<string>();
   return getLinkedIssues(session).flatMap((entry): LinkedSidebarIssue[] => {
-    if (isLinkedChange(entry)) return [];
     const ref = getRepositoryThreadRef(entry, matcher);
+    if (isLinkedChange(entry) && ref?.thread !== 'discussion') return [];
     if (ref) {
-      // A repository issue, or a duplicate of one listed earlier. An agent's or
+      // A repository issue or discussion, or a duplicate of one listed earlier. An agent's or
       // extension's issue link whose address names a change request is neither.
-      if (ref.thread !== 'issue' || seen.has(ref.key)) return [];
+      const { thread } = ref;
+      if (thread === 'pull' || seen.has(ref.key)) return [];
       seen.add(ref.key);
-      return [{ source: 'repository', key: ref.key, ref, identifier: repositoryThreadIdentifier(ref, matcher), url: entry.url, title: entry.title }];
+      return [{ source: 'repository', key: ref.key, ref: { ...ref, thread }, identifier: repositoryThreadIdentifier(ref, matcher), url: entry.url, title: entry.title }];
     }
     // An attached issue whose address no provider reads: no live state.
     if (entry.kind === 'issue') {

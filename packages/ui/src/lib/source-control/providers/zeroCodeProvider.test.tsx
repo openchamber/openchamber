@@ -69,6 +69,7 @@ const reference = (kind: 'issue' | 'pull', number: number, title: string): Repos
 const servedReferences = {
   pull: [reference('pull', 12, 'Teach the forge to rebase')],
   issue: [reference('issue', 7, 'Pipelines time out')],
+  discussion: [],
 } satisfies Record<RepositoryReference['kind'], RepositoryReference[]>;
 
 let providerReads = 0;
@@ -83,13 +84,16 @@ const sourceControl: SourceControlAPI = {
   repositoryBinding: () => new Promise(() => {}),
   repositoryContext: unexpected, resetRepositoryBinding: unexpected, repositoryProviderBindingMutate: unexpected,
   authInstances: unexpected, capabilities: unexpected, authStatus: unexpected, authStart: unexpected,
-  authComplete: unexpected, authSetToken: unexpected, authDisconnect: unexpected, authActivate: unexpected,
+  authComplete: unexpected, authSetToken: unexpected, authSetSshUrl: unexpected, authDisconnect: unexpected, authActivate: unexpected,
   authSetCliDisabled: unexpected,
   changeRequestStatus: unexpected, changeRequestCreate: unexpected, changeRequestUpdate: unexpected,
   changeRequestMerge: unexpected, changeRequestReady: unexpected, changeRequestComment: unexpected,
   changeRequestStartThread: unexpected, changeRequestReplyToThread: unexpected, changeRequestResolveThread: unexpected,
   changeRequestReview: unexpected, issueComment: unexpected, changeRequestSetState: unexpected,
   issueSetState: unexpected, changeRequestSetLabels: unexpected, issueSetLabels: unexpected,
+  discussionComment: unexpected, discussionSetState: unexpected, discussionSetAnswer: unexpected, discussionSetLabels: unexpected,
+  changeRequestReviewState: unexpected, changeRequestReviewComment: unexpected, changeRequestReviewCommentUpdate: unexpected,
+  changeRequestReviewCommentDelete: unexpected, changeRequestReviewDiscard: unexpected,
   changeRequestSetReviewers: unexpected, refreshProviderReads: unexpected, referenceLabels: unexpected,
   referenceReviewers: unexpected, changeRequestsList: unexpected, changeRequestContext: unexpected,
   issuesList: unexpected, issueGet: unexpected, issueComments: unexpected, projectUpstream: unexpected,

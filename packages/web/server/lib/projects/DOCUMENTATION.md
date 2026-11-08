@@ -17,14 +17,14 @@ that writes it:
 
 | Keys | Owner | Reached through |
 |---|---|---|
-| `version`, `scheduledTasks` | `project-config.js` (scheduled-task runtime) | `/api/projects/:projectId/scheduled-tasks/*` |
-| `setup-worktree`, `setup-worktree-wait`, `projectActions`, `projectActionsPrimaryId`, `draftStarters`, `projectPath` | `project-setup.js` via `readProjectSetup` / `updateProjectSetup` on the same runtime | `GET/PUT /api/projects/:projectId/config` (`routes.js`) |
+| `version`, `scheduledTasks`, `scheduledWorktreeCleanups` | `project-config.js` (scheduled-task runtime) | `/api/projects/:projectId/scheduled-tasks/*` and internal cleanup recovery |
+| `setup-worktree`, `setup-worktree-wait`, `teardownWorktree`, `projectActions`, `projectActionsPrimaryId`, `draftStarters`, `projectPath` | `project-setup.js` via `readProjectSetup` / `updateProjectSetup` on the same runtime | `GET/PUT /api/projects/:projectId/config` (`routes.js`) |
 
 Notes, todos, and plans moved out of this file to `packages/web/server/lib/project-context`.
 A project's environment variables and environment command are not in this file either: values can be secrets, so they live in `environment.json` (mode 0600, `packages/web/server/lib/environment`).
 
 A second, optional source is the team's shared file, `<repo>/.openchamber/project.json`
-(`version: 1`; `setupWorktree`, `setupWorktreeWait`, `projectActions`, `draftStarters`,
+(`version: 1`; `setupWorktree`, `setupWorktreeWait`, `teardownWorktree`, `projectActions`, `draftStarters`,
 `plansDir`, and `magicPrompts`, which `../magic-prompts` owns). The server reads it from the checkout the project id names
 (`projectPathFromId`). `GET /api/projects/:projectId/config`
 returns one merged view: what runs at the top level, plus `shared` and `personal`
@@ -34,6 +34,7 @@ blocks so a page can edit the personal file without copying a teammate's entry i
 |---|---|
 | `setupWorktree` | shared first, then personal; personal `setupWorktreeMode: "replace"` uses the personal list only |
 | `setupWorktreeWait` | personal when the personal file sets it, else shared, else `false` |
+| `teardownWorktree` | shared first, then personal; `setupWorktreeMode` does not apply, so a user who skips the team's setup still stops what the team's setup may have started |
 | `projectActions` | union by `id`; a personal action replaces the shared one with the same id; ids in personal `hiddenSharedActionIds` are dropped; every entry carries `source` |
 | `projectActionsPrimaryId` | personal only |
 | `draftStarters` | union by `type:name`, shared first, every entry carries `source` |
@@ -79,15 +80,43 @@ and removes the file when only `version` is left.
 Shared setup commands and shared actions run on the machine of whoever pulls
 the repo, so they run only after the user has seen them. The view carries
 `trust: { hash, trusted }`: `hash` is `sharedTrustHashOf(shared)`, a SHA-256
-over the executable parts (`setupWorktree` and each action's `id`, `command`,
-`runIn`, actions sorted by id; names and icons do not count), or `null` when
-nothing executes. `trusted` is true when nothing executes or the personal
+over the executable parts (`setupWorktree`, `teardownWorktree` when it is not
+empty, and each action's `id`, `command`, `runIn`, actions sorted by id; names
+and icons do not count), or `null` when nothing executes. An empty teardown list
+stays out of the hashed document, so an answer recorded before teardown
+commands existed still matches. `trusted` is true when nothing executes or the personal
 file's `sharedTrust.hash` equals the current hash, so a pull that changes a
 command brings the prompt back. The client records an answer with a PUT of
 `sharedTrustHash` (`null` forgets it). The prompt itself lives in the shared
-UI (`packages/ui/src/lib/sharedTrustConfirmation.ts`).
+UI (`packages/ui/src/lib/sharedTrustConfirmation.ts`). A worktree the server
+makes for an agent has no client to ask, so `worktree-setup.js` gives the
+prompt's "skip" answer when the shared commands are not trusted: it leaves
+them out and returns them for the caller to report.
 
 ## Modules
+
+`session-directory.js` serves `POST /api/projects/session-directory` for a
+session's unregistered host destination. It validates the directory, verifies
+the session still lives there, and checks the existing OpenCode fingerprint
+trust before appending. Empty configurations and already trusted fingerprints
+need no new answer. Untrusted code answers 403 `opencode_trust_required`; a
+changed destination answers 409; failed writes answer 503. It creates no folder,
+runs no project code, and never changes active-project or directory pointers.
+A destination inside a registered project returns that project. A linked
+worktree whose repository (the trust assessment's `repositoryKey`) matches a
+registered project's also returns that project, appends nothing, and emits
+`openchamber:worktree-changed` so clients list the worktree. That match
+assesses each registered project inside the settings write queue, so a project
+whose assessment takes over 2 seconds (a hung mount) counts as no match instead
+of holding the queue. Web, desktop and both mobile surfaces use the active server. VS Code registers
+through its workspace-folder bridge instead.
+
+### Why registration uses the settings write queue
+
+A background session and another window can update settings together. Resolving
+the project against the latest registry inside its write queue preserves other
+projects and metadata. Reading settings before enqueueing a whole replacement
+would lose an intervening append. A malformed registry fails without repair.
 
 - `project-id.js` — `createProjectIdFromPath` / `projectPathFromId`: the path-derived id (`path_<base64url>`) that names the file, and the checkout path back from it. The shared UI derives the same id (`packages/ui/src/lib/projectId.ts`); both sides must agree. `projectConfigFileStemOf`: the stem that names the file and the sibling folder for an id, see the file name invariant below.
 - `project-config.js` — `createProjectConfigRuntime`: raw read, atomic write, the cross-process file lock (Electron and a CLI `serve` can share one projects dir), scheduled-task normalization, and the project-setup read/update.
@@ -95,6 +124,9 @@ UI (`packages/ui/src/lib/sharedTrustConfirmation.ts`).
 - `routes.js` — directory activation and setup routes. `/api/openchamber/directory` and `/api/projects` are on the JSON-body allowlist in `opencode/core-routes.js`. Both register before the generic OpenCode proxy. Web, Electron, hosted mobile, and Capacitor use the server route. VS Code handles the directory route locally through `api:openchamber/directory` and keeps its existing manager-owned directory selection.
 
 ## Invariants
+
+- Scheduled worktree cleanup records are keyed by session id and survive task deletion. Each captures the created branch and directory identity. Scanning the project config files recovers runs even when their project is no longer registered; an unreadable file or malformed record does not erase other records. Claims and journal changes use the project lock, but Git removal runs outside it. A `removing` record carries both `ownerPID` and the native `ownerInstance` creation fingerprint until completion; PID reuse does not retain ownership. Failure releases ownership and a dead instance can be reclaimed. Unreadable process identity fails closed. Successful cleanup clears only that run's record. See `../scheduled-tasks/DOCUMENTATION.md` for the execution, goal and background-command gates.
+- Cleanup finalization accepts an abort signal and checks it after acquiring the project lock, after awaited claim checks, and before clearing the journal. An aborted claimed operation releases ownership without discarding the record; that release is allowed to finish after cancellation.
 
 - **Every write is a locked read-modify-write of the whole document.** Keys the writer does not own, and keys from newer builds, come back out unchanged. A setup update and a scheduled-task update never clobber each other.
 - **A wrongly shaped key is a 400, not a silent drop.** `projectSetupPatchToStored` throws; the file is untouched. Values inside a well-shaped key are sanitized (trimmed, capped, deduplicated) rather than rejected.

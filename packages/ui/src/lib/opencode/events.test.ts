@@ -146,6 +146,23 @@ describe("translateWireEvent", () => {
     })
   })
 
+  test("a synthetic item entering the inbox is pending until it is delivered", () => {
+    const events = translateWireEvent({
+      ...base,
+      type: "session.inbox.enqueued",
+      durable,
+      data: {
+        sessionID: "ses_1",
+        inboxID: "msg_s",
+        item: { type: "synthetic", delivery: "steer", payload: { text: "result" } },
+      },
+    })
+    expect(events).toEqual([{
+      type: "message.updated",
+      properties: { info: { id: "msg_s", sessionID: "ses_1", role: "synthetic", time: { created: 1000 }, text: "result", pending: true } },
+    }])
+  })
+
   test("assistant steps create the message, then patch it on completion", () => {
     const started = translateWireEvent({
       ...base,
@@ -304,7 +321,11 @@ describe("translateWireEvent", () => {
     })
     expect(form[0]).toMatchObject({ type: "form.created", properties: { form: { id: "form_1" } } })
     const settled = translateWireEvent({ ...base, type: "form.cancelled", data: { id: "form_1", sessionID: "ses_1" } })
-    expect(settled).toEqual([{ type: "form.settled", properties: { sessionID: "ses_1", formID: "form_1" } }])
+    // The two settle events collapse for the reducer but keep their
+    // disposition: recovery must tell an answer from a cancellation.
+    expect(settled).toEqual([{ type: "form.settled", properties: { sessionID: "ses_1", formID: "form_1", disposition: "cancelled" } }])
+    const replied = translateWireEvent({ ...base, type: "form.replied", data: { id: "form_1", sessionID: "ses_1", answer: { a: true } } })
+    expect(replied).toEqual([{ type: "form.settled", properties: { sessionID: "ses_1", formID: "form_1", disposition: "replied" } }])
   })
 
   test("catalog rebuilds name the list that has to be re-read", () => {
@@ -380,10 +401,14 @@ describe("translateWireEvent", () => {
       { ...base, type: "session.inbox.delivery.changed", durable, data: { sessionID: "ses_1", inboxID: "in_1", delivery: "queue" } },
       { ...base, type: "tui.toast.show", data: { message: "x", variant: "info" } },
       { ...base, type: "integration.updated", data: {} },
-      { ...base, type: "filesystem.changed", data: { file: "/repo/a.ts", event: "change" } },
       { ...base, type: "worktree.updated", data: { projectID: "proj" } },
     ]
     for (const event of ignored) expect(translateWireEvent(event)).toEqual([])
+  })
+
+  test("a watched file's change names the file", () => {
+    expect(translateWireEvent({ ...base, type: "filesystem.changed", data: { file: "/repo/a.ts", event: "unlink" } }))
+      .toEqual([{ type: "filesystem.changed", properties: { file: "/repo/a.ts" } }])
   })
 })
 

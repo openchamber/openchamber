@@ -4,6 +4,8 @@ import { useChatColumnActions, useChatSessionSelection } from './chatColumnSessi
 import { useSessions } from '@/sync/sync-context';
 import * as sessionActions from '@/sync/session-actions';
 import { canSavePermission } from './permissionSummary';
+import { eventMatchesShortcut, getEffectiveShortcutCombo, type ShortcutActionId } from '@/lib/shortcuts';
+import { useUIStore } from '@/stores/useUIStore';
 
 type ColumnKind = 'main' | 'pinned';
 
@@ -17,17 +19,21 @@ const columnOfEvent = (event: KeyboardEvent): ColumnKind => (
 );
 
 /**
- * The reply a key press gives: Alt+Enter allows once, Alt+Shift+Enter always
- * (only when the request has something to save), Alt+Backspace denies.
+ * The reply a key press gives. "Always" needs something to save. Bindings are
+ * single chords matched here, in the capture phase, because the composer would
+ * otherwise take the default Alt+Enter as a new line.
  */
 export const permissionShortcutReply = (
-  event: Pick<KeyboardEvent, 'key' | 'altKey' | 'shiftKey' | 'metaKey' | 'ctrlKey'>,
+  event: KeyboardEvent,
   canSave: boolean,
+  overrides?: Record<string, string>,
 ): PermissionReply | null => {
-  if (!event.altKey || event.metaKey || event.ctrlKey) return null;
-  if (event.key === 'Enter') return event.shiftKey ? (canSave ? 'always' : null) : 'once';
-  if (event.key === 'Backspace' && !event.shiftKey) return 'reject';
-  return null;
+  const pressed = (actionId: ShortcutActionId) => (
+    eventMatchesShortcut(event, getEffectiveShortcutCombo(actionId, overrides))
+  );
+  if (pressed('permission_allow_once')) return 'once';
+  if (pressed('permission_deny')) return 'reject';
+  return canSave && pressed('permission_allow_always') ? 'always' : null;
 };
 
 /** The request was raised by a child of the session the user is looking at. */
@@ -83,7 +89,7 @@ export const usePermissionResponse = (
         if (entry.column === target) owner = entry;
       }
       if (owner !== card) return;
-      const response = permissionShortcutReply(event, canSave);
+      const response = permissionShortcutReply(event, canSave, useUIStore.getState().shortcutOverrides);
       if (!response) return;
       event.preventDefault();
       event.stopPropagation();

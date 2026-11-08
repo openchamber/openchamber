@@ -349,6 +349,36 @@ describe('GET /api/source-control/github/references', () => {
     expect(res.body.hasMore).toBe(false);
   });
 
+  it('lists discussions with their own search and reads one with its comment threads', async () => {
+    const discussionNode = { ...issueNode(9), __typename: 'Discussion', url: 'https://github.com/example/project/discussions/9',
+      closed: false, isAnswered: false, locked: false, upvoteCount: 2, category: { name: 'Q&A', emojiHTML: '<div>🙏</div>', isAnswerable: true } };
+    delete discussionNode.state;
+    serveGitHub((body) => {
+      if (body.query.includes('DiscussionDetail')) {
+        return response({ data: { repository: { discussion: {
+          number: 9, locked: false, viewerCanUpdate: true, viewerCanClose: true, viewerCanReopen: false, category: { isAnswerable: true },
+          comments: { totalCount: 0, nodes: [] },
+        } } } });
+      }
+      expect(body.query).toContain('type: DISCUSSION');
+      // The board's unanswered list: open questions without an answer.
+      expect(body.variables.q).toBe('repo:example/project is:open is:unanswered sort:updated-desc');
+      return response({ data: { search: { discussionCount: 1, pageInfo: { hasNextPage: false, endCursor: null }, nodes: [discussionNode] } } });
+    });
+
+    const list = await request(app).get('/api/source-control/github/references')
+      .query({ ...readContext(project), kind: 'discussion', state: 'unanswered' })
+      .expect(200);
+    expect(list.body.items).toEqual([expect.objectContaining({ kind: 'discussion', number: 9, state: 'open', answered: false })]);
+
+    const detail = await request(app).get('/api/source-control/github/references/detail')
+      .query({ ...readContext(project), owner: 'example', repo: 'project', number: '9', kind: 'discussion' })
+      .expect(200);
+    expect(detail.body).toEqual({ connected: true, detail: {
+      number: 9, comments: [], commentTotal: 0, pull: null, discussion: { canComment: true, canClose: true, canReopen: false },
+    } });
+  });
+
   it('reads one item detail, only from the project repo network', async () => {
     const fetch = serveGitHub(() => response({ data: { repository: { issueOrPullRequest: {
       __typename: 'PullRequest',
@@ -611,6 +641,20 @@ describe('GitHub Enterprise references on a trusted enterprise checkout', () => 
 
     // The rejected ref's group never reaches the summaries.
     expect(fetch.mock.calls.some(([url]) => String(url).includes('/graphql'))).toBe(false);
+  });
+
+  it('reads the status of a pull request a link named outside the network, and refuses it to the same read without the link', async () => {
+    const fetch = vi.fn(async (url) => {
+      const endpoint = new URL(url);
+      if (endpoint.pathname === '/api/v3/repos/example/project') return response({ full_name: 'example/project', fork: false });
+      if (endpoint.pathname === '/api/graphql') return response({ data: {} });
+      throw new Error(`Unexpected GitHub request: ${endpoint.pathname}`);
+    });
+    vi.stubGlobal('fetch', fetch);
+
+    const query = { ...readContext(project), pulls: 'someone/else#5@github.example.com' };
+    await request(app).get('/api/source-control/github/references/status').query(query).expect(400);
+    await request(app).get('/api/source-control/github/references/status').query({ ...query, linked: '1' }).expect(200);
   });
 
   it("resolves a detail request naming an enterprise host with that host's Octokit, even when the same repo also exists on github.com", async () => {

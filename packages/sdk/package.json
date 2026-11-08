@@ -1,6 +1,6 @@
 {
   "name": "@openchamber/sdk",
-  "version": "2.5.1",
+  "version": "2.7.0",
   "description": "Contract for OpenChamber guests: manifest parse and iframe host bridge.",
   "private": false,
   "license": "MIT",
@@ -27,7 +27,8 @@
     }
   },
   "bin": {
-    "openchamber-guest-bundle": "./scripts/bundle-guest.ts"
+    "openchamber-guest-bundle": "./scripts/bundle-guest.ts",
+    "openchamber-guest-check": "./scripts/check-guest.ts"
   },
   "publishConfig": {
     "access": "public"
@@ -43,6 +44,7 @@
   "files": [
     "dist",
     "scripts/bundle-guest.ts",
+    "scripts/check-guest.ts",
     "README.md",
     "API.md",
     "DOCUMENTATION.md",

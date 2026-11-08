@@ -91,13 +91,12 @@ const JsonTreeView = React.memo(function JsonTreeView({
         </Button>
       </div>
       <div
-        className="oc-surface-code min-h-0 flex-1 bg-[var(--syntax-background)] py-1"
-        style={{ maxHeight, overflow: 'auto' }}
+        className="oc-surface-code flex min-h-0 flex-1 flex-col bg-[var(--syntax-background)] py-1"
+        style={{ maxHeight }}
       >
         <JsonTreeViewer
           ref={viewerRef}
           data={parsedData}
-          maxHeight={maxHeight}
           initiallyExpandedDepth={initiallyExpandedDepth}
         />
       </div>

@@ -46,13 +46,13 @@ const SwitcherRow: React.FC<{
       type="button"
       className={cn(
         'flex w-full items-center gap-3 rounded-xl px-2.5 py-2 text-start transition-colors active:bg-interactive-active focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring',
-        active && 'bg-[color-mix(in_srgb,var(--primary)_10%,transparent)]',
+        active && 'bg-interactive-selection text-interactive-selection-foreground',
       )}
       onClick={onSelect}
       style={{ touchAction: 'manipulation' }}
     >
       <span className="flex min-w-0 flex-1 flex-col">
-        <span dir="auto" className={cn('block truncate oc-ui-start-align typography-ui-label', active ? 'text-primary' : 'text-foreground')}>
+        <span dir="auto" className={cn('block truncate oc-ui-start-align typography-ui-label', !active && 'text-foreground')}>
           {getSessionTitle(session, t('sessions.sidebar.session.untitled'))}
         </span>
         {meta ? (
@@ -131,7 +131,7 @@ export const MobileSessionSwitcher: React.FC<{
   const setCurrentSession = useSessionUIStore((state) => state.setCurrentSession);
   const setActiveProjectIdOnly = useProjectsStore((state) => state.setActiveProjectIdOnly);
 
-  const items = useSwitcherItems(open || shouldRender, { maxParents: RECENT_SESSIONS_LIMIT });
+  const items = useSwitcherItems(open || shouldRender, { maxParents: RECENT_SESSIONS_LIMIT, ignorePins: true, currentSessionId });
 
   React.useEffect(() => {
     if (open) {
@@ -189,7 +189,7 @@ export const MobileSessionSwitcher: React.FC<{
         role="dialog"
         aria-label={t('sessions.switcher.openAria')}
         className={cn(
-          'oc-surface-elevated flex flex-col overflow-hidden rounded-[20px] border border-border/70 bg-surface-elevated p-2 shadow-[0_12px_32px_rgb(0_0_0_/_0.2)] will-change-transform',
+          'oc-surface-elevated flex flex-col overflow-hidden rounded-[20px] border border-edge bg-surface-elevated p-2 shadow-[0_12px_32px_rgb(0_0_0_/_0.2)] will-change-transform',
           isPopover ? 'absolute origin-top-left' : 'mx-3 mt-2',
           isExiting ? 'pointer-events-none' : 'pointer-events-auto',
         )}

@@ -1,8 +1,8 @@
 /**
- * Issues, pull requests and tracker tickets attached to the composer.
+ * Issues, discussions, pull requests and tracker tickets attached to the composer.
  *
- * A message may carry any number of them, from any source: repository issues
- * and change requests on any source-control provider, tracker work items
+ * A message may carry any number of them, from any source: repository issues,
+ * discussions and change requests on any source-control provider, tracker work items
  * (Linear issues), and items extensions hand over through `attach`. Each
  * one becomes its own context part on send, in the order it was attached.
  * Attaching an item that is already on the composer replaces it in place,
@@ -13,7 +13,7 @@ import type { JsonValue } from '@openchamber/sdk';
 
 import type { SourceControlProvider } from '@/lib/api/types';
 
-import { buildLinkedGuestIssue, buildLinkedIssue, buildLinkedTrackerItem, type LinkedIssue } from '@/lib/linkedIssues';
+import { buildLinkedDiscussion, buildLinkedGuestIssue, buildLinkedIssue, buildLinkedTrackerItem, type LinkedIssue } from '@/lib/linkedIssues';
 
 import type { ComposerContextReference } from './submit/buildOutgoingMessage';
 
@@ -24,6 +24,15 @@ export type ComposerReference =
         kind: 'repository-issue';
         /** Absent on issues restored from messages written before GitLab: those are GitHub. */
         provider?: SourceControlProvider;
+        number: number;
+        title: string;
+        url: string;
+        contextText: string;
+        author?: ComposerReferenceAuthor;
+    }
+    | {
+        kind: 'repository-discussion';
+        provider: SourceControlProvider;
         number: number;
         title: string;
         url: string;
@@ -71,6 +80,7 @@ export type ComposerReference =
 export const composerReferenceKey = (reference: ComposerReference): string => {
     switch (reference.kind) {
         case 'repository-issue':
+        case 'repository-discussion':
         case 'change-request':
             return `repository:${reference.url.toLowerCase()}`;
         case 'tracker-item':
@@ -114,6 +124,8 @@ export const toLinkedIssue = (reference: ComposerReference, linkedAt: number): L
                 author: reference.author,
                 linkedAt,
             });
+        case 'repository-discussion':
+            return buildLinkedDiscussion({ url: reference.url, number: reference.number, title: reference.title, linkedAt });
         case 'tracker-item':
             return buildLinkedTrackerItem({
                 provider: reference.provider,
@@ -146,6 +158,15 @@ export const toContextReference = (reference: ComposerReference): ComposerContex
             return {
                 kind: 'repository-issue',
                 ...(reference.provider ? { provider: reference.provider } : {}),
+                number: reference.number,
+                title: reference.title,
+                url: reference.url,
+                contextText: reference.contextText,
+            };
+        case 'repository-discussion':
+            return {
+                kind: 'repository-discussion',
+                provider: reference.provider,
                 number: reference.number,
                 title: reference.title,
                 url: reference.url,

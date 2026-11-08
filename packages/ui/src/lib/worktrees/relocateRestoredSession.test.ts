@@ -21,6 +21,7 @@ const setup = (options: {
   availability: Record<string, 'available' | 'missing' | 'unknown'>;
   projectRoot?: string | null;
   failMove?: boolean;
+  archived?: boolean;
 }) => {
   const moves: Array<{ id: string; from: string; to: string }> = [];
   const byId = new Map(options.sessions.map((entry) => [entry.id, entry]));
@@ -35,6 +36,7 @@ const setup = (options: {
         if (options.failMove) throw new Error('move rejected');
         moves.push({ id: moved.id, from, to });
       },
+      restoreArchivedWorktree: async () => options.archived === true,
     },
   };
 };
@@ -85,5 +87,24 @@ describe('relocateRestoredSessionIfDirectoryMissing', () => {
 
     const result = await relocateRestoredSessionIfDirectoryMissing('root', deps);
     expect(result.outcome).toBe('failed');
+  });
+
+  test('keeps a subsession whose worktree another restore brought back meanwhile', async () => {
+    const { deps, moves } = setup({ sessions: [session('root')], availability: { [PROJECT]: 'available' } });
+    let restoredByAnother = false;
+    deps.getDirectoryAvailability = async (directory: string) => (directory === WORKTREE && !restoredByAnother ? 'missing' : 'available');
+    // No archive left for it: the restore that ran first closed it.
+    deps.restoreArchivedWorktree = async () => {
+      restoredByAnother = true;
+      return false;
+    };
+    expect(await relocateRestoredSessionIfDirectoryMissing('root', deps)).toEqual({ outcome: 'kept' });
+    expect(moves).toEqual([]);
+  });
+
+  test('restores the archived worktree of a session archived with it, instead of moving it', async () => {
+    const { deps, moves } = setup({ sessions: [session('root')], availability: { [WORKTREE]: 'missing', [PROJECT]: 'available' }, archived: true });
+    expect(await relocateRestoredSessionIfDirectoryMissing('root', deps)).toEqual({ outcome: 'worktreeRestored' });
+    expect(moves).toEqual([]);
   });
 });

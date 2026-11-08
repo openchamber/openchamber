@@ -1,5 +1,7 @@
 import { digestMutationInput } from '../source-control/mutation-executor.js';
 import { changeRequestNetworkTarget } from '../source-control/repository-network.js';
+import { reviewCommentPosition } from '../source-control/review-position.js';
+import { cancelWaitingMerge, enableMergeWhenReady, readWaitingMerge } from './merge-when-ready.js';
 import {
   invalidProviderPayload,
   isPlainObject,
@@ -9,6 +11,7 @@ import {
   requireGitHubRepoNetwork,
   requireProviderArray,
 } from './mappers.js';
+import { readPendingReview } from './review-draft.js';
 
 /**
  * GitHub's durable mutations behind the shared route shell: the persisted
@@ -17,14 +20,21 @@ import {
  * reconciliation (`reconcile`).
  *
  * Digests cover GitHub's short operation name (`create`, `merge`, ...) while
- * records keep `change-request-<operation>` or the issue kinds; both are
- * persisted in `source-control-mutations.json` and must stay byte-identical,
- * or a retained `running` record would replay as a conflict.
+ * records keep `change-request-<operation>` or the issue and discussion
+ * kinds; both are persisted in `source-control-mutations.json` and must stay
+ * byte-identical, or a retained `running` record would replay as a conflict.
+ * Discussions are written through GraphQL by their node ids, read again at
+ * every write, so no id is kept in a record.
  */
 
 const ISSUE_KINDS = new Set(['issue-comment', 'issue-state', 'issue-labels']);
-const recordKind = (operation) => (ISSUE_KINDS.has(operation) ? operation : `change-request-${operation}`);
-const operationOf = (kind) => (ISSUE_KINDS.has(kind) ? kind : kind.replace(/^change-request-/, ''));
+const DISCUSSION_KINDS = new Set(['discussion-comment', 'discussion-state', 'discussion-answer', 'discussion-labels']);
+// Issue and discussion operations are their own record kinds; the rest are a change request's.
+const ownKind = (operation) => ISSUE_KINDS.has(operation) || DISCUSSION_KINDS.has(operation);
+const recordKind = (operation) => (ownKind(operation) ? operation : `change-request-${operation}`);
+const operationOf = (kind) => (ownKind(kind) ? kind : kind.replace(/^change-request-/, ''));
+// What GitHub calls each reason a discussion is closed for.
+const DISCUSSION_CLOSE_REASONS = Object.freeze({ resolved: 'RESOLVED', outdated: 'OUTDATED', duplicate: 'DUPLICATE' });
 
 /** The route each operation answers on. */
 const ROUTE_OPERATIONS = Object.freeze({
@@ -34,6 +44,10 @@ const ROUTE_OPERATIONS = Object.freeze({
   '/pr/ready': 'ready',
   '/pr/comment': 'comment',
   '/pr/review': 'review',
+  '/pr/review/comment': 'review-comment',
+  '/pr/review/comment/update': 'review-comment-update',
+  '/pr/review/comment/delete': 'review-comment-delete',
+  '/pr/review/discard': 'review-discard',
   '/pr/thread/reply': 'thread-reply',
   '/pr/thread/resolve': 'thread-resolve',
   '/issues/comment': 'issue-comment',
@@ -42,6 +56,18 @@ const ROUTE_OPERATIONS = Object.freeze({
   '/pr/labels': 'labels',
   '/issues/labels': 'issue-labels',
   '/pr/reviewers': 'reviewers',
+  '/discussions/comment': 'discussion-comment',
+  '/discussions/state': 'discussion-state',
+  '/discussions/answer': 'discussion-answer',
+  '/discussions/labels': 'discussion-labels',
+});
+
+// The operations on the viewer's own pending review.
+const REVIEW_DRAFT_OPERATIONS = new Set(['review-comment', 'review-comment-update', 'review-comment-delete', 'review-discard']);
+const REVIEW_EVENTS = Object.freeze({
+  approve: { event: 'APPROVE', state: 'APPROVED' },
+  'request-changes': { event: 'REQUEST_CHANGES', state: 'CHANGES_REQUESTED' },
+  comment: { event: 'COMMENT', state: 'COMMENTED' },
 });
 
 const mutationError = (message, code = 'INVALID_SOURCE_CONTROL_MUTATION_CONTEXT', status = 400) => Object.assign(new Error(message), { code, status });
@@ -95,11 +121,12 @@ const commentText = (value, required, maxLength) => {
   if (value.length > maxLength) throw mutationError('body is too long');
   return value;
 };
-// A review thread's GraphQL node id, such as `PRRT_kwDOA...`.
-const reviewThreadId = (value) => {
-  if (!isProviderString(value) || !/^[A-Za-z0-9_=-]{1,200}$/.test(value)) throw mutationError('threadId is invalid');
+// A GraphQL node id, such as a review thread's `PRRT_kwDOA...` or a discussion comment's `DC_kwDOA...`.
+const nodeId = (value, name) => {
+  if (!isProviderString(value) || !/^[A-Za-z0-9_=-]{1,200}$/.test(value)) throw mutationError(`${name} is invalid`);
   return value;
 };
+const reviewThreadId = (value) => nodeId(value, 'threadId');
 // Labels or reviewers as one whole set, so a repeat asks for the same result.
 const nameList = (value, name, limit) => {
   if (!Array.isArray(value) || value.length > limit
@@ -162,12 +189,39 @@ function normalizeOperation(operation, body, context, actor, credential, limits)
   if (operation === 'merge') {
     const method = requiredText(body.method, 'method');
     if (!['merge', 'squash', 'rebase'].includes(method)) throw mutationError('merge method is invalid');
-    return { input: { method }, digest: (target) => digestOf({ target, method }) };
+    if (body.cancel !== undefined && body.cancel !== true && body.cancel !== false) throw mutationError('cancel is invalid');
+    return body.cancel === true
+      ? { input: { method, cancel: true }, digest: (target) => digestOf({ target, method, cancel: true }) }
+      : { input: { method }, digest: (target) => digestOf({ target, method }) };
   }
   if (operation === 'ready') return { input: {}, digest: (target) => digestOf({ target }) };
-  if (operation === 'labels' || operation === 'issue-labels') {
+  if (operation === 'labels' || operation === 'issue-labels' || operation === 'discussion-labels') {
     const labels = nameList(body.labels, 'labels', limits.labelsMax);
     return { input: { labels }, digest: (target) => digestOf({ target, labels }) };
+  }
+  if (operation === 'discussion-comment') {
+    // A reply names the comment whose thread it answers; without one it is a comment of its own.
+    const replyTo = body.replyTo === undefined ? undefined : nodeId(body.replyTo, 'replyTo');
+    const text = commentText(body.body, true, limits.commentMaxLength);
+    return {
+      input: { replyTo, body: text },
+      digest: (target) => digestOf(replyTo === undefined ? { target, body: text } : { target, replyTo, body: text }),
+    };
+  }
+  if (operation === 'discussion-state') {
+    if (body.state === 'open') {
+      if (body.reason !== undefined) throw mutationError('reason is invalid');
+      return { input: { state: 'open' }, digest: (target) => digestOf({ target, state: 'open' }) };
+    }
+    if (body.state !== 'closed' || !Object.hasOwn(DISCUSSION_CLOSE_REASONS, body.reason)) throw mutationError('state is invalid');
+    const { reason } = body;
+    return { input: { state: 'closed', reason }, digest: (target) => digestOf({ target, state: 'closed', reason }) };
+  }
+  if (operation === 'discussion-answer') {
+    const commentId = nodeId(body.commentId, 'commentId');
+    if (body.answer !== true && body.answer !== false) throw mutationError('answer is invalid');
+    const { answer } = body;
+    return { input: { commentId, answer }, digest: (target) => digestOf({ target, commentId, answer }) };
   }
   if (operation === 'reviewers') {
     const reviewers = nameList(body.reviewers, 'reviewers', limits.reviewersMax);
@@ -195,7 +249,7 @@ function normalizeOperation(operation, body, context, actor, credential, limits)
   }
   if (operation === 'review') {
     const { verdict } = body;
-    if (verdict !== 'approve' && verdict !== 'request-changes') throw mutationError('review verdict is invalid');
+    if (!Object.hasOwn(REVIEW_EVENTS, verdict)) throw mutationError('review verdict is invalid');
     // A verdict names the commit it is for; without one it would land on whatever was pushed last.
     requiredText(context.target.headSha, 'target headSha');
     // GitHub asks for the reason when changes are requested.
@@ -205,6 +259,22 @@ function normalizeOperation(operation, body, context, actor, credential, limits)
       digest: (target) => digestOf(text === undefined ? { target, verdict } : { target, verdict, body: text }),
     };
   }
+  if (operation === 'review-comment') {
+    requiredText(context.target.headSha, 'target headSha');
+    const position = reviewCommentPosition(body, (message) => { throw mutationError(message); });
+    const text = commentText(body.body, true, limits.commentMaxLength);
+    return { input: { ...position, body: text }, digest: (target) => digestOf({ target, ...position, body: text }) };
+  }
+  if (operation === 'review-comment-update') {
+    const commentId = nodeId(body.commentId, 'commentId');
+    const text = commentText(body.body, true, limits.commentMaxLength);
+    return { input: { commentId, body: text }, digest: (target) => digestOf({ target, commentId, body: text }) };
+  }
+  if (operation === 'review-comment-delete') {
+    const commentId = nodeId(body.commentId, 'commentId');
+    return { input: { commentId }, digest: (target) => digestOf({ target, commentId }) };
+  }
+  if (operation === 'review-discard') return { input: {}, digest: (target) => digestOf({ target }) };
   throw mutationError('Mutation kind is invalid');
 }
 
@@ -289,6 +359,9 @@ export function createGitHubMutations({ descriptor, octokitOf, resolveRepo, reso
   // while: most land within seconds, and one still running is reported as
   // such, its outcome arriving with the PR's live state. A host without the
   // endpoint (an older GitHub Enterprise Server) merges the classic way.
+  // The classic endpoint lets a ruleset's bypass actor merge past the rules
+  // without asking; the asynchronous one does so only with `bypass_rules`,
+  // which is sent so both merge the same way. It never widens who may bypass.
   const MERGE_ASYNC_POLL_MS = 1000;
   const MERGE_ASYNC_WAIT_MS = 20_000;
   const MERGE_ASYNC_STATUSES = new Set(['pending', 'merged', 'enqueued', 'failed']);
@@ -314,16 +387,33 @@ export function createGitHubMutations({ descriptor, octokitOf, resolveRepo, reso
     return { merged: data.merged };
   };
   const mergePullRequest = async (octokit, project, target, method) => {
+    const whenReady = async () => {
+      try { return await enableMergeWhenReady(octokit, project, target, method); }
+      catch (error) { throw graphqlRejection(error); }
+    };
     const route = { owner: project.owner, repo: project.name, pull_number: target.number };
     let answer;
     try {
       const response = await octokit.request('PUT /repos/{owner}/{repo}/pulls/{pull_number}/merge-async', {
-        ...route, merge_method: method, sha: target.headSha,
+        ...route, merge_method: method, sha: target.headSha, bypass_rules: true,
       });
       answer = mergeAsyncAnswer(response?.data);
     } catch (error) {
       const status = error?.response?.status ?? error?.status;
-      if (status === 404) return mergeClassic(octokit, project, target, method);
+      if (status === 404) {
+        try { return await mergeClassic(octokit, project, target, method); }
+        catch (classicError) {
+          if ([403, 405, 422].includes(classicError?.response?.status ?? classicError?.status)) {
+            const waiting = await whenReady();
+            if (waiting) return waiting;
+          }
+          throw providerRejection(classicError);
+        }
+      }
+      if ([400, 403, 405, 422].includes(status)) {
+        const waiting = await whenReady();
+        if (waiting) return waiting;
+      }
       // A merge of this PR already requested is followed instead of asked
       // again; any other refusal (a moved head, a conflict) is GitHub's reason.
       if (status !== 409 || !isMergeAsyncAnswer(error.response?.data)) throw providerRejection(error);
@@ -342,6 +432,8 @@ export function createGitHubMutations({ descriptor, octokitOf, resolveRepo, reso
       }
     }
     if (answer.status === 'failed') {
+      const waiting = await whenReady();
+      if (waiting) return waiting;
       throw mutationError(answer.message ?? 'GitHub could not merge the pull request', 'SOURCE_CONTROL_MUTATION_REJECTED', 422);
     }
     if (answer.status === 'merged') return { merged: true };
@@ -392,6 +484,90 @@ export function createGitHubMutations({ descriptor, octokitOf, resolveRepo, reso
     if (!isProviderString(data?.addPullRequestReviewThreadReply?.comment?.id)) throw invalidProviderPayload('GitHub returned an invalid reply');
     return {};
   };
+  const PENDING_COMMENT_QUERY = `query($id: ID!) {
+  node(id: $id) {
+    __typename
+    ... on PullRequestReviewComment { state viewerDidAuthor pullRequest { number repository { name owner { login } } } }
+  }
+}`;
+  /** Only the viewer's own unpublished comment on the target pull request can be changed here. */
+  const requirePendingComment = async (octokit, commentId, project, number) => {
+    let data;
+    try {
+      data = await octokit.graphql(PENDING_COMMENT_QUERY, { id: commentId });
+    } catch (error) {
+      if (!Array.isArray(error?.errors)) throw error;
+      data = error.data;
+    }
+    const node = data?.node;
+    const repository = node?.pullRequest?.repository;
+    if (node?.__typename !== 'PullRequestReviewComment' || node.state !== 'PENDING' || node.viewerDidAuthor !== true
+      || node.pullRequest.number !== number
+      || !isProviderString(repository?.owner?.login) || !isProviderString(repository?.name)
+      || repository.owner.login.toLowerCase() !== project.owner.toLowerCase()
+      || repository.name.toLowerCase() !== project.name.toLowerCase()) {
+      throw mutationError('Review comment is not a draft of yours on this pull request', 'SOURCE_CONTROL_MUTATION_TARGET_INVALID', 409);
+    }
+  };
+  /** The viewer's pending review, started on the head commit when there is none yet. */
+  const pendingReview = async (octokit, { pendingReviewId, pullRequestId }, headSha) => {
+    if (pendingReviewId) return pendingReviewId;
+    const data = await graphqlWrite(
+      octokit,
+      'mutation($pullRequestId: ID!, $commitOID: GitObjectID!) { addPullRequestReview(input: { pullRequestId: $pullRequestId, commitOID: $commitOID }) { pullRequestReview { id } } }',
+      { pullRequestId, commitOID: headSha },
+    );
+    const id = data?.addPullRequestReview?.pullRequestReview?.id;
+    if (!isProviderString(id) || !id) throw invalidProviderPayload('GitHub returned an invalid review');
+    return id;
+  };
+  const addReviewComment = async (octokit, providerTarget, headSha, { path, side, startLine, line, body }) => {
+    const pullRequestReviewId = await pendingReview(octokit, providerTarget, headSha);
+    const diffSide = side === 'old' ? 'LEFT' : 'RIGHT';
+    const position = line === undefined
+      ? { subjectType: 'FILE' }
+      : { subjectType: 'LINE', line, side: diffSide, startLine, startSide: startLine === undefined ? undefined : diffSide };
+    const data = await graphqlWrite(
+      octokit,
+      'mutation($input: AddPullRequestReviewThreadInput!) { addPullRequestReviewThread(input: $input) { thread { id } } }',
+      { input: { pullRequestReviewId, path, body, ...position } },
+    );
+    if (!isProviderString(data?.addPullRequestReviewThread?.thread?.id)) throw invalidProviderPayload('GitHub returned an invalid review comment');
+    return {};
+  };
+  const updateReviewComment = async (octokit, commentId, body) => {
+    const data = await graphqlWrite(
+      octokit,
+      'mutation($commentId: ID!, $body: String!) { updatePullRequestReviewComment(input: { pullRequestReviewCommentId: $commentId, body: $body }) { pullRequestReviewComment { id } } }',
+      { commentId, body },
+    );
+    if (data?.updatePullRequestReviewComment?.pullRequestReviewComment?.id !== commentId) throw invalidProviderPayload('GitHub returned an invalid review comment');
+    return {};
+  };
+  const deleteReviewComment = async (octokit, commentId) => {
+    await graphqlWrite(
+      octokit,
+      'mutation($commentId: ID!) { deletePullRequestReviewComment(input: { id: $commentId }) { clientMutationId } }',
+      { commentId },
+    );
+    return {};
+  };
+  const discardReview = async (octokit, pendingReviewId) => {
+    await graphqlWrite(
+      octokit,
+      'mutation($id: ID!) { deletePullRequestReview(input: { pullRequestReviewId: $id }) { clientMutationId } }',
+      { id: pendingReviewId },
+    );
+    return {};
+  };
+  const submitReview = async (octokit, pendingReviewId, event, body) => {
+    const data = await graphqlWrite(
+      octokit,
+      'mutation($id: ID!, $event: PullRequestReviewEvent!, $body: String) { submitPullRequestReview(input: { pullRequestReviewId: $id, event: $event, body: $body }) { pullRequestReview { state } } }',
+      { id: pendingReviewId, event, body: body ?? null },
+    );
+    return data?.submitPullRequestReview?.pullRequestReview?.state;
+  };
   const setReviewThreadResolved = async (octokit, threadId, resolved) => {
     const field = resolved ? 'resolveReviewThread' : 'unresolveReviewThread';
     let data;
@@ -401,6 +577,130 @@ export function createGitHubMutations({ descriptor, octokitOf, resolveRepo, reso
       throw graphqlRejection(error);
     }
     if (data?.[field]?.thread?.isResolved !== resolved) throw invalidProviderPayload('GitHub returned an invalid thread state');
+    return {};
+  };
+  // A discussion lives in GitHub's GraphQL API only: it is written by its node
+  // id, and its labels by theirs.
+  const DISCUSSION_QUERY = `query($owner: String!, $name: String!, $number: Int!) {
+  repository(owner: $owner, name: $name) {
+    discussion(number: $number) { id number closed labels(first: 100) { nodes { id name } } }
+  }
+}`;
+  const graphqlWrite = async (octokit, query, variables) => {
+    try {
+      return await octokit.graphql(query, variables);
+    } catch (error) {
+      throw graphqlRejection(error);
+    }
+  };
+  const readDiscussion = async (octokit, project, number) => {
+    let data;
+    try {
+      data = await octokit.graphql(DISCUSSION_QUERY, { owner: project.owner, name: project.name, number });
+    } catch (error) {
+      if (!Array.isArray(error?.errors)) throw error;
+      data = error.data;
+    }
+    const discussion = data?.repository?.discussion;
+    if (!isPlainObject(discussion) || discussion.number !== number || !isProviderString(discussion.id) || !discussion.id) {
+      throw mutationError('GitHub discussion was not found', 'SOURCE_CONTROL_MUTATION_TARGET_INVALID', 409);
+    }
+    const labels = requireProviderArray(discussion.labels?.nodes, 'GitHub returned an invalid label list');
+    if (labels.some((label) => !isProviderString(label?.id) || !isProviderString(label?.name))) {
+      throw invalidProviderPayload('GitHub returned an invalid label list');
+    }
+    return { id: discussion.id, closed: discussion.closed === true, labels };
+  };
+  const DISCUSSION_COMMENT_QUERY = `query($id: ID!) {
+  node(id: $id) {
+    __typename
+    ... on DiscussionComment { isAnswer replyTo { id } discussion { number repository { name owner { login } } } }
+  }
+}`;
+  /** The comment `commentId` names, and only one of the target discussion: an id from elsewhere is refused. */
+  const readDiscussionComment = async (octokit, commentId, project, number) => {
+    let data;
+    try {
+      data = await octokit.graphql(DISCUSSION_COMMENT_QUERY, { id: commentId });
+    } catch (error) {
+      if (!Array.isArray(error?.errors)) throw error;
+      data = error.data;
+    }
+    const node = data?.node;
+    const repository = node?.discussion?.repository;
+    if (node?.__typename !== 'DiscussionComment' || node.discussion.number !== number
+      || !isProviderString(repository?.owner?.login) || !isProviderString(repository?.name)
+      || repository.owner.login.toLowerCase() !== project.owner.toLowerCase()
+      || repository.name.toLowerCase() !== project.name.toLowerCase()) {
+      throw mutationError('Comment is not on this discussion', 'SOURCE_CONTROL_MUTATION_TARGET_INVALID', 409);
+    }
+    return { isAnswer: node.isAnswer === true, reply: isPlainObject(node.replyTo) };
+  };
+  const commentOnDiscussion = async (octokit, discussionId, body, replyTo) => {
+    const data = await graphqlWrite(
+      octokit,
+      'mutation($discussionId: ID!, $body: String!, $replyToId: ID) { addDiscussionComment(input: { discussionId: $discussionId, body: $body, replyToId: $replyToId }) { comment { id } } }',
+      { discussionId, body, replyToId: replyTo ?? null },
+    );
+    if (!isProviderString(data?.addDiscussionComment?.comment?.id)) throw invalidProviderPayload('GitHub returned an invalid comment');
+    return {};
+  };
+  const setDiscussionState = async (octokit, discussionId, state, reason) => {
+    const data = state === 'closed'
+      ? await graphqlWrite(
+        octokit,
+        'mutation($discussionId: ID!, $reason: DiscussionCloseReason!) { closeDiscussion(input: { discussionId: $discussionId, reason: $reason }) { discussion { closed } } }',
+        { discussionId, reason: DISCUSSION_CLOSE_REASONS[reason] },
+      )
+      : await graphqlWrite(octokit, 'mutation($discussionId: ID!) { reopenDiscussion(input: { discussionId: $discussionId }) { discussion { closed } } }', { discussionId });
+    const closed = (state === 'closed' ? data?.closeDiscussion : data?.reopenDiscussion)?.discussion?.closed;
+    if (closed !== (state === 'closed')) throw invalidProviderPayload('GitHub returned an unexpected state');
+    return { state };
+  };
+  const setDiscussionAnswer = async (octokit, commentId, answer) => {
+    const field = answer ? 'markDiscussionCommentAsAnswer' : 'unmarkDiscussionCommentAsAnswer';
+    const data = await graphqlWrite(octokit, `mutation($id: ID!) { ${field}(input: { id: $id }) { discussion { id } } }`, { id: commentId });
+    if (!isProviderString(data?.[field]?.discussion?.id)) throw invalidProviderPayload('GitHub returned an invalid answer');
+    return {};
+  };
+  /**
+   * The discussion's labels as one whole set: GitHub adds and removes them by
+   * id, so the names are looked up in the repository first, and a name it
+   * does not have is refused before anything changes. Asking again for the
+   * same set is safe, so a failure between the two writes is fixed by trying again.
+   */
+  const setDiscussionLabels = async (octokit, project, discussion, labels) => {
+    let ids = [];
+    if (labels.length > 0) {
+      const variables = { owner: project.owner, name: project.name };
+      const selections = labels.map((label, index) => {
+        variables[`l${index}`] = label;
+        return `l${index}: label(name: $l${index}) { id name }`;
+      });
+      const declarations = labels.map((_label, index) => `$l${index}: String!`).join(', ');
+      const data = await graphqlWrite(octokit, `query($owner: String!, $name: String!, ${declarations}) { repository(owner: $owner, name: $name) { ${selections.join(' ')} } }`, variables);
+      ids = labels.map((label, index) => {
+        const found = data?.repository?.[`l${index}`];
+        if (!isProviderString(found?.id)) throw mutationError(`Label ${label} does not exist in this repository`, 'SOURCE_CONTROL_MUTATION_REJECTED', 422);
+        return found.id;
+      });
+    }
+    const current = discussion.labels.map((label) => label.id);
+    const add = ids.filter((id) => !current.includes(id));
+    const remove = current.filter((id) => !ids.includes(id));
+    if (add.length) {
+      await graphqlWrite(octokit, 'mutation($id: ID!, $labelIds: [ID!]!) { addLabelsToLabelable(input: { labelableId: $id, labelIds: $labelIds }) { clientMutationId } }', { id: discussion.id, labelIds: add });
+    }
+    if (remove.length) {
+      try {
+        await graphqlWrite(octokit, 'mutation($id: ID!, $labelIds: [ID!]!) { removeLabelsFromLabelable(input: { labelableId: $id, labelIds: $labelIds }) { clientMutationId } }', { id: discussion.id, labelIds: remove });
+      } catch (error) {
+        // Labels were already added: the set moved, so this is no definite
+        // refusal. Without a status it stays outcome-unknown and reconciles by name.
+        if (!add.length) throw error;
+        throw new Error('GitHub changed only part of the labels', { cause: error });
+      }
+    }
     return {};
   };
   const setLabels = async (octokit, project, number, labels) => {
@@ -459,8 +759,23 @@ export function createGitHubMutations({ descriptor, octokitOf, resolveRepo, reso
   const reconcileExisting = async (octokit, operation, target, input) => {
     // A comment or a review leaves nothing that tells a lost write from one
     // never sent short of guessing from its text, so the outcome stays unknown.
-    if (['comment', 'review', 'issue-comment', 'thread-reply'].includes(operation)) return unknownOutcome();
+    if (['comment', 'review', 'issue-comment', 'thread-reply', 'discussion-comment'].includes(operation)) return unknownOutcome();
+    if (REVIEW_DRAFT_OPERATIONS.has(operation)) return unknownOutcome();
     const project = target.project;
+    if (operation === 'discussion-state') {
+      const discussion = await readDiscussion(octokit, project, target.number);
+      const state = discussion.closed ? 'closed' : 'open';
+      return state === input.state ? { state: 'succeeded', result: { state } } : definiteFailure('SOURCE_CONTROL_MUTATION_NOT_APPLIED');
+    }
+    if (operation === 'discussion-answer') {
+      // Someone may have chosen another answer since: only the asked state is certain.
+      const comment = await readDiscussionComment(octokit, input.commentId, project, target.number);
+      return comment.isAnswer === input.answer ? { state: 'succeeded', result: {} } : unknownOutcome();
+    }
+    if (operation === 'discussion-labels') {
+      const names = (await readDiscussion(octokit, project, target.number)).labels.map((label) => label.name);
+      return sameNames(names, input.labels) ? { state: 'succeeded', result: {} } : unknownOutcome();
+    }
     if (operation === 'thread-resolve') {
       // Someone may have flipped it since: only the asked state is certain.
       const thread = await readReviewThread(octokit, input.threadId, project, target.number);
@@ -487,6 +802,11 @@ export function createGitHubMutations({ descriptor, octokitOf, resolveRepo, reso
       // Still open says nothing certain: GitHub may be merging it in the
       // background or holding it in a merge queue. The live state follows.
       if (pr.merged === true || isProviderString(pr.merged_at)) return { state: 'succeeded', result: { merged: true } };
+      const { pull } = await readWaitingMerge(octokit, project, target);
+      if (input.cancel) return !pull.isInMergeQueue && !pull.autoMergeRequest
+        ? { state: 'succeeded', result: { merged: false, outcome: 'cancelled' } } : unknownOutcome();
+      if (pull.isInMergeQueue) return { state: 'succeeded', result: { merged: false, outcome: 'queued' } };
+      if (pull.autoMergeRequest) return { state: 'succeeded', result: { merged: false, outcome: 'auto-merge' } };
     } else if (operation === 'state') {
       // A merged pull request reads `closed` too, and can no longer be reopened.
       if (pr.state === input.state) return { state: 'succeeded', result: { state: pr.state } };
@@ -542,6 +862,21 @@ export function createGitHubMutations({ descriptor, octokitOf, resolveRepo, reso
       };
     }
     const expected = context.target;
+    if (DISCUSSION_KINDS.has(operation)) {
+      if (expected.head !== undefined || expected.base !== undefined || expected.headSha !== undefined) {
+        throw mutationError('Discussion target is invalid');
+      }
+      const discussion = await readDiscussion(octokit, expectedProject, expected.number);
+      // A reply answers a comment's thread, and only a comment of this discussion takes an answer or a reply.
+      const commentId = operation === 'discussion-answer' ? input.commentId : operation === 'discussion-comment' ? input.replyTo : undefined;
+      if (commentId) {
+        const comment = await readDiscussionComment(octokit, commentId, expectedProject, expected.number);
+        if (operation === 'discussion-comment' && comment.reply) {
+          throw mutationError('A reply answers a comment, not another reply', 'SOURCE_CONTROL_MUTATION_TARGET_INVALID', 409);
+        }
+      }
+      return { providerTarget: { discussion }, target: { ...baseTarget(context, expectedProject), number: expected.number } };
+    }
     if (ISSUE_KINDS.has(operation)) {
       if (expected.head !== undefined || expected.base !== undefined || expected.headSha !== undefined) {
         throw mutationError('Issue target is invalid');
@@ -560,6 +895,21 @@ export function createGitHubMutations({ descriptor, octokitOf, resolveRepo, reso
     const target = { ...baseTarget(context, expectedProject), number: pr.number, head: pr.head.ref, base: pr.base.ref, headSha: pr.head.sha };
     if (operation === 'thread-reply' || operation === 'thread-resolve') {
       await readReviewThread(octokit, input.threadId, expectedProject, target.number);
+    }
+    if (operation === 'review-comment-update' || operation === 'review-comment-delete') {
+      await requirePendingComment(octokit, input.commentId, expectedProject, target.number);
+    }
+    if (operation === 'review' || operation === 'review-comment' || operation === 'review-discard') {
+      const pending = await readPendingReview({ octokit, owner: expectedProject.owner, repo: expectedProject.name, number: target.number });
+      if (operation === 'review-discard' && !pending) {
+        throw mutationError('There is no review draft on this pull request', 'SOURCE_CONTROL_MUTATION_TARGET_INVALID', 409);
+      }
+      // A verdict is for the commit the user read, and a pending review keeps
+      // the commit it began on. As a comment it goes out whatever that was.
+      if (operation === 'review' && input.verdict !== 'comment' && pending && pending.commit !== pr.head.sha) {
+        throw mutationError('This review draft was started on an older commit. Send it as a comment, then give your verdict.', 'SOURCE_CONTROL_MUTATION_REJECTED', 409);
+      }
+      return { providerTarget: { pendingReviewId: pending?.id ?? null, pullRequestId: pr.node_id }, target };
     }
     if (operation === 'ready') {
       const alreadyReady = pr.draft === false;
@@ -609,6 +959,10 @@ export function createGitHubMutations({ descriptor, octokitOf, resolveRepo, reso
         return {};
       }
       case 'merge':
+        if (input.cancel) {
+          try { return await cancelWaitingMerge(octokit, project, target); }
+          catch (error) { throw graphqlRejection(error); }
+        }
         return mergePullRequest(octokit, project, target, input.method);
       case 'labels':
       case 'issue-labels':
@@ -626,18 +980,46 @@ export function createGitHubMutations({ descriptor, octokitOf, resolveRepo, reso
         return replyToReviewThread(octokit, input.threadId, input.body);
       case 'thread-resolve':
         return setReviewThreadResolved(octokit, input.threadId, input.resolved);
+      case 'discussion-comment':
+        return commentOnDiscussion(octokit, providerTarget.discussion.id, input.body, input.replyTo);
+      case 'discussion-state':
+        return setDiscussionState(octokit, providerTarget.discussion.id, input.state, input.reason);
+      case 'discussion-answer':
+        return setDiscussionAnswer(octokit, input.commentId, input.answer);
+      case 'discussion-labels':
+        return setDiscussionLabels(octokit, project, providerTarget.discussion, input.labels);
+      case 'review-comment':
+        return addReviewComment(octokit, providerTarget, target.headSha, input);
+      case 'review-comment-update':
+        return updateReviewComment(octokit, input.commentId, input.body);
+      case 'review-comment-delete':
+        return deleteReviewComment(octokit, input.commentId);
+      case 'review-discard':
+        return discardReview(octokit, providerTarget.pendingReviewId);
       case 'review': {
+        const { event, state } = REVIEW_EVENTS[input.verdict];
+        // A pending review goes out with the verdict: GitHub keeps one per
+        // person, and a second one beside it is refused.
+        if (providerTarget.pendingReviewId) {
+          if (await submitReview(octokit, providerTarget.pendingReviewId, event, input.body) !== state) {
+            throw invalidProviderPayload('GitHub returned an invalid review');
+          }
+          return { commented: input.body !== undefined };
+        }
+        if (input.verdict === 'comment' && input.body === undefined) {
+          throw mutationError('A review with no comments needs text', 'SOURCE_CONTROL_MUTATION_REJECTED', 422);
+        }
         const reviewInput = {
           owner: project.owner,
           repo: project.name,
           pull_number: target.number,
           // The verdict is for the commit the user read.
           commit_id: target.headSha,
-          event: input.verdict === 'approve' ? 'APPROVE' : 'REQUEST_CHANGES',
+          event,
         };
         if (input.body !== undefined) reviewInput.body = input.body;
         const response = await rejected(() => octokit.rest.pulls.createReview(reviewInput));
-        if (response?.data?.state !== (input.verdict === 'approve' ? 'APPROVED' : 'CHANGES_REQUESTED')) {
+        if (response?.data?.state !== state) {
           throw invalidProviderPayload('GitHub returned an invalid review');
         }
         // GitHub posts the verdict and its text as one review.

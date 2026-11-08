@@ -7,9 +7,9 @@ compatibility: opencode
 
 ## Gate
 
-The changelog is written once per release, by the maintainer, as one story. `changelog/` stays untouched by every other task; a fix or a merged PR lands without a changelog line. Proceed only when the current message asks to update the changelog.
+Proceed only when the current message asks to update the changelog.
 
-Write `changelog/unreleased.md` and nothing else. Generation is not your job: `oc-dev create-release` turns the file into `changelog/<version>.md` with the date and renders `packages/vscode/CHANGELOG.md` and `changelog/index.json` from it. `CHANGELOG.md` at the root is a legacy copy for older installs. Never run the generator or touch any of these files. `bun run changelog:check` only validates the shape of what you wrote and writes nothing; `changelog/README.md` describes the format.
+Write `changelog/unreleased.md` and nothing else. Never run `oc-dev create-release` or edit what it generates; `changelog/README.md` has the format. `bun run changelog:check` validates and writes nothing.
 
 `unreleased.md` opens with a `title:` front matter line (see The title) and holds two sections:
 
@@ -18,7 +18,7 @@ Write `changelog/unreleased.md` and nothing else. Generation is not your job: `o
 
 ## The shape of a release
 
-Every release section is grouped. Under the version header come, in this order and only when non-empty:
+Each section (`## App`, `## VS Code`) is grouped; list only non-empty groups:
 
 ```markdown
 ### New
@@ -35,7 +35,7 @@ Every release section is grouped. Under the version header come, in this order a
 - Actions: use `mode: "background"` to handle a message action without opening a panel.
 
 ### Misc
-- Bundled OpenCode updated to 1.19.
+- Bundled OpenCode updated to 2.1.
 ```
 
 Where a change goes:
@@ -43,7 +43,7 @@ Where a change goes:
 - **New** — something the user could not do before: a feature, a surface, a language.
 - **Improvements** — something they could do works better or reads clearer now.
 - **Fixes** — something was broken and showed a wrong result; the bullet names the symptom.
-- **SDK** — capabilities and API changes for extension authors, under `## App`, after Fixes and before Misc. Name the API and what an author can build with it. User-visible extension features and fixes stay in the regular groups.
+- **SDK**: capabilities and API changes for extension authors, under `## App`. Name the API in backticks and what an author can build with it. Keep the same short bullet format; implementation internals belong in the PR. User-visible extension features and fixes stay in the regular groups.
 - **Misc** — bundled tool versions, packaging, platform support, retirements. Rarely more than a few lines.
 
 The maintainer's calls on the borderline cases:
@@ -52,7 +52,7 @@ The maintainer's calls on the borderline cases:
 - Something that made the app hang or stutter (tooltips or menus jolting the whole window) is a **Fix**, named by that symptom.
 - Minor polish (a dialog laid out in two columns, quieter metadata text) gets no bullet at all.
 
-The generator emits the groups in this order whatever order the source lists them and drops empty ones; version, date, and headers are its concern, not yours.
+The generator orders the groups and drops empty ones; version and date are its concern.
 
 ## The title
 
@@ -62,8 +62,9 @@ Every release carries a one-line `title:` in its front matter. The website lists
 - **Plain words, sentence case**; product names keep their casing. No area prefix with a colon, no trailing period, no version number, no credit.
 - **Never a category alone** (`Fixes`, `Stability`, `Improvements`, `Polish`) and **never a bare area** (`Git`, `Chat`): the title has to teach the reader something.
 - Two headliners at most, joined with `and`, and only when the release really has two.
+- **A small joke that still names the change** is the tradition: `Warm sessions, cold diffs`, `Tea time for git`, `Our monthly sidebar redesign`. Self-irony about our own habits lands best. Offer the maintainer a few, with a recommendation.
 
-`oc-dev create-release` refuses a release without a title. In `unreleased.md` it sits at the top:
+In `unreleased.md` it sits at the top:
 
 ```markdown
 ---
@@ -80,7 +81,6 @@ The reader is a user of the app. They never opened the code, they will not open 
 - **One sentence, two at most.** A bold highlight may take three. Under about 200 characters for a regular bullet.
 - **Name what they see or do.** The screen, the button, the gesture, the outcome. When a fix removed a symptom, name the symptom in plain words ("froze the page", "sent the comment by accident", "stopped at the first page").
 - **Plain words only.** Anything a user would have to look up is out: store, cache, route, payload, reconcile, authoritative, lifecycle, runtime, listing, revision, PTY, bridge. Internal component names are out unless the user sees them on screen.
-- **State the new behaviour directly.** Say what happens now. Framing it against the old way ("X, not Y", "instead of Y", "rather than Y") is the tell of machine-written notes; drop the second half and let the sentence stand.
 - **Area prefix, then the fact.** `Chat:`, `Settings/Providers:`, `Git:`, `Mobile:`, `Server:`, `CLI:`, `VS Code:` in the main file. A highlight bolds its prefix: `- **Project actions:** ...`.
 - **Details stay in the PR.** No commit hashes, file paths, numbers that do not change what the user does, or mechanism. One concrete number is fine when it is the whole point ("more than 200 sessions").
 
@@ -92,8 +92,6 @@ Worked example, same change:
 
 The weak version is accurate and lost the reader at the first comma. The good version keeps the three things a user notices and drops the mechanics that explain them.
 
-SDK bullets address extension authors: use exact API names in backticks and state how to use the new capability. Keep the same short bullet format; implementation internals still belong in the PR.
-
 Load `.agents/skills/communication-style/SKILL.md` and run its pattern scan over the finished sections; its rules on em dashes, hedging, and puffery apply here unchanged.
 
 ## Gather
@@ -101,10 +99,20 @@ Load `.agents/skills/communication-style/SKILL.md` and run its pattern scan over
 Determine the base and read everything through `HEAD`:
 
 ```bash
-BASE=$(git describe --tags --abbrev=0 2>/dev/null || git rev-list --max-parents=0 HEAD)
+BASE=$(git describe --tags --match 'v*' --abbrev=0 2>/dev/null || git rev-list --max-parents=0 HEAD)
 git log --oneline "$BASE"..HEAD
 git diff --stat "$BASE"..HEAD
 ```
+
+A hotfix ships from a `release/X.Y` branch, so its tag is not in `main`'s history and `BASE` stays at the release before it. Its changes already reached users: leave out every commit a hotfix since `BASE` cherry-picked. The hotfix tags are the `v*` tags newer than `BASE` that are not ancestors of `HEAD`, and each picked commit carries a `(cherry picked from commit <sha>)` line:
+
+```bash
+for tag in $(git tag --list 'v*' --no-merged HEAD); do
+  git log --format=%B "$BASE".."$tag" | grep -oE 'cherry picked from commit [0-9a-f]+' | awk '{print $NF}'
+done
+```
+
+On a release branch, writing a hotfix's own notes, the range is `BASE..HEAD` of that branch: only the picked changes.
 
 A squashed merge (subject ending in `(#123)`) or a `Merge pull request #123` commit hides the real change behind a terse subject. Read the PR: `gh pr view <number> --json number,title,body,author,mergedAt`. Distill its intent into the bullet shape above; the body's own wording is reviewer-facing and stays there. When `gh` cannot fetch it, use the commit and diff and say what remains uncertain.
 
@@ -121,7 +129,7 @@ Gathering is complete when every user-visible or SDK change has evidence, a know
 
 ## VS Code section
 
-An entry belongs here only when the extension actually mounts the surface: trace from `packages/vscode/webview/main.tsx` → `VSCodeApp` → `VSCodeLayout`, which mounts a subset of the shared UI, and read the surface map in `packages/vscode/src/DOCUMENTATION.md`. Server-side changes have no entry here; the extension runs no OpenChamber server. Prefixes drop the `VS Code:` part. Bullets are written separately from the App section rather than tagged, so reachability is a decision made per bullet. When reachability is uncertain, leave the entry out; a false entry becomes a bug report.
+An entry belongs here only when the extension actually mounts the surface. Read the surface map in `packages/vscode/src/DOCUMENTATION.md`. Server-side changes have no entry here; the extension runs no OpenChamber server. Prefixes drop the `VS Code:` part. Bullets are written separately from the App section rather than tagged, so reachability is a decision made per bullet. When reachability is uncertain, leave the entry out; a false entry becomes a bug report.
 
 ## Credit
 
@@ -134,7 +142,7 @@ Read each finished section top to bottom and check every bullet:
 - A user could point at it in the app within five seconds of reading it; an SDK entry tells an extension author which API to use and why.
 - It is one or two sentences (three for a highlight) in plain words, with no mechanism and no contrast against the old behaviour.
 - It sits in the group its wording claims (a Fix names a symptom, a New names a capability) and no higher than the bullets above it in impact.
-- Empty groups are absent; present groups appear in the order New, Improvements, Fixes, SDK, Misc.
+- Empty groups are absent.
 - It appears only in the section whose runtime receives it.
 - Its contributor is credited.
 - The `title:` line names the release's headline change in two to six plain words.

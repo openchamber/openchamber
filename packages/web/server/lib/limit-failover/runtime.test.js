@@ -62,9 +62,11 @@ describe('limit failure classification', () => {
     expect(classifyLimitFailure(quotaReport(), NOW)).toEqual({ resetAt: NOW + DEFAULT_EXHAUSTION_MS });
   });
 
-  it('counts OpenCode free-tier exhaustion as a quota error', () => {
-    const freeLimit = quotaReport({ providerID: 'opencode', error: { type: 'provider.free-limit', message: '', body: null } });
-    expect(classifyLimitFailure(freeLimit, NOW)).toEqual({ resetAt: NOW + DEFAULT_EXHAUSTION_MS });
+  it('counts OpenCode free-tier exhaustion and Console spend limits as quota errors', () => {
+    for (const type of ['provider.free-limit', 'provider.budget-limit', 'provider.model-budget-limit']) {
+      const report = quotaReport({ providerID: 'opencode', error: { type, message: '', body: null } });
+      expect(classifyLimitFailure(report, NOW)).toEqual({ resetAt: NOW + DEFAULT_EXHAUSTION_MS });
+    }
   });
 
   it('takes the reset from retryAfterMs before the body, and ignores a zero wait', () => {
@@ -404,6 +406,8 @@ describe('limit failover plugin', () => {
 
       await hooks.retry(retryEvent('provider.free-limit'));
       expect(JSON.parse(fetchMock.mock.calls[0][1].body).error.type).toBe('provider.free-limit');
+      await hooks.retry(retryEvent('provider.model-budget-limit'));
+      expect(JSON.parse(fetchMock.mock.calls[1][1].body).error.type).toBe('provider.model-budget-limit');
 
       const none = retryEvent();
       await hooks.retry(none);

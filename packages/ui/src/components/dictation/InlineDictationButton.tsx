@@ -14,6 +14,7 @@ import React from 'react';
 import { toast } from '@/components/ui';
 import { Icon } from '@/components/icon/Icon';
 import { DictationWaveform } from '@/components/dictation/DictationWaveform';
+import { ButtonTooltip } from '@/components/ui/action-toolbar';
 import { useDictation } from '@/hooks/useDictation';
 import { useWaitingBlink } from '@/hooks/useDurationTicker';
 import { isDictationCaptureSupported } from '@/lib/dictation/use-dictation-audio-source';
@@ -108,38 +109,41 @@ export const InlineDictationButton: React.FC<InlineDictationButtonProps> = ({
             {`${Math.floor(duration / 60)}:${String(duration % 60).padStart(2, '0')}`}
           </span>
         </span>
-        <button
-          type="button"
-          onClick={() => void cancelDictation()}
-          className={buttonClassName}
-          aria-label={t('chat.dictation.cancel')}
-          title={t('chat.dictation.cancel')}
-        >
-          <Icon name="close" className={iconClassName} />
-        </button>
-        <button
-          type="button"
-          onClick={() => void confirmDictation()}
-          className={cn(buttonClassName, 'text-primary hover:text-primary')}
-          aria-label={t('chat.dictation.insert')}
-          title={t('chat.dictation.insert')}
-        >
-          <Icon name="check" className={iconClassName} />
-        </button>
+        <ButtonTooltip label={t('chat.dictation.cancel')} className="shrink-0">
+          <button
+            type="button"
+            onClick={() => void cancelDictation()}
+            className={buttonClassName}
+            aria-label={t('chat.dictation.cancel')}
+          >
+            <Icon name="close" className={iconClassName} />
+          </button>
+        </ButtonTooltip>
+        <ButtonTooltip label={t('chat.dictation.insert')} className="shrink-0">
+          <button
+            type="button"
+            onClick={() => void confirmDictation()}
+            className={cn(buttonClassName, 'text-primary hover:text-primary')}
+            aria-label={t('chat.dictation.insert')}
+          >
+            <Icon name="check" className={iconClassName} />
+          </button>
+        </ButtonTooltip>
       </>
     );
   }
 
   return (
-    <button
-      type="button"
-      onClick={() => void startDictation()}
-      disabled={disabled}
-      className={buttonClassName}
-      aria-label={t('chat.dictation.start')}
-      title={t('chat.dictation.start')}
-    >
-      <Icon name="mic" className={iconClassName} />
-    </button>
+    <ButtonTooltip label={t('chat.dictation.start')} className="shrink-0">
+      <button
+        type="button"
+        onClick={() => void startDictation()}
+        disabled={disabled}
+        className={buttonClassName}
+        aria-label={t('chat.dictation.start')}
+      >
+        <Icon name="mic" className={iconClassName} />
+      </button>
+    </ButtonTooltip>
   );
 };

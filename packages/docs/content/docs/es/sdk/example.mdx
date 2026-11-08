@@ -16,8 +16,11 @@ Estos tres archivos son una extensión que funciona. Conecta un token de GitHub,
   "private": true,
   "openchamber": {
     "apiVersion": 1,
+    "id": "my-repos",
+    "name": "Repos",
+    "icon": "github",
     "contributes": {
-      "panel": { "id": "my-repos", "name": "Repos", "icon": "github", "entry": "panel/index.html" },
+      "panel": { "entry": "panel/index.html" },
       "attach": "panel",
       "integration": {
         "name": "GitHub (token)",

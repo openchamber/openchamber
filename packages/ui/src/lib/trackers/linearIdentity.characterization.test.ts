@@ -124,7 +124,7 @@ describe('Linear agent context text', () => {
     test('attaching an issue sends the neutral item, its comments once', async () => {
         const result = await resolveComposerReferences([{ source: 'tracker', provider: 'linear', item: summary }], {
             // SAFETY: the tracker branch never reads source control.
-            sourceControl: {} as Pick<SourceControlAPI, 'issueGet' | 'issueComments' | 'changeRequestContext'>,
+            sourceControl: {} as Pick<SourceControlAPI, 'issueGet' | 'issueComments' | 'changeRequestContext' | 'referenceDetail'>,
             context: null,
             readTrackerDetail: async () => issue,
             trackerName: () => 'Linear',

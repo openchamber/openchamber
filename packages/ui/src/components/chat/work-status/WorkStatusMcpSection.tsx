@@ -1,5 +1,6 @@
 import React from 'react';
 import { useI18n } from '@/lib/i18n';
+import { cn } from '@/lib/utils';
 import { Switch } from '@/components/ui/switch';
 import { useMcpStore } from '@/stores/useMcpStore';
 import { useConfigStore } from '@/stores/useConfigStore';
@@ -8,6 +9,7 @@ import { runBackgroundNetworkTask } from '@/lib/background-network';
 import { toast } from 'sonner';
 import { WorkStatusCollapsibleSection, WorkStatusRow, WorkStatusRowAction } from './WorkStatusPrimitives';
 import { useReportWorkStatusPresence } from './presenceContext';
+import { WorkStatusTouchContext } from './touchContext';
 import { useMcpDirectory } from '@/components/mcp/useMcpDirectory';
 
 type Props = {
@@ -18,10 +20,10 @@ type Props = {
 const MCP_STATUS_MAX_AGE_MS = 60_000;
 
 /**
- * MCP servers with their connection switches, reusing the dropdown's own
- * connect/disconnect actions.
+ * MCP servers with their on/off switches, reusing the dropdown's own action.
  */
 export const WorkStatusMcpSection: React.FC<Props> = ({ sessionId, directory: selectedDirectory }) => {
+  const touch = React.useContext(WorkStatusTouchContext);
   const { t } = useI18n();
   const directory = useMcpDirectory(true, { sessionId, directory: selectedDirectory });
 
@@ -29,8 +31,7 @@ export const WorkStatusMcpSection: React.FC<Props> = ({ sessionId, directory: se
     React.useCallback((state) => directory ? state.getStatusForDirectory(directory) : null, [directory]),
   );
   const ensureMcpFresh = useMcpStore((state) => state.ensureFresh);
-  const connect = useMcpStore((state) => state.connect);
-  const disconnect = useMcpStore((state) => state.disconnect);
+  const setEnabled = useMcpStore((state) => state.setEnabled);
   const isConnected = useConfigStore((state) => state.isConnected);
   const [busyServer, setBusyServer] = React.useState<string | null>(null);
 
@@ -78,12 +79,11 @@ export const WorkStatusMcpSection: React.FC<Props> = ({ sessionId, directory: se
 
     setBusyServer(name);
     try {
-      if (next) await connect(name, directory);
-      else await disconnect(name, directory);
+      await setEnabled(name, next, directory);
     } finally {
       setBusyServer((current) => (current === name ? null : current));
     }
-  }, [connect, disconnect, directory, mcpStatus, reportNeedsAuth]);
+  }, [directory, mcpStatus, reportNeedsAuth, setEnabled]);
 
   useReportWorkStatusPresence('mcp', mcpServers.length > 0);
 
@@ -101,40 +101,44 @@ export const WorkStatusMcpSection: React.FC<Props> = ({ sessionId, directory: se
         const busy = busyServer === name;
         const needsAuth = entry?.status.status === 'needs_auth';
         const failed = entry?.status.status === 'failed';
+        const toggle = (
+          <Switch
+            checked={connected}
+            disabled={busy}
+            loading={busy}
+            className={cn('disabled:opacity-100 data-[checked]:bg-status-info', !touch && 'scale-75')}
+            aria-label={t('chat.workStatus.mcp.toggle', { name })}
+            onCheckedChange={(checked) => { void handleToggle(name, checked); }}
+          />
+        );
+        // A server asking for sign-in or reporting a failure is asking to be
+        // acted on; the state is the affordance, so it is the button.
+        const stateAction = needsAuth ? (
+          <WorkStatusRowAction
+            tone="warning"
+            disabled={busy}
+            onClick={reportNeedsAuth}
+          >
+            {t('chat.workStatus.mcp.needsAuth')}
+          </WorkStatusRowAction>
+        ) : failed ? (
+          <WorkStatusRowAction
+            tone="error"
+            disabled={busy}
+            onClick={() => { void handleToggle(name, true); }}
+          >
+            {t('chat.workStatus.mcp.failed')}
+          </WorkStatusRowAction>
+        ) : null;
         return (
           <WorkStatusRow
             key={name}
-            leading={(
-              <Switch
-                checked={connected}
-                disabled={busy}
-                loading={busy}
-                className="scale-75 disabled:opacity-100 data-[checked]:bg-status-info"
-                aria-label={t('chat.workStatus.mcp.toggle', { name })}
-                onCheckedChange={(checked) => { void handleToggle(name, checked); }}
-              />
-            )}
+            // On the phone a switch goes on the row's end, full size, as
+            // settings rows put it; the icon column is too narrow for one.
+            leading={touch ? undefined : toggle}
             label={name}
             muted={!connected}
-            // A server asking for sign-in or reporting a failure is asking to be
-            // acted on; the state is the affordance, so it is the button.
-            value={needsAuth ? (
-              <WorkStatusRowAction
-                tone="warning"
-                disabled={busy}
-                onClick={reportNeedsAuth}
-              >
-                {t('chat.workStatus.mcp.needsAuth')}
-              </WorkStatusRowAction>
-            ) : failed ? (
-              <WorkStatusRowAction
-                tone="error"
-                disabled={busy}
-                onClick={() => { void handleToggle(name, true); }}
-              >
-                {t('chat.workStatus.mcp.failed')}
-              </WorkStatusRowAction>
-            ) : undefined}
+            value={touch ? <>{stateAction}{toggle}</> : stateAction ?? undefined}
           />
         );
       })}

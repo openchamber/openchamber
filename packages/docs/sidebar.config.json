@@ -222,6 +222,23 @@
           }
         },
         {
+          "label": "Workflows",
+          "link": "/workflows/",
+          "translations": {
+            "nl": "Workflows",
+            "uk": "Воркфлоу",
+            "zh-CN": "工作流",
+            "es": "Workflows",
+            "pt-BR": "Workflows",
+            "ko": "워크플로",
+            "pl": "Workflowy",
+            "fr": "Workflows",
+            "ja": "ワークフロー",
+            "de": "Workflows",
+            "tr": "Workflow'lar"
+          }
+        },
+        {
           "label": "Session Goals",
           "link": "/session-goals/",
           "translations": {
@@ -236,6 +253,23 @@
             "ja": "セッションゴール",
             "de": "Sitzungsziele",
             "tr": "Oturum hedefleri"
+          }
+        },
+        {
+          "label": "Sidebar",
+          "link": "/sidebar/",
+          "translations": {
+            "nl": "Zijbalk",
+            "uk": "Бічна панель",
+            "zh-CN": "侧边栏",
+            "es": "Barra lateral",
+            "pt-BR": "Barra lateral",
+            "ko": "사이드바",
+            "pl": "Pasek boczny",
+            "fr": "Barre latérale",
+            "ja": "サイドバー",
+            "de": "Seitenleiste",
+            "tr": "Kenar çubuğu"
           }
         },
         {

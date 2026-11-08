@@ -245,6 +245,13 @@ describe("message events", () => {
     expect(draft.message.ses_1.map((m) => m.id)).toEqual(["msg_a", "msg_u"])
   })
 
+  test("inbox delivery clears the pending mark of a synthetic message", () => {
+    const report: Message = { id: "msg_s", sessionID: "ses_1", role: "synthetic", time: { created: 5 }, text: "result", pending: true }
+    const draft = state({ message: { ses_1: [report] } })
+    apply(draft, { type: "message.patched", properties: { sessionID: "ses_1", messageID: "msg_s", patch: { time: { created: 30 } } } })
+    expect(draft.message.ses_1[0]).toEqual({ id: "msg_s", sessionID: "ses_1", role: "synthetic", time: { created: 30 }, text: "result" })
+  })
+
   test("a shell message is patched by shell id", () => {
     const shell: Message = {
       id: "msg_s",
@@ -366,6 +373,24 @@ describe("streaming parts", () => {
         properties: { sessionID: "ses_1", part: { ...done, state: { status: "running", input: { command: "ls" }, time: { start: 11 } } } },
       }),
     ).toBe(false)
+  })
+
+  test("server outcomes replace local interrupted tools and preserve their start time", () => {
+    for (const transition of [
+      { kind: "success" as const, output: "answered", executed: true, end: 15 },
+      { kind: "failed" as const, error: "form cancelled", errorType: "tool.execution", executed: true, end: 15 },
+    ]) {
+      const draft = state({ part: { msg_a: [{
+        id: "call_q", sessionID: "ses_1", messageID: "msg_a", type: "tool", callID: "call_q", tool: "question",
+        state: { status: "error", input: {}, error: "Interrupted", errorSource: "local", time: { start: 10, end: 12 } },
+      }] } })
+      apply(draft, { type: "message.tool.transition", properties: { sessionID: "ses_1", messageID: "msg_a", partID: "call_q", transition } })
+      const part = draft.part.msg_a[0]
+      expect(part).toMatchObject({ state: { status: transition.kind === "success" ? "completed" : "error", time: { start: 10, end: 15 } } })
+      if (part.type !== "tool") throw new Error("expected tool")
+      expect("errorSource" in part.state).toBe(false)
+      if (transition.kind === "failed") expect(part.state).toMatchObject({ errorType: "tool.execution" })
+    }
   })
 
   test("a finished read keeps no result, since its row opens the file instead", () => {

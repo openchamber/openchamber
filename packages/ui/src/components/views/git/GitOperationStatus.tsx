@@ -2,6 +2,8 @@ import { Button } from '@/components/ui/button';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import type { GitActionRecovery } from './useGitOperationRecovery';
+import { ButtonTooltip } from '@/components/ui/action-toolbar';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 
 /**
  * Says what a Git transfer left for the person to act on.
@@ -38,7 +40,7 @@ export function GitOperationStatus({ entry, onRefresh, onCancel, className }: {
       aria-busy={entry.checking}
       aria-label={t('gitView.operation.title')}
     >
-      <div className="max-h-48 space-y-1 overflow-y-auto">
+      <ScrollableOverlay outerClassName="max-h-48" className="space-y-1" disableHorizontal>
         {problem ? <p className="text-[var(--status-warning)]">{t(`gitView.operation.recovery.${problem}`)}</p> : null}
         {unreadRestored.map((reference) => (
           <div key={reference.operationId} className="space-y-1 text-muted-foreground">
@@ -77,9 +79,11 @@ export function GitOperationStatus({ entry, onRefresh, onCancel, className }: {
         })}
         {unknown ? <p className="text-[var(--status-warning)]">{t('gitView.operation.unknownHint')}</p> : null}
         {unknown ? <p className="text-muted-foreground">{t('gitView.operation.recovery.inspect')}</p> : null}
-      </div>
+      </ScrollableOverlay>
       {unknown || problem ? <div className="mt-3 flex flex-wrap gap-2">
-        <Button variant="outline" size="sm" disabled={entry.checking} onClick={onRefresh}>{t('gitView.operation.refresh')}</Button>
+        <ButtonTooltip sideOffset={8} label={t('contextTooltips.git.checkOperation')}>
+          <Button variant="outline" size="sm" disabled={entry.checking} onClick={onRefresh}>{t('gitView.operation.refresh')}</Button>
+        </ButtonTooltip>
         {canCancel ? <Button variant="ghost" size="sm" disabled={entry.checking} onClick={onCancel}>{t('gitView.operation.cancel')}</Button> : null}
       </div> : null}
     </section>

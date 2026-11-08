@@ -28,6 +28,10 @@ Elige el botón de identidad arriba del [panel Git](/es/git/) y elige una. Las p
 
 Al aplicar una identidad se escribe en la configuración **local** de git de ese repositorio, así que solo afecta a ese repo y tu ajuste global no cambia. Git en la terminal y la shell del agente también la usan. **Identidad del sistema** quita lo que escribió OpenChamber, y vuelve a responder tu propia configuración de Git.
 
+## Frases de contraseña de claves SSH
+
+Para una clave SSH cifrada, introduce su frase de contraseña opcional antes de buscar en `~/.ssh`. Después, confirma la huella y añade la clave. OpenChamber mantiene la clave cifrada y guarda la frase en el almacén de credenciales de OpenCode. Las frases guardadas solo funcionan para acciones de Git en la aplicación. Los comandos de Git del terminal o de agentes no las recuperan, por lo que una clave administrada cifrada no puede autenticarse por esa vía.
+
 ## Relacionado
 
 - [Flujos de trabajo de Git](/es/git/): haz commit con la identidad que configures

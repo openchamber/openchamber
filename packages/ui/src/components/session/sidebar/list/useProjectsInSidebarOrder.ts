@@ -1,6 +1,6 @@
 import React from 'react';
 import type { Project as OpenCodeProject, Session } from '@/lib/opencode/model';
-import { isVSCodeRuntime } from '@/lib/desktop';
+import { getSettingsSurface } from '@/lib/settings/surface';
 import { useSidebarSpaces } from '@/lib/spaces/spaces-store';
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
@@ -37,13 +37,11 @@ export const useProjectsInSidebarOrder = <T extends { id: string }>(
   items: readonly T[],
   enabled = true,
 ): readonly T[] => {
-  const isVSCode = React.useMemo(() => isVSCodeRuntime(), []);
+  // Every sidebar sorts projects by the stored order, in either grouping.
+  const isVSCode = React.useMemo(() => getSettingsSurface() === 'vscode', []);
   const projects = useProjectsStore((state) => (enabled ? state.projects : NO_PROJECTS));
   const manualOrder = useProjectsStore((state) => (enabled ? state.manualProjectOrder : NO_IDS));
-  const storedOrder = useSessionDisplayStore((state) => state.projectSortOrder);
-  // VS Code has no List view; elsewhere List keeps the manual order, as the sidebar does.
-  const listView = useSessionDisplayStore((state) => !isVSCode && state.sidebarViewMode === 'timeline');
-  const order = listView ? 'manual' : storedOrder;
+  const order = useSessionDisplayStore((state) => state.projectSortOrder);
   const recent = enabled && order === 'recent';
   const sessions = useGlobalSessionsStore((state) => (recent ? state.activeSessions : NO_SESSIONS));
   // Archived sessions can tie an OpenCode project to a registered one, as in the sidebar's index.

@@ -1,7 +1,6 @@
 import * as vscode from 'vscode';
 import { type OpenCodeManager } from './opencode';
 import { handleStandardGitBridgeMessage } from './bridge-git-runtime';
-import { handleSpecialGitBridgeMessage } from './bridge-git-special-runtime';
 import { handleSmallModelBridgeMessage, readOpenCodeSmallModelCatalog } from './bridge-small-model-runtime';
 import { handleFsBridgeMessage } from './bridge-fs-runtime';
 import { handleConfigBridgeMessage } from './bridge-config-runtime';
@@ -11,6 +10,7 @@ import { waitForWorktreeRemoval } from './gitService';
 import { handlePermissionAutoAcceptBridgeMessage } from './bridge-permission-auto-accept-runtime';
 import { handleProjectSetupBridgeMessage } from './bridge-project-setup-runtime';
 import { createSessionStateStore, getOpenChamberDataDir } from './openchamberSessionState';
+import { openCodeTrust } from './opencodeTrust';
 import {
   fetchOpenCodeSkillsFromApi,
   persistSettings,
@@ -83,14 +83,6 @@ export async function handleBridgeMessage(message: BridgeRequest, ctx?: BridgeCo
     if (standardGitResponse) {
       return standardGitResponse;
     }
-    const specialGitResponse = await handleSpecialGitBridgeMessage(
-      { id, type, payload },
-      ctx,
-      { readSettings, execGit, readPromptOverrides: magicPrompts.overridesForDirectory }
-    );
-    if (specialGitResponse) {
-      return specialGitResponse;
-    }
     const smallModelResponse = await handleSmallModelBridgeMessage(
       { id, type, payload },
       (directory) => readOpenCodeSmallModelCatalog(ctx?.manager, directory),
@@ -153,6 +145,7 @@ export async function handleBridgeMessage(message: BridgeRequest, ctx?: BridgeCo
         tryHandleLocalFsProxy,
         waitForWorktreeRemoval,
         sessionState: sessionStateStore,
+        openCodeTrust,
         buildUnavailableApiResponse,
         sanitizeForwardHeaders,
         collectHeaders,

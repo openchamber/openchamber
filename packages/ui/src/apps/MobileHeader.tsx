@@ -10,10 +10,10 @@ import { useGitStore, useIsGitRepo } from '@/stores/useGitStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSession } from '@/sync/sync-context';
 
-import { SpaceAccessButton } from '@/components/session/spaces/SpaceAccessButton';
 
 import { MobileSessionMetadataButton } from './MobileSessionMetadata';
 import { MobileSessionSwitcher } from './MobileSessionSwitcher';
+import { MOBILE_HEADER_BUTTON_CLASS } from '@/components/ui/mobileHeader';
 
 export const MobileHeader: React.FC<{
   onOpenSessions: () => void;
@@ -93,7 +93,7 @@ export const MobileHeader: React.FC<{
         <div className="flex h-[var(--oc-header-height,56px)] w-full items-center gap-1 px-2">
           <button
             type="button"
-            className="flex size-10 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-interactive-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className={MOBILE_HEADER_BUTTON_CLASS}
             aria-label={t('mobile.sessions.openSheetAria')}
             onClick={handleOpenSessions}
             style={{ touchAction: 'manipulation' }}
@@ -116,7 +116,7 @@ export const MobileHeader: React.FC<{
             style={{ touchAction: 'manipulation' }}
           >
             <span className="flex min-w-0 items-center gap-1">
-              <span dir="auto" className="block min-w-0 truncate oc-ui-start-align typography-ui-label text-foreground">{primaryLabel}</span>
+              <span dir="auto" className="block min-w-0 truncate oc-ui-start-align typography-ui-label font-medium text-foreground">{primaryLabel}</span>
               {/* Discoverability: the chevron marks the title as a disclosure
                   trigger and flips while the switcher is open. */}
               <Icon
@@ -143,15 +143,9 @@ export const MobileHeader: React.FC<{
             />
           )}
 
-          <SpaceAccessButton
-            directory={effectiveDirectory}
-            className="flex size-10 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-interactive-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            iconClassName="size-5"
-          />
-
           <button
             type="button"
-            className="relative flex size-10 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-interactive-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className={MOBILE_HEADER_BUTTON_CLASS}
             aria-label={hasUncommittedChanges
               ? t('mobile.header.openWorkspaceWithChangesAria')
               : t('mobile.header.openWorkspaceAria')}

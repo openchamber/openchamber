@@ -7,25 +7,26 @@
 const STATUSES = new Set(['disconnected', 'unavailable']);
 
 /**
- * `readLiveSummaries({ provider, instance, accountId, refs, issueRefs })` is the
- * source-control module's provider-neutral reader: it answers
+ * `readLiveSummaries({ provider, instance, accountId, refs, issueRefs, discussionRefs, details })`
+ * is the source-control module's provider-neutral reader (`details` adds a
+ * pull request's failed check names and newest comments): it answers
  * `{ connected: false }` without an account, else `{ connected: true,
- * summaries, issueSummaries }`, or a provider's own `{ status }` (GitHub's
+ * summaries, issueSummaries, discussionSummaries }`, or a provider's own `{ status }` (GitHub's
  * per-host rate limit and refused token). `trackers` is the tracker
  * registry; each tracker's `liveSummaries(identifiers)` reads its work items.
  */
 export function createTrackedItemReaders({ readLiveSummaries, trackers }) {
   return {
-    async sourceControl({ provider, instance, accountId = null, pulls, issues }) {
+    async sourceControl({ provider, instance, accountId = null, pulls, issues, discussions = [], details = false }) {
       if (!(readLiveSummaries instanceof Function)) return { status: 'disconnected' };
-      const result = await readLiveSummaries({ provider, instance, accountId, refs: pulls, issueRefs: issues });
+      const result = await readLiveSummaries({ provider, instance, accountId, refs: pulls, issueRefs: issues, discussionRefs: discussions, details });
       if (!result?.connected) return { status: 'disconnected' };
       if (STATUSES.has(result.status)) {
         return Number.isFinite(result.retryAfterMs)
           ? { status: result.status, retryAfterMs: result.retryAfterMs }
           : { status: result.status };
       }
-      return { status: 'ok', pulls: result.summaries ?? [], issues: result.issueSummaries ?? [] };
+      return { status: 'ok', pulls: result.summaries ?? [], issues: result.issueSummaries ?? [], discussions: result.discussionSummaries ?? [] };
     },
 
     // A tracker this server does not register (an item a newer client or an

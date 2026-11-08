@@ -18,17 +18,22 @@ const parseStore = (value) => {
     || value.version !== 1 || !Array.isArray(value.keys)) throw invalidStore();
   const ids = new Set();
   const keys = value.keys.map((record) => {
-    if (!isPlainObject(record) || !hasExactKeys(record, ['id', 'privateKeyPath', 'fingerprint'])
+    if (!isPlainObject(record) || !hasExactKeys(record, ['id', 'privateKeyPath', 'fingerprint',
+      ...(Object.hasOwn(record, 'passphraseCredentialId') ? ['passphraseCredentialId'] : [])])
+      || (Object.hasOwn(record, 'passphraseCredentialId')
+        && (!isString(record.passphraseCredentialId) || !/^cred_[A-Za-z0-9_-]+$/.test(record.passphraseCredentialId)))
       || !isString(record.id) || !record.id || record.id.trim() !== record.id || record.id.includes('\0')
       || !isString(record.privateKeyPath) || !path.isAbsolute(record.privateKeyPath) || /[\0\r\n]/.test(record.privateKeyPath)
       || !isString(record.fingerprint) || !/^SHA256:[A-Za-z0-9+/]{43}=?$/.test(record.fingerprint)
       || ids.has(record.id)) throw invalidStore();
     ids.add(record.id);
-    return Object.freeze({
+    const parsed = {
       id: record.id,
       privateKeyPath: record.privateKeyPath,
       fingerprint: record.fingerprint,
-    });
+    };
+    if (record.passphraseCredentialId) parsed.passphraseCredentialId = record.passphraseCredentialId;
+    return Object.freeze(parsed);
   });
   return Object.freeze({ version: 1, keys: Object.freeze(keys) });
 };

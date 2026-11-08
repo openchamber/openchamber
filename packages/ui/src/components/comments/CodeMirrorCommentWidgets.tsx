@@ -20,7 +20,7 @@ interface CodeMirrorCommentWidgetsOptions {
   fileLabel: string;
   newWidgetId: string;
   mapDraftToRange: (draft: InlineCommentDraft) => LineRange;
-  onSave: (text: string, range?: LineRange) => void;
+  onSave: (text: string, range?: LineRange) => boolean;
   onCancel: () => void;
   onEdit: (draft: InlineCommentDraft) => void;
   onDelete: (draft: InlineCommentDraft) => void;

@@ -15,6 +15,7 @@ type FakeModel = {
   name: string;
   enabled: boolean;
   limit: { context: number; output: number };
+  settings?: { apiKey: string };
 };
 type SeenRequest = { path: string; directory: string | undefined; authorization: string | undefined };
 
@@ -98,6 +99,16 @@ describe('GET /api/small-model in VS Code', () => {
       success: true,
       data: { authenticatedProviders: ['openai', 'anthropic', 'plugin'] },
     });
+  });
+
+  test('leaves out zen without a login and lists it with a real credential', async () => {
+    providers = [{ id: 'opencode', name: 'OpenCode' }];
+
+    models = [{ ...MODEL('opencode', 'big-pickle'), settings: { apiKey: 'public' } }];
+    assert.deepEqual((await ask({ directory: '/proj' }))?.data, { authenticatedProviders: [] });
+
+    models = [{ ...MODEL('opencode', 'gpt-5-nano'), settings: { apiKey: 'zen-key' } }];
+    assert.deepEqual((await ask({ directory: '/proj' }))?.data, { authenticatedProviders: ['opencode'] });
   });
 
   test('reads the project directory with the OpenCode credentials', async () => {

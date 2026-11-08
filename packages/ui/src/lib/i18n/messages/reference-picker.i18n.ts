@@ -131,6 +131,9 @@ export const referencePickerI18n = {
     'references.picker.preview.reviewers': 'Reviewers',
     'references.picker.preview.stateMenuAria': 'Change state ({state})',
     'references.picker.preview.refresh': 'Refresh',
+    'references.link.copy': 'Copy link',
+    'references.link.copied': 'Link copied',
+    'references.link.copyFailed': 'Could not copy the link',
   },
   de: {
     'references.picker.thread.resolved': 'Erledigt',
@@ -263,6 +266,9 @@ export const referencePickerI18n = {
     'references.picker.preview.reviewers': 'Reviewer',
     'references.picker.preview.stateMenuAria': 'Status ändern ({state})',
     'references.picker.preview.refresh': 'Aktualisieren',
+    'references.link.copy': 'Link kopieren',
+    'references.link.copied': 'Link kopiert',
+    'references.link.copyFailed': 'Link konnte nicht kopiert werden',
   },
   fr: {
     'references.picker.thread.resolved': 'Résolu',
@@ -395,6 +401,9 @@ export const referencePickerI18n = {
     'references.picker.preview.reviewers': 'Relecteurs',
     'references.picker.preview.stateMenuAria': 'Changer l’état ({state})',
     'references.picker.preview.refresh': 'Actualiser',
+    'references.link.copy': 'Copier le lien',
+    'references.link.copied': 'Lien copié',
+    'references.link.copyFailed': 'Impossible de copier le lien',
   },
   nl: {
     'references.picker.thread.resolved': 'Opgelost',
@@ -527,6 +536,9 @@ export const referencePickerI18n = {
     'references.picker.preview.reviewers': 'Reviewers',
     'references.picker.preview.stateMenuAria': 'Status wijzigen ({state})',
     'references.picker.preview.refresh': 'Vernieuwen',
+    'references.link.copy': 'Link kopiëren',
+    'references.link.copied': 'Link gekopieerd',
+    'references.link.copyFailed': 'Kan de link niet kopiëren',
   },
   es: {
     'references.picker.thread.resolved': 'Resuelto',
@@ -659,6 +671,9 @@ export const referencePickerI18n = {
     'references.picker.preview.reviewers': 'Revisores',
     'references.picker.preview.stateMenuAria': 'Cambiar estado ({state})',
     'references.picker.preview.refresh': 'Actualizar',
+    'references.link.copy': 'Copiar enlace',
+    'references.link.copied': 'Enlace copiado',
+    'references.link.copyFailed': 'No se pudo copiar el enlace',
   },
   ja: {
     'references.picker.thread.resolved': '解決済み',
@@ -791,6 +806,9 @@ export const referencePickerI18n = {
     'references.picker.preview.reviewers': 'レビュアー',
     'references.picker.preview.stateMenuAria': '状態を変更（{state}）',
     'references.picker.preview.refresh': '再読み込み',
+    'references.link.copy': 'リンクをコピー',
+    'references.link.copied': 'リンクをコピーしました',
+    'references.link.copyFailed': 'リンクをコピーできませんでした',
   },
   'pt-BR': {
     'references.picker.thread.resolved': 'Resolvido',
@@ -923,6 +941,9 @@ export const referencePickerI18n = {
     'references.picker.preview.reviewers': 'Revisores',
     'references.picker.preview.stateMenuAria': 'Alterar estado ({state})',
     'references.picker.preview.refresh': 'Atualizar',
+    'references.link.copy': 'Copiar link',
+    'references.link.copied': 'Link copiado',
+    'references.link.copyFailed': 'Não foi possível copiar o link',
   },
   uk: {
     'references.picker.thread.resolved': 'Вирішено',
@@ -1055,6 +1076,9 @@ export const referencePickerI18n = {
     'references.picker.preview.reviewers': 'Рецензенти',
     'references.picker.preview.stateMenuAria': 'Змінити стан ({state})',
     'references.picker.preview.refresh': 'Оновити',
+    'references.link.copy': 'Копіювати посилання',
+    'references.link.copied': 'Посилання скопійовано',
+    'references.link.copyFailed': 'Не вдалося скопіювати посилання',
   },
   ko: {
     'references.picker.thread.resolved': '해결됨',
@@ -1187,6 +1211,9 @@ export const referencePickerI18n = {
     'references.picker.preview.reviewers': '리뷰어',
     'references.picker.preview.stateMenuAria': '상태 변경 ({state})',
     'references.picker.preview.refresh': '새로 고침',
+    'references.link.copy': '링크 복사',
+    'references.link.copied': '링크를 복사했습니다',
+    'references.link.copyFailed': '링크를 복사하지 못했습니다',
   },
   pl: {
     'references.picker.thread.resolved': 'Rozwiązane',
@@ -1319,6 +1346,9 @@ export const referencePickerI18n = {
     'references.picker.preview.reviewers': 'Recenzenci',
     'references.picker.preview.stateMenuAria': 'Zmień stan ({state})',
     'references.picker.preview.refresh': 'Odśwież',
+    'references.link.copy': 'Kopiuj link',
+    'references.link.copied': 'Skopiowano link',
+    'references.link.copyFailed': 'Nie udało się skopiować linku',
   },
   'zh-CN': {
     'references.picker.thread.resolved': '已解决',
@@ -1451,6 +1481,9 @@ export const referencePickerI18n = {
     'references.picker.preview.reviewers': '审查者',
     'references.picker.preview.stateMenuAria': '更改状态（{state}）',
     'references.picker.preview.refresh': '刷新',
+    'references.link.copy': '复制链接',
+    'references.link.copied': '链接已复制',
+    'references.link.copyFailed': '无法复制链接',
   },
   'zh-TW': {
     'references.picker.thread.resolved': '已解決',
@@ -1583,6 +1616,9 @@ export const referencePickerI18n = {
     'references.picker.preview.reviewers': '審查者',
     'references.picker.preview.stateMenuAria': '變更狀態（{state}）',
     'references.picker.preview.refresh': '重新整理',
+    'references.link.copy': '複製連結',
+    'references.link.copied': '已複製連結',
+    'references.link.copyFailed': '無法複製連結',
   },
   tr: {
     'references.picker.thread.resolved': 'Çözüldü',
@@ -1715,6 +1751,9 @@ export const referencePickerI18n = {
     'references.picker.preview.reviewers': 'İnceleyiciler',
     'references.picker.preview.stateMenuAria': 'Durumu değiştir ({state})',
     'references.picker.preview.refresh': 'Yenile',
+    'references.link.copy': 'Bağlantıyı kopyala',
+    'references.link.copied': 'Bağlantı kopyalandı',
+    'references.link.copyFailed': 'Bağlantı kopyalanamadı',
   },
   ar: {
     'references.picker.thread.resolved': 'تم الحل',
@@ -1847,6 +1886,9 @@ export const referencePickerI18n = {
     'references.picker.preview.reviewers': 'المراجعون',
     'references.picker.preview.stateMenuAria': 'تغيير الحالة ({state})',
     'references.picker.preview.refresh': 'تحديث',
+    'references.link.copy': 'نسخ الرابط',
+    'references.link.copied': 'تم نسخ الرابط',
+    'references.link.copyFailed': 'تعذّر نسخ الرابط',
   },
   he: {
     'references.picker.thread.resolved': 'נפתר',
@@ -1979,5 +2021,8 @@ export const referencePickerI18n = {
     'references.picker.preview.reviewers': 'סוקרים',
     'references.picker.preview.stateMenuAria': 'שנה מצב ({state})',
     'references.picker.preview.refresh': 'רענון',
+    'references.link.copy': 'העתק קישור',
+    'references.link.copied': 'הקישור הועתק',
+    'references.link.copyFailed': 'לא ניתן היה להעתיק את הקישור',
   },
 } as const;

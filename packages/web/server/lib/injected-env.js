@@ -29,6 +29,35 @@ export function injectedEnvKeys(env) {
 }
 
 /**
+ * `env` without what OpenChamber put into it, for a server started from such
+ * a shell: it is its own instance, not the one whose shell it runs in. What
+ * the user exported is not in the record and stays.
+ * @param {Record<string, string | undefined>} env
+ * @returns {Record<string, string | undefined>}
+ */
+export function withoutInjectedEnv(env) {
+  const injected = injectedEnvKeys(env);
+  return Object.fromEntries(Object.entries(env).filter(([key]) => !injected.has(key)));
+}
+
+/**
+ * A copy of `env` with `values` set as the user's own: their names leave the
+ * record, so a command started with it takes them as given.
+ * @param {Record<string, string | undefined>} env
+ * @param {Record<string, string>} values
+ * @returns {Record<string, string | undefined>}
+ */
+export function withUserEnv(env, values) {
+  const next = { ...env, ...values };
+  const recorded = injectedEnvKeys(env);
+  recorded.delete(INJECTED_ENV_KEY);
+  for (const key of Object.keys(values)) recorded.delete(key);
+  if (recorded.size > 0) next[INJECTED_ENV_KEY] = [...recorded].join(',');
+  else delete next[INJECTED_ENV_KEY];
+  return next;
+}
+
+/**
  * Set each defined value in `env` and record the names whose value changed.
  * @template {Record<string, string | undefined>} T
  * @param {T} env

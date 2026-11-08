@@ -54,7 +54,9 @@ export function adaptVSCodeRoles(theme: Theme, authored: Readonly<VSCodeThemePal
     neutral, (color) => minimum(color) >= floor,
   );
   surface.foreground = text(surface.foreground, dark ? 13.6 : 9, 7);
-  surface.mutedForeground = text(surface.mutedForeground, Math.min(6, contrast(surface.foreground, canvas) * 0.7));
+  // Dark palettes cap secondary text lower: there mid greys sit close
+  // together, and a brighter secondary colour merges with resting titles.
+  surface.mutedForeground = text(surface.mutedForeground, Math.min(dark ? 5.2 : 6, contrast(surface.foreground, canvas) * 0.7));
   surface.elevatedForeground = text(surface.elevatedForeground, dark ? 13.6 : 9, 7);
 
   const accents = [authored['button.background'], authored['textLink.foreground'], authored['activityBarBadge.background'], authored['list.highlightForeground'], authored.focusBorder];

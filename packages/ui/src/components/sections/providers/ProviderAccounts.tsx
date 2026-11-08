@@ -210,7 +210,7 @@ export const ProviderAccounts: React.FC<ProviderAccountsProps> = ({
                       className={cn(SETTINGS_ICON_BUTTON_CLASS, 'shrink-0')}
                       aria-label={t('settings.providers.accounts.menuAria', { account: connection.label })}
                     >
-                      <Icon name="more-2" className="size-4" />
+                      <Icon name="more" className="size-4" />
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end">

@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { resolveProjectForSessionDirectory } from './projectResolution';
+import { useSpacesStore } from './spaces/spaces-store';
 
 const projects = [
   { id: 'openchamber', path: '/workspace/openchamber', label: 'OpenChamber' },
@@ -42,5 +43,18 @@ describe('resolveProjectForSessionDirectory', () => {
     ]);
 
     expect(resolveProjectForSessionDirectory(configuredProjects, worktrees, worktreePath)).toEqual(configuredProjects[1]);
+  });
+
+  test('resolves a session in an isolated space to the project the space was made from', () => {
+    const space = '0123456789ab';
+    const initial = useSpacesStore.getState();
+    try {
+      // Unknown space: no project, rather than a guess from the path.
+      expect(resolveProjectForSessionDirectory(projects, new Map(), `/spaces/${space}/openchamber/src`)).toBeNull();
+      useSpacesStore.setState({ spaces: new Map([[space, { id: space, name: 'quick-falcon', state: 'complete', projectDirectory: '/workspace/openchamber', directory: `/spaces/${space}/openchamber` }]]) });
+      expect(resolveProjectForSessionDirectory(projects, new Map(), `/spaces/${space}/openchamber/src`)).toEqual(projects[0]);
+    } finally {
+      useSpacesStore.setState(initial, true);
+    }
   });
 });

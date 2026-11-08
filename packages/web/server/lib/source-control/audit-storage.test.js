@@ -64,6 +64,14 @@ describe('source-control audit storage', () => {
     await expect(store.plan(plan('mismatch-two', { target: { ...issueTarget, kind: 'change-request' } }))).rejects.toThrow();
   });
 
+  it('names a discussion write by its discussion', async () => {
+    const { store } = await setup();
+    const discussionTarget = { kind: 'discussion', operation: 'discussion-answer', projectId: 'project_one', number: 5 };
+    await expect(store.plan(plan('answer', { target: discussionTarget }))).resolves.toBeTruthy();
+    await expect(store.plan(plan('labels', { target: { ...discussionTarget, operation: 'discussion-labels' } }))).resolves.toBeTruthy();
+    await expect(store.plan(plan('mismatch', { target: { ...discussionTarget, kind: 'issue' } }))).rejects.toThrow();
+  });
+
   it('fails closed on busy reads and cleans failed snapshot writes', async () => {
     const { filePath, store } = await setup();
     await store.plan(plan('original'));

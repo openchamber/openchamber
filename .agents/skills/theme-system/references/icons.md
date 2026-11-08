@@ -15,19 +15,7 @@ import type { IconName } from '@/components/icon/icons';
 
 ## Naming
 
-Convert Remixicon names to sprite names:
-
-1. Remove `Ri`.
-2. Remove the `Line` suffix.
-3. Convert PascalCase to lowercase kebab-case.
-4. Preserve filled variants with explicit `-fill`.
-
-| Remixicon | Sprite name |
-|---|---|
-| `RiArrowDownSLine` | `arrow-down-s` |
-| `RiCheckLine` | `check` |
-| `RiLoader4Line` | `loader-4` |
-| `RiGithubFill` | `github-fill` |
+Follow the naming rules in `packages/ui/src/components/icon/README.md`.
 
 ## Config Values
 

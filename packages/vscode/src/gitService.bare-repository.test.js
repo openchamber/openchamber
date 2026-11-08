@@ -89,4 +89,20 @@ describe('VS Code git service with a bare repository', () => {
     expect(entries.map((entry) => fs.realpathSync(entry.path))).toEqual([fs.realpathSync(repo)]);
     expect(entries[0].branch).toBe('main');
   });
+
+  it("reports a repository Git refuses in Git's words instead of as no repository", async () => {
+    if (!canRunGit()) return;
+
+    const repo = createSourceRepository();
+    expect(await checkIsGitRepository(path.join(createTempDir(), 'missing'))).toBe(false);
+    // Git's own switch for a repository owned by someone else.
+    process.env.GIT_TEST_ASSUME_DIFFERENT_OWNER = '1';
+    try {
+      const error = await checkIsGitRepository(repo).catch((caught) => caught);
+      expect(error).toMatchObject({ code: 'GIT_REPOSITORY_UNREADABLE' });
+      expect(error.message).toContain('safe.directory');
+    } finally {
+      delete process.env.GIT_TEST_ASSUME_DIFFERENT_OWNER;
+    }
+  });
 });

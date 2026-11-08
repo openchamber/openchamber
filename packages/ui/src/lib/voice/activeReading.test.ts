@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import {
+    createReadingPlaybackGuard,
     finishReading,
     isCurrentReading,
     startReading,
@@ -17,6 +18,41 @@ afterEach(() => {
 });
 
 describe('activeReading', () => {
+    test('a pending reading cannot start after eligibility is lost', async () => {
+        let eligible = true;
+        const playback = player();
+        const token = startReading('pending', playback.stop);
+        const beforePlayback = createReadingPlaybackGuard(token, () => eligible);
+        eligible = false;
+        await expect(beforePlayback()).rejects.toThrow('Reading cancelled');
+        expect(isCurrentReading(token)).toBe(false);
+        expect(playback.stops).toBe(1);
+    });
+
+    test('an established reading keeps playing chunks after backgrounding', async () => {
+        let eligible = true;
+        const token = startReading('chunks', player().stop);
+        const beforePlayback = createReadingPlaybackGuard(token, () => eligible);
+        await beforePlayback();
+        eligible = false;
+        await beforePlayback();
+        expect(isCurrentReading(token)).toBe(true);
+    });
+
+    test('a replaced reading cannot schedule a late chunk or stop its replacement', async () => {
+        const token = startReading('old', player().stop);
+        const beforePlayback = createReadingPlaybackGuard(token);
+        await beforePlayback();
+        const replacement = startReading('new', player().stop);
+        await expect(beforePlayback()).rejects.toThrow('Reading cancelled');
+        expect(isCurrentReading(replacement)).toBe(true);
+    });
+
+    test('manual playback does not need automatic-start eligibility', async () => {
+        const token = startReading('manual', player().stop);
+        await createReadingPlaybackGuard(token)();
+        expect(isCurrentReading(token)).toBe(true);
+    });
     test('a new reading stops the one in progress', () => {
         const first = player();
         const second = player();

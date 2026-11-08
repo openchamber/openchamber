@@ -330,9 +330,9 @@ export const NewSpaceDialog: React.FC<NewSpaceDialogProps> = ({ open, onOpenChan
           </button>
           {showFiles ? (
             // Paths from the user's own repository: text to show, left to right in every language.
-            <ul dir="ltr" className="mt-1 max-h-32 overflow-y-auto typography-meta text-muted-foreground">
+            <ScrollableOverlay as="ul" dir="ltr" outerClassName="mt-1 max-h-32" className="typography-meta text-muted-foreground" disableHorizontal>
               {changedFiles.map((file) => <li key={file} className="truncate font-mono">{file}</li>)}
-            </ul>
+            </ScrollableOverlay>
           ) : null}
         </div>
       ) : null}
@@ -480,7 +480,7 @@ export const NewSpaceDialog: React.FC<NewSpaceDialogProps> = ({ open, onOpenChan
       <DialogContent className="flex h-[min(30rem,85vh)] max-w-3xl flex-col">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <Icon name="box-3" className="h-5 w-5" />
+            <Icon name="instance" className="h-5 w-5" />
             {t('spaces.create.title')}
           </DialogTitle>
           <DialogDescription>{t('spaces.create.description')}</DialogDescription>

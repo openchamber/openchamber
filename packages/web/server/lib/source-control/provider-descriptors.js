@@ -45,6 +45,11 @@ function assertChangeCapabilities(descriptor) {
   if (capabilities.reviewModel !== undefined && !['verdict', 'votes'].includes(capabilities.reviewModel)) throw invalid('review model');
   if (capabilities.revisions !== undefined && capabilities.revisions !== true && capabilities.revisions !== false) throw invalid('revisions capability');
   if (capabilities.createVia !== undefined && !['api', 'push'].includes(capabilities.createVia)) throw invalid('create method');
+  if (capabilities.discussions !== undefined && capabilities.discussions !== true && capabilities.discussions !== false) throw invalid('discussions capability');
+  // Discussions are listed by the reference picker and opened by their address.
+  if (capabilities.discussions && (!capabilities.referencePicker || !descriptor.presentation.urls.discussion?.length)) {
+    throw invalid('discussions capability: it needs the reference picker and discussion URLs');
+  }
 }
 
 /**
@@ -104,8 +109,9 @@ export const sourceControlProviderDescriptors = createProviderDescriptors();
  * registry's priority order. `extension` (`{ guestId, name, version }`) marks
  * a provider an installed extension serves; older clients drop the field.
  * The change-host features (`reviewModel`, `revisions`, `createByPush`, and
- * the presentation's `branchHeads` and `submitRequirements`) appear only when
- * the descriptor declares them.
+ * the presentation's `branchHeads` and `submitRequirements`) and
+ * `discussions` (with `urls.discussion`) appear only when the descriptor
+ * declares them, and so do `urls.commit` and `urls.user`.
  */
 export function publicProviderDescriptor(descriptor, order, extension) {
   const { presentation } = descriptor;
@@ -167,6 +173,13 @@ export function publicProviderDescriptor(descriptor, order, extension) {
   if (capabilities.reviewModel !== undefined) published.features.reviewModel = capabilities.reviewModel;
   if (capabilities.revisions !== undefined) published.features.revisions = capabilities.revisions;
   if (capabilities.createVia !== undefined) published.features.createByPush = capabilities.createVia === 'push';
+  if (capabilities.discussions !== undefined) {
+    published.features.discussions = capabilities.discussions;
+    if (presentation.urls.discussion) published.urls.discussion = [...presentation.urls.discussion];
+  }
+  // Where a host's commits and people live, for links in item text; left out where it has none.
+  if (presentation.urls.commit) published.urls.commit = [...presentation.urls.commit];
+  if (presentation.urls.user) published.urls.user = [...presentation.urls.user];
   if (extension) {
     published.extension = { guestId: extension.guestId, name: extension.name, version: extension.version };
   }

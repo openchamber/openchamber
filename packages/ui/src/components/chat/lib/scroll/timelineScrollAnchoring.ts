@@ -40,25 +40,30 @@ export const getRowBottom = (
     return top + Math.max(1, height);
 };
 
-// The list footer (question and permission cards, error notices, the tail
-// spacer) renders after the last row and is part of the real content; the
-// list does not expose its size through getState, so the caller passes the
-// last reported value.
+// The scroll offset of the real content's end: the same place as the scroll
+// node's own end (`scrollHeight - clientHeight`) once the list is measured,
+// taken from the rows because that total lags a re-wrap. Row positions start
+// below the list header, and the footer (question and permission cards,
+// error notices, the tail spacer the composer and the status row float over)
+// renders after the last row; the list does not expose either size through
+// getState, so the caller passes the last reported values. Leaving the
+// header out and counting the status row's reserve again on top of the
+// footer, the end came out 8 px short of the scroll node's in a typical
+// session, and a resize settling moved a reader on the end by that much.
 export const resolveRealContentEndOffset = ({
     state,
-    composerOverlayHeight,
+    headerSize = 0,
     footerSize = 0,
 }: {
     readonly state: TimelineListMeasurementState;
-    readonly composerOverlayHeight: number;
+    readonly headerSize?: number;
     readonly footerSize?: number;
 }): number | null => {
     const lastIndex = state.data.length - 1;
     if (lastIndex < 0) return null;
     const lastBottom = getRowBottom(state, lastIndex);
     if (lastBottom === null) return null;
-    const visibleLength = Math.max(0, state.scrollLength - composerOverlayHeight);
-    return Math.max(0, lastBottom + Math.max(0, footerSize) - visibleLength);
+    return Math.max(0, Math.max(0, headerSize) + lastBottom + Math.max(0, footerSize) - state.scrollLength);
 };
 
 // Keep return-to-end detection in a tight band, rather than half a viewport.

@@ -39,3 +39,19 @@ export function generateBranchName(prefix?: string): string {
   }
   return slug;
 }
+
+// The dialog names an issue's or discussion's branch `issue-180-` (Linear's
+// `issue-ENG-12-`) plus a pair; that prefix is the part worth keeping.
+const GENERATED_NAME = new RegExp(`^((?:issue|discussion)-[^\\s/]+-)?(?:${ADJECTIVES.join('|')})-(?:${NOUNS.join('|')})(?:-[a-z0-9]{4})?$`);
+
+/**
+ * When `name` is one this generator makes (`cosmic-dolphin`, with the
+ * dialog's `-x1y2` suffix when the plain pair was taken, or after an item's
+ * `issue-180-`), the prefix to keep (empty for a bare pair), so the server can
+ * record that nobody chose the rest and the agent may rename it after the
+ * task. Null for any other name.
+ */
+export function generatedBranchPrefix(name: string): string | null {
+  const match = GENERATED_NAME.exec(name.trim());
+  return match ? match[1] ?? '' : null;
+}

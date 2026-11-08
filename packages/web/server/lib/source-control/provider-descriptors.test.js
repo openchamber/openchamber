@@ -68,9 +68,10 @@ describe('source control provider descriptors', () => {
     expect(() => gitea.instance.normalize(input)).toThrow(message);
   });
 
-  it('describes Gitea as a token-only provider without threads, uploads or stacks', () => {
+  it('describes Gitea as a token and gt provider without threads, uploads or stacks', () => {
     expect(gitea.instance.defaultInstances).toEqual([]);
-    expect(gitea.authMethods).toEqual({ device: false, pat: true, cli: false });
+    expect(gitea.authMethods).toEqual({ device: false, pat: true, cli: { tool: 'gt' } });
+    expect(sourceControlProviderDescriptors.get('forgejo').authMethods).toEqual({ device: false, pat: true, cli: false });
     expect(gitea.transport.httpsUsername).toEqual({ kind: 'login' });
     expect(gitea.capabilities).toMatchObject({
       merge: { methods: ['merge', 'squash', 'rebase'] },
@@ -78,7 +79,7 @@ describe('source control provider descriptors', () => {
       uploads: false, stacks: false, referencePicker: false,
     });
     const published = publicProviderDescriptor(gitea, 2);
-    expect(published).toMatchObject({ id: 'gitea', auth: { methods: ['pat'] }, instances: { defaultInstance: null } });
+    expect(published).toMatchObject({ id: 'gitea', auth: { methods: ['pat', 'cli'], cliName: 'gt', cliTransport: false }, instances: { defaultInstance: null } });
     expect(published.icon.path).toMatch(/^[MmLlHhVvCcSsQqTtAaZz0-9eE.,\s+-]+$/);
   });
 
@@ -114,8 +115,19 @@ describe('source control provider descriptors', () => {
   // A server without the providers route serves exactly GitHub and GitLab, so
   // the web adapter's fallback stays those two; every provider added since
   // comes after them in the published list.
+  // Discussions came later, so a server that old has none and the fallback leaves them out.
   it('publishes the web adapter fallback for an older server as its leading providers', () => {
-    const published = sourceControlProviderDescriptors.list().map((descriptor, order) => publicProviderDescriptor(descriptor, order));
+    const withoutDiscussions = (descriptor) => {
+      const features = { ...descriptor.features };
+      const urls = { ...descriptor.urls };
+      delete features.discussions;
+      // A server old enough for the fallback has no review draft routes.
+      delete features.reviewDrafts;
+      delete features.reviewDraftFileComments;
+      delete urls.discussion;
+      return { ...descriptor, features, urls };
+    };
+    const published = sourceControlProviderDescriptors.list().map((descriptor, order) => withoutDiscussions(publicProviderDescriptor(descriptor, order)));
     expect(published.slice(0, BUILT_IN_SOURCE_CONTROL_PROVIDERS.length)).toEqual(BUILT_IN_SOURCE_CONTROL_PROVIDERS);
     expect(BUILT_IN_SOURCE_CONTROL_PROVIDERS.map((descriptor) => descriptor.id)).toEqual(['github', 'gitlab']);
   });

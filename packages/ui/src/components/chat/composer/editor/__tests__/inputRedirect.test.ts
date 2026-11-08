@@ -10,12 +10,13 @@ let views: EditorView[];
 
 beforeEach(() => {
     browser = new Window({ url: 'http://localhost' });
+    Object.defineProperty(browser.navigator, 'platform', { configurable: true, value: 'Linux x86_64' });
     const globals = {
         window: browser, document: browser.document, navigator: browser.navigator,
         HTMLElement: browser.HTMLElement, Element: browser.Element, Node: browser.Node,
         MutationObserver: browser.MutationObserver, ResizeObserver: browser.ResizeObserver,
         Event: browser.Event, KeyboardEvent: browser.KeyboardEvent, ClipboardEvent: browser.ClipboardEvent,
-        DataTransfer: browser.DataTransfer,
+        MouseEvent: browser.MouseEvent, DataTransfer: browser.DataTransfer,
         requestAnimationFrame: browser.requestAnimationFrame.bind(browser),
         cancelAnimationFrame: browser.cancelAnimationFrame.bind(browser),
         getComputedStyle: browser.getComputedStyle.bind(browser),
@@ -29,6 +30,7 @@ beforeEach(() => {
 
 afterEach(async () => {
     for (const view of views) view.destroy();
+    document.body.replaceChildren();
     for (const [name, descriptor] of descriptors) {
         if (descriptor) Object.defineProperty(globalThis, name, descriptor);
         else Reflect.deleteProperty(globalThis, name);
@@ -148,6 +150,137 @@ test('a paste with nothing focused goes through the composer', () => {
     expect(redirect.redirectPaste(event)).toBe(true);
     expect(event.defaultPrevented).toBe(true);
     expect(main.view.state.doc.toString()).toBe('draft pasted');
+});
+
+const middlePointer = (target: EventTarget) => {
+    const event = new MouseEvent('pointerdown', {
+        bubbles: true, cancelable: true, button: 1, clientX: 12, clientY: 8,
+    });
+    target.dispatchEvent(event);
+    return event;
+};
+
+const middlePaste = (target: EventTarget, text = 'middle paste') => {
+    const data = new DataTransfer();
+    data.setData('text/plain', text);
+    const event = new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true });
+    Object.defineProperty(event, 'target', { configurable: true, value: target });
+    return event;
+};
+
+test('a middle click in the composer moves the caret and leaves native paste in place', () => {
+    const main = mountColumn('main', 'draft');
+    const redirect = createComposerInputRedirect();
+    Object.defineProperty(main.view, 'posAtCoords', { configurable: true, value: () => 2 });
+    redirect.rememberColumn(middlePointer(main.view.contentDOM));
+
+    const paste = middlePaste(main.view.contentDOM);
+    redirect.captureMiddleClickPaste(paste);
+
+    expect(paste.defaultPrevented).toBe(false);
+    expect(redirect.redirectPaste(paste)).toBe(false);
+    expect(main.view.state.selection.main.head).toBe(2);
+    expect(main.view.state.doc.toString()).toBe('draft');
+});
+
+test('a middle click on page chrome does not fall through to a focused composer', () => {
+    const main = mountColumn('main', 'draft');
+    const redirect = createComposerInputRedirect();
+    redirect.rememberColumn(middlePointer(main.button));
+
+    const paste = middlePaste(main.view.contentDOM);
+    redirect.captureMiddleClickPaste(paste);
+
+    expect(paste.defaultPrevented).toBe(true);
+    expect(main.view.state.doc.toString()).toBe('draft');
+});
+
+test('a middle click in another text field stays native', () => {
+    const redirect = createComposerInputRedirect();
+    const field = document.createElement('input');
+    document.body.append(field);
+    redirect.rememberColumn(middlePointer(field));
+
+    const paste = middlePaste(field);
+    redirect.captureMiddleClickPaste(paste);
+
+    expect(paste.defaultPrevented).toBe(false);
+    expect(redirect.redirectPaste(paste)).toBe(false);
+});
+
+test('a middle click in a shadow-root field stays native', () => {
+    const redirect = createComposerInputRedirect();
+    const host = document.createElement('div');
+    document.body.append(host);
+    const shadow = host.attachShadow({ mode: 'open' });
+    const field = document.createElement('textarea');
+    shadow.append(field);
+    const path = () => [field, shadow, host, document, window];
+
+    const pointer = new MouseEvent('pointerdown', { bubbles: true, button: 1 });
+    Object.defineProperty(pointer, 'composedPath', { configurable: true, value: path });
+    redirect.rememberColumn(pointer);
+
+    const paste = middlePaste(host);
+    Object.defineProperty(paste, 'composedPath', { configurable: true, value: path });
+    redirect.captureMiddleClickPaste(paste);
+
+    expect(paste.defaultPrevented).toBe(false);
+    expect(redirect.redirectPaste(paste)).toBe(false);
+});
+
+test('a middle click in a terminal stays with that terminal', () => {
+    const redirect = createComposerInputRedirect();
+    const terminal = document.createElement('div');
+    terminal.dataset.terminalOwner = 'main';
+    const canvas = document.createElement('canvas');
+    const input = document.createElement('textarea');
+    terminal.append(canvas, input);
+    document.body.append(terminal);
+    redirect.rememberColumn(middlePointer(canvas));
+
+    const paste = middlePaste(input, '');
+    redirect.captureMiddleClickPaste(paste);
+
+    expect(paste.defaultPrevented).toBe(false);
+    expect(redirect.redirectPaste(paste)).toBe(false);
+});
+
+test('a keyboard paste a non-editable surface handles stays out of the composer', () => {
+    const main = mountColumn('main', 'draft');
+    const redirect = createComposerInputRedirect();
+    const guest = document.createElement('div');
+    guest.setAttribute('role', 'application');
+    guest.addEventListener('paste', (event) => event.preventDefault());
+    document.body.append(guest);
+    window.addEventListener('paste', (event) => redirect.captureMiddleClickPaste(event), true);
+    window.addEventListener('paste', (event) => redirect.redirectPaste(event));
+
+    const paste = middlePaste(guest);
+    guest.dispatchEvent(paste);
+
+    expect(paste.defaultPrevented).toBe(true);
+    expect(main.view.state.doc.toString()).toBe('draft');
+});
+
+test('Windows and macOS keep the existing unowned-paste fallback', () => {
+    for (const [index, platform] of ['Win32', 'MacIntel'].entries()) {
+        if (index > 0) {
+            for (const view of views) view.destroy();
+            views = [];
+            document.body.replaceChildren();
+        }
+        Object.defineProperty(navigator, 'platform', { configurable: true, value: platform });
+        const main = mountColumn('main', 'draft ');
+        const redirect = createComposerInputRedirect();
+        redirect.rememberColumn(middlePointer(document.body));
+
+        const paste = middlePaste(document.body);
+
+        expect(redirect.redirectPaste(paste)).toBe(true);
+        expect(paste.defaultPrevented).toBe(true);
+        expect(main.view.state.doc.toString()).toBe('draft middle paste');
+    }
 });
 
 test('coming back to the window puts the caret in the composer unless focus takes text', () => {

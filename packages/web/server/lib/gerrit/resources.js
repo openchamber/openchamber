@@ -1,4 +1,6 @@
+import { documentDataUrl } from '../source-control/document-versions.js';
 import { isPlainObject, isString } from '../shared/guards.js';
+import { mapLimited } from '../shared/map-limited.js';
 import { joinProjectPath } from '../source-control/project-path.js';
 import { readLocalRevision as readLocalRevisionDefault, readUpstreamBranch as readUpstreamBranchDefault } from './local-revision.js';
 import {
@@ -28,6 +30,8 @@ const CONTEXT_OPTIONS = ['ALL_REVISIONS', 'CURRENT_COMMIT', 'LABELS', 'DETAILED_
 const HEAD_OPTIONS = ['ALL_REVISIONS'];
 // `reviewers` comes with `LABELS`; nothing is answered without a label option.
 const MUTATION_OPTIONS = ['CURRENT_REVISION', 'LABELS', 'DETAILED_ACCOUNTS'];
+// Gerrit's review comments outside any file of the diff.
+const MAGIC_REVIEW_PATHS = new Set(['/COMMIT_MSG', '/MERGE_LIST', '/PATCHSET_LEVEL']);
 const CANDIDATE_OPTIONS = ['LABELS', 'DETAILED_ACCOUNTS'];
 const LIVE_OPTIONS = ['CURRENT_REVISION', 'SUBMITTABLE'];
 
@@ -46,20 +50,6 @@ const enc = (value) => encodeURIComponent(value);
 function requireMapped(value, message) {
   if (!value) throw malformed(message);
   return value;
-}
-
-async function mapLimited(items, limit, task) {
-  const results = new Array(items.length);
-  let next = 0;
-  const worker = async () => {
-    while (next < items.length) {
-      const index = next;
-      next += 1;
-      results[index] = await task(items[index]);
-    }
-  };
-  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
-  return results;
 }
 
 /** Free text as one quoted search term; a bare number is the change itself. */
@@ -108,9 +98,10 @@ export function createGerritResourceService({
     return primary;
   };
 
-  /** The bound project, and the one a selector names, which must be it. */
-  const boundProject = async (directory, selector, remote) => {
+  /** The bound project, and the one a selector names, which must be it unless a link named it (`linked`). */
+  const boundProject = async (directory, selector, remote, { linked = false } = {}) => {
     const primary = await primaryProject(directory, remote);
+    if (linked && selector) return { ...primary, project: joinProjectPath(selector.owner, selector.name), owner: selector.owner, name: selector.name };
     if (selector && joinProjectPath(selector.owner, selector.name) !== primary.project) throw notFound('Gerrit project is outside the bound project');
     return primary;
   };
@@ -138,8 +129,8 @@ export function createGerritResourceService({
 
   const requireChange = (raw, project) => requireMapped(mapGerritChange(raw, identity, project), 'Gerrit returned an invalid change');
 
-  const findChange = async (directory, number, selector, remote, options) => {
-    const primary = await boundProject(directory, selector, remote);
+  const findChange = async (directory, number, selector, remote, options, { linked } = {}) => {
+    const primary = await boundProject(directory, selector, remote, { linked });
     const project = projectOf(primary, { remoteName: primary.remoteName });
     const raw = await readChange(primary.project, number, options);
     return { primary, project, raw, request: requireChange(raw, project) };
@@ -189,6 +180,28 @@ export function createGerritResourceService({
   const targetPath = (providerTarget) => changePath(providerTarget.project, providerTarget.number);
   const reviewerIds = (raw) => (Array.isArray(raw?.reviewers?.REVIEWER) ? raw.reviewers.REVIEWER : [])
     .filter((account) => Number.isInteger(account?._account_id)).map((account) => String(account._account_id));
+  const readDrafts = async (providerTarget) => {
+    const drafts = await client.get(`${targetPath(providerTarget)}/drafts`);
+    if (!isPlainObject(drafts)) throw malformed('Gerrit returned invalid draft comments');
+    return drafts;
+  };
+  const hasDrafts = (drafts) => Object.values(drafts).some((comments) => Array.isArray(comments) && comments.length > 0);
+  /** Only the viewer's own draft can be changed: Gerrit shows no one else's. */
+  const requireDraft = async (providerTarget, commentId) => {
+    const draft = Object.values(await readDrafts(providerTarget)).flat().find((comment) => comment?.id === commentId);
+    if (!draft) throw Object.assign(new Error('Review comment is not a draft of yours on this change'), { code: 'SOURCE_CONTROL_MUTATION_TARGET_INVALID', status: 409 });
+    return draft;
+  };
+  const reviewPerson = (account) => {
+    const user = mapGerritUser(account, identity);
+    return user ? { login: user.username, avatarUrl: user.avatarUrl } : null;
+  };
+  const reviewCommentAt = (comment) => ({
+    path: comment.file,
+    side: comment.side === 'PARENT' ? 'old' : 'new',
+    line: Number.isInteger(comment.line) ? comment.line : null,
+    startLine: Number.isInteger(comment.range?.start_line) && comment.range.start_line < comment.line ? comment.range.start_line : null,
+  });
   const requireCurrent = (raw, headSha) => {
     if (raw.current_revision !== headSha) throw mismatch('headSha');
   };
@@ -247,7 +260,7 @@ export function createGerritResourceService({
      * commit SHA), the current patchset when none is named.
      */
     async changeRequestContext(directory, number, options = {}) {
-      const { primary, project, raw, request } = await findChange(directory, number, options.project, options.remote, CONTEXT_OPTIONS);
+      const { primary, project, raw, request } = await findChange(directory, number, options.project, options.remote, CONTEXT_OPTIONS, { linked: options.linked });
       const sha = revisionOf(raw, options.revision);
       const path = changePath(primary.project, number);
       const [files, patch, inline, stack] = await Promise.all([
@@ -346,8 +359,8 @@ export function createGerritResourceService({
     },
 
     /** A patchset's changes as one unified diff (`/patch` is a base64 mail; its diff part is kept). */
-    async changeRequestPatch(directory, number, { project, remote, revision } = {}) {
-      const { primary, raw } = await findChange(directory, number, project, remote, HEAD_OPTIONS);
+    async changeRequestPatch(directory, number, { project, remote, revision, linked } = {}) {
+      const { primary, raw } = await findChange(directory, number, project, remote, HEAD_OPTIONS, { linked });
       const sha = revisionOf(raw, revision);
       const patch = await client.base64(`${changePath(primary.project, number)}/revisions/${sha}/patch`);
       return { patch: diffOfPatch(patch.toString('utf8')), meta: { owner: primary.owner, repo: primary.name, number } };
@@ -358,11 +371,12 @@ export function createGerritResourceService({
      * the patchset. `/COMMIT_MSG` is the commit message, which has no
      * earlier side.
      */
-    async changeRequestFileContents(directory, number, { project, remote, path, previousPath, status, revision }) {
-      const { primary, raw } = await findChange(directory, number, project, remote, HEAD_OPTIONS);
+    async changeRequestFileContents(directory, number, { project, remote, path, previousPath, status, revision, binary, linked }) {
+      const { primary, raw } = await findChange(directory, number, project, remote, HEAD_OPTIONS, { linked });
       const sha = revisionOf(raw, revision);
       const readFile = async (filePath, parent) => {
         const content = await client.base64(`${changePath(primary.project, number)}/revisions/${sha}/files/${enc(filePath)}/content`, parent ? { parent: 1 } : undefined);
+        if (binary) return documentDataUrl(content);
         if (content.length > MAX_FULL_FILE_BYTES) {
           throw Object.assign(new Error('This file is too large to show in full'), { status: 413, code: 'file-too-large' });
         }
@@ -470,6 +484,106 @@ export function createGerritResourceService({
       return { state: 'succeeded', result: {} };
     },
 
+    /**
+     * The viewer's draft comments and the comment threads on the current
+     * patchset, for the diff. An older patchset's lines are not in this diff;
+     * the board keeps those.
+     */
+    async reviewState(directory, number, project, remote) {
+      const { primary, raw } = await findChange(directory, number, project, remote, MUTATION_OPTIONS);
+      const providerTarget = { project: primary.project, number };
+      const path = targetPath(providerTarget);
+      const [drafts, published, self] = await Promise.all([readDrafts(providerTarget), client.get(`${path}/comments`), client.get('/accounts/self')]);
+      const currentPatchSet = raw.revisions?.[raw.current_revision]?._number;
+      const me = reviewPerson(self);
+      const commentsOf = (map) => Object.entries(isPlainObject(map) ? map : {}).flatMap(([file, comments]) => (
+        MAGIC_REVIEW_PATHS.has(file) || !Array.isArray(comments) ? [] : comments.map((comment) => ({ ...comment, file }))
+      ));
+      const draftComments = commentsOf(drafts);
+      const threads = new Map();
+      const byId = new Map(commentsOf(published).map((comment) => [comment.id, comment]));
+      const rootOf = (comment) => {
+        let current = comment;
+        while (current.in_reply_to && byId.has(current.in_reply_to)) current = byId.get(current.in_reply_to);
+        return current;
+      };
+      for (const comment of byId.values()) {
+        const root = rootOf(comment);
+        if (root.patch_set !== currentPatchSet) continue;
+        if (!threads.has(root.id)) threads.set(root.id, { root, comments: [] });
+        threads.get(root.id).comments.push(comment);
+      }
+      return {
+        connected: true,
+        viewerIsAuthor: raw.owner?._account_id === self?._account_id,
+        headSha: raw.current_revision,
+        draft: draftComments.length > 0 ? {
+          id: String(number),
+          body: '',
+          // A draft on an older patchset has no line in this diff; it shows with the file's comments.
+          comments: draftComments.map((comment) => ({
+            ...(comment.patch_set === currentPatchSet ? reviewCommentAt(comment) : { ...reviewCommentAt(comment), line: null, startLine: null }),
+            id: comment.id,
+            body: comment.message,
+            author: me,
+          })),
+        } : null,
+        threads: [...threads.values()].map(({ root, comments }) => {
+          const ordered = comments.sort((left, right) => String(left.updated).localeCompare(String(right.updated)));
+          return {
+            ...reviewCommentAt(root),
+            id: root.id,
+            resolved: ordered.at(-1)?.unresolved === false,
+            canReply: false,
+            canResolve: false,
+            comments: ordered.map((comment) => ({
+              id: comment.id,
+              body: comment.message,
+              createdAt: gerritTimestamp(comment.updated) ?? '',
+              url: `${origin}/c/${primary.project}/+/${number}/comment/${comment.id}`,
+              author: reviewPerson(comment.author),
+            })),
+          };
+        }),
+        truncated: false,
+      };
+    },
+
+    async addReviewComment({ providerTarget, position, body, expectedTarget }) {
+      requireCurrent(await readTarget(providerTarget), expectedTarget.headSha);
+      const draft = { path: position.path, message: body };
+      if (position.side === 'old') draft.side = 'PARENT';
+      if (position.line !== undefined) {
+        draft.line = position.line;
+        if (position.startLine !== undefined) {
+          draft.range = { start_line: position.startLine, start_character: 0, end_line: position.line + 1, end_character: 0 };
+        }
+      }
+      const result = await client.put(`${targetPath(providerTarget)}/revisions/${expectedTarget.headSha}/drafts`, draft);
+      if (!isPlainObject(result) || !isString(result.id)) throw malformed('Gerrit returned an invalid draft comment');
+      return {};
+    },
+
+    async updateReviewComment({ providerTarget, commentId, body }) {
+      const draft = await requireDraft(providerTarget, commentId);
+      await client.put(`${targetPath(providerTarget)}/revisions/${draft.patch_set}/drafts/${encodeURIComponent(commentId)}`, { message: body });
+      return {};
+    },
+
+    async deleteReviewComment({ providerTarget, commentId }) {
+      const draft = await requireDraft(providerTarget, commentId);
+      await client.delete(`${targetPath(providerTarget)}/revisions/${draft.patch_set}/drafts/${encodeURIComponent(commentId)}`);
+      return {};
+    },
+
+    /** Gerrit has no call for the whole draft, so each comment goes on its own; a failure leaves the rest to discard again. */
+    async discardReview({ providerTarget }) {
+      for (const draft of Object.values(await readDrafts(providerTarget)).flat()) {
+        await client.delete(`${targetPath(providerTarget)}/revisions/${draft.patch_set}/drafts/${encodeURIComponent(draft.id)}`);
+      }
+      return {};
+    },
+
     /** A change message, without votes. */
     async comment({ providerTarget, body }) {
       const result = await client.post(`${targetPath(providerTarget)}/revisions/current/review`, { message: body });
@@ -485,7 +599,11 @@ export function createGerritResourceService({
      */
     async vote({ providerTarget, votes, body, expectedTarget }) {
       requireCurrent(await readTarget(providerTarget), expectedTarget.headSha);
-      const payload = { labels: votes };
+      if (Object.keys(votes).length === 0 && body === undefined && !hasDrafts(await readDrafts(providerTarget))) {
+        throw Object.assign(new Error('A review with no comments needs text'), { status: 422 });
+      }
+      // The viewer's draft comments go out with the votes.
+      const payload = { labels: votes, drafts: 'PUBLISH_ALL_REVISIONS' };
       if (body !== undefined) payload.message = body;
       const result = await client.post(`${targetPath(providerTarget)}/revisions/${expectedTarget.headSha}/review`, payload);
       if (!isPlainObject(result)) throw malformed('Gerrit returned an invalid review result');
@@ -494,4 +612,3 @@ export function createGerritResourceService({
     },
   };
 }
-

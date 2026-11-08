@@ -3,7 +3,7 @@
 import * as React from "react"
 import { Toaster as Sonner } from "sonner"
 import type { ToasterProps } from "sonner"
-import { getLocaleDirection, useI18nStore } from "@/lib/i18n"
+import { formatMessage, getLocaleDirection, useI18nStore } from "@/lib/i18n"
 import { buttonVariants } from "@/components/ui/button-variants"
 import { Spinner } from "@/components/ui/spinner"
 
@@ -84,14 +84,78 @@ function usePinnedToastStyles(container: HTMLElement | null, shadow: string) {
   }, [container, shadow])
 }
 
-const Toaster = ({ position = "bottom-right", ...props }: ToasterProps) => {
+// The close cross, on a disc of its own over the toast's corner. A toast that
+// closes by itself fills the ring around it (`.oc-toast-timed`), which runs down
+// to the moment it goes and holds while the pointer rests on the toasts, as
+// sonner's timer does.
+const ToastCloseMark = ({ large = false }: { large?: boolean }) => (
+  // `oc-raised` draws only the edge and shadow; the disc is opaque, as a
+  // raised control is (canvas tone in light themes, elevated in dark).
+  <span className={`oc-raised flex ${large ? "size-6" : "size-5"} items-center justify-center rounded-full bg-[var(--surface-background)] dark:bg-surface-elevated`}>
+    <svg viewBox="0 0 24 24" className={large ? "size-6" : "size-5"} aria-hidden="true">
+      <circle className="oc-toast-ring" cx="12" cy="12" r="10.5" pathLength="100" fill="none" stroke="currentColor" strokeWidth="1.5" transform="rotate(-90 12 12)" />
+      <path d="M8.5 8.5l7 7m0-7l-7 7" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+    </svg>
+  </span>
+)
+
+/**
+ * Where the close cross sits and how the rest lines up. `corner` (desktop and
+ * web): the cross on a disc over the toast's leading top corner, buttons
+ * beside short text or on a row below long text. `banner` (the phone): one
+ * row like a system banner, the text, then the buttons, then a larger cross
+ * inside the toast's end, all centred on the text; nothing hangs off the
+ * toast over the header behind it.
+ */
+type ToastLayout = "corner" | "banner"
+
+const CORNER_CLASS_NAMES = {
+  // Centered on the toast's leading top corner, whatever size touch gives
+  // the button; the disc inside keeps its size. Sonner paints the button
+  // itself (fill, edge) even unstyled; `!` keeps that paint off.
+  closeButton:
+    "absolute top-1 start-1 z-[1] flex -translate-x-1/2 -translate-y-1/2 rtl:translate-x-1/2 items-center justify-center rounded-full !border-0 !bg-transparent p-0 text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none",
+  toast:
+    "oc-surface-elevated group/toast toast flex w-[var(--width)] flex-wrap items-start gap-2 rounded-[var(--radius-xl)] px-3.5 py-3 text-foreground data-[expanded=false]:data-[front=false]:[&>*]:opacity-0 [&_[data-button]]:self-center [&_[data-button]]:ms-auto [&_[data-cancel]+[data-button]]:ms-0",
+  // Capped to the row beside the icon (its 1.25rem, its 0.125rem margin
+  // and the 0.5rem gap): long text fills that row and pushes the buttons
+  // onto a row of their own below, where the first one's auto margin
+  // keeps them at the end. Text that fits leaves them beside it. Two
+  // buttons stay together: a toast with a cancel button puts both below.
+  content: "flex min-w-0 flex-col [[data-icon]+&]:max-w-[calc(100%-1.875rem)] [[data-sonner-toast]:has([data-cancel])_&]:w-full",
+  // Padded to the buttons' height (`--toast-row`), so a one-line title
+  // centers on the buttons beside it and the icon lines up with the
+  // title's first line.
+  title: "typography-ui-label font-medium text-foreground py-[calc((var(--toast-row)-1lh)/2)]",
+  icon: "relative me-0.5 flex h-[var(--toast-row)] w-5 shrink-0 items-center justify-center text-muted-foreground [&>svg]:size-5",
+}
+
+const BANNER_CLASS_NAMES = {
+  // In the row, last whatever sonner's order, a thumb-sized target around
+  // the larger disc. Sonner positions the button absolutely; `!` undoes it.
+  closeButton:
+    "order-last !static -me-1 flex size-9 shrink-0 !transform-none items-center justify-center self-center rounded-full !border-0 !bg-transparent p-0 text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none",
+  // Rows start at the top: the title's first line is padded to the close
+  // target's height (size-9), and the icon fills that same band, so the two
+  // share a centre whether the title wraps or not. The close and action
+  // buttons centre on the whole toast.
+  toast:
+    "oc-surface-elevated group/toast toast flex w-[var(--width)] items-start gap-2 rounded-[var(--radius-xl)] py-2.5 ps-3.5 pe-2 text-foreground data-[expanded=false]:data-[front=false]:[&>*]:opacity-0 [&_[data-button]]:shrink-0 [&_[data-button]]:self-center",
+  content: "flex min-w-0 flex-1 flex-col",
+  title: "typography-ui-label font-medium text-foreground py-[calc((2.25rem-1lh)/2)]",
+  icon: "relative me-0.5 flex h-9 w-5 shrink-0 items-center justify-center text-muted-foreground [&>svg]:size-5",
+}
+
+const Toaster = ({ position = "bottom-right", layout = "corner", ...props }: ToasterProps & { layout?: ToastLayout }) => {
   // Read from the store, so a Toaster rendered outside the provider still works.
   const direction = getLocaleDirection(useI18nStore((state) => state.locale))
+  const closeLabel = formatMessage(useI18nStore((state) => state.dictionary), "dialog.common.actions.close")
   const isDark = useIsDarkTheme()
   const shadow = isDark ? SHADOW_DARK : SHADOW_LIGHT
   // State, not a ref: the observer attaches once sonner's section mounts.
   const [container, setContainer] = React.useState<HTMLElement | null>(null)
   usePinnedToastStyles(container, shadow)
+  const layoutClassNames = layout === "banner" ? BANNER_CLASS_NAMES : CORNER_CLASS_NAMES
 
   return (
     <Sonner
@@ -100,33 +164,23 @@ const Toaster = ({ position = "bottom-right", ...props }: ToasterProps) => {
       dir={direction}
       position={direction === "rtl" ? MIRRORED_POSITION[position] : position}
       className="toaster group font-sans"
-      closeButton={false}
+      closeButton
       // Sonner's own spinner is a fixed 16px box pinned to the icon slot's
       // corner; the app's spinner is centered in the slot and scales with it.
-      icons={{ loading: <Spinner className="size-5" /> }}
+      icons={{ loading: <Spinner className="size-5" />, close: <ToastCloseMark large={layout === "banner"} /> }}
       toastOptions={{
         // Sonner's built-in look is written in px (width, text, button height)
         // and its own font stack, so it ignores the interface font and size.
         // Unstyled drops that look; the classes below draw the whole toast in
         // rem and give its buttons the shared Button's look.
         unstyled: true,
+        closeButtonAriaLabel: closeLabel,
         classNames: {
-          toast:
-            "oc-surface-elevated group/toast toast flex w-[var(--width)] flex-wrap items-start gap-2 rounded-[var(--radius-xl)] px-3.5 py-3 text-foreground data-[expanded=false]:data-[front=false]:[&>*]:opacity-0 [&_[data-button]]:self-center [&_[data-button]]:ms-auto [&_[data-cancel]+[data-button]]:ms-0",
-          // Capped to the row beside the icon (its 1.25rem, its 0.125rem margin
-          // and the 0.5rem gap): long text fills that row and pushes the buttons
-          // onto a row of their own below, where the first one's auto margin
-          // keeps them at the end. Text that fits leaves them beside it.
-          content: "flex min-w-0 flex-col [[data-icon]+&]:max-w-[calc(100%-1.875rem)]",
-          // Padded to the buttons' height (`--toast-row`), so a one-line title
-          // centers on the buttons beside it and the icon lines up with the
-          // title's first line.
-          title: "typography-ui-label font-medium text-foreground py-[calc((var(--toast-row)-1lh)/2)]",
+          ...layoutClassNames,
           // `!`: sonner colours dark-theme descriptions even when unstyled.
           description: "typography-meta !text-muted-foreground",
           actionButton: buttonVariants({ size: "xs" }),
           cancelButton: buttonVariants({ variant: "secondary", size: "xs" }),
-          icon: "relative me-0.5 flex h-[var(--toast-row)] w-5 shrink-0 items-center justify-center text-muted-foreground [&>svg]:size-5",
           success: "[&_[data-icon]]:!text-[var(--status-success)]",
           error: "[&_[data-icon]]:!text-[var(--status-error)]",
           warning: "[&_[data-icon]]:!text-[var(--status-warning)]",

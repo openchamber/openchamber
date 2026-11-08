@@ -61,7 +61,7 @@ export function createTrackedItemsInterest({
   onWindowReturned = () => {},
   warn = () => {},
 }: Dependencies) {
-  const declarations = new Map<symbol, readonly TrackedItem[]>();
+  const declarations = new Map<symbol, { items: readonly TrackedItem[]; background: boolean }>();
   let connectionId: string | null = null;
   let sentSignature: string | null = null;
   let flushTimer: ReturnType<typeof setTimeout> | null = null;
@@ -70,8 +70,10 @@ export function createTrackedItemsInterest({
 
   const union = () => {
     const items = new Map<string, TrackedItem>();
-    for (const declared of declarations.values()) {
-      for (const item of declared) {
+    // What is on screen fills the cap first; background followers get what is left.
+    const ordered = [...declarations.values()].sort((left, right) => Number(left.background) - Number(right.background));
+    for (const declared of ordered) {
+      for (const item of declared.items) {
         if (items.size >= MAX_ITEMS) return items;
         items.set(trackedItemKey(item), item);
       }
@@ -137,8 +139,8 @@ export function createTrackedItemsInterest({
   return {
     /** Starts listening without following anything yet, so signals reach watched branches. */
     start,
-    declare(token: symbol, items: readonly TrackedItem[]) {
-      declarations.set(token, items);
+    declare(token: symbol, items: readonly TrackedItem[], options?: { background?: boolean }) {
+      declarations.set(token, { items, background: options?.background ?? false });
       start();
       scheduleFlush();
     },
@@ -174,7 +176,11 @@ const trackedItemsInterest = createTrackedItemsInterest({
  * starts answering at once and pushes changes; read them with the
  * `useTracked*States` selectors.
  */
-export function useTrackedItems(items: readonly TrackedItem[]): void {
+export function useTrackedItems(items: readonly TrackedItem[], options?: {
+  /** Followed for background work, not shown: yields the cap to what is on screen. */
+  background?: boolean;
+}): void {
+  const background = options?.background ?? false;
   const signature = items.map(trackedItemKey).sort().join('\n');
   const itemsRef = React.useRef(items);
   itemsRef.current = items;
@@ -184,6 +190,6 @@ export function useTrackedItems(items: readonly TrackedItem[]): void {
   React.useEffect(() => () => trackedItemsInterest.release(token), [token]);
   React.useEffect(() => {
     trackedItemsInterest.start();
-    trackedItemsInterest.declare(token, signature ? itemsRef.current : []);
-  }, [signature, token]);
+    trackedItemsInterest.declare(token, signature ? itemsRef.current : [], { background });
+  }, [background, signature, token]);
 }

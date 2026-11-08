@@ -13,6 +13,7 @@ import { Spinner } from "@/components/ui/spinner";
 import type { GitRemote } from '@/lib/gitApi';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
+import { ButtonTooltip } from '@/components/ui/action-toolbar';
 
 type SyncAction = 'fetch' | 'pull' | 'sync' | 'publish' | null;
 
@@ -60,7 +61,6 @@ export const SyncActions: React.FC<SyncActionsProps> = ({
   choosesPushDestination = false,
 }) => {
   const { t } = useI18n();
-  const skipRemoteSelectRef = React.useRef(false);
   const isRemovingRemote = Boolean(removingRemoteName);
   const trackingRemote = trackingRemoteName
     ? remotes.find((remote) => remote.name === trackingRemoteName)
@@ -102,7 +102,7 @@ export const SyncActions: React.FC<SyncActionsProps> = ({
   };
 
   return (
-    <div className="inline-flex items-center rounded-md border border-border/60 bg-[var(--surface-elevated)] overflow-hidden">
+    <div className="inline-flex items-center rounded-md border border-edge bg-[var(--surface-elevated)] overflow-hidden">
       <Tooltip>
         <TooltipTrigger asChild>
           <span className="inline-flex" tabIndex={blocksRebaseSync || detached ? 0 : undefined}>
@@ -141,19 +141,21 @@ export const SyncActions: React.FC<SyncActionsProps> = ({
       </Tooltip>
 
       <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <button
-            type="button"
-            className={cn(
-              'inline-flex h-7 w-6 items-center justify-center border-s border-[var(--interactive-border)] text-muted-foreground',
-              'transition-colors hover:bg-interactive-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50'
-            )}
-            disabled={isDropdownDisabled}
-            aria-label={t('gitView.sync.moreActionsAria')}
-          >
-            <Icon name="arrow-down-s" className="size-4" />
-          </button>
-        </DropdownMenuTrigger>
+        <ButtonTooltip label={t('gitView.sync.moreActionsAria')} side="bottom">
+          <DropdownMenuTrigger asChild>
+            <button
+              type="button"
+              className={cn(
+                'inline-flex h-7 w-6 items-center justify-center border-s border-[var(--interactive-border)] text-muted-foreground',
+                'transition-colors hover:bg-interactive-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50'
+              )}
+              disabled={isDropdownDisabled}
+              aria-label={t('gitView.sync.moreActionsAria')}
+            >
+              <Icon name="arrow-down-s" className="size-4" />
+            </button>
+          </DropdownMenuTrigger>
+        </ButtonTooltip>
         {/* Anchored to the trailing edge so the menu stays inside the pane instead of running past it. */}
         <DropdownMenuContent align="end" className="w-[min(360px,calc(100vw-2rem))] max-h-[320px] overflow-y-auto">
           <DropdownMenuItem disabled={isPushDisabled} onSelect={onPublish}>
@@ -174,14 +176,7 @@ export const SyncActions: React.FC<SyncActionsProps> = ({
           {remotes.map((remote) => (
             <DropdownMenuItem
               key={remote.name}
-              onSelect={(event) => {
-                if (skipRemoteSelectRef.current) {
-                  event.preventDefault();
-                  skipRemoteSelectRef.current = false;
-                  return;
-                }
-                onFetch(remote);
-              }}
+              onSelect={() => onFetch(remote)}
             >
               <div className="flex w-full items-center gap-2">
                 <Icon name="download" className="size-4 text-muted-foreground" />
@@ -196,32 +191,35 @@ export const SyncActions: React.FC<SyncActionsProps> = ({
                   </div>
                 </div>
                 {onRemoveRemote && remote.name !== trackingRemoteName ? (
-                  <Button
-                    type="button"
-                    variant="destructive"
-                    size="xs"
-                    className="h-6 w-6 px-0"
-                    disabled={syncAction !== null || isRemovingRemote}
-                    onPointerDown={(event) => {
-                      skipRemoteSelectRef.current = true;
-                      event.preventDefault();
-                      event.stopPropagation();
-                    }}
-                    onClick={(event) => {
-                      skipRemoteSelectRef.current = true;
-                      event.preventDefault();
-                      event.stopPropagation();
-                      onRemoveRemote(remote);
-                    }}
-                    aria-label={t('gitView.header.removeRemoteAria', { name: remote.name })}
-                    title={t('gitView.header.removeRemoteTitle', { name: remote.name })}
-                  >
-                    {removingRemoteName === remote.name ? (
-                      <Spinner className="size-3.5" />
-                    ) : (
-                      <Icon name="close" className="size-3.5" />
-                    )}
-                  </Button>
+                  // A disabled button takes no pointer events, so the press lands here and
+                  // must stop before the item, which would fetch from this remote.
+                  <span className="inline-flex" onClick={(event) => event.stopPropagation()} onMouseUp={(event) => event.stopPropagation()}>
+                    <ButtonTooltip sideOffset={8} label={t('gitView.header.removeRemoteTitle', { name: remote.name })}>
+                      <Button
+                        type="button"
+                        variant="destructive"
+                        size="xs"
+                        className="h-6 w-6 px-0"
+                        disabled={syncAction !== null || isRemovingRemote}
+                        onPointerDown={(event) => {
+                          event.preventDefault();
+                          event.stopPropagation();
+                        }}
+                        onClick={(event) => {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          onRemoveRemote(remote);
+                        }}
+                        aria-label={t('gitView.header.removeRemoteAria', { name: remote.name })}
+                      >
+                        {removingRemoteName === remote.name ? (
+                          <Spinner className="size-3.5" />
+                        ) : (
+                          <Icon name="close" className="size-3.5" />
+                        )}
+                      </Button>
+                    </ButtonTooltip>
+                  </span>
                 ) : null}
               </div>
             </DropdownMenuItem>

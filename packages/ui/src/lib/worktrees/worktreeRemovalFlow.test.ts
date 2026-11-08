@@ -1,6 +1,28 @@
 import { describe, expect, test } from 'bun:test';
 
-import { archiveSessionsThenRemoveWorktree } from './worktreeRemovalFlow';
+import { GitWorktreeRequestError } from '@/lib/api/types';
+import { archiveSessionsThenRemoveWorktree, deleteWithoutTeardownToast } from './worktreeRemovalFlow';
+
+describe('deleteWithoutTeardownToast', () => {
+  test('offers the retry only for a delete its teardown stopped, from the server or the extension host, and waits for it', () => {
+    const retries: string[] = [];
+    const fromServer = new GitWorktreeRequestError('WORKTREE_TEARDOWN_FAILED', 'Worktree teardown command failed', 500);
+    const fromBridge = Object.assign(new Error('Worktree teardown command failed'), { code: 'WORKTREE_TEARDOWN_FAILED' });
+
+    for (const error of [fromServer, fromBridge]) {
+      const options = deleteWithoutTeardownToast(error, 'Delete without teardown', () => retries.push('again'));
+      expect(options?.action.label).toBe('Delete without teardown');
+      expect(options?.duration).toBe(Infinity);
+      options?.action.onClick();
+    }
+    expect(retries).toEqual(['again', 'again']);
+
+    for (const error of [new Error('folder in use'), new GitWorktreeRequestError('WORKTREE_ARCHIVE_PARTIAL', 'partial', 500)]) {
+      expect(deleteWithoutTeardownToast(error, 'Delete without teardown', () => retries.push('never'))).toBeUndefined();
+    }
+    expect(retries).toEqual(['again', 'again']);
+  });
+});
 
 describe('archiveSessionsThenRemoveWorktree', () => {
   test('archives linked sessions while the worktree still exists, then removes it', async () => {
@@ -11,8 +33,8 @@ describe('archiveSessionsThenRemoveWorktree', () => {
         calls.push(`archive:${sessionIds.join(',')}`);
         return { archivedIds: ['session-one'], failedIds: ['session-two'] };
       },
-      removeWorktree: async () => {
-        calls.push('remove');
+      removeWorktree: async (archivedIds) => {
+        calls.push(`remove:${archivedIds.join(',')}`);
         return true;
       },
       restoreSessions: async (sessionIds) => {
@@ -21,7 +43,8 @@ describe('archiveSessionsThenRemoveWorktree', () => {
       },
     });
 
-    expect(calls).toEqual(['archive:session-one,session-two', 'remove']);
+    // An archive of the worktree records exactly the sessions that went.
+    expect(calls).toEqual(['archive:session-one,session-two', 'remove:session-one']);
     expect(result).toEqual({ removed: true, archive: { archivedIds: ['session-one'], failedIds: ['session-two'] } });
   });
 

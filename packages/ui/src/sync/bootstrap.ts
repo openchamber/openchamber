@@ -9,10 +9,12 @@ import { runBackgroundNetworkTask } from "../lib/background-network"
 import { refreshBackgroundShells } from "./background-shells"
 import {
   readDirectoryStatusSnapshot,
+  selectHeldSessionStatuses,
   readDirectoryFormSnapshot,
   readDirectoryPermissionSnapshot,
   type DirectoryRecoverySource,
 } from "./directory-recovery-snapshots"
+import { noteQuestionFormSnapshot } from "./recoverable-questions"
 
 const cmp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0)
 
@@ -109,16 +111,16 @@ export function bootstrapDirectory(input: DirectoryBootstrapInput) {
   })()
   // Initialization has its own completion and network capacity. A slow config
   // or directory cannot hold the session-list scheduler's slot.
-  const environment = initializeDirectory(input)
+  const environment = initializeDirectory(input, sessions)
   return { sessions, environment }
 }
 
-async function initializeDirectory(input: DirectoryBootstrapInput): Promise<BootstrapResult> {
+async function initializeDirectory(input: DirectoryBootstrapInput, sessions: Promise<BootstrapResult>): Promise<BootstrapResult> {
   const { directory, store, set, global: g } = input
-  const read = <T>(request: () => Promise<T>) => retry(() => runBackgroundNetworkTask(() => {
+  const read = <T>(request: () => Promise<T>, priority?: "active-session") => retry(() => runBackgroundNetworkTask(() => {
     if (input.isStale?.()) throw new Error("Directory initialization superseded")
     return request()
-  }))
+  }, priority))
   const commit = (patch: Partial<State>): boolean => {
     if (input.isStale?.()) return false
     set(patch)
@@ -138,19 +140,25 @@ async function initializeDirectory(input: DirectoryBootstrapInput): Promise<Boot
   // Queue live recovery first. Each read commits independently and a failing
   // config read cannot suppress pending form or permission recovery.
   const critical = Promise.allSettled([
-    read(async () => {
-      const session_status = await readDirectoryStatusSnapshot(store, async () => {
-        const statuses = await opencodeClient.getActiveSessionStatuses(directory)
-        if (statuses === null) throw new Error("session.active failed")
-        return statuses
-      })
-      commit({ session_status, sessionStatusReady: true })
+    // The host's active list covers every directory, so it speaks for this one
+    // only once the session list says which of those sessions are here. Without
+    // that list the statuses stay unknown.
+    sessions.then(async (listed) => {
+      if (listed !== "complete") return
+      await read(async () => {
+        const session_status = await readDirectoryStatusSnapshot(store, async () => {
+          const statuses = await opencodeClient.getActiveSessionStatuses(directory)
+          if (statuses === null) throw new Error("session.active failed")
+          return selectHeldSessionStatuses(statuses, store.getState().session)
+        })
+        commit({ session_status, sessionStatusReady: true })
+      }, "active-session")
     }),
     read(async () => {
       const form = await readDirectoryFormSnapshot(store, () => (
         opencodeClient.listPendingForms({ directories: [directory] })
       ))
-      commit({ form })
+      if (commit({ form })) noteQuestionFormSnapshot(directory, Object.values(form).flat())
     }),
     read(async () => {
       const permission = await readDirectoryPermissionSnapshot(store, () => (

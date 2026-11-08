@@ -9,9 +9,7 @@ description: Use when creating or modifying OpenChamber UI components, styling, 
 
 - Use semantic OpenChamber theme tokens; never hardcode hex colors or generic Tailwind palette colors.
 - Use shared UI primitives before introducing feature-local controls.
-- Use the shared `Button`; do not create button wrappers such as `ButtonSmall` or `ButtonLarge`.
 - Every dropdown-style value-picker trigger takes its chrome from `dropdownTriggerVariants` in `packages/ui/src/components/ui/dropdown-trigger.ts`; call sites add layout classes only. Deliberately chrome-less pickers in composers or headers are the exception.
-- Use the sprite-based `Icon`; never import icons directly from `@remixicon/react`.
 - Apply hover tokens only to interactive elements.
 - Use status colors only for actual status/feedback.
 - Use selection tokens for selected state and primary tokens for primary actions.
@@ -24,7 +22,7 @@ description: Use when creating or modifying OpenChamber UI components, styling, 
 | Adding, converting, storing, or generating icons | `references/icons.md` |
 | Adding built-in or custom themes | `references/adding-themes.md` |
 
-Load every matching reference before editing. How a screen should look and behave (depth and borders, which surface class to use, layout stability, sizing, composition, text density) is owned by `openchamber-ui-guidance`; load it for any visible UI change. User-facing or accessible text must load `locale-ui-patterns`. Spacing, positioning and directional icons follow `rtl-layout`, which owns how a layout works in both directions. Settings composition is owned by `settings-ui-patterns`, which declares `theme-system` as its one-way companion.
+Load every matching reference before editing. How a screen should look and behave (depth and borders, which surface class to use, layout stability, sizing, composition, text density) is owned by `openchamber-ui-guidance`; load it for any visible UI change. User-facing or accessible text must load `locale-ui-patterns`. Spacing, positioning and directional icons follow `rtl-layout`, which owns how a layout works in both directions.
 
 ## Token Decision
 
@@ -39,7 +37,7 @@ Prefer CSS variables/classes for component styling. Use `useThemeSystem()` only 
 
 ## Button Contract
 
-Use `Button` from `packages/ui/src/components/ui/button.tsx`.
+Use `Button` from `packages/ui/src/components/ui/button.tsx`; do not create wrappers such as `ButtonSmall` or `ButtonLarge`.
 
 | Variant | Use |
 |---|---|
@@ -63,7 +61,7 @@ Do not hardcode button height/padding when a size variant exists. Do not recreat
 
 A button that opens a page, panel, or search field is a toggle: while what it opened is on screen it carries `aria-pressed` and the selection tokens, and the next click closes it. Closing a search field also clears its query, so the list never stays filtered by text nobody can see.
 
-Controls in one row share one height. Every dropdown trigger on desktop is 28px (`dropdownTriggerVariants()` default, `SelectTrigger`), in forms and toolbars alike. Toolbars, filter rows and the context panel header use 28px throughout: `Button size="sm"`, `<Input inputSize="compact">`, and the active-pill tab strip (its default). Form inputs and buttons stay 32px (`default`). Pick the size variant instead of overriding `h-*` at the call site to match a neighbour; mobile/touch branches keep their own larger sizes (`mobile`, `touch`).
+Every dropdown trigger on desktop is 28px (`dropdownTriggerVariants()` default, `SelectTrigger`), in forms and toolbars alike. Toolbars, filter rows and the context panel header use 28px throughout: `Button size="sm"`, `<Input inputSize="compact">`, and the active-pill tab strip (its default). Form inputs and buttons stay 32px (`default`). Pick the size variant instead of overriding `h-*` at the call site to match a neighbour; mobile/touch branches keep their own larger sizes (`mobile`, `touch`).
 
 Extensions draw these controls from their own copy, the SDK UI kit in `packages/sdk/src/ui`. A change to a shared primitive's size, radius, or states (button, input, dropdown trigger, select item, checkbox, tabs, badge) also changes its twin in `packages/sdk/src/ui/style.ts` in the same change: appearance in `GUEST_UI_LOOK_CSS`, which the server serves to installed extensions, sizes in `UI_SIZE_CSS`, which reach an extension when its author rebuilds. Then rebuild the SDK example bundles (`packages/sdk/DOCUMENTATION.md`).
 
@@ -83,22 +81,24 @@ import { Icon } from '@/components/icon/Icon';
 <Icon name="check" className="size-4" />
 ```
 
-Use `IconName` for icon values stored in arrays, objects, state, or config. `Icon` has no `size` prop. Run `bun run icons:generate` when introducing a sprite name, and never edit `sprite.ts` manually. Load `references/icons.md` for the complete workflow.
+Never import icons directly from `@remixicon/react`. Use `IconName` for icon values stored in arrays, objects, state, or config. `Icon` has no `size` prop. Run `bun run icons:generate` when introducing a sprite name, and never edit `sprite.ts` manually. Load `references/icons.md` for the complete workflow.
 
 ## Animation Contract
 
-Animate only `transform` and `opacity`. Use `transform: rotate(...)`, not the individual `rotate` property. Non-composited properties recalculate style continuously; geometry also triggers layout, and wrappers, `will-change`, `contain`, or stepped timing do not remove that cost. Animate only while conveying live information.
+Animate only `transform` and `opacity`. Use `transform: rotate(...)`, not the individual `rotate` property. Non-composited properties recalculate style continuously; geometry also triggers layout. Animate only while conveying live information.
 
 Motion that can stay on screen for minutes follows the state it shows:
 
 - **Steady state stands still**: connected, failed, degraded, "Unavailable", the provider logo while the agent works, read-aloud playing (its icon turns `--primary-text`). Show a static icon in the state's color.
 - **A wait that can last spins on the shared clock**: a running project action, worktree setup or removal, a space being made, CI checks, loading sessions or models, walkthrough generation, an OpenCode update. Render `Spinner` (`components/ui/spinner.tsx`): eight bars, four steps a second.
-- **A wait that cannot spin blinks**: a status dot (6 px, `size-1.5`), the recording dot, a loading skeleton, the splash logo's glow. Apply `useWaitingBlink(active)`; it dims every other second.
+- **A wait that cannot spin blinks**: a status dot (6 px, `size-1.5`), the recording dot, a loading skeleton. Apply `useWaitingBlink(active)`; it dims every other second. The splash logo steps instead: its roof tiers light up one at a time, once a second, through `useWaitingPhase`.
 - **Waiting text gets dots**: "Thinking", "Waiting for approval". Put `BusyDots` (`components/ui/busy-dots.tsx`) after the label; drop any "…" from the string.
 - **A spinner that lasts seconds** (a button after a click, a quick load, refresh) keeps `animate-spin`.
 - **Hidden stops.** A surface kept mounted while hidden wraps its content in `PauseClock` (`components/ui/pause-clock.tsx`); the context panel's zones already do. An `inert` subtree pauses its CSS animations (`index.css`).
 
-`Spinner`, `useWaitingBlink`, `BusyDots` and live counters (`useDurationTickerNow`) share one clock (`hooks/useDurationTicker.ts`): a page draws four frames a second while a spinner shows and one otherwise, however many indicators are on screen. Each tick re-renders the component that calls the hook, so it goes in the indicator itself, never in the page around it (`performance-engineering`, "Motion That Stays On Screen"). `lib/infiniteAnimations.test.ts` fails on any new infinite CSS animation outside the short ones it lists. The cost behind these rules is in `performance-engineering`, "Motion That Stays On Screen".
+`Spinner`, `useWaitingBlink`, `BusyDots` and live counters (`useDurationTickerNow`) share one clock (`hooks/useDurationTicker.ts`): a page draws four frames a second while a spinner shows and one otherwise, however many indicators are on screen. Each tick re-renders the component that calls the hook, so call it in the indicator itself. `lib/infiniteAnimations.test.ts` fails on any new infinite CSS animation outside the short ones it lists. The cost behind these rules is in `performance-engineering`, "Motion That Stays On Screen".
+
+Springs are the app's easing. `lib/motion/springs.ts` turns a spring (perceived duration, bounce) into a CSS `linear()` easing and writes it to `--oc-motion-<name>-duration` / `-easing`: `popup` for menus, selects and tooltips (`oc-popup-motion`, which transitions only opacity and transform; never `transition-all` on a popup), `layout` for a control easing into a new width. Change a spring in `MOTION_SPRINGS` and paste its generated values into `design-system.css` (its test keeps them in step). In development `Cmd+Alt+M` opens live knobs for them. A control whose width follows its value (a picker) uses `useWidthMorph(ref)` (`lib/motion/useSizeMorph.ts`): it watches the content, retargets from where the control stands when a part arrives late, and clips the text while it moves. An open popup whose content changes uses `useHeightMorph(ref)` on its box the same way; `DropdownMenuContent` calls it for every menu. Its positioner (base-ui) or `bottom-full` keeps the anchored edge in place in every painted frame, so the hook never moves the popup itself. These are the accepted size animations: once per content change, on a small control or an open popup.
 
 For any other technique, load `performance-engineering` and `scripts/perf/DOCUMENTATION.md`, measure it with `bun run profile:animation`, and add a fixture variant when needed. This skill owns animation styling; `performance-engineering` owns performance evidence.
 
@@ -112,4 +112,4 @@ For any other technique, load `performance-engineering` and `scripts/perf/DOCUME
 - Icons use `Icon`/`IconName`, and generated sprite changes are intentional.
 - Hover, selection, primary, and status semantics are distinct.
 - Light/dark/high-contrast and long-text states remain legible.
-- Every applicable contract and loaded task reference was verified with relevant type-check, visual/runtime validation, and generated-asset checks.
+- Every applicable contract and loaded task reference was verified with relevant visual/runtime validation and generated-asset checks.

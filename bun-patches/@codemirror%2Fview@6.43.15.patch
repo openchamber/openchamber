@@ -1,0 +1,171 @@
+Temporary OpenChamber patch for @codemirror/view 6.43.15 (issue #5746).
+
+An iOS keyboard cleaning up dictation inserts a paragraph DIV and keeps writing
+into it. CodeMirror reads the paragraph at once and replaces the DIV with its
+own line, so the keyboard's later text lands in a detached node and is lost.
+The patch reads such a paragraph one frame later, with the rest of its batch,
+and keeps the pending change when the editor updates, takes focus or reads
+its layout within that frame.
+
+Remove this patch once a @codemirror/view release fixes it upstream. When
+bumping @codemirror/view before then, carry it over and rerun
+packages/ui/src/components/chat/composer/editor/__tests__/iosNativeParagraph.test.ts.
+
+diff --git a/dist/index.cjs b/dist/index.cjs
+index a75cdaf6caef51a98adee80a57536a9ca12a1e85..fe6d15a787d1a095d9671564376aab5d99df3bcf 100644
+--- a/dist/index.cjs
++++ b/dist/index.cjs
+@@ -7182,6 +7182,7 @@ class DOMObserver {
+         // Set when a selection change is detected, cleared on flush
+         this.selectionChanged = false;
+         this.delayedFlush = -1;
++        this.iosParagraphPending = false;
+         this.resizeTimeout = -1;
+         this.queue = [];
+         this.delayedAndroidKey = null;
+@@ -7213,6 +7214,17 @@ class DOMObserver {
+                 mutations.some(m => m.type == "childList" && m.removedNodes.length ||
+                     m.type == "characterData" && m.oldValue.length > m.target.nodeValue.length))
+                 this.flushSoon();
++            // OpenChamber patch (temporary, drop once @codemirror/view fixes
++            // it upstream): an iOS keyboard that inserts a paragraph can keep
++            // writing into the DIV it just created. Reading the change now
++            // replaces that DIV with a line tile, and the keyboard's later
++            // text lands in the detached node and is lost. Read the paragraph
++            // with the rest of its batch on the next frame instead.
++            else if (browser.ios && !view.composing && mutations.some(m => m.type == "childList" && m.target == this.dom &&
++                Array.prototype.some.call(m.addedNodes, n => n.nodeName == "DIV"))) {
++                this.iosParagraphPending = true;
++                this.flushSoon();
++            }
+             else
+                 this.flush();
+         });
+@@ -7393,6 +7405,10 @@ class DOMObserver {
+         }
+     }
+     ignore(f) {
++        // OpenChamber patch: read a deferred iOS paragraph before the
++        // records are cleared below.
++        if (this.iosParagraphPending && this.view.updateState == 0 /* UpdateState.Idle */)
++            this.forceFlush();
+         if (!this.active)
+             return f();
+         try {
+@@ -7484,6 +7500,7 @@ class DOMObserver {
+         return this.queue;
+     }
+     processRecords() {
++        this.iosParagraphPending = false;
+         let records = this.pendingRecords();
+         if (records.length)
+             this.queue = [];
+@@ -8049,7 +8066,9 @@ class EditorView {
+         // If there was a pending DOM change, eagerly read it and try to
+         // apply it after the given transactions.
+         let pendingKey = this.observer.delayedAndroidKey, domChange = null;
+-        if (pendingKey) {
++        // OpenChamber patch: a deferred iOS paragraph is read here like a
++        // pending Android key, since clearing the observer would drop it.
++        if (pendingKey || this.observer.iosParagraphPending) {
+             this.observer.clearDelayedAndroidKey();
+             domChange = this.observer.readChange();
+             // Only try to apply DOM changes if the transactions didn't
+@@ -8116,7 +8135,7 @@ class EditorView {
+                 if (dispatchFocus && this.state == dispatchFocus.startState)
+                     this.dispatch(dispatchFocus);
+                 if (domChange) {
+-                    if (!applyDOMChange(this, domChange) && pendingKey.force)
++                    if (!applyDOMChange(this, domChange) && pendingKey && pendingKey.force)
+                         dispatchKey(this.contentDOM, pendingKey.key, pendingKey.keyCode);
+                 }
+             });
+@@ -8216,7 +8235,8 @@ class EditorView {
+             return;
+         }
+         this.measureScheduled = 0; // Prevent requestMeasure calls from scheduling another animation frame
+-        if (flush)
++        // OpenChamber patch: a layout read must not drop a deferred iOS paragraph.
++        if (flush || this.observer.iosParagraphPending)
+             this.observer.forceFlush();
+         let updated = null;
+         let scroll = this.viewState.scrollParent, scrollOffset = this.viewState.getScrollOffset();
+diff --git a/dist/index.js b/dist/index.js
+index bda68ef32c8741c3c3f85bcf877953496ccf6e20..8608ea66d9c8dbf5d84c3ac73e2197830f08a2a8 100644
+--- a/dist/index.js
++++ b/dist/index.js
+@@ -7177,6 +7177,7 @@ class DOMObserver {
+         // Set when a selection change is detected, cleared on flush
+         this.selectionChanged = false;
+         this.delayedFlush = -1;
++        this.iosParagraphPending = false;
+         this.resizeTimeout = -1;
+         this.queue = [];
+         this.delayedAndroidKey = null;
+@@ -7208,6 +7209,17 @@ class DOMObserver {
+                 mutations.some(m => m.type == "childList" && m.removedNodes.length ||
+                     m.type == "characterData" && m.oldValue.length > m.target.nodeValue.length))
+                 this.flushSoon();
++            // OpenChamber patch (temporary, drop once @codemirror/view fixes
++            // it upstream): an iOS keyboard that inserts a paragraph can keep
++            // writing into the DIV it just created. Reading the change now
++            // replaces that DIV with a line tile, and the keyboard's later
++            // text lands in the detached node and is lost. Read the paragraph
++            // with the rest of its batch on the next frame instead.
++            else if (browser.ios && !view.composing && mutations.some(m => m.type == "childList" && m.target == this.dom &&
++                Array.prototype.some.call(m.addedNodes, n => n.nodeName == "DIV"))) {
++                this.iosParagraphPending = true;
++                this.flushSoon();
++            }
+             else
+                 this.flush();
+         });
+@@ -7388,6 +7400,10 @@ class DOMObserver {
+         }
+     }
+     ignore(f) {
++        // OpenChamber patch: read a deferred iOS paragraph before the
++        // records are cleared below.
++        if (this.iosParagraphPending && this.view.updateState == 0 /* UpdateState.Idle */)
++            this.forceFlush();
+         if (!this.active)
+             return f();
+         try {
+@@ -7479,6 +7495,7 @@ class DOMObserver {
+         return this.queue;
+     }
+     processRecords() {
++        this.iosParagraphPending = false;
+         let records = this.pendingRecords();
+         if (records.length)
+             this.queue = [];
+@@ -8044,7 +8061,9 @@ class EditorView {
+         // If there was a pending DOM change, eagerly read it and try to
+         // apply it after the given transactions.
+         let pendingKey = this.observer.delayedAndroidKey, domChange = null;
+-        if (pendingKey) {
++        // OpenChamber patch: a deferred iOS paragraph is read here like a
++        // pending Android key, since clearing the observer would drop it.
++        if (pendingKey || this.observer.iosParagraphPending) {
+             this.observer.clearDelayedAndroidKey();
+             domChange = this.observer.readChange();
+             // Only try to apply DOM changes if the transactions didn't
+@@ -8111,7 +8130,7 @@ class EditorView {
+                 if (dispatchFocus && this.state == dispatchFocus.startState)
+                     this.dispatch(dispatchFocus);
+                 if (domChange) {
+-                    if (!applyDOMChange(this, domChange) && pendingKey.force)
++                    if (!applyDOMChange(this, domChange) && pendingKey && pendingKey.force)
+                         dispatchKey(this.contentDOM, pendingKey.key, pendingKey.keyCode);
+                 }
+             });
+@@ -8211,7 +8230,8 @@ class EditorView {
+             return;
+         }
+         this.measureScheduled = 0; // Prevent requestMeasure calls from scheduling another animation frame
+-        if (flush)
++        // OpenChamber patch: a layout read must not drop a deferred iOS paragraph.
++        if (flush || this.observer.iosParagraphPending)
+             this.observer.forceFlush();
+         let updated = null;
+         let scroll = this.viewState.scrollParent, scrollOffset = this.viewState.getScrollOffset();

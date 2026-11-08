@@ -4,10 +4,11 @@ import { useSessionUIStore } from '@/sync/session-ui-store';
 import { ACTIVE_PROJECT_ACTION_LIFECYCLES, useTerminalStore } from '@/stores/useTerminalStore';
 import { Spinner } from '@/components/ui/spinner';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
+import { readComposerDraftTarget } from '@/hooks/useComposerAddress';
 import { useDraftSpaceTarget } from '@/lib/spaces/useDraftSpaceTarget';
 import { panelContentDirectory } from '@/lib/spaces/space-creation-requests';
 import { SpacePreparing } from '@/components/session/spaces/SpacePreparing';
-import { type TerminalStreamEvent } from '@/lib/api/types';
+import { type RuntimeAPIs, type TerminalStreamEvent } from '@/lib/api/types';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { useFontPreferences } from '@/hooks/useFontPreferences';
 import { CODE_FONT_OPTION_MAP, DEFAULT_MONO_FONT } from '@/lib/fontOptions';
@@ -20,6 +21,7 @@ import type { TerminalTheme } from '@/lib/terminalTheme';
 import { cn } from '@/lib/utils';
 import { useUIStore } from '@/stores/useUIStore';
 import { Button } from '@/components/ui/button';
+import { ButtonTooltip } from '@/components/ui/action-toolbar';
 import { toast } from '@/components/ui';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { SortableTabsStrip } from '@/components/ui/sortable-tabs-strip';
@@ -43,6 +45,7 @@ import { useInContextPanelHeader } from '@/components/layout/contextPanelHeaderS
 import { useZoneSurfaceDragOut } from '@/components/layout/zoneSurfaceDragContext';
 import { useZoneInteractive } from '@/components/layout/zoneInteractiveContext';
 import { ZoneMoveMenuItems } from '@/components/layout/ZoneMoveMenuItems';
+import { registerCloseTabTarget } from '@/lib/closeTabTarget';
 
 type TerminalViewProps = {
     visible?: boolean;
@@ -53,6 +56,10 @@ type TerminalViewProps = {
 };
 
 const FALLBACK_TERMINAL_SIZE = { cols: 80, rows: 24 } as const;
+// The terminal socket retries forever with a growing delay (0.5 s doubling to
+// 8 s). Five failed attempts in a row take about 8 s: a server restart is back
+// by then, so only a connection that stays down shows the error.
+const RECONNECT_ATTEMPTS_BEFORE_ERROR = 5;
 
 type TerminalTabViewportProps = {
     directory: string;
@@ -68,6 +75,7 @@ type TerminalTabViewportProps = {
     fontFamily: string;
     fontSize: number;
     enableTouchScroll: boolean;
+    clipboard: RuntimeAPIs['clipboard'];
 };
 
 /**
@@ -78,7 +86,7 @@ type TerminalTabViewportProps = {
  */
 const TerminalTabViewport: React.FC<TerminalTabViewportProps> = ({
     directory, tabId, isActive, isTerminalVisible, registerController,
-    onInput, onResize, onProvisionalSize, theme, monoFont, fontFamily, fontSize, enableTouchScroll,
+    onInput, onResize, onProvisionalSize, theme, monoFont, fontFamily, fontSize, enableTouchScroll, clipboard,
 }) => {
     // Scrollback is a leaf subscription: streaming output must not rerender the tab strip.
     const chunks = useTerminalStore((s) => s.getBuffer(directory, tabId).chunks);
@@ -97,6 +105,7 @@ const TerminalTabViewport: React.FC<TerminalTabViewportProps> = ({
                 fontFamily={fontFamily}
                 fontSize={fontSize}
                 enableTouchScroll={enableTouchScroll}
+                clipboard={clipboard}
                 autoFocus={isTerminalVisible && isActive}
                 isVisible={isTerminalVisible && isActive}
             />
@@ -116,7 +125,7 @@ const TerminalTabIcon: React.FC<{ iconName: IconName; active: boolean }> = ({ ic
 
 export const TerminalView: React.FC<TerminalViewProps> = ({ visible, directory, onLastTabClosed }) => {
     const { t } = useI18n();
-    const { terminal, runtime } = useRuntimeAPIs();
+    const { terminal, runtime, clipboard } = useRuntimeAPIs();
     const { currentTheme } = useThemeSystem();
     const pageBackground = usePageColors().background;
     const terminalAppearanceRef = React.useRef<{ themeMode: 'light' | 'dark'; terminalBackground: string; terminalForeground: string }>({ themeMode: 'dark', terminalBackground: '', terminalForeground: '' });
@@ -207,6 +216,11 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible, directory, 
     const [connectionError, setConnectionError] = React.useState<string | null>(null);
     const [isFatalError, setIsFatalError] = React.useState(false);
     const [isReconnectPending, setIsReconnectPending] = React.useState(false);
+    // The terminal whose reconnect kept failing. It stays set through "Try
+    // again" until a snapshot shows the stream is back, so a retry that fails
+    // does not blank the pane while the attempt count starts over.
+    const [unreachableTerminalId, setUnreachableTerminalId] = React.useState<string | null>(null);
+    const [isRetryingConnection, setIsRetryingConnection] = React.useState(false);
     const [activeModifier, setActiveModifier] = React.useState<Modifier | null>(null);
     const [isRestarting, setIsRestarting] = React.useState(false);
 
@@ -378,6 +392,53 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible, directory, 
         [setTabPreviewUrl]
     );
 
+    // Hosts pass an inline callback; reading it through a ref keeps a parent
+    // re-render from reconnecting the stream that depends on this close.
+    const onLastTabClosedRef = React.useRef(onLastTabClosed);
+    onLastTabClosedRef.current = onLastTabClosed;
+
+    // `processExited` is for a tab whose process is already gone: the tab goes
+    // at once and the server's record is released after. Waiting for that
+    // reply would let an action re-run that reuses the tab meanwhile lose it.
+    const closeTerminalTab = React.useCallback(
+        (directory: string, tabId: string, { processExited = false } = {}) => {
+            if (tabId === activeTabIdRef.current) {
+                disconnectStream();
+            }
+
+            setConnectionError(null);
+            setIsFatalError(false);
+            setIsReconnectPending(false);
+            const tabs = useTerminalStore.getState().getDirectoryState(directory)?.tabs ?? [];
+            const sessionId = tabs.find((tab) => tab.id === tabId)?.terminalSessionId;
+            const isLastTab = tabs.length === 1 && tabs[0]?.id === tabId;
+            // Removing the surface in the same update unmounts this view
+            // before the store's replacement tab could start a shell.
+            const removeTab = () => {
+                if (isLastTab) onLastTabClosedRef.current?.();
+                closeTab(directory, tabId);
+            };
+            if (processExited) {
+                removeTab();
+                if (sessionId) void terminal.close(sessionId, directory).catch(() => undefined);
+                return;
+            }
+            void (async () => {
+                if (sessionId) await terminal.close(sessionId, directory);
+                removeTab();
+            })().catch((error) => setConnectionError(error instanceof Error ? error.message : t('terminalView.error.sessionEnded')));
+        },
+        [closeTab, disconnectStream, t, terminal]
+    );
+
+    // A shell or project action that exits takes its tab with it when the user
+    // chose so. VS Code has no tabs and no such setting, so its terminal keeps
+    // the exited output.
+    const closesOnExit = React.useCallback(
+        () => enableTabs && useUIStore.getState().terminalCloseOnExit,
+        [enableTabs],
+    );
+
     const startStream = React.useCallback(
         (
             directory: string,
@@ -410,18 +471,29 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible, directory, 
                                 setConnectionError(null);
                                 setIsFatalError(false);
                                 setIsReconnectPending(false);
+                                setUnreachableTerminalId(null);
+                                setIsRetryingConnection(false);
                                 focusTerminalWhenWindowActive();
 
                                 replaceBuffer(directory, tabId, event.data ?? '', event.sequence ?? 0, terminalSnapshotSize(event));
                                 scanTerminalPreviewOutput(directory, tabId, event.data ?? '');
-                                if (event.status === 'exited') setTabLifecycle(directory, tabId, 'exited');
+                                if (event.status === 'exited') {
+                                    if (closesOnExit()) {
+                                        closeTerminalTab(directory, tabId, { processExited: true });
+                                        break;
+                                    }
+                                    setTabLifecycle(directory, tabId, 'exited');
+                                }
                                 break;
                             }
                             case 'reconnecting': {
-                                void event;
                                 setConnectionError(null);
                                 setIsFatalError(false);
                                 setIsReconnectPending(true);
+                                setIsRetryingConnection(false);
+                                if ((event.attempt ?? 0) >= RECONNECT_ATTEMPTS_BEFORE_ERROR) {
+                                    setUnreachableTerminalId(terminalId);
+                                }
                                 break;
                             }
                             case 'data': {
@@ -432,6 +504,10 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible, directory, 
                                 break;
                             }
                             case 'exit': {
+                                if (closesOnExit()) {
+                                    closeTerminalTab(directory, tabId, { processExited: true });
+                                    break;
+                                }
                                 const exitCode =
                                     typeof event.exitCode === 'number' ? event.exitCode : null;
                                 const signal = typeof event.signal === 'number' ? event.signal : null;
@@ -464,6 +540,19 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible, directory, 
                         }
                     },
                     onError: (error, fatal) => {
+                        // A stopped action the server had to force-kill ends with
+                        // KILLED and no exit event, and the server has already
+                        // dropped it. The action runner may have cleared the tab's
+                        // session for the same message just before, so ownership
+                        // here accepts that cleared session too.
+                        if (error.code === 'KILLED' && activeTerminalIdRef.current === terminalId && closesOnExit()) {
+                            const killedTab = useTerminalStore.getState().getDirectoryState(directory)?.tabs.find((tab) => tab.id === tabId);
+                            if (killedTab && (killedTab.terminalSessionId === terminalId || killedTab.terminalSessionId === null)) {
+                                setTabSessionId(directory, tabId, null);
+                                closeTerminalTab(directory, tabId, { processExited: true });
+                                return;
+                            }
+                        }
                         if (!ownsStream()) {
                             return;
                         }
@@ -471,6 +560,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible, directory, 
                         if (!fatal) {
                             setConnectionError(null);
                             setIsFatalError(false);
+                            setIsRetryingConnection(false);
                             return;
                         }
 
@@ -507,6 +597,8 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible, directory, 
         [
             appendToBuffer,
             replaceBuffer,
+            closeTerminalTab,
+            closesOnExit,
             disconnectStream,
             focusTerminalWhenWindowActive,
             scanTerminalPreviewOutput,
@@ -774,6 +866,18 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible, directory, 
         await handleRestart();
     }, [handleRestart]);
 
+    // A fresh subscription dials at once instead of waiting out the backoff.
+    // When an action runner still holds the session, subscribing replays its
+    // cached snapshot at once; the error stays until the socket itself answers.
+    const handleRetryConnection = React.useCallback(() => {
+        if (!terminalDirectory || !activeTabId || !terminalSessionId) return;
+        disconnectStream();
+        startStream(terminalDirectory, activeTabId, terminalSessionId);
+        setIsRetryingConnection(true);
+        setIsReconnectPending(true);
+        setUnreachableTerminalId(terminalSessionId);
+    }, [activeTabId, disconnectStream, startStream, terminalDirectory, terminalSessionId]);
+
     const handleCreateTab = React.useCallback(() => {
         if (!terminalDirectory) return;
         const tabId = createTab(terminalDirectory);
@@ -786,9 +890,9 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible, directory, 
 
     const handleAttachSelection = React.useCallback(() => {
         const selection = terminalControllerRef.current?.getSelection();
-        const sessionKey = currentSessionId ?? (newSessionDraft?.open ? 'draft' : null);
-        if (!selection || !sessionKey || !activeTab || !contextDirectory) return;
-        addContextDraft({ directory: contextDirectory, sessionKey }, {
+        const target = readComposerDraftTarget(contextDirectory);
+        if (!selection || !target || !activeTab) return;
+        const draftId = addContextDraft(target, {
             source: 'terminal',
             fileLabel: activeTab.label,
             startLine: selection.startLine,
@@ -798,8 +902,12 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible, directory, 
             terminalId: activeTab.terminalSessionId ?? activeTab.id,
             text: '',
         });
+        if (!draftId && selection.text.trim()) {
+            toast.error(t('inlineComment.toast.noRoom'));
+            return;
+        }
         queueMicrotask(focusChatInput);
-    }, [activeTab, addContextDraft, contextDirectory, currentSessionId, newSessionDraft?.open]);
+    }, [activeTab, addContextDraft, contextDirectory, t]);
 
     // Touch hosts have no keyboard shortcut for copy, so the toolbar offers the
     // same action the desktop gets from Cmd/Ctrl+C on a selection.
@@ -834,27 +942,20 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible, directory, 
     const handleCloseTab = React.useCallback(
         (tabId: string) => {
             if (!terminalDirectory) return;
-
-            if (tabId === activeTabId) {
-                disconnectStream();
-            }
-
-            setConnectionError(null);
-            setIsFatalError(false);
-            setIsReconnectPending(false);
-            const tabs = useTerminalStore.getState().getDirectoryState(terminalDirectory)?.tabs ?? [];
-            const sessionId = tabs.find((tab) => tab.id === tabId)?.terminalSessionId;
-            const isLastTab = tabs.length === 1 && tabs[0]?.id === tabId;
-            void (async () => {
-                if (sessionId) await terminal.close(sessionId, terminalDirectory);
-                // Removing the surface in the same update unmounts this view
-                // before the store's replacement tab could start a shell.
-                if (isLastTab) onLastTabClosed?.();
-                closeTab(terminalDirectory, tabId);
-            })().catch((error) => setConnectionError(error instanceof Error ? error.message : t('terminalView.error.sessionEnded')));
+            closeTerminalTab(terminalDirectory, tabId);
         },
-        [activeTabId, closeTab, disconnectStream, onLastTabClosed, terminalDirectory, t, terminal]
+        [closeTerminalTab, terminalDirectory]
     );
+
+    // While a terminal tab is on screen, Cmd/Ctrl+W in the desktop app closes
+    // it as its close button does, instead of the whole window.
+    const rootRef = React.useRef<HTMLDivElement | null>(null);
+    const handleCloseTabRef = React.useRef(handleCloseTab);
+    handleCloseTabRef.current = handleCloseTab;
+    React.useEffect(() => {
+        if (!enableTabs || !isTerminalVisible || !activeTabId) return;
+        return registerCloseTabTarget(() => handleCloseTabRef.current(activeTabId), rootRef);
+    }, [activeTabId, enableTabs, isTerminalVisible]);
 
     const handleReorderTab = React.useCallback(
         (tabId: string, overTabId: string) => {
@@ -1152,121 +1253,151 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible, directory, 
     const preserveTerminalFocus = (event: React.PointerEvent<HTMLButtonElement>) => {
         if (isTouchTerminal) event.preventDefault();
     };
+    // A long press opens a tooltip and swallows the click, so keys on a touch screen go without one.
+    const quickKeyTooltip = (label: string, key: React.ReactElement) => (
+        isTouchTerminal || hasTouchOnlyPointer
+            ? key
+            : <ButtonTooltip label={label} side="top">{key}</ButtonTooltip>
+    );
+    const modifierTooltip = (modifier: Modifier, name: string) => t(
+        activeModifier === modifier
+            ? 'contextTooltips.terminalBrowser.quickKeys.releaseModifier'
+            : 'contextTooltips.terminalBrowser.quickKeys.holdModifier',
+        { key: name },
+    );
     const quickKeysControls = (
         <>
-            <Button
-                type="button"
-                size={quickKeySize}
-                variant="outline"
-                onPointerDown={preserveTerminalFocus}
-                onClick={() => handleMobileKeyPress('esc')}
-                disabled={quickKeysDisabled}
-            >
-                {t('terminalView.quickKeys.escape')}
-            </Button>
-            <Button
-                type="button"
-                size={quickKeySize}
-                variant="outline"
-                className={quickKeyIconClass}
-                onPointerDown={preserveTerminalFocus}
-                onClick={() => handleMobileKeyPress('tab')}
-                disabled={quickKeysDisabled}
-            >
-                <Icon name="arrow-right" className="h-4 w-4" />
-                <span className="sr-only">{t('terminalView.quickKeys.tabAria')}</span>
-            </Button>
-            <Button
-                type="button"
-                size={quickKeySize}
-                variant="chip"
-                aria-pressed={activeModifier === 'ctrl'}
-                className={isTouchTerminal ? 'px-3' : 'px-2'}
-                onPointerDown={preserveTerminalFocus}
-                onClick={() => handleModifierToggle('ctrl')}
-                disabled={quickKeysDisabled}
-            >
-                <span className="text-xs font-medium">{formatShortcutForDisplay('ctrl')}</span>
-                <span className="sr-only">{t('terminalView.quickKeys.controlModifierAria')}</span>
-            </Button>
-            <Button
-                type="button"
-                size={quickKeySize}
-                variant="chip"
-                aria-pressed={activeModifier === 'alt'}
-                className={isTouchTerminal ? 'px-3' : 'px-2'}
-                onPointerDown={preserveTerminalFocus}
-                onClick={() => handleModifierToggle('alt')}
-                disabled={quickKeysDisabled}
-            >
-                <span className="text-xs font-medium">{formatShortcutForDisplay('alt')}</span>
-                <span className="sr-only">{t('terminalView.quickKeys.altModifierAria')}</span>
-            </Button>
-            <Button
-                type="button"
-                size={quickKeySize}
-                variant="outline"
-                className={quickKeyIconClass}
-                onPointerDown={preserveTerminalFocus}
-                onClick={() => handleMobileKeyPress('arrow-up')}
-                disabled={quickKeysDisabled}
-            >
-                <Icon name="arrow-up"/>
-                <span className="sr-only">{t('terminalView.quickKeys.arrowUpAria')}</span>
-            </Button>
-            <Button
-                type="button"
-                size={quickKeySize}
-                variant="outline"
-                className={quickKeyIconClass}
-                onPointerDown={preserveTerminalFocus}
-                onClick={() => handleMobileKeyPress('arrow-left')}
-                disabled={quickKeysDisabled}
-            >
-                <Icon name="arrow-left"/>
-                <span className="sr-only">{t('terminalView.quickKeys.arrowLeftAria')}</span>
-            </Button>
-            <Button
-                type="button"
-                size={quickKeySize}
-                variant="outline"
-                className={quickKeyIconClass}
-                onPointerDown={preserveTerminalFocus}
-                onClick={() => handleMobileKeyPress('arrow-down')}
-                disabled={quickKeysDisabled}
-            >
-                <Icon name="arrow-down"/>
-                <span className="sr-only">{t('terminalView.quickKeys.arrowDownAria')}</span>
-            </Button>
-            <Button
-                type="button"
-                size={quickKeySize}
-                variant="outline"
-                className={quickKeyIconClass}
-                onPointerDown={preserveTerminalFocus}
-                onClick={() => handleMobileKeyPress('arrow-right')}
-                disabled={quickKeysDisabled}
-            >
-                <Icon name="arrow-right"/>
-                <span className="sr-only">{t('terminalView.quickKeys.arrowRightAria')}</span>
-            </Button>
-            <Button
-                type="button"
-                size={quickKeySize}
-                variant="outline"
-                className={quickKeyIconClass}
-                onPointerDown={preserveTerminalFocus}
-                onClick={() => handleMobileKeyPress('enter')}
-                disabled={quickKeysDisabled}
-            >
-                <Icon name="arrow-go-back"/>
-                <span className="sr-only">{t('terminalView.quickKeys.enterAria')}</span>
-            </Button>
+            {quickKeyTooltip(t('contextTooltips.terminalBrowser.quickKeys.escape'), (
+                <Button
+                    type="button"
+                    size={quickKeySize}
+                    variant="outline"
+                    onPointerDown={preserveTerminalFocus}
+                    onClick={() => handleMobileKeyPress('esc')}
+                    disabled={quickKeysDisabled}
+                >
+                    {t('terminalView.quickKeys.escape')}
+                </Button>
+            ))}
+            {quickKeyTooltip(t('terminalView.quickKeys.tabAria'), (
+                <Button
+                    type="button"
+                    size={quickKeySize}
+                    variant="outline"
+                    className={quickKeyIconClass}
+                    onPointerDown={preserveTerminalFocus}
+                    onClick={() => handleMobileKeyPress('tab')}
+                    disabled={quickKeysDisabled}
+                >
+                    <Icon name="arrow-right" className="h-4 w-4" />
+                    <span className="sr-only">{t('terminalView.quickKeys.tabAria')}</span>
+                </Button>
+            ))}
+            {quickKeyTooltip(modifierTooltip('ctrl', t('terminalView.quickKeys.controlLabel')), (
+                <Button
+                    type="button"
+                    size={quickKeySize}
+                    variant="chip"
+                    aria-pressed={activeModifier === 'ctrl'}
+                    className={isTouchTerminal ? 'px-3' : 'px-2'}
+                    onPointerDown={preserveTerminalFocus}
+                    onClick={() => handleModifierToggle('ctrl')}
+                    disabled={quickKeysDisabled}
+                >
+                    <span className="text-xs font-medium">{formatShortcutForDisplay('ctrl')}</span>
+                    <span className="sr-only">{t('terminalView.quickKeys.controlModifierAria')}</span>
+                </Button>
+            ))}
+            {quickKeyTooltip(modifierTooltip('alt', t('terminalView.quickKeys.altLabel')), (
+                <Button
+                    type="button"
+                    size={quickKeySize}
+                    variant="chip"
+                    aria-pressed={activeModifier === 'alt'}
+                    className={isTouchTerminal ? 'px-3' : 'px-2'}
+                    onPointerDown={preserveTerminalFocus}
+                    onClick={() => handleModifierToggle('alt')}
+                    disabled={quickKeysDisabled}
+                >
+                    <span className="text-xs font-medium">{formatShortcutForDisplay('alt')}</span>
+                    <span className="sr-only">{t('terminalView.quickKeys.altModifierAria')}</span>
+                </Button>
+            ))}
+            {quickKeyTooltip(t('terminalView.quickKeys.arrowUpAria'), (
+                <Button
+                    type="button"
+                    size={quickKeySize}
+                    variant="outline"
+                    className={quickKeyIconClass}
+                    onPointerDown={preserveTerminalFocus}
+                    onClick={() => handleMobileKeyPress('arrow-up')}
+                    disabled={quickKeysDisabled}
+                >
+                    <Icon name="arrow-up"/>
+                    <span className="sr-only">{t('terminalView.quickKeys.arrowUpAria')}</span>
+                </Button>
+            ))}
+            {quickKeyTooltip(t('terminalView.quickKeys.arrowLeftAria'), (
+                <Button
+                    type="button"
+                    size={quickKeySize}
+                    variant="outline"
+                    className={quickKeyIconClass}
+                    onPointerDown={preserveTerminalFocus}
+                    onClick={() => handleMobileKeyPress('arrow-left')}
+                    disabled={quickKeysDisabled}
+                >
+                    <Icon name="arrow-left"/>
+                    <span className="sr-only">{t('terminalView.quickKeys.arrowLeftAria')}</span>
+                </Button>
+            ))}
+            {quickKeyTooltip(t('terminalView.quickKeys.arrowDownAria'), (
+                <Button
+                    type="button"
+                    size={quickKeySize}
+                    variant="outline"
+                    className={quickKeyIconClass}
+                    onPointerDown={preserveTerminalFocus}
+                    onClick={() => handleMobileKeyPress('arrow-down')}
+                    disabled={quickKeysDisabled}
+                >
+                    <Icon name="arrow-down"/>
+                    <span className="sr-only">{t('terminalView.quickKeys.arrowDownAria')}</span>
+                </Button>
+            ))}
+            {quickKeyTooltip(t('terminalView.quickKeys.arrowRightAria'), (
+                <Button
+                    type="button"
+                    size={quickKeySize}
+                    variant="outline"
+                    className={quickKeyIconClass}
+                    onPointerDown={preserveTerminalFocus}
+                    onClick={() => handleMobileKeyPress('arrow-right')}
+                    disabled={quickKeysDisabled}
+                >
+                    <Icon name="arrow-right"/>
+                    <span className="sr-only">{t('terminalView.quickKeys.arrowRightAria')}</span>
+                </Button>
+            ))}
+            {quickKeyTooltip(t('terminalView.quickKeys.enterAria'), (
+                <Button
+                    type="button"
+                    size={quickKeySize}
+                    variant="outline"
+                    className={quickKeyIconClass}
+                    onPointerDown={preserveTerminalFocus}
+                    onClick={() => handleMobileKeyPress('enter')}
+                    disabled={quickKeysDisabled}
+                >
+                    <Icon name="arrow-go-back"/>
+                    <span className="sr-only">{t('terminalView.quickKeys.enterAria')}</span>
+                </Button>
+            ))}
         </>
     );
 
     return (
-        <div className="flex h-full flex-col overflow-hidden bg-[var(--surface-background)]">
+        <div ref={rootRef} className="flex h-full flex-col overflow-hidden bg-[var(--surface-background)]">
             <TerminalTabRenameDialog
                 currentLabel={renamingTab?.label ?? null}
                 onRename={handleRenameTab}
@@ -1290,71 +1421,80 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible, directory, 
                             />
                         </div>
 
-                        <Button
-                            type="button"
-                            size="xs"
-                            variant="ghost"
-                            className={cn('shrink-0', isTouchTerminal ? 'h-8 w-8 p-0' : 'h-7 w-7 p-0')}
-                            onClick={handleCreateTab}
-                            title={t('terminalView.tabs.newTabTitle')}
-                        >
-                            <Icon name="add" className={`${isTouchTerminal ? 'h-[18px] w-[18px]' : 'h-4 w-4'}`}/>
-                        </Button>
+                        <ButtonTooltip label={t('contextTooltips.terminalBrowser.terminal.newTab')} side="bottom" className="shrink-0">
+                            <Button
+                                type="button"
+                                size="xs"
+                                variant="ghost"
+                                className={cn('shrink-0', isTouchTerminal ? 'h-8 w-8 p-0' : 'h-7 w-7 p-0')}
+                                onClick={handleCreateTab}
+                                aria-label={t('contextTooltips.terminalBrowser.terminal.newTab')}
+                            >
+                                <Icon name="add" className={`${isTouchTerminal ? 'h-[18px] w-[18px]' : 'h-4 w-4'}`}/>
+                            </Button>
+                        </ButtonTooltip>
 
                         <div className="flex shrink-0 items-center gap-1 overflow-visible">
-                            <Button type="button" size="xs" variant="ghost" className="h-7 w-7 p-0" onClick={() => void handleRestart()} disabled={isRestarting || isActionTab} title={t('terminalView.actions.restart')} aria-label={t('terminalView.actions.restart')}>
-                                <Icon name="restart" className="h-4 w-4" />
-                            </Button>
-                            <Button
-                                type="button"
-                                size="xs"
-                                variant="ghost"
-                                className="h-7 w-7 p-0"
-                                onClick={handleAttachSelection}
-                                title={t('terminalView.actions.attachSelection')}
-                                aria-label={t('terminalView.actions.attachSelection')}
-                            >
-                                <Icon name="attachment-2" className="h-4 w-4" />
-                            </Button>
-                            <Button
-                                type="button"
-                                size="xs"
-                                variant="ghost"
-                                className="h-7 w-7 p-0"
-                                onClick={handleCopySelection}
-                                title={t('terminalView.actions.copySelection')}
-                                aria-label={t('terminalView.actions.copySelection')}
-                            >
-                                <Icon name="file-copy" className="h-4 w-4" />
-                            </Button>
-                            {useTouchTerminalInput ? (
+                            <ButtonTooltip label={t('terminalView.actions.restart')} side="bottom">
+                                <Button type="button" size="xs" variant="ghost" className="h-7 w-7 p-0" onClick={() => void handleRestart()} disabled={isRestarting || isActionTab} aria-label={t('terminalView.actions.restart')}>
+                                    <Icon name="restart" className="h-4 w-4" />
+                                </Button>
+                            </ButtonTooltip>
+                            <ButtonTooltip label={t('terminalView.actions.attachSelection')} side="bottom">
                                 <Button
                                     type="button"
                                     size="xs"
                                     variant="ghost"
                                     className="h-7 w-7 p-0"
-                                    onClick={handlePasteClipboard}
-                                    title={t('terminalView.actions.paste')}
-                                    aria-label={t('terminalView.actions.paste')}
+                                    onClick={handleAttachSelection}
+                                    aria-label={t('terminalView.actions.attachSelection')}
                                 >
-                                    <Icon name="clipboard" className="h-4 w-4" />
+                                    <Icon name="attachment-2" className="h-4 w-4" />
                                 </Button>
-                            ) : null}
-                            {previewUrl ? (
+                            </ButtonTooltip>
+                            <ButtonTooltip label={t('terminalView.actions.copySelection')} side="bottom">
                                 <Button
                                     type="button"
                                     size="xs"
-                                    variant="outline"
-                                    className="h-6 shrink-0 gap-1 px-2"
-                                    onClick={() => {
-                                        if (!contextDirectory) return;
-                                        openContextPreview(contextDirectory, previewUrl);
-                                    }}
-                                    title={t('terminalView.preview.openTitle')}
+                                    variant="ghost"
+                                    className="h-7 w-7 p-0"
+                                    onClick={handleCopySelection}
+                                    aria-label={t('terminalView.actions.copySelection')}
                                 >
-                                    <Icon name="global" className="h-3.5 w-3.5 shrink-0" />
-                                    <span className="whitespace-nowrap">{t('terminalView.preview.open')}</span>
+                                    <Icon name="file-copy" className="h-4 w-4" />
                                 </Button>
+                            </ButtonTooltip>
+                            {useTouchTerminalInput ? (
+                                <ButtonTooltip label={t('terminalView.actions.paste')} side="bottom">
+                                    <Button
+                                        type="button"
+                                        size="xs"
+                                        variant="ghost"
+                                        className="h-7 w-7 p-0"
+                                        onClick={handlePasteClipboard}
+                                        aria-label={t('terminalView.actions.paste')}
+                                    >
+                                        <Icon name="clipboard" className="h-4 w-4" />
+                                    </Button>
+                                </ButtonTooltip>
+                            ) : null}
+                            {previewUrl ? (
+                                <ButtonTooltip label={t('terminalView.preview.openTitle')} side="bottom" className="shrink-0">
+                                    <Button
+                                        type="button"
+                                        size="xs"
+                                        variant="outline"
+                                        className="h-6 shrink-0 gap-1 px-2"
+                                        onClick={() => {
+                                            if (!contextDirectory) return;
+                                            openContextPreview(contextDirectory, previewUrl);
+                                        }}
+                                        aria-label={t('terminalView.preview.openTitle')}
+                                    >
+                                        <Icon name="global" className="h-3.5 w-3.5 shrink-0" />
+                                        <span className="whitespace-nowrap">{t('terminalView.preview.open')}</span>
+                                    </Button>
+                                </ButtonTooltip>
                             ) : null}
                         </div>
                     </div>
@@ -1393,30 +1533,55 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible, directory, 
                             fontFamily={resolvedFontStack}
                             fontSize={terminalFontSize}
                             enableTouchScroll={useTouchTerminalInput}
+                            clipboard={clipboard}
                         />
                     )) : null}
                 </div>
+                {isReconnectPending && terminalSessionId !== null && unreachableTerminalId === terminalSessionId ? (
+                    <div
+                        className="absolute inset-0 flex items-center justify-center px-6"
+                        style={{ backgroundColor: xtermTheme.background }}
+                    >
+                        {/* The pane is forced left to right for terminal output; this text follows its own language. */}
+                        <div dir="auto" className="max-w-sm text-center">
+                            <p role="alert" className="typography-ui-label font-medium text-[var(--status-error)]">
+                                {t('terminalView.error.cannotConnect')}
+                            </p>
+                            <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                className="mt-4"
+                                onClick={handleRetryConnection}
+                                disabled={isRetryingConnection}
+                            >
+                                {t('terminalView.actions.tryAgain')}
+                            </Button>
+                        </div>
+                    </div>
+                ) : null}
                 {!isReconnectPending && connectionError && (
                     <div className="absolute inset-x-0 bottom-0 bg-[var(--status-error-background)] px-3 py-2 text-xs text-[var(--status-error-text)] flex items-center justify-between gap-2">
                         <span>{connectionError}</span>
                         {isFatalError && isTouchTerminal && (
-                            <Button
-                                size="sm"
-                                variant="secondary"
-                                className="h-6 px-2 py-0 text-xs"
-                                onClick={handleHardRestart}
-                                disabled={isRestarting}
-                                title={t('terminalView.actions.hardRestartTitle')}
-                                type="button"
-                            >
-                                {t('terminalView.actions.hardRestart')}
-                            </Button>
+                            <ButtonTooltip label={t('terminalView.actions.hardRestartTitle')} side="top">
+                                <Button
+                                    size="sm"
+                                    variant="secondary"
+                                    className="h-6 px-2 py-0 text-xs"
+                                    onClick={handleHardRestart}
+                                    disabled={isRestarting}
+                                    type="button"
+                                >
+                                    {t('terminalView.actions.hardRestart')}
+                                </Button>
+                            </ButtonTooltip>
                         )}
                     </div>
                 )}
             </div>
             {isTouchTerminal && showQuickKeys ? (
-                <div className="shrink-0 overflow-x-auto border-t border-border/40 bg-[var(--surface-background)] px-2 pt-1.5 pb-[max(0.375rem,calc(var(--oc-app-bottom-safe,0px)-var(--oc-keyboard-inset,0px)))] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                <div data-keyboard-inset-reader="" data-keyboard-rider="" className="shrink-0 overflow-x-auto border-t border-edge-muted bg-[var(--surface-background)] px-2 pt-1.5 pb-[max(0.375rem,calc(var(--oc-app-bottom-safe,0px)-var(--oc-keyboard-inset,0px)))] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                     {/* Keys are physical: arrows keep pointing where the key does. */}
                     <div dir="ltr" className="flex min-w-max items-center gap-1.5">
                         {quickKeysControls}

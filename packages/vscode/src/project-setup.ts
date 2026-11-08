@@ -40,6 +40,7 @@ export type PersonalProjectSetup = {
   setupWorktree: string[];
   setupWorktreeWait: boolean | null;
   setupWorktreeMode: SetupWorktreeMode;
+  teardownWorktree: string[];
   projectActions: ProjectAction[];
   projectActionsPrimaryId: string | null;
   draftStarters: DraftStarter[];
@@ -51,6 +52,7 @@ export type PersonalProjectSetup = {
 export type SharedProjectConfig = {
   setupWorktree: string[];
   setupWorktreeWait: boolean | null;
+  teardownWorktree: string[];
   projectActions: ProjectAction[];
   draftStarters: DraftStarter[];
   plansDir: string | null;
@@ -83,6 +85,7 @@ export type ProjectSetupView = {
   trust: { hash: string | null; trusted: boolean };
   setupWorktree: string[];
   setupWorktreeWait: boolean;
+  teardownWorktree: string[];
   projectActions: Array<ProjectAction & { source: ProjectSetupSource }>;
   projectActionsPrimaryId: string | null;
   draftStarters: Array<DraftStarter & { source: ProjectSetupSource }>;
@@ -98,7 +101,7 @@ const SHARED_CONFIG_VERSION = 1;
  * (`magicPrompts`, keys from newer builds) belongs to another writer and goes
  * back out exactly as it was read.
  */
-export const SHARED_SETUP_KEYS: readonly string[] = Object.freeze(['version', 'setupWorktree', 'setupWorktreeWait', 'projectActions', 'draftStarters', 'plansDir']);
+export const SHARED_SETUP_KEYS: readonly string[] = Object.freeze(['version', 'setupWorktree', 'setupWorktreeWait', 'teardownWorktree', 'projectActions', 'draftStarters', 'plansDir']);
 const SHARED_SETUP_KEY_SET: ReadonlySet<string> = new Set(SHARED_SETUP_KEYS);
 
 /**
@@ -109,6 +112,7 @@ type StoredProjectSetupPatch = {
   'setup-worktree'?: string[];
   'setup-worktree-wait'?: boolean;
   setupWorktreeMode?: SetupWorktreeMode;
+  teardownWorktree?: string[];
   projectActions?: ProjectAction[];
   projectActionsPrimaryId?: string | undefined;
   draftStarters?: DraftStarter[];
@@ -218,6 +222,7 @@ export const personalProjectSetupOf = (raw: unknown): PersonalProjectSetup => {
     setupWorktree: sanitizeSetupCommands(document['setup-worktree']),
     setupWorktreeWait: typeof wait === 'boolean' ? wait : null,
     setupWorktreeMode: setupWorktreeModeOf(document.setupWorktreeMode),
+    teardownWorktree: sanitizeSetupCommands(document.teardownWorktree),
     projectActions,
     projectActionsPrimaryId: primaryRaw && projectActions.some((action) => action.id === primaryRaw) ? primaryRaw : null,
     draftStarters: sanitizeDraftStarters(document.draftStarters),
@@ -235,11 +240,14 @@ const sharedTrustOf = (value: unknown): PersonalProjectSetup['sharedTrust'] => {
 };
 
 /**
- * What a trust answer covers: the shared setup commands and the shared
- * actions' commands, canonical order, hashed; `null` when nothing executes.
+ * What a trust answer covers: the shared setup and teardown commands and the
+ * shared actions' commands, canonical order, hashed; `null` when nothing
+ * executes. Teardown enters the hash only when there is some, so answers
+ * recorded before teardown commands existed still match.
  */
 export const sharedTrustHashOf = (shared: SharedProjectConfig): string | null => {
   const commands = shared.setupWorktree;
+  const teardown = shared.teardownWorktree;
   const actions = shared.projectActions
     .map((action) => {
       const executable: { id: string; command: string; runIn?: 'parent' } = { id: action.id, command: action.command };
@@ -247,8 +255,11 @@ export const sharedTrustHashOf = (shared: SharedProjectConfig): string | null =>
       return executable;
     })
     .sort((left, right) => (left.id < right.id ? -1 : left.id > right.id ? 1 : 0));
-  if (commands.length === 0 && actions.length === 0) return null;
-  const digest = crypto.createHash('sha256').update(JSON.stringify({ setupWorktree: commands, projectActions: actions })).digest('hex');
+  if (commands.length === 0 && teardown.length === 0 && actions.length === 0) return null;
+  const executable = teardown.length > 0
+    ? { setupWorktree: commands, projectActions: actions, teardownWorktree: teardown }
+    : { setupWorktree: commands, projectActions: actions };
+  const digest = crypto.createHash('sha256').update(JSON.stringify(executable)).digest('hex');
   return `sha256:${digest}`;
 };
 
@@ -268,6 +279,7 @@ export const normalizePlansDir = (value: unknown): string | null => {
 const EMPTY_SHARED: SharedProjectConfig = {
   setupWorktree: [],
   setupWorktreeWait: null,
+  teardownWorktree: [],
   projectActions: [],
   draftStarters: [],
   plansDir: null,
@@ -293,6 +305,7 @@ export const parseSharedProjectConfig = (raw: string): SharedProjectConfigRead =
   const invalid = (reason: string): SharedProjectConfigRead => ({ status: 'invalid', reason, document });
   if ('setupWorktree' in parsed && !Array.isArray(parsed.setupWorktree)) return invalid('setupWorktree must be an array');
   if ('setupWorktreeWait' in parsed && typeof parsed.setupWorktreeWait !== 'boolean') return invalid('setupWorktreeWait must be a boolean');
+  if ('teardownWorktree' in parsed && !Array.isArray(parsed.teardownWorktree)) return invalid('teardownWorktree must be an array');
   if ('projectActions' in parsed && !Array.isArray(parsed.projectActions)) return invalid('projectActions must be an array');
   if ('draftStarters' in parsed && !Array.isArray(parsed.draftStarters)) return invalid('draftStarters must be an array');
   let plansDir: string | null = null;
@@ -307,6 +320,7 @@ export const parseSharedProjectConfig = (raw: string): SharedProjectConfigRead =
     config: {
       setupWorktree: sanitizeSetupCommands(parsed.setupWorktree),
       setupWorktreeWait: typeof wait === 'boolean' ? wait : null,
+      teardownWorktree: sanitizeSetupCommands(parsed.teardownWorktree),
       projectActions: sanitizeProjectActions(parsed.projectActions),
       draftStarters: sanitizeDraftStarters(parsed.draftStarters),
       plansDir,
@@ -320,8 +334,9 @@ const withSource = <T,>(entries: T[], source: ProjectSetupSource): Array<T & { s
 /**
  * One merged view from the personal part and the shared read. Same rules as
  * the server: shared setup commands first (unless personal replaces), the
- * personal wait flag wins when set, actions union by id with personal
- * replacing shared and hidden shared ids dropped, starters union by key.
+ * personal wait flag wins when set, shared teardown commands first (the mode
+ * does not apply), actions union by id with personal replacing shared and
+ * hidden shared ids dropped, starters union by key.
  */
 export const mergeProjectSetup = (personal: PersonalProjectSetup, sharedRead: SharedProjectConfigRead): ProjectSetupView => {
   const shared = sharedRead.status === 'ok' ? sharedRead.config : EMPTY_SHARED;
@@ -339,6 +354,7 @@ export const mergeProjectSetup = (personal: PersonalProjectSetup, sharedRead: Sh
     setupWorktreeWait: personal.setupWorktreeWait !== null
       ? personal.setupWorktreeWait
       : shared.setupWorktreeWait === true,
+    teardownWorktree: [...shared.teardownWorktree, ...personal.teardownWorktree],
     projectActions: [...withSource(sharedActions, 'shared'), ...withSource(personal.projectActions, 'personal')],
     projectActionsPrimaryId: personal.projectActionsPrimaryId,
     draftStarters: [...withSource(shared.draftStarters, 'shared'), ...withSource(personalStarters, 'personal')],
@@ -371,6 +387,7 @@ const foreignSharedEntriesOf = (document: JsonObject): Array<[string, JsonValue]
 export const isSharedProjectConfigEmpty = (config: SharedProjectConfig, document: JsonObject = {}): boolean => (
   config.setupWorktree.length === 0
   && config.setupWorktreeWait === null
+  && config.teardownWorktree.length === 0
   && config.projectActions.length === 0
   && config.draftStarters.length === 0
   && config.plansDir === null
@@ -387,6 +404,7 @@ export const serializeSharedProjectConfig = (config: SharedProjectConfig, docume
   const output: Record<string, unknown> = { version: SHARED_CONFIG_VERSION };
   if (config.setupWorktree.length > 0) output.setupWorktree = config.setupWorktree;
   if (config.setupWorktreeWait !== null) output.setupWorktreeWait = config.setupWorktreeWait;
+  if (config.teardownWorktree.length > 0) output.teardownWorktree = config.teardownWorktree;
   if (config.projectActions.length > 0) output.projectActions = sanitizeProjectActions(config.projectActions).map(withoutEmptyIcon);
   if (config.draftStarters.length > 0) output.draftStarters = config.draftStarters;
   if (config.plansDir !== null) output.plansDir = config.plansDir;
@@ -411,6 +429,10 @@ export const applySharedProjectSetupPatch = (current: SharedProjectConfig, patch
     const wait = patch.setupWorktreeWait;
     if (wait !== null && typeof wait !== 'boolean') throw new ProjectSetupValidationError('setupWorktreeWait must be a boolean or null');
     next.setupWorktreeWait = wait;
+  }
+  if ('teardownWorktree' in patch) {
+    if (!Array.isArray(patch.teardownWorktree)) throw new ProjectSetupValidationError('teardownWorktree must be an array of commands');
+    next.teardownWorktree = sanitizeSetupCommands(patch.teardownWorktree);
   }
   if ('projectActions' in patch) {
     if (!Array.isArray(patch.projectActions)) throw new ProjectSetupValidationError('projectActions must be an array');
@@ -449,6 +471,10 @@ export const projectSetupPatchToStored = (patch: unknown): StoredProjectSetupPat
   if ('setupWorktreeWait' in patch) {
     if (typeof patch.setupWorktreeWait !== 'boolean') throw new ProjectSetupValidationError('setupWorktreeWait must be a boolean');
     stored['setup-worktree-wait'] = patch.setupWorktreeWait;
+  }
+  if ('teardownWorktree' in patch) {
+    if (!Array.isArray(patch.teardownWorktree)) throw new ProjectSetupValidationError('teardownWorktree must be an array of commands');
+    stored.teardownWorktree = sanitizeSetupCommands(patch.teardownWorktree);
   }
   if ('projectActions' in patch) {
     if (!Array.isArray(patch.projectActions)) throw new ProjectSetupValidationError('projectActions must be an array');

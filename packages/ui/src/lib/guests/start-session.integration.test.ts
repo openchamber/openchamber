@@ -1,12 +1,16 @@
 import { afterEach, expect, mock, spyOn, test } from 'bun:test';
 import type { Session } from '@/lib/opencode/model';
+import { INITIAL_STATE } from '@/sync/types';
 import { createRuntimeOpencodeClient, opencodeClient } from '@/lib/opencode/client';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
+import { useSelectionStore } from '@/sync/selection-store';
+import { useConfigStore } from '@/stores/useConfigStore';
+import * as syncRefs from '@/sync/sync-refs';
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { useUIStore } from '@/stores/useUIStore';
 import * as sessionActions from '@/sync/session-actions';
-import { startGuestSession } from './start-session';
+import { promptGuestSession, startGuestSession } from './start-session';
 import * as worktreeCreate from '@/lib/worktrees/worktreeCreate';
 import * as worktreeBootstrap from '@/lib/worktrees/worktreeBootstrap';
 import * as projectConfig from '@/lib/openchamberConfig';
@@ -17,7 +21,348 @@ const created: Session = {
   tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
   time: { created: 1, updated: 1 },
 };
-afterEach(() => mock.restore());
+const originalSendMessage = useSessionUIStore.getState().sendMessage;
+const originalLastUserChoice = useSessionUIStore.getState().getLastUserChoice;
+afterEach(() => {
+  mock.restore();
+  useSessionUIStore.setState({ sendMessage: originalSendMessage, getLastUserChoice: originalLastUserChoice });
+});
+
+test('a guest prompt sends the target session selection rather than the app default', async () => {
+  const sessionId = 'guest-prompt-target';
+  const selection = useSelectionStore.getState();
+  selection.saveSessionAgentSelection(sessionId, 'plan');
+  selection.saveSessionModelSelection(sessionId, 'chosen', 'model');
+  selection.saveAgentModelForSession(sessionId, 'plan', 'chosen', 'model');
+  selection.saveAgentModelVariantForSession(sessionId, 'plan', 'chosen', 'model', 'high');
+  const config = useConfigStore.getState();
+  useConfigStore.setState({ currentProviderId: 'default', currentModelId: 'other', currentAgentName: 'build' });
+  const send = spyOn(useSessionUIStore.getState(), 'sendMessage').mockResolvedValue(undefined);
+  try {
+    const result = await promptGuestSession({ request: { text: 'Synthetic prompt', send: true }, sessionId,
+      directory: '/synthetic', busy: false, compose: () => {}, t: (key) => key });
+    expect(result).toEqual({ ok: true, result: { sent: 'sent' } });
+    expect(send.mock.calls[0]).toEqual(['Synthetic prompt', 'chosen', 'model', 'plan', undefined,
+      undefined, undefined, 'high', undefined, { sessionId, directory: '/synthetic' }]);
+  } finally {
+    selection.clearSessionSelections(sessionId);
+    useConfigStore.setState({ currentProviderId: config.currentProviderId, currentModelId: config.currentModelId, currentAgentName: config.currentAgentName });
+  }
+});
+
+test('a guest prompt preserves an explicit default effort over older session history', async () => {
+  const sessionId = 'guest-prompt-default-effort';
+  const selection = useSelectionStore.getState();
+  selection.saveSessionAgentSelection(sessionId, 'plan');
+  selection.saveSessionModelSelection(sessionId, 'chosen', 'model');
+  selection.saveAgentModelVariantForSession(sessionId, 'plan', 'chosen', 'model', null);
+  const state = useSessionUIStore.getState();
+  spyOn(state, 'getLastUserChoice').mockReturnValue({ agent: 'plan', providerID: 'chosen', modelID: 'model', variant: 'high' });
+  const send = spyOn(state, 'sendMessage').mockResolvedValue(undefined);
+  try {
+    await promptGuestSession({ request: { text: 'Synthetic prompt', send: true }, sessionId,
+      directory: '/synthetic', busy: false, compose: () => {}, t: (key) => key });
+    expect(send.mock.calls[0]?.slice(1, 4)).toEqual(['chosen', 'model', 'plan']);
+    expect(send.mock.calls[0]?.[7]).toBeNull();
+  } finally {
+    selection.clearSessionSelections(sessionId);
+  }
+});
+
+test('a guest prompt uses the target session history when there is no local pick', async () => {
+  const state = useSessionUIStore.getState();
+  spyOn(state, 'getLastUserChoice').mockReturnValue({ agent: 'plan', providerID: 'history', modelID: 'model', variant: 'high' });
+  const send = spyOn(state, 'sendMessage').mockResolvedValue(undefined);
+  await promptGuestSession({ request: { text: 'Synthetic prompt', send: true }, sessionId: 'guest-history-only',
+    directory: '/synthetic', busy: false, compose: () => {}, t: (key) => key });
+  expect(send.mock.calls[0]?.slice(1, 4)).toEqual(['history', 'model', 'plan']);
+  expect(send.mock.calls[0]?.[7]).toBe('high');
+});
+
+test('a guest prompt to the active session uses the visible composer selection', async () => {
+  const state = useSessionUIStore.getState();
+  const config = useConfigStore.getState();
+  const send = spyOn(state, 'sendMessage').mockResolvedValue(undefined);
+  useSessionUIStore.setState({ currentSessionId: 'visible-session' });
+  useConfigStore.setState({ currentProviderId: 'visible', currentModelId: 'model', currentAgentName: 'plan', currentVariant: 'high' });
+  try {
+    await promptGuestSession({ request: { text: 'Synthetic prompt', send: true }, sessionId: 'visible-session',
+      directory: '/synthetic', busy: false, compose: () => {}, t: (key) => key });
+    expect(send.mock.calls[0]?.slice(1, 4)).toEqual(['visible', 'model', 'plan']);
+    expect(send.mock.calls[0]?.[7]).toBe('high');
+  } finally {
+    useSessionUIStore.setState({ currentSessionId: state.currentSessionId });
+    useConfigStore.setState({ currentProviderId: config.currentProviderId, currentModelId: config.currentModelId,
+      currentAgentName: config.currentAgentName, currentVariant: config.currentVariant });
+  }
+});
+
+test('a guest prompt carries an unsent agent pick for the active session', async () => {
+  const state = useSessionUIStore.getState();
+  const config = useConfigStore.getState();
+  const selection = useSelectionStore.getState();
+  selection.pickSessionAgent('active-picked-agent', 'plan');
+  const send = spyOn(state, 'sendMessage').mockResolvedValue(undefined);
+  useSessionUIStore.setState({ currentSessionId: 'active-picked-agent' });
+  useConfigStore.setState({ currentProviderId: 'visible', currentModelId: 'model', currentAgentName: 'build' });
+  try {
+    await promptGuestSession({ request: { text: 'Synthetic prompt', send: true }, sessionId: 'active-picked-agent',
+      directory: '/synthetic', busy: false, compose: () => {}, t: (key) => key });
+    expect(send.mock.calls[0]?.[3]).toBe('plan');
+  } finally {
+    selection.clearSessionSelections('active-picked-agent');
+    useSessionUIStore.setState({ currentSessionId: state.currentSessionId });
+    useConfigStore.setState({ currentProviderId: config.currentProviderId, currentModelId: config.currentModelId, currentAgentName: config.currentAgentName });
+  }
+});
+
+test('a guest prompt follows the session record even when the panel directory does not match the store key', async () => {
+  const sessionId = 'guest-path-form-mismatch';
+  const selection = useSelectionStore.getState();
+  selection.saveSessionAgentSelection(sessionId, 'old-agent');
+  selection.followSessionAgent(sessionId, 'old-agent');
+  selection.saveSessionModelSelection(sessionId, 'old', 'model');
+  selection.markSessionModelFollowed(sessionId, 'old/model#');
+  // The directory child store is keyed by the normalized path, but the panel
+  // can hold a different form (case, separators, trailing slash), so no store
+  // answers for that string at all. The send path then falls back to the
+  // cross-directory map; the capture must see the same record.
+  spyOn(syncRefs, 'getDirectoryState').mockReturnValue(undefined);
+  spyOn(syncRefs, 'getAllSyncSessions').mockReturnValue([{ ...created, id: sessionId, agent: 'new-agent', model: { providerID: 'new', id: 'model', variant: 'high' } }]);
+  const send = spyOn(useSessionUIStore.getState(), 'sendMessage').mockResolvedValue(undefined);
+  try {
+    await promptGuestSession({ request: { text: 'Synthetic prompt', send: true }, sessionId,
+      directory: 'C:/Users/test/project/', busy: false, compose: () => {}, t: (key) => key });
+    expect(send.mock.calls[0]?.slice(1, 4)).toEqual(['new', 'model', 'new-agent']);
+    expect(send.mock.calls[0]?.[7]).toBe('high');
+  } finally {
+    selection.clearSessionSelections(sessionId);
+  }
+});
+
+test('a guest prompt follows a newer model and agent on a background session record', async () => {
+  const sessionId = 'guest-switched-session';
+  const selection = useSelectionStore.getState();
+  selection.saveSessionAgentSelection(sessionId, 'old-agent');
+  selection.followSessionAgent(sessionId, 'old-agent');
+  selection.saveSessionModelSelection(sessionId, 'old', 'model');
+  selection.markSessionModelFollowed(sessionId, 'old/model#');
+  spyOn(syncRefs, 'getDirectoryState').mockReturnValue({ ...INITIAL_STATE, session: [{ ...created, id: sessionId, agent: 'new-agent', model: { providerID: 'new', id: 'model', variant: 'high' } }] });
+  const send = spyOn(useSessionUIStore.getState(), 'sendMessage').mockResolvedValue(undefined);
+  try {
+    await promptGuestSession({ request: { text: 'Synthetic prompt', send: true }, sessionId,
+      directory: '/synthetic', busy: false, compose: () => {}, t: (key) => key });
+    expect(send.mock.calls[0]?.slice(1, 4)).toEqual(['new', 'model', 'new-agent']);
+    expect(send.mock.calls[0]?.[7]).toBe('high');
+  } finally {
+    selection.clearSessionSelections(sessionId);
+  }
+});
+
+test('a guest prompt uses the first background session record effort', async () => {
+  const sessionId = 'guest-first-record';
+  spyOn(syncRefs, 'getDirectoryState').mockReturnValue({ ...INITIAL_STATE, session: [{ ...created, id: sessionId, agent: 'plan', model: { providerID: 'new', id: 'model', variant: 'high' } }] });
+  const send = spyOn(useSessionUIStore.getState(), 'sendMessage').mockResolvedValue(undefined);
+  await promptGuestSession({ request: { text: 'Synthetic prompt', send: true }, sessionId,
+    directory: '/synthetic', busy: false, compose: () => {}, t: (key) => key });
+  expect(send.mock.calls[0]?.slice(1, 4)).toEqual(['new', 'model', 'plan']);
+  expect(send.mock.calls[0]?.[7]).toBe('high');
+});
+
+test('a switched background record without effort keeps the saved effort for that model', async () => {
+  const sessionId = 'guest-switched-no-effort';
+  const selection = useSelectionStore.getState();
+  selection.markSessionModelFollowed(sessionId, 'old/model#');
+  selection.saveAgentModelVariantForSession(sessionId, 'plan', 'new', 'model', 'high');
+  spyOn(syncRefs, 'getDirectoryState').mockReturnValue({ ...INITIAL_STATE, session: [{ ...created, id: sessionId, agent: 'plan', model: { providerID: 'new', id: 'model' } }] });
+  const send = spyOn(useSessionUIStore.getState(), 'sendMessage').mockResolvedValue(undefined);
+  try {
+    await promptGuestSession({ request: { text: 'Synthetic prompt', send: true }, sessionId,
+      directory: '/synthetic', busy: false, compose: () => {}, t: (key) => key });
+    expect(send.mock.calls[0]?.[7]).toBe('high');
+  } finally {
+    selection.clearSessionSelections(sessionId);
+  }
+});
+
+test('a background agent switch retains the session model, not an older model for that agent', async () => {
+  const sessionId = 'guest-agent-switched';
+  const selection = useSelectionStore.getState();
+  selection.followSessionAgent(sessionId, 'build');
+  selection.saveSessionModelSelection(sessionId, 'current', 'model');
+  selection.saveAgentModelForSession(sessionId, 'plan', 'older', 'model');
+  spyOn(syncRefs, 'getDirectoryState').mockReturnValue({ ...INITIAL_STATE, session: [{ ...created, id: sessionId, agent: 'plan', model: { providerID: 'current', id: 'model' } }] });
+  const send = spyOn(useSessionUIStore.getState(), 'sendMessage').mockResolvedValue(undefined);
+  try {
+    await promptGuestSession({ request: { text: 'Synthetic prompt', send: true }, sessionId,
+      directory: '/synthetic', busy: false, compose: () => {}, t: (key) => key });
+    expect(send.mock.calls[0]?.slice(1, 4)).toEqual(['current', 'model', 'plan']);
+  } finally {
+    selection.clearSessionSelections(sessionId);
+  }
+});
+
+['agent', 'model'].forEach((field) => test(`a background guest prompt preserves a followed ${field} round trip while sending`, async () => {
+  const sessionId = 'guest-followed-round-trip';
+  const selection = useSelectionStore.getState();
+  const ui = useSessionUIStore.getState();
+  const config = useConfigStore.getState();
+  useConfigStore.setState({ isConnected: true });
+  const record: Session = { ...created, id: sessionId, agent: 'build', model: { providerID: 'p', id: 'M1' } };
+  spyOn(syncRefs, 'getDirectoryState').mockReturnValue({ ...INITIAL_STATE, session: [record] });
+  spyOn(opencodeClient, 'getSession').mockResolvedValue(record);
+  spyOn(sessionActions, 'optimisticSend').mockImplementation(async (input) => { await input.send('message', []); });
+  let finish!: (message: string) => void;
+  let started!: () => void;
+  const leaving = new Promise<void>((resolve) => { started = resolve; });
+  spyOn(opencodeClient, 'sendMessage').mockImplementation(() => new Promise<string>((resolve) => {
+    finish = resolve;
+    started();
+  }));
+  selection.followSessionAgent(sessionId, 'build');
+  selection.markSessionModelFollowed(sessionId, 'p/M1#');
+  selection.pickSessionAgent(sessionId, 'plan');
+  selection.saveSessionModelSelection(sessionId, 'p', 'M2');
+  selection.pickSessionModel(sessionId, 'p', 'M2');
+  useSessionUIStore.setState({ currentSessionId: 'another-chat' });
+  try {
+    const sending = promptGuestSession({ request: { text: 'Synthetic prompt', send: true }, sessionId,
+      directory: '/synthetic', busy: false, compose: () => {}, t: (key) => key });
+    await leaving;
+    if (field === 'agent') {
+      selection.followSessionAgent(sessionId, 'plan');
+      selection.followSessionAgent(sessionId, 'build');
+    } else {
+      selection.markSessionModelFollowed(sessionId, 'p/M2#');
+      selection.markSessionModelFollowed(sessionId, 'p/M1#');
+    }
+    finish('message');
+    expect(await sending).toEqual({ ok: true, result: { sent: 'sent' } });
+    expect(selection.getSessionAgentSelection(sessionId)).toBe(field === 'agent' ? 'build' : 'plan');
+    expect(selection.isSessionModelSwitched(sessionId, field === 'model' ? 'p/M1#' : 'p/M2#')).toBe(false);
+  } finally {
+    selection.clearSessionSelections(sessionId);
+    useSessionUIStore.setState({ currentSessionId: ui.currentSessionId });
+    useConfigStore.setState(config);
+  }
+}));
+
+[['M3', 'M4'], ['M3', 'M1'], ['M1', 'M1']].forEach(([beforeSendModel, externalModel]) => test(`a background guest prompt carries an unsent model over ${beforeSendModel}, then follows an external switch to ${externalModel}`, async () => {
+  const sessionId = 'guest-unsent-model';
+  const selection = useSelectionStore.getState();
+  const ui = useSessionUIStore.getState();
+  const config = useConfigStore.getState();
+  useConfigStore.setState({ isConnected: true });
+  let record: Session = { ...created, id: sessionId, agent: 'plan', model: { providerID: 'p', id: 'M1' } };
+  spyOn(syncRefs, 'getDirectoryState').mockImplementation(() => ({ ...INITIAL_STATE, session: [record] }));
+  spyOn(opencodeClient, 'getSession').mockImplementation(async () => record);
+  const send = spyOn(opencodeClient, 'sendMessage').mockResolvedValue('message');
+  // Keep the real send selection and settlement; skip only transcript insertion.
+  spyOn(sessionActions, 'optimisticSend').mockImplementation(async (input) => { await input.send('message', []); });
+  selection.followSessionAgent(sessionId, 'plan');
+  selection.markSessionModelFollowed(sessionId, 'p/M1#');
+  useSessionUIStore.setState({ currentSessionId: sessionId });
+  selection.saveSessionModelSelection(sessionId, 'p', 'M2');
+  selection.pickSessionModel(sessionId, 'p', 'M2');
+  selection.saveAgentModelVariantForSession(sessionId, 'plan', 'p', 'M2', 'high');
+  useSessionUIStore.setState({ currentSessionId: 'another-chat' });
+  record = { ...record, model: { providerID: 'p', id: beforeSendModel, variant: beforeSendModel === 'M1' ? undefined : 'low' } };
+  const prompt = () => promptGuestSession({ request: { text: 'Synthetic prompt', send: true }, sessionId,
+    directory: '/synthetic', busy: false, compose: () => {}, t: (key) => key });
+  try {
+    send.mockRejectedValueOnce(new Error('Send rejected'));
+    expect(await prompt()).toEqual({ ok: true, result: { sent: 'failed' } });
+    expect(selection.getSessionModelPick(sessionId)).toEqual({ providerId: 'p', modelId: 'M2' });
+    expect(await prompt()).toEqual({ ok: true, result: { sent: 'sent' } });
+    expect(send.mock.calls[1]?.[0].model).toEqual({ providerID: 'p', id: 'M2', variant: 'high' });
+    expect(selection.getSessionModelPick(sessionId)).toBeNull();
+    record = { ...record, model: { providerID: 'p', id: externalModel, variant: externalModel === 'M1' ? undefined : 'low' } };
+    expect(await prompt()).toEqual({ ok: true, result: { sent: 'sent' } });
+    // The session already holds the external model, so no switch is needed.
+    expect(send.mock.calls[2]?.[0].model).toBeUndefined();
+    expect(selection.getSessionModelSelection(sessionId)).toEqual({ providerId: 'p', modelId: externalModel });
+  } finally {
+    selection.clearSessionSelections(sessionId);
+    useSessionUIStore.setState({ currentSessionId: ui.currentSessionId });
+    useConfigStore.setState(config);
+  }
+}));
+
+['review', 'plan'].forEach((beforeSendAgent) => test(`a background guest prompt follows a switch back to the original agent after carrying a pick over ${beforeSendAgent}`, async () => {
+  const sessionId = 'guest-unsent-agent-return';
+  const selection = useSelectionStore.getState();
+  const ui = useSessionUIStore.getState();
+  const config = useConfigStore.getState();
+  useConfigStore.setState({ isConnected: true });
+  let record: Session = { ...created, id: sessionId, agent: 'plan', model: { providerID: 'p', id: 'M1' } };
+  spyOn(syncRefs, 'getDirectoryState').mockImplementation(() => ({ ...INITIAL_STATE, session: [record] }));
+  spyOn(opencodeClient, 'getSession').mockImplementation(async () => record);
+  const send = spyOn(opencodeClient, 'sendMessage').mockResolvedValue('message');
+  spyOn(sessionActions, 'optimisticSend').mockImplementation(async (input) => { await input.send('message', []); });
+  selection.followSessionAgent(sessionId, 'plan');
+  selection.saveSessionModelSelection(sessionId, 'p', 'M1');
+  selection.markSessionModelFollowed(sessionId, 'p/M1#');
+  selection.pickSessionAgent(sessionId, 'build');
+  useSessionUIStore.setState({ currentSessionId: 'another-chat' });
+  record = { ...record, agent: beforeSendAgent };
+  const prompt = () => promptGuestSession({ request: { text: 'Synthetic prompt', send: true }, sessionId,
+    directory: '/synthetic', busy: false, compose: () => {}, t: (key) => key });
+  try {
+    send.mockRejectedValueOnce(new Error('Send rejected'));
+    expect(await prompt()).toEqual({ ok: true, result: { sent: 'failed' } });
+    expect(selection.getSessionAgentPick(sessionId)).toBe('build');
+    expect(await prompt()).toEqual({ ok: true, result: { sent: 'sent' } });
+    expect(send.mock.calls[1]?.[0].agent).toBe('build');
+    expect(selection.getSessionAgentPick(sessionId)).toBeNull();
+    record = { ...record, agent: 'plan' };
+    expect(await prompt()).toEqual({ ok: true, result: { sent: 'sent' } });
+    expect(send.mock.calls[2]?.[0].agent).toBeUndefined();
+    expect(selection.getSessionAgentSelection(sessionId)).toBe('plan');
+  } finally {
+    selection.clearSessionSelections(sessionId);
+    useSessionUIStore.setState({ currentSessionId: ui.currentSessionId });
+    useConfigStore.setState(config);
+  }
+}));
+
+test('composer and guest sends retain the same unsent model after selecting a pinned agent', async () => {
+  const sessionId = 'guest-pinned-agent';
+  const selection = useSelectionStore.getState();
+  const config = useConfigStore.getState();
+  const ui = useSessionUIStore.getState();
+  const record: Session = { ...created, id: sessionId, agent: 'build', model: { providerID: 'p', id: 'M1' } };
+  spyOn(syncRefs, 'getDirectoryState').mockReturnValue({ ...INITIAL_STATE, session: [record] });
+  spyOn(opencodeClient, 'getSession').mockResolvedValue(record);
+  const send = spyOn(opencodeClient, 'sendMessage').mockResolvedValue('message');
+  const switchModel = spyOn(opencodeClient, 'switchSessionModel');
+  const switchAgent = spyOn(opencodeClient, 'switchSessionAgent');
+  spyOn(sessionActions, 'optimisticSend').mockImplementation(async (input) => { await input.send('message', []); });
+  useSessionUIStore.setState({ currentSessionId: sessionId });
+  useConfigStore.setState({ isConnected: true, currentProviderId: 'p', currentModelId: 'M2', selectionSource: 'manual',
+    currentVariant: undefined, agents: [{ id: 'plan', name: 'plan', displayName: 'plan', mode: 'primary', hidden: false,
+      model: { providerID: 'p', id: 'M3' }, request: { settings: {}, headers: {}, body: {} }, permissions: [] }] });
+  selection.pickSessionModel(sessionId, 'p', 'M2');
+  try {
+    useConfigStore.getState().setAgent('plan');
+    expect(switchModel.mock.calls.length).toBe(0);
+    expect(switchAgent.mock.calls.length).toBe(0);
+    const composer = useConfigStore.getState();
+    expect(composer.currentModelId).toBe('M2');
+    await ui.sendMessage('Composer prompt', composer.currentProviderId, composer.currentModelId, composer.currentAgentName ?? undefined,
+      undefined, undefined, undefined, composer.currentVariant, undefined, { sessionId, directory: '/synthetic' });
+    selection.pickSessionModel(sessionId, 'p', 'M2');
+    useSessionUIStore.setState({ currentSessionId: 'another-chat' });
+    await promptGuestSession({ request: { text: 'Extension prompt', send: true }, sessionId,
+      directory: '/synthetic', busy: false, compose: () => {}, t: (key) => key });
+    expect(send.mock.calls[0]?.[0].model?.id).toBe('M2');
+    expect(send.mock.calls[1]?.[0].model).toEqual(send.mock.calls[0]?.[0].model);
+    expect(selection.getSessionModelPick(sessionId)).toBeNull();
+  } finally {
+    selection.clearSessionSelections(sessionId);
+    useSessionUIStore.setState({ currentSessionId: ui.currentSessionId });
+    useConfigStore.setState(config);
+  }
+});
 const setup = () => {
   const create = spyOn(opencodeClient, 'createSession').mockImplementation(async (_input, directory) => ({ ...created, directory: directory ?? created.directory }));
   spyOn(sessionActions, 'setLinkedIssue').mockResolvedValue(created);

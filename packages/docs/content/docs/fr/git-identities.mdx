@@ -28,6 +28,10 @@ Choisissez le bouton d’identité en haut du [panneau Git](/git/) et sélection
 
 Appliquer une identité l’écrit dans la configuration git **locale** de ce dépôt. Elle ne touche donc que ce dépôt, et votre réglage global reste tel quel. Git dans le terminal et le shell de l’agent l’utilisent aussi. **Identité système** retire ce qu’OpenChamber a écrit, et votre propre configuration Git reprend la main.
 
+## Phrases secrètes des clés SSH
+
+Pour une clé SSH chiffrée, saisissez sa phrase secrète facultative avant de rechercher dans `~/.ssh`, puis confirmez son empreinte et ajoutez la clé. OpenChamber conserve la clé chiffrée et enregistre la phrase secrète dans le stockage des identifiants d'OpenCode. Les phrases enregistrées servent uniquement aux actions Git dans l'application. Les commandes Git du terminal ou des agents ne les récupèrent pas. Une clé gérée chiffrée ne peut donc pas s'authentifier par cette voie.
+
 ## Pages liées
 
 - [Workflows Git](/git/) : commiter avec l’identité définie

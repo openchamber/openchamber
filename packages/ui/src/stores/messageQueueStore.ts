@@ -185,6 +185,8 @@ const serverAttachmentSchema = z.object({
     size: z.number(),
     source: z.enum(['local', 'server', 'vscode']),
     serverPath: z.string().optional(),
+    /** The file's on-disk path, when the runtime resolved one; the model is handed it as the file identity. */
+    agentPath: z.string().optional(),
     /** Present only on a taken item; broadcasts and snapshots omit payloads. */
     dataUrl: z.string().optional(),
 });
@@ -282,6 +284,7 @@ const toAttachedFile = (attachment: ServerQueueAttachment): AttachedFile => {
         source: attachment.source,
     };
     if (attachment.serverPath) file.serverPath = attachment.serverPath;
+    if (attachment.agentPath) file.agentPath = attachment.agentPath;
     return file;
 };
 
@@ -318,8 +321,7 @@ type ServerQueueItemInput = {
 
 type ServerQueueRequestBody =
     | { directory: string; item: ServerQueueItemInput }
-    | { itemIds: string[] }
-    | { held: boolean };
+    | { itemIds: string[] };
 
 const toServerAttachment = (attachment: AttachedFile): ServerQueueAttachmentInput => {
     const input: ServerQueueAttachmentInput = {
@@ -331,6 +333,7 @@ const toServerAttachment = (attachment: AttachedFile): ServerQueueAttachmentInpu
         dataUrl: attachment.dataUrl,
     };
     if (attachment.serverPath) input.serverPath = attachment.serverPath;
+    if (attachment.agentPath) input.agentPath = attachment.agentPath;
     return input;
 };
 
@@ -455,8 +458,6 @@ interface MessageQueueActions {
      * owner, the host ('') or a space; a session the owner may not speak for is ignored.
      */
     applyServerSession: (session: ServerQueueSession, revision: number, expectedRuntimeKey: string, owner?: string) => void;
-    /** Server-owned queue: tell the server that owns the session's queue to hold or release its delivery. */
-    setServerHold: (sessionId: string, directory: string, held: boolean) => Promise<void>;
     resetForRuntimeSwitch: (previousRuntimeKey: string | null | undefined) => void;
 }
 
@@ -923,12 +924,6 @@ export const useMessageQueueStore = create<MessageQueueStore>()(
                     },
 
                     applyServerSession,
-
-                    setServerHold: async (sessionId, directory, held) => {
-                        if (!isServerOwnedMessageQueue()) return;
-                        const response = await runtimeFetch(`${sessionPath(sessionId)}/hold`, { ...jsonInit('PUT', { held }), directory });
-                        if (!response.ok) throw new Error(`Message queue hold request failed (${response.status})`);
-                    },
 
                     resetForRuntimeSwitch: (previousRuntimeKey) => {
                         hydrationGeneration += 1;

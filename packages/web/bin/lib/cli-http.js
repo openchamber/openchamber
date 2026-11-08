@@ -106,9 +106,10 @@ async function requestJson(port, endpoint, options = {}) {
   const timeoutMs = Number.isFinite(options.timeoutMs) && options.timeoutMs > 0
     ? Math.trunc(options.timeoutMs)
     : 4000;
-  const fetchOptions = { ...options };
-  delete fetchOptions.timeoutMs;
-  delete fetchOptions.uiPassword;
+  // Control commands pass their whole parsed CLI options here. Only the request
+  // fields may reach fetch: Bun rejects `session` (`--session`) as its own option.
+  const { method, headers, body: requestBody } = options;
+  const fetchOptions = { method, body: requestBody };
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
@@ -116,8 +117,8 @@ async function requestJson(port, endpoint, options = {}) {
     const requestUrl = buildLocalUrl(port, endpoint);
     const requestHeaders = {
       Accept: 'application/json',
-      ...(fetchOptions.body ? { 'Content-Type': 'application/json' } : {}),
-      ...(fetchOptions.headers || {}),
+      ...(requestBody ? { 'Content-Type': 'application/json' } : {}),
+      ...(headers || {}),
     };
     const desktopAuth = getDesktopLocalAuthHeader(port, requestHeaders);
     if (desktopAuth) {

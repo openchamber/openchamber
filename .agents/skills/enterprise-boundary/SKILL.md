@@ -35,7 +35,7 @@ Whether a flow belongs to a class, and whether an in-house pin should exist, are
 
 When teams plausibly need the feature on their own infrastructure (Jev on an in-house endpoint, a self-hosted relay, network access inside a closed network), a pin beats a plain off. A new knob gets:
 
-1. A key in `policyFileSchema` and its environment variable, resolved in `readEnterprisePolicy` by the source rule: when the file turns the mode on, only the file decides and the environment adds nothing; otherwise the file value wins and the variable fills the gap.
+1. A key in `policyFileSchema` and its environment variable, resolved in `readEnterprisePolicy` by the source rule in the module header.
 2. Validation in the consumer, with an invalid value treated as unset.
 3. Secrets kept on the server: `publicEnterprisePolicy` carries only what the UI must show.
 4. The matching `enterprise-mode.d.ts` entry and cases in `enterprise-mode.test.js` for file, environment, both, and a broken file.
@@ -58,4 +58,4 @@ A link that leads to a setup the mode forbids is a defect. Report every surface 
 
 ## Completion
 
-Every crossing the change adds has a class, server-side enforcement on each runtime it exists on, a test with the mode on and off, a surface list with each surface's behavior, and updated docs. Open product questions are raised, never decided in the diff.
+Every crossing the change adds has a class, server-side enforcement on each runtime it exists on, a test with the mode on and off, a surface list with each surface's behavior, and updated docs.

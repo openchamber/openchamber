@@ -56,6 +56,9 @@ import { z } from 'zod';
  * - The integrations catalog, a bundled list of outside services to install,
  *   is hidden (`packages/ui` SidebarHeader); administrator-curated sources for
  *   it do not exist yet. MCP, plugin and skill entry in Settings is unchanged.
+ * - The agent image tool (`openchamber-control/generate-image.js`) is not
+ *   gated: it reaches an image model through OpenCode, so `provider.use`
+ *   covers it like any other provider (maintainer decision, 2026-10-27).
  * - The Settings card that installs the Claude Code plugin, a model provider,
  *   is hidden (`packages/ui` IntegrationsPage). The plugin itself is not
  *   refused: OpenCode's `provider.use` policy covers `claude-code` like any
@@ -66,10 +69,33 @@ import { z } from 'zod';
  *   (`../index.js`); the desktop shell binds loopback (`packages/electron`).
  *   Pairing a device then goes through a pinned relay only.
  * - Extensions that could send what they see elsewhere (`network`, `origins`,
- *   `service`) install and run only from a Git repository the administrator
- *   listed (`allowedExtensions` / `OPENCHAMBER_ALLOWED_EXTENSIONS`), or from a
+ *   `service`, `transcript`, session content posted to such a service, and
+ *   `opencode`, sessions such a service reads from OpenCode) install and run
+ *   only from a Git repository the administrator listed (`allowedExtensions` /
+ *   `OPENCHAMBER_ALLOWED_EXTENSIONS`), or from a
  *   local folder where `allowLocalExtensions` /
  *   `OPENCHAMBER_ALLOW_LOCAL_EXTENSIONS` allows it; see `guests/enterprise.js`.
+ *   A package that starts sessions, answers the agent's permission requests,
+ *   adds to agents' instructions or ships skills answers to the same list
+ *   (`guests/enterprise.js`).
+ *   An allowed extension serving as a notification channel gets the kind's
+ *   generic title with no body, session name or directory, as the phone does
+ *   (`notifications/runtime.js` `sendToChannels`). An allowed extension
+ *   serving as a tracker receives the user's searches and item identifiers,
+ *   and the session comments it posts carry a fixed label and the session
+ *   link only (`trackers/extension-tracker.js`), so no conversation content
+ *   crosses; the allowlist is its gate, as for every service. An allowed
+ *   extension serving as a usage provider receives the credentials OpenCode
+ *   holds for the providers its manifest lists, which the user approved in
+ *   the dialog, and no conversation content (`quota/extension-quota.js`);
+ *   the allowlist is its gate too, re-read on every call. An extension that
+ *   ships an OpenCode plugin (`opencodePlugin`: code inside OpenCode itself)
+ *   answers to the same list at install, in the managed OpenCode config
+ *   (`guests/agent-context.js`), and at the card's button that writes the
+ *   user's global OpenCode config (`guests/routes.js`), re-read before the
+ *   write. The managed config is rewritten when the policy changes while the
+ *   app runs (`watchEnterprisePolicy` below, started by `../index.js`), so a
+ *   plugin or skill the policy now refuses leaves the running OpenCode.
  *
  * The file can also pin the OpenCode CLI (`opencodeBinary`), with or without
  * enterprise mode: managed OpenCode then starts only from that path, never
@@ -200,6 +226,28 @@ const envFlag = (env, name) => {
 const envString = (env, name) => (env[name] ?? '').trim() || null;
 
 const envList = (env, name) => (env[name] ?? '').split(',').map((entry) => entry.trim()).filter(Boolean);
+
+/**
+ * Calls `onChange` once the policy in effect differs from the last read: a
+ * managed OpenCode config written before the change still lists what the
+ * policy now refuses (`guests/agent-context.js`), and only a rewrite takes it
+ * out of the running OpenCode. A poll, since the policy file lives at a fixed
+ * path that may not exist yet and is read on every use anyway.
+ *
+ * @param {{ onChange: () => void, intervalMs?: number, read?: () => object }} options
+ * @returns {() => void} stops the watch
+ */
+export const watchEnterprisePolicy = ({ onChange, intervalMs = 15_000, read = readEnterprisePolicy }) => {
+  let last = JSON.stringify(read());
+  const timer = setInterval(() => {
+    const next = JSON.stringify(read());
+    if (next === last) return;
+    last = next;
+    onChange();
+  }, intervalMs);
+  timer.unref?.();
+  return () => clearInterval(timer);
+};
 
 /**
  * The policy in effect, from the file and the environment together.

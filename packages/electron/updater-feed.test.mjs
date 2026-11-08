@@ -2,7 +2,11 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+  CANARY_UPDATER_FEED,
   PRODUCTION_UPDATER_FEED,
+  isCanaryVersion,
+  isUpdateChannel,
+  normalizeUpdateChannel,
   parseLoopbackUpdaterUrl,
   resolveUpdaterFeed,
 } from './updater-feed.mjs';
@@ -19,6 +23,28 @@ test('production updater feed is immutable GitHub configuration', () => {
     owner: 'openchamber',
     repo: 'openchamber',
   });
+});
+
+test('the Canary channel reads the canary pre-release; on a release build every other stored value is Stable', () => {
+  assert.equal(resolveUpdaterFeed({ channel: 'canary' }), CANARY_UPDATER_FEED);
+  assert.equal(CANARY_UPDATER_FEED.url, 'https://github.com/openchamber/openchamber/releases/download/canary/');
+  assert.equal(resolveUpdaterFeed({ channel: 'stable' }), PRODUCTION_UPDATER_FEED);
+  assert.equal(normalizeUpdateChannel('canary', '2.6.1'), 'canary');
+  for (const value of ['stable', undefined, null, 'beta', 'Canary', 1]) assert.equal(normalizeUpdateChannel(value, '2.6.1'), 'stable');
+  assert.deepEqual(['stable', 'canary', 'beta', undefined].map(isUpdateChannel), [true, true, false, false]);
+  // The loopback feed wins on either channel.
+  assert.equal(resolveUpdaterFeed({ environment: overrideEnvironment, testBuild: true, channel: 'canary' }).url, overrideEnvironment.OPENCHAMBER_UPDATER_E2E_URL);
+});
+
+test('a Canary build nobody picked a channel for stays on Canary; a stored pick wins', () => {
+  const canaryBuild = '2.6.2-canary.20261105.7';
+  for (const value of [undefined, null, 'beta']) assert.equal(normalizeUpdateChannel(value, canaryBuild), 'canary');
+  assert.equal(normalizeUpdateChannel('stable', canaryBuild), 'stable');
+});
+
+test('a Canary build is told by the canary pre-release part of its version', () => {
+  assert.equal(isCanaryVersion('2.5.4-canary.20261030.123'), true);
+  for (const version of ['2.5.4', '2.5.4-beta.1', 'canary', undefined]) assert.equal(isCanaryVersion(version), false);
 });
 
 test('requires the complete E2E environment and embedded build-marker conjunction', () => {

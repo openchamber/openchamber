@@ -38,7 +38,7 @@ Verwijs in `index.html` naar `main.js` met een gewone `<script src="main.js"></s
 
 OpenChamber leest het manifest en toont de gevraagde rechten. Zie [Rechten](#rechten). Na goedkeuring verschijnt uw pictogram in de balk. Klik erop om de pagina te laden.
 
-U kunt ook een lokale `.zip` of een https-link naar een Git-repository of ZIP-bestand toevoegen. Alleen een Git-installatie ondersteunt updates: verhoog `version` in `package.json` en push. OpenChamber biedt de update aan wanneer de gebruiker opnieuw Instellingen → Extensies opent. Met `#tag` of `#branch` in de URL bepaalt u welke versie wordt gevolgd. Deze installaties worden naar de gegevensmap van OpenChamber gekopieerd en draaien daaruit. Lever dus gebouwde bestanden mee, geen `node_modules` of TypeScript-bronbestanden. Verwijderen wist de kopie. Een mapinstallatie draait rechtstreeks uit uw map, zodat u kunt bewerken, opnieuw bouwen en herladen.
+U kunt ook een lokale `.zip` of een https-link naar een Git-repository of ZIP-bestand toevoegen. Alleen een Git-installatie ondersteunt updates: verhoog `version` in `package.json` en push. OpenChamber controleert kort na het openen en om de paar uur, meldt het de gebruiker één keer en biedt de update aan in Instellingen → Extensies. Een link naar `openchamber://extensions/install?url=<encoded repository URL>` op een willekeurige pagina opent de desktopapp met die repository in het toevoegvenster, zodat u een installatieknop kunt aanbieden. Met `#tag` of `#branch` in de URL bepaalt u welke versie wordt gevolgd. Deze installaties worden naar de gegevensmap van OpenChamber gekopieerd en draaien daaruit. Lever dus gebouwde bestanden mee, geen `node_modules` of TypeScript-bronbestanden. Verwijderen wist de kopie. Een mapinstallatie draait rechtstreeks uit uw map, zodat u kunt bewerken, opnieuw bouwen en herladen.
 
 ## Manifest
 
@@ -49,13 +49,11 @@ U kunt ook een lokale `.zip` of een https-link naar een Git-repository of ZIP-be
   "openchamber": {
     "apiVersion": 1,
     "engines": { "openchamber": ">=1.24.0" },
+    "id": "acme-hello",
+    "name": "Hello",
+    "icon": "window",
     "contributes": {
-      "panel": {
-        "id": "acme-hello",
-        "name": "Hello",
-        "icon": "window",
-        "entry": "panel/index.html"
-      },
+      "panel": { "entry": "panel/index.html" },
       "attach": "dialog",
       "page": true,
       "capabilities": ["prompt", "sessions"],
@@ -80,7 +78,7 @@ U kunt ook een lokale `.zip` of een https-link naar een Git-repository of ZIP-be
 
 `engines.openchamber` is optioneel. Geef de oudste ondersteunde OpenChamber-versie op als `1.24.0` of `>=1.24.0`. Oudere builds weigeren de installatie dan meteen, in plaats van later vast te lopen.
 
-`contributes.panel` beschrijft de vermelding in de balk. `id` gebruikt kebab-case en moet uniek zijn onder de geïnstalleerde extensies. `icon` is een Remixicon-naam: `RiWindowLine` wordt `window`. Een SVG-bestand in uw map, zoals `icon.svg`, mag ook. `entry` verwijst naar het HTML-bestand in de map. Laat het weg voor een extensie die alleen `tools` opgeeft. Zie [Uw tools in de chat](#uw-tools-in-de-chat).
+`id`, `name` en `icon` benoemen de extensie. `id` gebruikt kebab-case en moet uniek zijn onder de geïnstalleerde extensies. `icon` is een Remixicon-naam: `RiWindowLine` wordt `window`. Een SVG-bestand in uw map, zoals `icon.svg`, mag ook. `contributes.panel` is het paneel van de extensie in de balk. De `entry` daarvan verwijst naar het HTML-bestand in de map. Een extensie zonder paneel in de balk laat `panel` weg. Oudere pakketten houden `id`, `name` en `icon` in `panel`, en dat blijft werken.
 
 `contributes.attach` is optioneel. Hiermee verschijnt de extensie in het +-menu naast het chatveld, zodat de gebruiker een taak kan kiezen en aan een sessie koppelen.
 
@@ -89,7 +87,7 @@ U kunt ook een lokale `.zip` of een https-link naar een Git-repository of ZIP-be
 - `{ "mode": "dialog", "entry": "panel/attach.html" }` opent een aparte pagina in het venster, zodat de kiezer geen code met het zijpaneel hoeft te delen
 - zonder dit veld verschijnt de extensie niet in dat menu
 
-Uw pagina leest via `ctx.surface` waar ze staat: `panel`, `dialog`, `page` of `status`. Klikt de gebruiker op een gekoppeld item, dan krijgt u de bijbehorende `data` terug in `ctx.item`. Openen vanuit de balk, het +-menu of het menu voor schermvullende pagina's begint zonder item.
+Uw pagina leest via `ctx.surface` waar ze staat: `panel`, `dialog`, `page`, `status` of `block`. Klikt de gebruiker op een gekoppeld item, dan krijgt u de bijbehorende `data` terug in `ctx.item`. Openen vanuit de balk, het +-menu of het menu voor schermvullende pagina's begint zonder item.
 
 `contributes.page: true` maakt het paneel schermvullend beschikbaar via Extensiepagina's boven de sessielijst. Gebruik `{ "entry": "panel/page.html", "title": "Board" }` voor aparte HTML en een optionele titel. Lever die HTML en de gebouwde scripts mee. Een pagina vereist `panel.entry`, gebruikt dezelfde afscherming en rechten en opent alleen op keuze van de gebruiker. Herladen, pauzeren, verwijderen of wisselen van server sluit de pagina.
 
@@ -97,7 +95,7 @@ Gebruik voor een bord `host.storage` voor blijvende JSON-gegevens en de project-
 
 `contributes.integration` is optioneel. Het voegt een kaart bij Instellingen → Integraties toe waar de gebruiker een account verbindt. Zie [Accounts en netwerk](#accounts-en-netwerk).
 
-`contributes.service` is optioneel. Hiermee geeft u een lokaal proces op dat OpenChamber naast de extensie start voor zaken die een webpagina niet kan bereiken, zoals een Docker-socket. Het proces heeft de volledige gebruikerstoegang en draait zonder sandbox. Het toestemmingsvenster waarschuwt hiervoor. Gebruik een service alleen als de pagina het werk niet zelf kan doen. Zie `GUEST_SERVICES.md` in het pakket. Een service met `provides: ["browser"]` kan ook de browser van de agent leveren. Ze beantwoordt `browser.*`-acties op de server, zodat agents zonder geopende desktopapp kunnen browsen. De gebruiker kiest haar bij Instellingen → OpenChamber-tools. Zo'n service heeft geen paneel nodig.
+`contributes.service` is optioneel. Hiermee geeft u een lokaal proces op dat OpenChamber naast de extensie start voor zaken die een webpagina niet kan bereiken, zoals een Docker-socket. Het proces heeft de volledige gebruikerstoegang en draait zonder sandbox. Het toestemmingsvenster waarschuwt hiervoor. Gebruik een service alleen als de pagina het werk niet zelf kan doen. Zie `GUEST_SERVICES.md` in het pakket. Een service met `provides: ["browser"]` kan ook de browser van de agent leveren. Ze beantwoordt `browser.*`-acties op de server, zodat agents zonder geopende desktopapp kunnen browsen. De gebruiker kiest haar bij Instellingen → OpenChamber-tools. Zo'n service heeft geen paneel nodig. Een service kan ook te horen krijgen wat er in de sessies van de gebruiker gebeurt: geef `contributes.sessionEvents` ernaast op, en OpenChamber stuurt elke beurt die wordt afgerond of mislukt en elke toestemming of vraag van de agent naar de service, uit elk project, zonder geopend venster. Zie [Sessiegebeurtenissen](/nl/sdk/host/#sessiegebeurtenissen). En een service met `provides: ["notifications"]` bezorgt de meldingen van de gebruiker naast de desktop en de telefoon, aan Slack, Matrix of een eigen server; de gebruiker verbindt het account bij Instellingen → Integraties en het token blijft in OpenChamber. Zie [Meldingskanalen](/nl/sdk/host/#meldingskanalen). Een service met `provides: ["tracker"]` is een tracker voor werkitems naast Linear, met zijn accountkaart onder Extensieaccounts; zie [Trackers](/nl/sdk/host/#trackers). En een service met `provides: ["quota"]` rapporteert het verbruik naast de ingebouwde providers en leest daarvoor de aanmeldgegevens die OpenCode bewaart voor de providers die hij in het manifest noemt; zie [Verbruiksproviders](/nl/sdk/host/#verbruiksproviders).
 
 ## Rechten
 
@@ -110,9 +108,28 @@ Een paneel tonen en de huidige sessie lezen vereist geen toestemming. Voor hande
 | `files` | bestanden in het geopende project lezen en schrijven via `readFile`, `writeFile`, `listDir` en `stat` met een relatief pad |
 | `model` | eenmalig tekst genereren met het Small Model via `generate`, buiten een sessie |
 
-Vijf rechten worden automatisch toegevoegd: `network` bij een `integration`, `service` bij een `service`, `filesystem` bij `filesystem`-patronen, `origins` bij `origins` en `conversation` als een sessieactie berichten opvraagt. Zie [Acties, opdrachten en de badge](#acties-opdrachten-en-de-badge).
+Elf rechten worden automatisch toegevoegd: `network` bij een `integration`, `service` bij een `service`, `filesystem` bij `filesystem`-patronen, `origins` bij `origins`, `conversation` als een sessieactie berichten opvraagt, `transcript` als `sessionEvents` of `sessionControl` om `content` vraagt, `sessionControl` als uw service op sessies inwerkt, `sessionAnswers` als die namens de gebruiker de toestemmingsverzoeken en formulieren van de agent beantwoordt (`sessionControl: { answers: true }`), `instructions` als die aanvult wat agents lezen, en `skills` als u `contributes.skills` opgeeft, een map in het pakket met skills die elke agent bereiken zolang de extensie aanstaat. Zie [Acties, opdrachten en de badge](#acties-opdrachten-en-de-badge), [Sessiegebeurtenissen](/nl/sdk/host/#sessiegebeurtenissen) en [OpenChamber aanroepen](/nl/sdk/host/#openchamber-aanroepen-vanuit-uw-service). En `opencodePlugin` wanneer u `contributes.opencodePlugin` declareert (zie hieronder).
 
 Bij installatie ziet de gebruiker de volledige lijst en kan die goedkeuren of de extensie verwijderen. Vraagt een nieuwe versie meer, dan verschijnt het venster opnieuw. Een aanroep waarvoor een nog niet goedgekeurd recht nodig is, faalt met `NOT_GRANTED`.
+
+## Een OpenCode-plugin in uw pakket
+
+Een extensie kan een OpenCode-plugin meeleveren, zodat mensen één ding installeren in plaats van twee. Declareer `"opencodePlugin": "plugin"`, een map in het pakket met `index.js` of `server.js` in de hoofdmap. OpenCode leest `main` niet, dus voor een entry op een andere plek zet je `name` en `exports` in de `package.json` van de map. De entry exporteert standaard `{ id, setup }`, de vorm die OpenCode laadt; hij importeert niets, want OpenCode laadt hem met een kale `import()` uit uw map, waar niets geïnstalleerd is. De `input` van een tool is gewoon JSON Schema, en zijn `execute` antwoordt `{ content }`.
+
+```json
+{
+  "contributes": {
+    "panel": { "id": "teapot-tools", "name": "Teapot Tools", "icon": "cup" },
+    "opencodePlugin": "plugin"
+  }
+}
+```
+
+Het goedkeuringsvenster krijgt een regel erbij, **Een plugin toevoegen aan OpenCode**, die duidelijk zegt dat plugincode binnen OpenCode draait met de volledige toegang van de gebruiker. Na toestemming zet OpenChamber uw map in de OpenCode-configuratie die het beheert, hetzelfde bestand als voor `contributes.skills`; de OpenCode die het draait, bewaakt dat bestand en laadt de plugin binnen een paar seconden. De extensie uitschakelen of verwijderen haalt hem op dezelfde manier weg. Er wordt niets in de eigen `opencode.json` van de gebruiker geschreven: dat bestand is van de gebruiker, en een plugin daarin zou uw extensie overleven en in elke OpenCode op de computer draaien.
+
+Waar dat bestand OpenCode niet bereikt, zegt het scherm van de extensie dat en biedt het **Toevoegen aan globale configuratie** aan, wat uw map in de globale OpenCode-configuratie van de gebruiker schrijft als een vermelding die vanaf dan van de gebruiker is. Dat gebeurt wanneer OpenChamber de OpenCode waarmee het praat niet heeft gestart, of wanneer de omgeving van de server een eigen `OPENCODE_CONFIG` instelt (de plugin laadt dan bij de volgende start van OpenCode). Een OpenCode op een andere machine kan geen map van deze machine laden; het scherm zegt dat en biedt niets aan. Een plugin die niet laadt, meldt OpenCode onder Instellingen → Plugins zodra er een vermelding is; uw extensie blijft hoe dan ook werken. De installatie weigert een pakket waarvan de pluginmap ontbreekt of waarvan de `package.json` geen entry-bestand noemt.
+
+VS Code en de mobiele apps laden geen extensies, dus daar komt geen plugin aan. Een sessie in een geïsoleerde space draait zijn eigen OpenCode, dat de configuratie van de host nooit leest. De bedrijfsmodus behandelt de plugin als een lokale service: hij installeert alleen vanuit een repository die de beheerder heeft toegestaan. De SDK heeft een werkend voorbeeld, `examples/opencode-plugin`.
 
 ## Tekst genereren
 
@@ -156,7 +173,7 @@ Wat elke `scheme` verstuurt:
 | `"bearer"` | `Authorization: Bearer <token>` | de API verwacht een bearer- of persoonlijk toegangstoken |
 | `"basic"` | `Authorization: Basic base64(username:token)` | de API verwacht HTTP Basic met gebruikersnaam, vaak een e-mailadres, en API-token; de kaart vraagt om beide en `usernameLabel` benoemt het eerste veld |
 
-`settings` voegt gewone tekstvelden aan de kaart toe. Hun waarden staan in `ctx.settings`.
+`settings` voegt gewone tekstvelden aan de kaart toe. Hun waarden staan in `ctx.settings`. Een veld met `"secret": true` wordt op de kaart gemaskeerd en bereikt nooit een pagina. Uw service leest het met `readSettings()`.
 
 ## Bestanden
 
@@ -264,6 +281,8 @@ Naast de balk en het +-menu kan een extensie op nog drie plekken verschijnen. Ze
 ]
 ```
 
+`where` accepteert ook `selection` (geselecteerde tekst in een bericht), `file` (een rij in Bestanden) en `diff` (geselecteerde regels van een bestand of diff). Hun items hebben een `kind` met dezelfde naam: `selection` bevat de tekst, `file` het pad, `diff` het pad en het regelbereik. Bij een selectie bepaalt `display` hoe de actie verschijnt: `label` (de standaard), `icon` met het label als tooltip, of `both`.
+
 Een berichtactie opent de extensie met `ctx.item` van `kind: "message"`: sessie-ID en -titel, projectmap, bericht-ID, rol en tekst. Een sessieactie gebruikt `kind: "session"` met sessie-ID, titel en map. Voeg `"payload": ["messages"]` toe om het hele gesprek mee te krijgen, oudste eerst, met dezelfde tekst als de Markdown-export. Dit vereist `conversation`, apart getoond in het toestemmingsvenster. `item.action` geeft aan welke menuoptie is gekozen.
 
 **Slash-opdrachten die iets koppelen.** Geef een opdracht op en handel deze in de pagina af:
@@ -281,7 +300,7 @@ host.onResolve(async ({ command, args }) => {
 
 Typt de gebruiker `/task ABC-12`, dan vraagt OpenChamber uw extensie om het item op te zoeken en koppelt het teruggegeven resultaat aan het invoerveld, zonder een venster te openen. Geef `null` terug als niets is gevonden. Is het paneel gesloten, dan laadt OpenChamber het op de achtergrond voor de aanroep. Namen die OpenChamber of OpenCode al gebruikt, worden genegeerd.
 
-**Badge op het balkpictogram.** `host.setBadge(3)` toont een getal, bijvoorbeeld het aantal open taken. `host.setBadge(null)` wist de badge. Het openen van het paneel wist haar ook.
+**Badge op het balkpictogram.** `host.setBadge(3)` zet een stip op het pictogram en toont het getal in de tooltip, bijvoorbeeld het aantal open taken. `host.setBadge(null)` wist de badge. Het openen van het paneel wist haar ook.
 
 ## Uw tools in de chat
 

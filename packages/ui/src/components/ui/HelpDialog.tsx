@@ -12,6 +12,7 @@ import {
   getEffectiveShortcutCombo,
   getEffectiveShortcutPrefix,
   getShortcutAction,
+  isShortcutAvailable,
   formatShortcutForDisplay,
   type ShortcutActionId,
 } from "@/lib/shortcuts";
@@ -83,6 +84,12 @@ export const HelpDialog: React.FC = () => {
           icon: "ai-agent",
         },
         {
+          id: 'search_prompt_history',
+          keys: '',
+          descriptionKey: 'helpDialog.item.searchPromptHistory',
+          icon: 'history',
+        },
+        {
           id: 'open_model_selector',
           descriptionKey: "helpDialog.item.openModelSelector",
           icon: "ai-generate-2",
@@ -105,9 +112,10 @@ export const HelpDialog: React.FC = () => {
           keys: '',
         },
         {
-          keys: [formatShortcutForDisplay('mod+shift+alt+n')],
+          id: 'new_window',
           descriptionKey: "helpDialog.item.newWindow",
           icon: "window",
+          keys: '',
         },
       ],
     },
@@ -142,6 +150,16 @@ export const HelpDialog: React.FC = () => {
           icon: 'list-unordered',
           keys: '',
         },
+        {
+          id: 'open_new_worktree_dialog',
+          icon: 'git-branch',
+          keys: '',
+        },
+        {
+          id: 'add_project',
+          icon: 'folder-add',
+          keys: '',
+        },
         { id: 'focus_input', descriptionKey: "helpDialog.item.focusChatInput", icon: "text", keys: '' },
         {
           id: 'toggle_prompt_navigator',
@@ -160,6 +178,51 @@ export const HelpDialog: React.FC = () => {
           icon: 'arrow-up-double',
           keys: '',
         },
+        {
+          id: 'toggle_selection_mode',
+          icon: 'checkbox-multiple',
+          keys: '',
+        },
+        {
+          id: 'toggle_chats_section',
+          icon: 'text',
+          keys: '',
+        },
+        {
+          id: 'toggle_pinned_section',
+          icon: 'pushpin',
+          keys: '',
+        },
+        {
+          id: 'toggle_work_section',
+          icon: 'eye',
+          keys: '',
+        },
+        {
+          id: 'toggle_detailed_rows',
+          icon: 'list-unordered',
+          keys: '',
+        },
+        {
+          id: 'pin_current_session',
+          icon: 'pushpin',
+          keys: '',
+        },
+        {
+          id: 'copy_current_session_id',
+          icon: 'file-copy',
+          keys: '',
+        },
+        {
+          id: 'toggle_work_current_session',
+          icon: 'checkbox-circle',
+          keys: '',
+        },
+        {
+          id: 'open_multi_run',
+          icon: 'git-merge',
+          keys: '',
+        },
       ],
     },
     {
@@ -173,9 +236,34 @@ export const HelpDialog: React.FC = () => {
           keys: '',
         },
         {
-          id: 'toggle_terminal_expanded',
-          descriptionKey: 'helpDialog.item.toggleTerminalExpanded',
-          icon: "window",
+          id: 'toggle_context_panel_expanded',
+          descriptionKey: 'helpDialog.item.toggleContextPanelExpanded',
+          icon: "layout-right",
+          keys: '',
+        },
+        {
+          id: 'collapse_sessions_all',
+          icon: 'contract-up-down',
+          keys: '',
+        },
+        {
+          id: 'expand_sessions_all',
+          icon: 'expand-up-down',
+          keys: '',
+        },
+        {
+          id: 'open_notes',
+          icon: 'sticky-note',
+          keys: '',
+        },
+        {
+          id: 'open_todos',
+          icon: 'checkbox-circle',
+          keys: '',
+        },
+        {
+          id: 'show_context_usage',
+          icon: 'pie-chart',
           keys: '',
         },
         {
@@ -224,6 +312,46 @@ export const HelpDialog: React.FC = () => {
           icon: "settings-3",
           keys: '',
         },
+        {
+          id: 'open_archive',
+          icon: 'archive',
+          keys: '',
+        },
+        {
+          id: 'open_overview',
+          icon: 'compass-3',
+          keys: '',
+        },
+        {
+          id: 'show_opencode_status',
+          icon: 'pulse',
+          keys: '',
+        },
+        {
+          id: 'reload_ui',
+          icon: 'refresh',
+          keys: '',
+        },
+        {
+          id: 'restart_opencode',
+          icon: 'restart',
+          keys: '',
+        },
+        {
+          id: 'toggle_list_grouping',
+          icon: 'layout-right',
+          keys: '',
+        },
+        {
+          id: 'toggle_project_display',
+          icon: 'folder',
+          keys: '',
+        },
+        {
+          id: 'cycle_project_sort',
+          icon: 'list-unordered',
+          keys: '',
+        },
       ],
     },
   ];
@@ -239,7 +367,7 @@ export const HelpDialog: React.FC = () => {
             const action = shortcut.id ? getShortcutAction(shortcut.id) : undefined;
             const descriptionKey = shortcut.descriptionKey
               ?? (action?.customizable ? action.settingsLabelKey : undefined);
-            if (!descriptionKey) return null;
+            if (!descriptionKey || (action && !isShortcutAvailable(action))) return null;
             // This dialog lists what the keyboard can do right now;
             // an action without a binding belongs to the command
             // palette and Settings, not here.
@@ -276,7 +404,7 @@ export const HelpDialog: React.FC = () => {
                           {t('helpDialog.keyCombiner.or')}
                         </span>
                       )}
-                      <kbd className="inline-flex items-center gap-1 px-1.5 py-0.5 typography-meta bg-muted rounded border border-border/20">
+                      <kbd className="inline-flex items-center gap-1 px-1.5 py-0.5 typography-meta bg-muted rounded border border-edge-muted">
                         {keyCombo}
                       </kbd>
                     </React.Fragment>

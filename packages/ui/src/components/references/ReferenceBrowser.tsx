@@ -15,6 +15,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { dropdownTriggerVariants } from '@/components/ui/dropdown-trigger';
 import { Input } from '@/components/ui/input';
+import { PICKER_SEARCH_INPUT_CLASS } from '@/components/ui/MobileSheetList';
 import { SortableTabsStrip } from '@/components/ui/sortable-tabs-strip';
 import { useI18n, type I18nKey } from '@/lib/i18n';
 import type { ChangeRequestTerm } from '@/lib/source-control/providers/descriptor';
@@ -22,7 +23,6 @@ import { cn } from '@/lib/utils';
 
 import { ReferencePickerRow } from './ReferencePickerRow';
 import {
-    CHANGE_REQUEST_TAB_KEYS,
     REPOSITORY_PEOPLE,
     REPOSITORY_PEOPLE_LABEL_KEYS,
     REPOSITORY_STATE_LABEL_KEYS,
@@ -32,6 +32,8 @@ import {
     TRACKER_PRIORITY_FILTERS,
     TRACKER_PRIORITY_LABEL_KEYS,
     referencePickerItemKey,
+    repositoryKindOfTab,
+    repositoryKindTabs,
     trackerStateFilterLabel,
     type ReferencePickerItem,
 } from './referencePickerItems';
@@ -43,19 +45,18 @@ const NO_PULLS_KEYS = {
     change: 'references.picker.empty.changes',
 } as const satisfies Record<ChangeRequestTerm, I18nKey>;
 
-/** Issues and change requests, named by the provider's term; the repository source only. */
+/** Issues and change requests, named by the provider's term, and discussions where it keeps them; the repository source only. */
 export const ReferenceBrowserTabs: React.FC<{ browser: ReferenceBrowser }> = ({ browser }) => {
     const { t } = useI18n();
     if (browser.source !== 'repository') return null;
+    const tabs = repositoryKindTabs(t, browser.term, browser.discussions)
+        .map((tab) => ({ ...tab, icon: <Icon name={tab.icon} className="size-3.5" /> }));
     return (
-        <div className={cn(browser.isMobile ? 'w-full' : 'w-[16rem]')}>
+        <div className={cn(browser.isMobile ? 'w-full' : tabs.length > 2 ? 'w-[24rem]' : 'w-[16rem]')}>
             <SortableTabsStrip
-                items={[
-                    { id: 'issue', label: t('references.picker.tab.issues'), icon: <Icon name="record-circle" className="size-3.5" /> },
-                    { id: 'pull', label: t(CHANGE_REQUEST_TAB_KEYS[browser.term]), icon: <Icon name="git-pull-request" className="size-3.5" /> },
-                ]}
+                items={tabs}
                 activeId={browser.repositoryKind}
-                onSelect={(id) => browser.selectRepositoryKind(id === 'pull' ? 'pull' : 'issue')}
+                onSelect={(id) => browser.selectRepositoryKind(repositoryKindOfTab(id))}
                 variant="active-pill"
                 layoutMode="fit"
             />
@@ -161,15 +162,18 @@ export const ReferenceBrowserSearch: React.FC<{
     const { t } = useI18n();
     const { source, term, isMobile, list, query, searchRef } = browser;
     const tracked = source !== 'repository';
-    const placeholder = t(tracked ? 'references.picker.search.tracker' : `references.picker.search.${term}`);
+    const discussions = !tracked && browser.repositoryKind === 'discussion';
+    const placeholder = t(tracked ? 'references.picker.search.tracker' : discussions ? 'references.picker.search.discussions' : `references.picker.search.${term}`);
     // The phone's field shares its row with the filter, so it gets the short wording;
     // the label keeps the full one.
-    const shortPlaceholder = t(tracked ? 'references.picker.search.mobile.tracker' : `references.picker.search.mobile.${term}`);
+    const shortPlaceholder = t(tracked
+        ? 'references.picker.search.mobile.tracker'
+        : discussions ? 'references.picker.search.mobile.discussions' : `references.picker.search.mobile.${term}`);
 
     return (
         <div className={cn('flex items-center gap-2', !isMobile && 'min-w-[14rem] flex-1')}>
             <div className="relative min-w-0 flex-1">
-                <Icon name="search" className="pointer-events-none absolute inset-s-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                <Icon name="search" className={cn('pointer-events-none absolute inset-s-2.5 top-1/2 -translate-y-1/2 text-muted-foreground', isMobile ? 'size-3.5' : 'size-4')} />
                 <Input
                     ref={searchRef}
                     autoFocus={!isMobile}
@@ -180,7 +184,7 @@ export const ReferenceBrowserSearch: React.FC<{
                     aria-label={placeholder}
                     title={placeholder}
                     inputSize={isMobile ? 'default' : 'compact'}
-                    className="w-full ps-8 pe-14"
+                    className={cn('w-full', isMobile ? PICKER_SEARCH_INPUT_CLASS : 'ps-8', 'pe-14')}
                 />
                 <div className="absolute inset-e-1.5 top-1/2 flex -translate-y-1/2 items-center gap-1">
                     {list.refreshing && list.status !== 'loading' ? (
@@ -254,6 +258,7 @@ export const ReferenceBrowserList: React.FC<{
         if (debouncedQuery.trim()) return t('references.picker.empty.search');
         if (tracker) return t('references.picker.empty.tracker');
         if (repositoryKind === 'issue') return t('references.picker.empty.issues');
+        if (repositoryKind === 'discussion') return t('references.picker.empty.discussions');
         return t(NO_PULLS_KEYS[term]);
     };
 

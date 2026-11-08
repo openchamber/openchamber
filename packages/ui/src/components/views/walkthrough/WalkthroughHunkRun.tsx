@@ -4,12 +4,15 @@ import { fileDiffFromPatch } from '@/lib/diff/patchFileDiff';
 import { getLanguageFromExtension } from '@/lib/toolHelpers';
 import { mergeRunPatch } from '@/lib/walkthrough/model';
 import type { WalkthroughHunk } from '@/lib/walkthrough/types';
+import type { DiffCommentOrigin } from '@/lib/diffCommentOrigin';
 
 interface WalkthroughHunkRunProps {
   path: string;
   hunks: WalkthroughHunk[];
   renderSideBySide: boolean;
   wrapLines: boolean;
+  /** The diff the walkthrough reads, for comments; absent for uncommitted changes. */
+  commentOrigin?: DiffCommentOrigin;
   /** Find identity of this run; absent when the run is not searchable. */
   runKey?: string;
   /** Find-in-walkthrough: register this run's rendered viewer handle. */
@@ -33,6 +36,7 @@ export const WalkthroughHunkRun = memo(function WalkthroughHunkRun({
   hunks,
   renderSideBySide,
   wrapLines,
+  commentOrigin,
   runKey,
   registerFindViewerRef,
   onFindWordRequest,
@@ -60,6 +64,7 @@ export const WalkthroughHunkRun = memo(function WalkthroughHunkRun({
       fileDiff={fileDiff}
       language={getLanguageFromExtension(path) || ''}
       fileName={path}
+      commentOrigin={commentOrigin}
       renderSideBySide={renderSideBySide}
       wrapLines={wrapLines}
       layout="inline"

@@ -7,7 +7,8 @@
  * beside attached files and linked references and share their look. Hovering
  * (or tapping) a chip opens a stacked preview of its items above the composer,
  * where a comment the user wrote can be edited in place and any item removed
- * before sending.
+ * before sending. On mobile the pencil opens the composer's comment shell on
+ * that comment instead (`composer/comment/`), the same field that wrote it.
  *
  * The preview is portaled into `previewHost`, a positioned wrapper outside the
  * composer box, which clips its contents (see "Floating composer" in
@@ -15,13 +16,15 @@
  */
 
 import React from 'react';
-import { createPortal } from 'react-dom';
+import { createPortal, flushSync } from 'react-dom';
 import { AnimatePresence } from 'motion/react';
 
 import { CommentTextEditor } from '@/components/comments/CommentTextEditor';
 import { useCommentImagePaste } from '@/components/comments/useCommentImagePaste';
 import { Icon } from '@/components/icon/Icon';
 import type { IconName } from '@/components/icon/icons';
+import { toast } from '@/components/ui';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/lib/i18n';
 import { changeRequestCopy } from '@/lib/source-control/changeRequestCopy';
 import type { ChangeRequestTerm } from '@/lib/source-control/providers/descriptor';
@@ -42,12 +45,18 @@ import { getContextPreviewMaxHeight } from './contextPreviewHeight';
 import { withAttachmentChips } from '../../message/parts/attachmentCitationChips';
 import { useInputStore } from '@/sync/input-store';
 import { GlassPopupMotion } from './GlassPopupMotion';
+import { fileWithDiffCommentOrigin } from '@/lib/diffCommentOrigin';
+import { isWholeFileComment } from '@/components/comments/wholeFileComment';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
+import { useMobileCommentComposerController } from '../comment/MobileCommentComposerContext';
 
 interface ComposerContextChipsProps {
     draftTarget: InlineCommentDraftTarget | null;
     colors: Theme['colors'];
     /** Positioned wrapper above which the preview opens; the preview waits for it. */
     previewHost: HTMLElement | null;
+    /** Mobile edits a comment in the composer's comment shell, not in the preview. */
+    isMobile: boolean;
 }
 
 /** Chip groups: every terminal selection is its own chip; the rest group by kind. */
@@ -77,6 +86,15 @@ const basename = (path: string): string => {
 /** Hover-away grace: long enough to cross from the chip to the preview above the composer. */
 const PREVIEW_CLOSE_DELAY_MS = 500;
 
+/**
+ * Hover opens and closes the preview for a mouse only. A tap (finger or a pen
+ * without hover) fires its enter right before its click, so a hover handler
+ * would open the preview and the click would close it again in the same tap.
+ */
+const onMouseHover = (handler: () => void) => (event: React.PointerEvent) => {
+    if (event.pointerType === 'mouse') handler();
+};
+
 const ENTRY_ACTION_CLASS = 'inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:bg-interactive-hover hover:text-foreground';
 const ENTRY_LABEL_CLASS = 'text-[0.625rem] font-medium uppercase tracking-wide text-muted-foreground opacity-60';
 
@@ -88,7 +106,7 @@ const DraftPreviewEntry: React.FC<{
     onStartEdit: () => void;
     onEndEdit: () => void;
     onRemove: () => void;
-    onSaveComment: ((text: string) => void) | null;
+    onSaveComment: ((text: string) => boolean) | null;
     /** Chat quotes: point at the quoted fragment in the transcript. */
     onFocusQuote: ((focused: boolean) => void) | null;
     onRevealQuote: (() => void) | null;
@@ -109,8 +127,9 @@ const DraftPreviewEntry: React.FC<{
     }, [editing]);
 
     const commitEdit = () => {
-        if (onSaveComment && editText !== draft.text) {
-            onSaveComment(editText);
+        if (onSaveComment && editText !== draft.text && !onSaveComment(editText)) {
+            toast.error(t('inlineComment.toast.noRoom'));
+            return;
         }
         void imagePaste.attachCitedImages(editText);
         onEndEdit();
@@ -146,30 +165,38 @@ const DraftPreviewEntry: React.FC<{
                     {title}
                 </span>
                 {onSaveComment ? (
-                    <button
-                        type="button"
-                        className={ENTRY_ACTION_CLASS}
-                        style={{ minHeight: 0, minWidth: 0 }}
-                        onPointerDown={keepEditorFocus}
-                        onClick={editing ? commitEdit : onStartEdit}
-                        aria-label={editing ? t('chat.chatInput.contextPreview.saveEdit') : t('chat.chatInput.contextPreview.edit')}
-                        title={editing ? t('chat.chatInput.contextPreview.saveEdit') : t('chat.chatInput.contextPreview.edit')}
-                    >
-                        <Icon name={editing ? 'check' : 'pencil'} className="h-3 w-3" />
-                    </button>
+                    <Tooltip>
+                        <TooltipTrigger asChild>
+                            <button
+                                type="button"
+                                className={ENTRY_ACTION_CLASS}
+                                style={{ minHeight: 0, minWidth: 0 }}
+                                onPointerDown={keepEditorFocus}
+                                onClick={editing ? commitEdit : onStartEdit}
+                                aria-label={editing ? t('chat.chatInput.contextPreview.saveEdit') : t('chat.chatInput.contextPreview.edit')}
+                            >
+                                <Icon name={editing ? 'check' : 'pencil'} className="h-3 w-3" />
+                            </button>
+                        </TooltipTrigger>
+                        <TooltipContent side="top" sideOffset={6}>{editing ? t('chat.chatInput.contextPreview.saveEdit') : t('chat.chatInput.contextPreview.edit')}</TooltipContent>
+                    </Tooltip>
                 ) : null}
-                <button
-                    type="button"
-                    className={ENTRY_ACTION_CLASS}
-                    style={{ minHeight: 0, minWidth: 0 }}
-                    onPointerDown={keepEditorFocus}
-                    onClick={editing ? cancelEdit : onRemove}
-                    aria-label={editing ? t('chat.chatInput.contextPreview.cancelEdit') : t('chat.chatInput.contextPreview.remove')}
-                    title={editing ? t('chat.chatInput.contextPreview.cancelEdit') : t('chat.chatInput.contextPreview.remove')}
-                >
-                    {/* While editing this button discards the edit, not the quote. */}
-                    <Icon name={editing ? 'close' : 'delete-bin'} className="h-3 w-3" />
-                </button>
+                <Tooltip>
+                    <TooltipTrigger asChild>
+                        <button
+                            type="button"
+                            className={ENTRY_ACTION_CLASS}
+                            style={{ minHeight: 0, minWidth: 0 }}
+                            onPointerDown={keepEditorFocus}
+                            onClick={editing ? cancelEdit : onRemove}
+                            aria-label={editing ? t('chat.chatInput.contextPreview.cancelEdit') : t('chat.chatInput.contextPreview.remove')}
+                        >
+                            {/* While editing this button discards the edit, not the quote. */}
+                            <Icon name={editing ? 'close' : 'delete-bin'} className="h-3 w-3" />
+                        </button>
+                    </TooltipTrigger>
+                    <TooltipContent side="top" sideOffset={6}>{editing ? t('chat.chatInput.contextPreview.cancelEdit') : t('chat.chatInput.contextPreview.remove')}</TooltipContent>
+                </Tooltip>
             </div>
             <div className="space-y-2 px-3 py-2">
                 {draft.code.trim() ? (
@@ -217,7 +244,7 @@ const DraftPreviewEntry: React.FC<{
     );
 };
 
-function ComposerContextChipsView({ draftTarget, colors, previewHost }: ComposerContextChipsProps) {
+function ComposerContextChipsView({ draftTarget, colors, previewHost, isMobile }: ComposerContextChipsProps) {
     const { t } = useI18n();
     const draftKey = draftTarget
         ? getInlineCommentDraftKey(getRuntimeKey(), draftTarget.directory, draftTarget.sessionKey)
@@ -234,6 +261,7 @@ function ComposerContextChipsView({ draftTarget, colors, previewHost }: Composer
     const updateDraft = useInlineCommentDraftStore((state) => state.updateDraft);
     const attachedFiles = useInputStore((state) => state.attachedFiles);
     const attachmentFilenames = React.useMemo(() => attachedFiles.map((file) => file.filename), [attachedFiles]);
+    const mobileComment = useMobileCommentComposerController();
 
     const [openGroupKey, setOpenGroupKey] = React.useState<string | null>(null);
     const [editingDraftId, setEditingDraftId] = React.useState<string | null>(null);
@@ -332,10 +360,13 @@ function ComposerContextChipsView({ draftTarget, colors, previewHost }: Composer
                         ? t('chat.message.context.codeCommentLine', { file: basename(draft.fileLabel), line: draft.startLine })
                         : t('chat.message.context.codeComment', { file: basename(draft.fileLabel), start: draft.startLine, end: draft.endLine }))
                     : t('chat.message.context.fileQuote', { file: basename(draft.fileLabel) });
-            default:
+            default: {
+                const file = fileWithDiffCommentOrigin(basename(draft.fileLabel), draft.origin);
+                if (isWholeFileComment(draft)) return t('chat.message.context.codeCommentFile', { file });
                 return draft.startLine === draft.endLine
-                    ? t('chat.message.context.codeCommentLine', { file: basename(draft.fileLabel), line: draft.startLine })
-                    : t('chat.message.context.codeComment', { file: basename(draft.fileLabel), start: draft.startLine, end: draft.endLine });
+                    ? t('chat.message.context.codeCommentLine', { file, line: draft.startLine })
+                    : t('chat.message.context.codeComment', { file, start: draft.startLine, end: draft.endLine });
+            }
         }
     }, [t, termOf]);
 
@@ -426,9 +457,11 @@ function ComposerContextChipsView({ draftTarget, colors, previewHost }: Composer
                 <div
                     key="context-preview"
                     ref={previewRef}
-                    className="absolute bottom-full inset-s-0 z-30 mb-1.5 w-full max-w-[480px]"
-                    onMouseEnter={cancelClose}
-                    onMouseLeave={scheduleClose}
+                    // A menu over the composer, so it sits above the docks that
+                    // share this band (btw, permission, form) at z-30.
+                    className="absolute bottom-full inset-s-0 z-50 mb-1.5 w-full max-w-[480px]"
+                    onPointerEnter={onMouseHover(cancelClose)}
+                    onPointerLeave={onMouseHover(scheduleClose)}
                 >
                 {/* Shadow on the wrapper, never on the glass: see "Floating
                     composer" in composer/DOCUMENTATION.md. */}
@@ -437,9 +470,10 @@ function ComposerContextChipsView({ draftTarget, colors, previewHost }: Composer
                     className="oc-glass-popover oc-glass-floating overflow-hidden rounded-xl"
                     style={previewMaxHeight === null ? undefined : { maxHeight: previewMaxHeight }}
                 >
-                    <div
-                        className="divide-y divide-[var(--interactive-border)] overflow-y-auto"
-                        style={previewMaxHeight === null ? undefined : { maxHeight: Math.max(0, previewMaxHeight - 2) }}
+                    <ScrollableOverlay
+                        outerStyle={previewMaxHeight === null ? undefined : { maxHeight: Math.max(0, previewMaxHeight - 2) }}
+                        className="divide-y divide-[var(--interactive-border)]"
+                        disableHorizontal
                     >
                         {openGroup.drafts.map((draft, index) => (
                             <DraftPreviewEntry
@@ -448,7 +482,26 @@ function ComposerContextChipsView({ draftTarget, colors, previewHost }: Composer
                                 index={index}
                                 title={titleFor(draft)}
                                 editing={editingDraftId === draft.id}
-                                onStartEdit={() => setEditingDraftId(draft.id)}
+                                onStartEdit={() => {
+                                    if (!isMobile || !mobileComment) {
+                                        setEditingDraftId(draft.id);
+                                        return;
+                                    }
+                                    // flushSync mounts and focuses the shell
+                                    // inside the tap, as iOS requires for the
+                                    // soft keyboard (see composer/comment/).
+                                    const opened = flushSync(() => mobileComment.openEdit({
+                                        target: draftTarget,
+                                        draftId: draft.id,
+                                        // Shown in the shell's quote row only;
+                                        // a save writes nothing but the text.
+                                        // Without quoted text the row names
+                                        // the item, as the preview does.
+                                        quote: { plainText: draft.code.trim() ? draft.code : titleFor(draft), markdownText: draft.code, messageId: null },
+                                        text: draft.text,
+                                    }));
+                                    if (opened) setOpenGroupKey(null);
+                                }}
                                 onEndEdit={() => setEditingDraftId((current) => (current === draft.id ? null : current))}
                                 onRemove={() => removeDraft(draftTarget, draft.id)}
                                 onSaveComment={editableSource(draft.source)
@@ -463,7 +516,7 @@ function ComposerContextChipsView({ draftTarget, colors, previewHost }: Composer
                                 attachmentFilenames={attachmentFilenames}
                             />
                         ))}
-                    </div>
+                    </ScrollableOverlay>
                 </div>
                 </GlassPopupMotion>
                 </div>
@@ -478,13 +531,13 @@ function ComposerContextChipsView({ draftTarget, colors, previewHost }: Composer
                     // Same chip shape as attached files and linked
                     // references; the inline minimums opt out of the
                     // mobile 36px button floor so the row stays even.
-                    className="inline-flex h-7 max-w-full min-w-0 items-center gap-1.5 rounded-lg border border-border/80 bg-background px-2 text-start text-xs transition-opacity hover:opacity-80"
+                    className="inline-flex h-7 max-w-full min-w-0 items-center gap-1.5 rounded-lg border border-edge bg-background px-2 text-start text-xs transition-opacity hover:opacity-80"
                     style={{ minHeight: 0, minWidth: 0 }}
-                    onMouseEnter={() => {
+                    onPointerEnter={onMouseHover(() => {
                         cancelClose();
                         setOpenGroupKey(group.key);
-                    }}
-                    onMouseLeave={scheduleClose}
+                    })}
+                    onPointerLeave={onMouseHover(scheduleClose)}
                     onClick={() => {
                         if (editingRef.current) return;
                         setOpenGroupKey((current) => (current === group.key ? null : group.key));

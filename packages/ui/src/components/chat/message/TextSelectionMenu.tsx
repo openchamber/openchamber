@@ -1,4 +1,5 @@
 import React from 'react';
+import { createChatDraftIdentity } from '@/lib/chatDraftPersistence';
 import { createPortal, flushSync } from 'react-dom';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useChatColumnActions, useChatSessionSelection } from '../chatColumnSession';
@@ -14,8 +15,10 @@ import { PROJECT_NOTE_BODY_MAX_LENGTH } from '@/lib/projectContextApi';
 import { useProjectContextStore } from '@/stores/useProjectContextStore';
 import { summarizeSelectionForNotes } from '@/lib/smallModel';
 import { resolveProjectForSessionDirectory } from '@/lib/projectResolution';
+import { useSpaceProjectDirectory } from '@/lib/spaces/spaces-store';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { isVSCodeRuntime } from '@/lib/desktop';
+import { HoverTooltip } from '@/components/ui/row-tooltip';
 import { useI18n } from '@/lib/i18n';
 import { getTypeToCommentText } from '@/lib/typeToComment';
 import { useCommentImagePaste } from '@/components/comments/useCommentImagePaste';
@@ -25,11 +28,21 @@ import {
     useMobileCommentComposerController,
     useMobileCommentDraft,
 } from '../composer/comment/MobileCommentComposerContext';
+import { SelectionApprovalButton } from './SelectionApprovalButton';
+import { GUEST_ITEM_MESSAGE_TEXT_MAX } from '@openchamber/sdk';
+import { GuestIcon } from '@/components/layout/GuestRailIcon';
+import { useGuestActions } from '@/hooks/useGuestSurfaces';
+import { guestActionsWhere, type GuestActionEntry } from '@/lib/guests/actions';
+import { runGuestAction } from '@/lib/guests/run-action';
 import { rangeToMarkdown, trimSelectionValue, wrapMarkdownSelectionForChat } from './selectionMarkdown';
+import { resolveShadowSelectionRange } from './shadowSelection';
 import { registerActiveSelectionToolbar } from '@/lib/addSelectionToChat';
+import { TooltipLabelWithShortcut } from '@/components/ui/action-toolbar';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { formatShortcutForDisplay, getEffectiveShortcutCombo } from '@/lib/shortcuts';
 import { collectSelectionOverlayRects } from '@/lib/selectionOverlayRects';
 import { frameRectInApp, onFrameSelection } from './frameSelection';
-import { captureChatQuoteAnchor, type ChatQuoteAnchor } from '@/lib/chatQuoteAnchor';
+import { captureChatQuoteAnchor, findChatQuoteRoots, findUiRenderQuoteRoot, resolveChatQuoteAnchor, type ChatQuoteAnchor } from '@/lib/chatQuoteAnchor';
 import {
   DESKTOP_MENU_FALLBACK_HEIGHT_PX,
   DESKTOP_MENU_FALLBACK_WIDTH_PX,
@@ -44,6 +57,7 @@ interface TextSelectionMenuProps {
   // the message's own read-aloud button.
   readingKey: string;
   canReadAloud: boolean;
+  uiRenderSelection?: boolean;
   // This menu answers to the selections made in the page frames inside its
   // container (`openchamber_render`), not to the container's own text. Each
   // page has its own such menu (HtmlRenderFrame), so a page works wherever it
@@ -78,9 +92,25 @@ const normalizeDistilledInsight = (insight: string): string => (
   insight.trim().replace(/^[-*+]\s+/, '').slice(0, PROJECT_NOTE_BODY_MAX_LENGTH)
 );
 
-const TextSelectionMenuImpl: React.FC<TextSelectionMenuProps> = ({ containerRef, readingKey, canReadAloud, frameSelections = false }) => {
+const messageIdOf = (node: Node): string | null => (
+  (node instanceof Element ? node : node.parentElement)?.closest('[data-message-id]')?.getAttribute('data-message-id') ?? null
+);
+
+/**
+ * Whether this menu answers the selection: it lies inside the menu's
+ * container, or starts there and ends in a later row of the same long answer
+ * (each row has its own menu; the row it starts in shows it).
+ */
+const ownsSelection = (container: HTMLElement, range: Range): boolean => {
+  if (container.contains(range.commonAncestorContainer)) return true;
+  if (!container.contains(range.startContainer)) return false;
+  const messageId = messageIdOf(container);
+  return messageId !== null && messageId === messageIdOf(range.endContainer);
+};
+
+const TextSelectionMenuImpl: React.FC<TextSelectionMenuProps> = ({ containerRef, readingKey, canReadAloud, frameSelections = false, uiRenderSelection = false }) => {
+  const guestActions = useGuestActions();
   const { t } = useI18n();
-  const { isPlaying: isReading, play: playReading, stop: stopReading } = useMessageTTS(readingKey);
   const [position, setPosition] = React.useState<MenuPosition>({ x: 0, y: 0, placement: 'above', show: false });
   // False while the chat has scrolled the selection out of view; the menu
   // waits hidden instead of pinning itself to an edge.
@@ -88,6 +118,7 @@ const TextSelectionMenuImpl: React.FC<TextSelectionMenuProps> = ({ containerRef,
   const [selectedText, setSelectedText] = React.useState('');
   const [selectedTextMarkdown, setSelectedTextMarkdown] = React.useState('');
   const [selectedMessageId, setSelectedMessageId] = React.useState<string | null>(null);
+  const { isPlaying: isReading, play: playReading, stop: stopReading } = useMessageTTS(uiRenderSelection ? selectedMessageId ?? readingKey : readingKey);
   const [selectedAnchor, setSelectedAnchor] = React.useState<ChatQuoteAnchor | null>(null);
   const [commentMode, setCommentMode] = React.useState(false);
   const commentModeRef = React.useRef(false);
@@ -151,6 +182,7 @@ const TextSelectionMenuImpl: React.FC<TextSelectionMenuProps> = ({ containerRef,
   const setPendingInputText = useInputStore((state) => state.setPendingInputText);
   const requestBtwComposer = useInputStore((state) => state.requestBtwComposer);
   const isMobile = useUIStore((state) => state.isMobile);
+  const shortcutOverrides = useUIStore((state) => state.shortcutOverrides);
   const projects = useProjectsStore((state) => state.projects);
   const availableWorktreesByProject = useSessionUIStore((state) => state.availableWorktreesByProject);
   const effectiveDirectory = useEffectiveDirectory();
@@ -213,6 +245,10 @@ const TextSelectionMenuImpl: React.FC<TextSelectionMenuProps> = ({ containerRef,
     isMenuVisibleRef.current = false;
   }, []);
 
+  // The chat stays mounted behind a new-session draft and across session
+  // switches, and leaving it fires no selectionchange: its menu closes here.
+  React.useEffect(() => hideMenu, [currentSessionId, newSessionDraftOpen, hideMenu]);
+
   // Listener-facing mirror of the composer's comment state: the document
   // listeners below must not clear the quote highlight for taps inside the
   // comment shell, which lives outside this menu's DOM.
@@ -250,9 +286,46 @@ const TextSelectionMenuImpl: React.FC<TextSelectionMenuProps> = ({ containerRef,
     };
   }, [containerRef]);
 
+  // A hoisted page can be remounted in the final answer while a comment is open.
+  React.useEffect(() => {
+    const scope = containerRef.current;
+    const partId = selectedAnchor?.page?.kind === 'ui' ? selectedAnchor.page.partId : null;
+    if (!uiRenderSelection || !commentMode || !scope || !selectedMessageId || !partId || !selectedAnchor) return;
+    const selector = `[data-ui-render-message="${CSS.escape(selectedMessageId)}"][data-ui-render-part="${CSS.escape(partId)}"]`;
+    let frame: number | null = null;
+    const restore = () => {
+      frame = null;
+      const page = findUiRenderQuoteRoot(scope, selectedMessageId, partId);
+      const pending = pendingSelectionRef.current;
+      if (!page || !pending || (pending.range && page.contains(pending.range.startContainer))) return;
+      const range = resolveChatQuoteAnchor(page, selectedAnchor);
+      if (!range) return;
+      pending.range = range;
+      const rect = range.getBoundingClientRect();
+      anchorRectRef.current = rect;
+      updateCommentRects();
+      if (!isMobile) {
+        const boundary = scope.closest('[data-scrollbar="chat"], [data-selection-menu-boundary]')?.getBoundingClientRect();
+        setAnchorVisible(!boundary || (rect.bottom > boundary.top && rect.top < boundary.bottom));
+        setPosition((previous) => ({ ...previous, ...getDesktopPosition(rect) }));
+      }
+    };
+    const observer = new MutationObserver((records) => {
+      const relevant = records.some((record) => {
+        const target = record.target instanceof Element ? record.target : record.target.parentElement;
+        return target?.closest(selector) || [...record.addedNodes].some((node) => node instanceof Element && (node.matches(selector) || node.querySelector(selector)));
+      });
+      if (relevant && frame === null) frame = window.requestAnimationFrame(restore);
+    });
+    observer.observe(scope, { childList: true, subtree: true });
+    return () => {
+      observer.disconnect();
+      if (frame !== null) window.cancelAnimationFrame(frame);
+    };
+  }, [commentMode, containerRef, getDesktopPosition, isMobile, selectedAnchor, selectedMessageId, uiRenderSelection, updateCommentRects]);
+
   const addMarkdownToChat = React.useCallback((markdownText: string) => {
     const markdownBlock = wrapMarkdownSelectionForChat(markdownText);
-    // Quoted inside a chat pinned in the side panel, it goes to that chat's composer.
     setPendingInputText(markdownBlock, 'append', columnPinned ? currentSessionId : null);
 
     hideMenu();
@@ -411,28 +484,41 @@ const TextSelectionMenuImpl: React.FC<TextSelectionMenuProps> = ({ containerRef,
 
     // Check if selection is within the container
     const range = selection.getRangeAt(0);
+    if (uiRenderSelection) {
+      const element = range.startContainer instanceof Element ? range.startContainer : range.startContainer.parentElement;
+      const page = element?.closest('[data-ui-render-hoisted]');
+      if (!page || !page.contains(range.endContainer)) {
+        if (!isDraggingRef.current) hideMenu();
+        return;
+      }
+    }
     
-    if (!container.contains(range.commonAncestorContainer)) {
+    if (!ownsSelection(container, range)) {
       if (!isDraggingRef.current) {
         hideMenu();
       }
       return;
     }
 
-    // Get selection coordinates
-    const rect = range.getBoundingClientRect();
+    // A selection inside a shadow-rooted widget (a diff in a tool call) reaches
+    // the document as an empty range over the widget's host: measure the
+    // widget's own range, or the menu lands in the top-left corner.
+    const measuredRange = resolveShadowSelectionRange(range, text) ?? range;
+    const rect = measuredRange.getBoundingClientRect();
 
     // Store the selection but don't show menu yet if dragging
-    const anchorElement = range.commonAncestorContainer instanceof Element
-      ? range.commonAncestorContainer
-      : range.commonAncestorContainer.parentElement;
+    const anchorElement = range.startContainer instanceof Element
+      ? range.startContainer
+      : range.startContainer.parentElement;
     const replaced = pendingSelectionRef.current;
     pendingSelectionRef.current = {
       plainText: text,
       markdownText: rangeToMarkdown(range, text),
       rect,
-      messageId: anchorElement?.closest('[data-message-id]')?.getAttribute('data-message-id') ?? null,
-      range: range.cloneRange(),
+      messageId: uiRenderSelection
+        ? anchorElement?.closest('[data-ui-render-message]')?.getAttribute('data-ui-render-message') ?? null
+        : anchorElement?.closest('[data-message-id]')?.getAttribute('data-message-id') ?? null,
+      range: measuredRange.cloneRange(),
     };
     // The app's selection takes over from one a page frame had.
     replaced?.clear?.();
@@ -441,7 +527,7 @@ const TextSelectionMenuImpl: React.FC<TextSelectionMenuProps> = ({ containerRef,
     if (!isDraggingRef.current) {
       showMenu();
     }
-  }, [containerRef, hideMenu, showMenu]);
+  }, [containerRef, hideMenu, showMenu, uiRenderSelection]);
 
   React.useEffect(() => {
     const container = containerRef.current;
@@ -602,8 +688,20 @@ const TextSelectionMenuImpl: React.FC<TextSelectionMenuProps> = ({ containerRef,
     const pending = pendingSelectionRef.current;
     // A page's selection was anchored by the page, in its own text.
     if (pending && !pending.range) return pending.anchor ?? null;
-    return container && pending?.range ? captureChatQuoteAnchor(container, pending.range) : null;
-  }, [containerRef]);
+    if (!container || !pending?.range) return null;
+    if (uiRenderSelection) {
+      const element = pending.range.startContainer instanceof Element ? pending.range.startContainer : pending.range.startContainer.parentElement;
+      const page = element?.closest('[data-ui-render-part]');
+      const partId = page?.getAttribute('data-ui-render-part');
+      if (!page || !partId) return null;
+      const anchor = captureChatQuoteAnchor(page, pending.range);
+      return anchor ? { ...anchor, page: { partId, kind: 'ui' } } : null;
+    }
+    // A long answer's rows are one text: the anchor counts in all of its rows.
+    const scope = container.closest('[data-scrollbar="chat"]');
+    const roots = scope && pending.messageId ? findChatQuoteRoots(scope, pending.messageId) : [];
+    return captureChatQuoteAnchor(roots.includes(container) ? roots : [container], pending.range);
+  }, [containerRef, uiRenderSelection]);
 
   const openComment = React.useCallback((initialText: string) => {
     if (!selectedTextMarkdown) return;
@@ -654,6 +752,7 @@ const TextSelectionMenuImpl: React.FC<TextSelectionMenuProps> = ({ containerRef,
       messageId: selectedMessageId,
       anchor: captureCommentAnchor(),
     };
+    setSelectedAnchor(quote.anchor);
     setCommentMode(true);
     commentModeRef.current = true;
     updateCommentRects();
@@ -667,23 +766,26 @@ const TextSelectionMenuImpl: React.FC<TextSelectionMenuProps> = ({ containerRef,
   }, [captureCommentAnchor, hideMenu, mobileCommentController, selectedMessageId, selectedText, selectedTextMarkdown, updateCommentRects]);
 
   const handleAttachComment = React.useCallback(() => {
-    const sessionKey = currentSessionId ?? (newSessionDraftOpen ? 'draft' : null);
-    if (!selectedTextMarkdown || !sessionKey || !effectiveDirectory) {
+    const composerTarget = mobileCommentController?.getScope() ?? null;
+    if (!selectedTextMarkdown || !composerTarget) {
       hideMenu();
       return;
     }
-    const draftId = addContextDraft({ directory: effectiveDirectory, sessionKey }, {
-      source: 'chat-quote',
-      fileLabel: selectedMessageId ?? '',
-      startLine: 1,
-      endLine: 1,
-      code: selectedTextMarkdown,
-      language: '',
-      text: commentText.trim(),
-      anchor: selectedAnchor ?? undefined,
-    });
+    const draftId = addContextDraft(
+      { directory: composerTarget.directory, sessionKey: composerTarget.sessionKey },
+      {
+        source: 'chat-quote',
+        fileLabel: selectedMessageId ?? '',
+        startLine: 1,
+        endLine: 1,
+        code: selectedTextMarkdown,
+        language: '',
+        text: commentText.trim(),
+        anchor: selectedAnchor ?? undefined,
+      },
+    );
     if (!draftId) {
-      toast.error(t('chat.textSelection.comment.attachFailed'));
+      toast.error(t('inlineComment.toast.noRoom'));
       return;
     }
     hideMenu();
@@ -691,15 +793,28 @@ const TextSelectionMenuImpl: React.FC<TextSelectionMenuProps> = ({ containerRef,
       // Focus first: it hands the attachment slot to this column's composer,
       // where the comment's images belong.
       focusColumnInput();
-      void attachCitedImages(commentText);
+      void attachCitedImages(commentText, createChatDraftIdentity(
+        composerTarget.runtimeKey, composerTarget.directory, composerTarget.sessionKey,
+      ));
     });
-  }, [addContextDraft, attachCitedImages, commentText, currentSessionId, effectiveDirectory, focusColumnInput, hideMenu, newSessionDraftOpen, selectedAnchor, selectedMessageId, selectedTextMarkdown, t]);
+  }, [addContextDraft, attachCitedImages, commentText, focusColumnInput, hideMenu, mobileCommentController, selectedAnchor, selectedMessageId, selectedTextMarkdown, t]);
 
+  const getApprovalSelection = React.useCallback(() => {
+    if (!pendingSelectionRef.current || !selectedTextMarkdown) return null;
+    return { markdownText: selectedTextMarkdown, messageId: selectedMessageId, anchor: captureCommentAnchor() };
+  }, [captureCommentAnchor, selectedMessageId, selectedTextMarkdown]);
+
+  const finishApproval = React.useCallback(() => {
+    hideMenu();
+    window.getSelection()?.removeAllRanges();
+  }, [hideMenu]);
+
+  const selectionDirectory = effectiveDirectory ?? currentSessionDirectory ?? '';
+  const spaceProjectDirectory = useSpaceProjectDirectory(selectionDirectory);
   const currentProjectRef = React.useMemo(() => {
-    const directory = effectiveDirectory ?? currentSessionDirectory ?? '';
-    const resolved = resolveProjectForSessionDirectory(projects, availableWorktreesByProject, directory);
+    const resolved = resolveProjectForSessionDirectory(projects, availableWorktreesByProject, selectionDirectory, spaceProjectDirectory);
     return resolved ? { id: resolved.id, path: resolved.path } : null;
-  }, [availableWorktreesByProject, currentSessionDirectory, effectiveDirectory, projects]);
+  }, [availableWorktreesByProject, projects, selectionDirectory, spaceProjectDirectory]);
 
   const handleAddToNotes = React.useCallback(async () => {
     if (!selectedText || !currentProjectRef) {
@@ -758,6 +873,24 @@ const TextSelectionMenuImpl: React.FC<TextSelectionMenuProps> = ({ containerRef,
     )
     : null;
 
+  const selectionActions = currentSessionId && selectedMessageId ? guestActionsWhere(guestActions, 'selection') : [];
+  const runSelectionAction = (entry: GuestActionEntry) => {
+    if (!currentSessionId || !selectedMessageId) return;
+    void runGuestAction(entry, {
+      kind: 'selection',
+      action: entry.action.id,
+      sessionId: currentSessionId,
+      directory: selectionDirectory || null,
+      messageId: selectedMessageId,
+      text: selectedTextMarkdown.slice(0, GUEST_ITEM_MESSAGE_TEXT_MAX),
+    }, t);
+    hideMenu();
+  };
+
+  const approvalButton = currentSessionId && selectedMessageId
+    ? <SelectionApprovalButton mobile={isMobile} getSelection={getApprovalSelection} onSuccess={finishApproval} />
+    : null;
+
   const commentInput = (
     <div
       className={cn(
@@ -781,18 +914,19 @@ const TextSelectionMenuImpl: React.FC<TextSelectionMenuProps> = ({ containerRef,
         placeholder={t('chat.textSelection.comment.placeholder')}
         className="w-64 max-w-[70vw] py-1.5 text-sm leading-5 text-foreground"
       />
-      <button
-        type="button"
-        onClick={handleAttachComment}
-        className={cn(
-          'mb-0.5 flex shrink-0 items-center justify-center rounded-full bg-[var(--primary-base)] text-[var(--primary-foreground)] hover:opacity-90 transition-opacity duration-150',
-          'h-8 w-8'
-        )}
-        aria-label={t('chat.textSelection.comment.attach')}
-        title={t('chat.textSelection.comment.attach')}
-      >
-        <Icon name="attachment-2" className="h-4 w-4" />
-      </button>
+      <HoverTooltip label={t('chat.textSelection.comment.attach')}>
+        <button
+          type="button"
+          onClick={handleAttachComment}
+          className={cn(
+            'mb-0.5 flex shrink-0 items-center justify-center rounded-full bg-[var(--primary-base)] text-[var(--primary-foreground)] hover:opacity-90 transition-opacity duration-150',
+            'h-8 w-8'
+          )}
+          aria-label={t('chat.textSelection.comment.attach')}
+        >
+          <Icon name="attachment-2" className="h-4 w-4" />
+        </button>
+      </HoverTooltip>
     </div>
   );
 
@@ -820,11 +954,11 @@ const TextSelectionMenuImpl: React.FC<TextSelectionMenuProps> = ({ containerRef,
           bottom: 'calc(0.5rem + env(safe-area-inset-bottom, 0px))',
         }}
       >
-        {/* The first row sizes its tiles by their labels so three fit. Only
-            Comment shrinks, hyphenating a long word instead of clipping it;
-            the short Quote and Read labels stay whole. */}
+        {/* Without Read, both rows share equal-width columns. With Read, the
+            first row sizes tiles by their labels so three fit. Only Comment
+            shrinks, hyphenating a long word instead of clipping it. */}
         <div className="flex flex-col gap-2">
-          <div className="flex gap-2">
+          <div className={cn('gap-2', canReadAloud ? 'flex' : 'grid grid-cols-2')}>
             <button
               onClick={handleOpenMobileComment}
               className={cn(
@@ -841,6 +975,8 @@ const TextSelectionMenuImpl: React.FC<TextSelectionMenuProps> = ({ containerRef,
               <span className="whitespace-normal hyphens-auto">{t('chat.textSelection.actions.comment')}</span>
             </button>
 
+            <Tooltip>
+            <TooltipTrigger asChild>
             <button
               onClick={handleAddToChat}
               className={cn(
@@ -850,12 +986,15 @@ const TextSelectionMenuImpl: React.FC<TextSelectionMenuProps> = ({ containerRef,
                 'active:opacity-80',
                 'transition-opacity duration-150'
               )}
-              title={t('chat.textSelection.title.addToCurrentChat')}
+              aria-label={t('chat.textSelection.title.addToCurrentChat')}
               type="button"
             >
               <Icon name="add" className="h-5 w-5 flex-shrink-0" />
               <span className="whitespace-normal hyphens-auto">{t('chat.textSelection.actions.addToInput')}</span>
             </button>
+            </TooltipTrigger>
+            <TooltipContent side="top" sideOffset={6}><TooltipLabelWithShortcut label={t('chat.textSelection.title.addToCurrentChat')} shortcut={formatShortcutForDisplay(getEffectiveShortcutCombo('add_selection_to_chat', shortcutOverrides), '')} /></TooltipContent>
+            </Tooltip>
 
             {canReadAloud ? (
               <button
@@ -878,7 +1017,7 @@ const TextSelectionMenuImpl: React.FC<TextSelectionMenuProps> = ({ containerRef,
             ) : null}
           </div>
 
-          <div className="grid grid-cols-2 gap-2">
+          <div className="flex flex-wrap gap-2 [&>button]:flex-[1_1_40%]">
             {currentSessionId ? (
               <button
                 onClick={handleAskOpenChamber}
@@ -915,6 +1054,26 @@ const TextSelectionMenuImpl: React.FC<TextSelectionMenuProps> = ({ containerRef,
                 <span className="min-w-0 whitespace-normal">{t('chat.textSelection.actions.addToNotes')}</span>
               </button>
             ) : null}
+
+            {selectionActions.map((entry) => (
+              <button
+                key={`${entry.guest.id}:${entry.action.id}`}
+                onClick={() => runSelectionAction(entry)}
+                className={cn(
+                  'flex min-w-0 items-center gap-2 rounded-xl px-3 py-2.5 text-start',
+                  'text-sm font-medium leading-tight',
+                  'bg-foreground/[0.04] text-foreground',
+                  'active:opacity-80',
+                  'transition-opacity duration-150'
+                )}
+                type="button"
+              >
+                <GuestIcon icon={entry.icon} iconSrc={entry.iconSrc} className="h-5 w-5 flex-shrink-0" />
+                <span className="min-w-0 whitespace-normal">{entry.action.label}</span>
+              </button>
+            ))}
+
+            {approvalButton}
           </div>
         </div>
       </div>,
@@ -949,38 +1108,40 @@ const TextSelectionMenuImpl: React.FC<TextSelectionMenuProps> = ({ containerRef,
             isOpening ? 'opacity-0 translate-y-[4px]' : 'opacity-100 translate-y-0'
           )}
         >
-          <button
-            onClick={handleOpenComment}
-            className={cn(
-              'px-3.5 py-1.5 rounded-full',
-              'text-sm font-medium',
-              'text-foreground',
-              'hover:bg-[var(--interactive-hover)]',
-              'transition-colors duration-150'
-            )}
-            title={t('chat.textSelection.title.commentOnSelection')}
-            type="button"
-          >
-            {t('chat.textSelection.actions.comment')}
-          </button>
+          <HoverTooltip label={t('chat.textSelection.title.commentOnSelection')}>
+            <button
+              onClick={handleOpenComment}
+              className={cn(
+                'px-3.5 py-1.5 rounded-full',
+                'text-sm font-medium',
+                'text-foreground',
+                'hover:bg-[var(--interactive-hover)]',
+                'transition-colors duration-150'
+              )}
+              type="button"
+            >
+              {t('chat.textSelection.actions.comment')}
+            </button>
+          </HoverTooltip>
 
           {currentSessionId ? (
             <>
               <div className="mx-0.5 h-5 w-px shrink-0 bg-[var(--interactive-border)]" />
-              <button
-                onClick={handleAskOpenChamber}
-                className={cn(
-                  'px-3.5 py-1.5 rounded-full',
-                  'text-sm font-medium',
-                  'text-foreground',
-                  'hover:bg-[var(--interactive-hover)]',
-                  'transition-colors duration-150'
-                )}
-                title={t('chat.textSelection.title.askOpenChamber')}
-                type="button"
-              >
-                {t('chat.textSelection.actions.askOpenChamber')}
-              </button>
+              <HoverTooltip label={t('chat.textSelection.title.askOpenChamber')}>
+                <button
+                  onClick={handleAskOpenChamber}
+                  className={cn(
+                    'px-3.5 py-1.5 rounded-full',
+                    'text-sm font-medium',
+                    'text-foreground',
+                    'hover:bg-[var(--interactive-hover)]',
+                    'transition-colors duration-150'
+                  )}
+                  type="button"
+                >
+                  {t('chat.textSelection.actions.askOpenChamber')}
+                </button>
+              </HoverTooltip>
             </>
           ) : null}
 
@@ -989,42 +1150,78 @@ const TextSelectionMenuImpl: React.FC<TextSelectionMenuProps> = ({ containerRef,
             <>
               <div className="mx-0.5 h-5 w-px shrink-0 bg-[var(--interactive-border)]" />
 
+              <HoverTooltip label={t('chat.textSelection.title.saveInsightToNotes')}>
+                <span className="inline-flex">
+                  <button
+                    onClick={handleAddToNotes}
+                    disabled={isAddingToNotes}
+                    className={cn(
+                      'flex items-center gap-1.5 px-3.5 py-1.5 rounded-full',
+                      'text-sm font-medium',
+                      'text-foreground',
+                      'hover:bg-[var(--interactive-hover)] disabled:opacity-60 disabled:cursor-not-allowed',
+                      'transition-colors duration-150'
+                    )}
+                    type="button"
+                  >
+                    {isAddingToNotes ? <Icon name="loader-4" className="h-4 w-4 animate-spin" /> : null}
+                    <span className="whitespace-nowrap">{t('chat.textSelection.actions.addToNotes')}</span>
+                  </button>
+                </span>
+              </HoverTooltip>
+            </>
+          ) : null}
+
+          {selectionActions.length > 0 ? <div className="mx-0.5 h-5 w-px shrink-0 bg-[var(--interactive-border)]" /> : null}
+          {selectionActions.map((entry) => (
+            // Each action says how it shows; the label stays its tooltip when only the icon does.
+            <HoverTooltip key={`${entry.guest.id}:${entry.action.id}`} label={entry.action.label}>
               <button
-                onClick={handleAddToNotes}
-                disabled={isAddingToNotes}
+                onClick={() => runSelectionAction(entry)}
+                aria-label={entry.action.label}
                 className={cn(
-                  'flex items-center gap-1.5 px-3.5 py-1.5 rounded-full',
+                  'flex items-center rounded-full',
+                  entry.action.display === 'icon' ? 'h-8 w-8 justify-center' : 'gap-1.5 px-3.5 py-1.5',
                   'text-sm font-medium',
                   'text-foreground',
-                  'hover:bg-[var(--interactive-hover)] disabled:opacity-60 disabled:cursor-not-allowed',
+                  'hover:bg-[var(--interactive-hover)]',
                   'transition-colors duration-150'
                 )}
-                title={t('chat.textSelection.title.saveInsightToNotes')}
                 type="button"
               >
-                {isAddingToNotes ? <Icon name="loader-4" className="h-4 w-4 animate-spin" /> : null}
-                <span className="whitespace-nowrap">{t('chat.textSelection.actions.addToNotes')}</span>
+                {entry.action.display === 'icon' || entry.action.display === 'both'
+                  ? <GuestIcon icon={entry.icon} iconSrc={entry.iconSrc} className="h-4 w-4" />
+                  : null}
+                {entry.action.display === 'icon' ? null : <span className="whitespace-nowrap">{entry.action.label}</span>}
               </button>
+            </HoverTooltip>
+          ))}
+
+          {approvalButton ? (
+            <>
+              <div className="mx-0.5 h-5 w-px shrink-0 bg-[var(--interactive-border)]" />
+              {approvalButton}
             </>
           ) : null}
 
           {canReadAloud ? (
             <>
               <div className="mx-0.5 h-5 w-px shrink-0 bg-[var(--interactive-border)]" />
-              <button
-                onClick={handleReadAloud}
-                className={cn(
-                  'flex h-8 w-8 items-center justify-center rounded-full',
-                  isReading ? 'text-[var(--primary-text)]' : 'text-foreground',
-                  'hover:bg-[var(--interactive-hover)]',
-                  'transition-colors duration-150'
-                )}
-                aria-label={readAloudLabel}
-                title={readAloudLabel}
-                type="button"
-              >
-                <Icon name="volume-up" className={cn('h-4 w-4', isReading && 'text-[var(--primary-text)]')} />
-              </button>
+              <HoverTooltip label={readAloudLabel}>
+                <button
+                  onClick={handleReadAloud}
+                  className={cn(
+                    'flex h-8 w-8 items-center justify-center rounded-full',
+                    isReading ? 'text-[var(--primary-text)]' : 'text-foreground',
+                    'hover:bg-[var(--interactive-hover)]',
+                    'transition-colors duration-150'
+                  )}
+                  aria-label={readAloudLabel}
+                  type="button"
+                >
+                  <Icon name="volume-up" className={cn('h-4 w-4', isReading && 'text-[var(--primary-text)]')} />
+                </button>
+              </HoverTooltip>
             </>
           ) : null}
         </div>

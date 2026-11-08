@@ -37,6 +37,9 @@ Itens do repositório mostram o selo **In repo**. Ações do repositório també
     "bun install"
   ],
   "setupWorktreeWait": true,
+  "teardownWorktree": [
+    "docker compose down"
+  ],
   "projectActions": [
     {
       "id": "dev",
@@ -62,6 +65,8 @@ Itens do repositório mostram o selo **In repo**. Ações do repositório també
 Só `version` é obrigatório. Todas as outras chaves são opcionais, e o OpenChamber grava apenas as que têm algo.
 
 `setupWorktree` é a lista de comandos de shell que o OpenChamber roda dentro de um worktree novo logo depois de criá-lo, em ordem. Use `$ROOT_PROJECT_PATH` para o caminho do checkout principal. `setupWorktreeWait: true` faz o OpenChamber esperar esses comandos antes de iniciar uma sessão no worktree.
+
+`teardownWorktree` é a lista de comandos de shell que o OpenChamber roda dentro de um worktree logo antes de excluí-lo ou arquivá-lo, em ordem, por exemplo `docker compose down` para um stack que o worktree subiu. Se um falhar, o worktree fica e o OpenChamber mostra o erro do comando. Os do repositório rodam primeiro, depois os seus, mesmo quando você usa só os seus próprios comandos de configuração. Eles passam pela mesma pergunta de confiança que os comandos de configuração.
 
 `projectActions` é a lista de ações do projeto, as que você executa pelo Work Status, pelo diálogo de ações do projeto e pela paleta de comandos. `id`, `name` e `command` são obrigatórios. `icon` é opcional e cai no ícone de play; os nomes que o OpenChamber conhece são `play`, `build`, `lint`, `terminal`, `tools`, `bug`, `flask`, `rocket`, `code`, `server`, `branch`, `search`, `settings`, `brain`, `stack`, `robot`, `command` e `file`. `autoOpenUrl: true` abre o endereço que o comando imprime, veja [Pré-visualização e servidores de desenvolvimento](/preview/). `platforms` limita a ação a `macos`, `linux` ou `windows`. `runIn: "parent"` roda a ação no checkout principal em vez do worktree atual.
 

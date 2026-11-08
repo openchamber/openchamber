@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { resolveForwardedNotificationRuntimeKey, resolveHostEntryForRuntimeKey, runtimeKeyForDeepLinkHost, stampForwardedNotification } from './notification-host-routing.mjs';
+import { findReusableHostWindowIndex, resolveForwardedNotificationRuntimeKey, resolveHostEntryForRuntimeKey, resolveSenderHostId, runtimeKeyForDeepLinkHost, stampForwardedNotification } from './notification-host-routing.mjs';
 
 test('local runtime key resolves to a local host entry', () => {
   assert.deepEqual(resolveHostEntryForRuntimeKey('local', {
@@ -55,12 +55,119 @@ test('runtime keys are trimmed before resolution', () => {
   }), { id: 'local', url: 'http://127.0.0.1:3912', clientToken: '', requestHeaders: {} });
 });
 
+const reuseDeps = {
+  hosts: [
+    { id: 'host-a', url: 'https://a.example.com' },
+    { id: 'host-b', url: 'https://b.example.com', apiUrl: 'https://api.b.example.com' },
+  ],
+  localUrl: 'http://127.0.0.1:3912',
+  localClientToken: 'tok',
+};
+
+test('reuse finds the window whose renderer reports the host', () => {
+  assert.equal(findReusableHostWindowIndex(
+    [{ runtimeKey: 'host:host-b', hostWindowId: null }],
+    'host-b',
+    reuseDeps,
+  ), 0);
+  assert.equal(findReusableHostWindowIndex(
+    [{ runtimeKey: 'host:host-b', hostWindowId: null }],
+    'host-a',
+    reuseDeps,
+  ), -1);
+});
+
+test('a reported key wins over the window creation tag', () => {
+  const switched = [{ runtimeKey: 'host:host-b', hostWindowId: 'host-a' }];
+  assert.equal(findReusableHostWindowIndex(switched, 'host-b', reuseDeps), 0);
+  assert.equal(findReusableHostWindowIndex(switched, 'host-a', reuseDeps), -1);
+});
+
+test('a window that has not reported yet is reused by its creation tag', () => {
+  assert.equal(findReusableHostWindowIndex(
+    [{ runtimeKey: '', hostWindowId: 'host-a' }],
+    'host-a',
+    reuseDeps,
+  ), 0);
+  // A booting window is still preferred over nothing when no ready window exists.
+  assert.equal(findReusableHostWindowIndex(
+    [{ runtimeKey: 'host:host-b', hostWindowId: null }, { runtimeKey: '', hostWindowId: 'host-a' }],
+    'host-a',
+    reuseDeps,
+  ), 1);
+});
+
+test('a reported key that resolves to no host does not fall back to the tag', () => {
+  assert.equal(findReusableHostWindowIndex(
+    [{ runtimeKey: 'url:https://gone.example', hostWindowId: 'host-a' }],
+    'host-a',
+    reuseDeps,
+  ), -1);
+});
+
+test('a url runtime key is reused for the host it belongs to', () => {
+  assert.equal(findReusableHostWindowIndex(
+    [{ runtimeKey: 'url:https://api.b.example.com', hostWindowId: null }],
+    'host-b',
+    reuseDeps,
+  ), 0);
+});
+
+test('the local runtime key is reused for the local host', () => {
+  assert.equal(findReusableHostWindowIndex(
+    [{ runtimeKey: 'local', hostWindowId: null }],
+    'local',
+    reuseDeps,
+  ), 0);
+  assert.equal(findReusableHostWindowIndex(
+    [{ runtimeKey: 'local', hostWindowId: null }],
+    'local',
+    { hosts: [], localUrl: null, localClientToken: '' },
+  ), -1);
+});
+
+test('destroyed windows are skipped and a ready match beats a booting one', () => {
+  assert.equal(findReusableHostWindowIndex(
+    [null, { runtimeKey: 'host:host-a', hostWindowId: null }],
+    'host-a',
+    reuseDeps,
+  ), 1);
+  assert.equal(findReusableHostWindowIndex(
+    [{ runtimeKey: '', hostWindowId: 'host-a' }, { runtimeKey: 'host:host-a', hostWindowId: 'host-b' }],
+    'host-a',
+    reuseDeps,
+  ), 1);
+});
+
 test('host windows forward their own host id regardless of the renderer key', () => {
   assert.equal(resolveForwardedNotificationRuntimeKey({ runtimeKey: 'url:https://b.example.com', hostWindowId: 'host-b' }), 'host:host-b');
   assert.equal(resolveForwardedNotificationRuntimeKey({ runtimeKey: 'host:stale', hostWindowId: 'host-b' }), 'host:host-b');
   assert.equal(resolveForwardedNotificationRuntimeKey({ runtimeKey: 'local', hostWindowId: 'host-b' }), 'host:host-b');
   assert.equal(resolveForwardedNotificationRuntimeKey({ runtimeKey: '', hostWindowId: 'host-b' }), 'host:host-b');
   assert.equal(resolveForwardedNotificationRuntimeKey({ runtimeKey: undefined, hostWindowId: ' host-b ' }), 'host:host-b');
+});
+
+test('a window tagged for the local instance forwards the local key', () => {
+  assert.equal(resolveForwardedNotificationRuntimeKey({ runtimeKey: 'host:x', hostWindowId: 'local' }), 'local');
+});
+
+test('the sender host is the runtime the window reports, not its creation tag', () => {
+  // Opened for host-a, switched in place to Local: its notifications are Local.
+  assert.equal(resolveSenderHostId({ runtimeKey: 'local', hostWindowId: 'host-a' }, reuseDeps), 'local');
+  assert.equal(resolveSenderHostId({ runtimeKey: 'host:host-b', hostWindowId: 'host-a' }, reuseDeps), 'host-b');
+  assert.equal(resolveSenderHostId({ runtimeKey: 'url:https://api.b.example.com', hostWindowId: null }, reuseDeps), 'host-b');
+  const stamped = stampForwardedNotification(
+    { payload: { sessionId: 'ses_x', runtimeKey: 'local' } },
+    resolveSenderHostId({ runtimeKey: 'local', hostWindowId: 'host-a' }, reuseDeps),
+  );
+  assert.equal(stamped.runtimeKey, 'local');
+});
+
+test('the sender host falls back to the creation tag only before the window reports', () => {
+  assert.equal(resolveSenderHostId({ runtimeKey: '', hostWindowId: 'host-a' }, reuseDeps), 'host-a');
+  assert.equal(resolveSenderHostId({ runtimeKey: null, hostWindowId: null }, reuseDeps), null);
+  // A reported key that names no saved host leaves the renderer key in charge.
+  assert.equal(resolveSenderHostId({ runtimeKey: 'url:https://gone.example', hostWindowId: 'host-a' }, reuseDeps), null);
 });
 
 test('untagged windows keep the renderer-provided runtime key', () => {

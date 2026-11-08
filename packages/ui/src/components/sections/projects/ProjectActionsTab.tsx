@@ -102,7 +102,7 @@ const ActionsGrid: React.FC<{ setup: ProjectSetup; setupState: ProjectSetupState
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button type="button" variant="ghost" size="icon" className="h-7 w-7 shrink-0 text-muted-foreground" aria-label={t('settings.projects.actions.menuAria')}>
-                    <Icon name="more-2" className="size-4" />
+                    <Icon name="more" className="size-4" />
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end" className="w-fit min-w-40">

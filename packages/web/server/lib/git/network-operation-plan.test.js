@@ -489,16 +489,24 @@ describe('Git network operation planner', () => {
       .rejects.toMatchObject({ code: 'INVALID_GIT_NETWORK_OPERATION', status: 400 });
   });
 
-  it('rejects credentials embedded in an authoritative endpoint', async () => {
-    const planner = makePlanner({
-      validateGitTransportContext: async () => ({ ...authority, endpoint: 'https://user:secret@example.com/repo.git' }),
-    });
-    await expect(planner.planNetworkOperation(existingInput('fetch')))
-      .rejects.toThrow('Git endpoint is invalid');
+  it.each([
+    ['fetch', 'https://user:secret@example.com/repo.git'],
+    ['fetch', 'https://user@example.com/repo.git'],
+    ['fetch', 'https://ghp_token123@example.com/repo.git'],
+    ['fetch', 'https://:secret@example.com/repo.git'],
+    ['pull', 'https://myorg@dev.azure.com/myorg/app/_git/app'],
+    ['sync', 'https://myorg@dev.azure.com/myorg/app/_git/app'],
+  ])('refuses %s from a remote with userinfo %s and names the fix without repeating it', async (operation, endpoint) => {
+    const planner = makePlanner({ validateGitTransportContext: async () => ({ ...authority, endpoint }) });
+    const input = operation === 'sync' ? syncInput() : existingInput(operation);
+    const error = await planner.planNetworkOperation(input).catch((caught) => caught);
+    expect(error).toMatchObject({ code: 'INVALID_GIT_REMOTE_USERINFO', status: 400, message: 'Git remote URL has a name before @' });
   });
 
   it.each([
-    'https://user@example.com/repo.git',
+    'https://user@example.com/repo.git?access_token=secret',
+    'http://user@git.example.com/repo.git',
+    'file://user@example.com/repo.git',
     'https://example.com/repo.git?access_token=secret',
     'https://example.com/repo.git#private',
     'ssh://git:secret@example.com/owner/repo.git',

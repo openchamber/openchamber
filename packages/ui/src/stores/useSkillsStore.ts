@@ -178,7 +178,7 @@ interface SkillsStore {
   /** Every directory loaded so far, including the ambient one. Holds switched-off skills too. */
   skillsByDirectory: Record<string, DiscoveredSkill[]>;
   /**
-   * The `integration.use` statements OpenCode applies per directory, which
+   * The `skill.use` and `mcp.use` statements OpenCode applies per directory, which
    * decide the skills agents can use (`skillSwitch.ts`). A failed read keeps
    * the last ones known; a directory never read has no entry.
    */
@@ -334,6 +334,15 @@ export const selectSkillsForDirectory = (
 };
 
 /**
+ * Whether one project's skills have been read; until then its empty list is
+ * not an answer. A failed read settles it to the skills known before.
+ */
+export const selectSkillsLoadedForDirectory = (
+  state: Pick<SkillsStore, 'skillsByDirectory'>,
+  directory?: string | null,
+): boolean => Object.hasOwn(state.skillsByDirectory, getSkillsCacheKey(resolveDirectory(directory)));
+
+/**
  * The policy statements of one project, or null while none could be read; an
  * omitted directory means the project the app is on.
  */
@@ -403,11 +412,12 @@ const writeSkillSwitch = async (
   directory: string | null,
 ): Promise<string[]> => {
   const queryParams = directory ? `?directory=${encodeURIComponent(directory)}` : '';
-  const headers = new Headers({ 'Content-Type': 'application/json' });
-  if (directory) headers.set('x-opencode-directory', directory);
   const response = await runtimeFetch(`/api/config/skill-switch${queryParams}`, {
     method: 'PUT',
-    headers,
+    // A plain object, so runtimeFetch can URI-encode a non-Latin-1 directory; Headers.set would throw.
+    headers: directory
+      ? { 'Content-Type': 'application/json', 'x-opencode-directory': directory }
+      : { 'Content-Type': 'application/json' },
     body: JSON.stringify({ id: skill.id, enabled, scope: skill.scope }),
   });
   const payload: { changed?: string[]; error?: string } | null = await response.json().catch(() => null);
@@ -515,6 +525,7 @@ export const useSkillsStore = create<SkillsStore>()(
             })();
 
             for (let attempt = 0; attempt < 3; attempt++) {
+              if (generation !== skillsGeneration) return false;
               try {
                 const queryParams = directory ? `?directory=${encodeURIComponent(directory)}` : '';
 
@@ -522,6 +533,7 @@ export const useSkillsStore = create<SkillsStore>()(
                   priority: 'low',
                   headers: directory ? { 'x-opencode-directory': directory } : undefined,
                 }));
+                if (response === undefined) return false;
                 if (!response.ok) {
                   throw new Error(`Failed to list skills: ${response.status}`);
                 }

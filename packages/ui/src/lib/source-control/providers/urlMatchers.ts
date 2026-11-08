@@ -2,7 +2,7 @@ import type { RepositoryReferenceKind } from '@/lib/api/types';
 import type { SourceControlProviderDescriptor } from './descriptor';
 import { splitProjectPath } from '../projectPath';
 
-/** An issue or change request a link names, and the provider instance it lives on. */
+/** An issue, change request or discussion a link names, and the provider instance it lives on. */
 export interface RepositoryItemUrlMatch {
   provider: SourceControlProviderDescriptor['id'];
   instance: string;
@@ -75,6 +75,8 @@ const patternsOf = (descriptor: SourceControlProviderDescriptor): CompiledPatter
   const compiled = [
     ...descriptor.urls.changeRequest.map((pattern) => compilePattern(pattern, 'pull')),
     ...descriptor.urls.issue.map((pattern) => compilePattern(pattern, 'issue')),
+    // Only a host that keeps discussions names them; its links are discussions only then.
+    ...(descriptor.features.discussions ? descriptor.urls.discussion.map((pattern) => compilePattern(pattern, 'discussion')) : []),
   ].filter((pattern): pattern is CompiledPattern => pattern !== null);
   compiledByDescriptor.set(descriptor, compiled);
   return compiled;

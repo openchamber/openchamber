@@ -2,6 +2,7 @@ import React from 'react';
 import { GUEST_FILE_EDITOR_CONTENT_MAX, type FileEditorContentKind, type FileEditorDocument } from '@openchamber/sdk';
 
 import { PluginPane } from '@/components/layout/PluginPane';
+import { ContentLoadingState } from '@/components/ui/content-state';
 import { createGuestFileChannel, type GuestFileChannel } from '@/lib/guests/file-editor-channel';
 import { useI18n } from '@/lib/i18n';
 import { pluginModeFromId } from '@/lib/surfaces/modes';
@@ -108,7 +109,7 @@ export const GuestFileEditor = React.forwardRef<FileCanvasHandle, GuestFileEdito
     const fileEditor = React.useMemo(() => (channel ? { editorId, channel } : null), [channel, editorId]);
 
     if (!fileEditor) {
-      return <div className="flex h-full items-center justify-center text-sm text-muted-foreground">{t('common.loading')}</div>;
+      return <ContentLoadingState label={t('filesView.artifact.state.loading')} />;
     }
     return <PluginPane mode={pluginModeFromId(guestId)} surface="file" fileEditor={fileEditor} />;
   },

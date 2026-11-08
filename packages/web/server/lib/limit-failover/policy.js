@@ -12,9 +12,17 @@ const LONG_WAIT_MS = 60_000;
 /** How long an account stays skipped when its limit error says nothing about the reset. */
 export const DEFAULT_EXHAUSTION_MS = 60 * 60_000;
 
-// `provider.free-limit` is OpenCode's own free tier running out (2.1.2+); it
-// was `provider.quota` before and behaves the same.
-const LIMIT_ERROR_TYPES = new Set(['provider.quota', 'provider.free-limit', 'provider.rate-limit']);
+// `provider.free-limit` is OpenCode's own free tier running out (2.1.2+), and
+// `provider.budget-limit` / `provider.model-budget-limit` an OpenCode Console
+// spend limit of the workspace or of one model (2.2+). They were
+// `provider.quota` before and behave the same.
+const LIMIT_ERROR_TYPES = new Set([
+  'provider.quota',
+  'provider.free-limit',
+  'provider.budget-limit',
+  'provider.model-budget-limit',
+  'provider.rate-limit',
+]);
 
 // The moment a window opens: epoch seconds (until the year 2286) or
 // milliseconds, a numeric string of either, or ISO text.

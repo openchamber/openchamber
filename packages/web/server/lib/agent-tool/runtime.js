@@ -5,6 +5,8 @@ import { asNonEmptyString, isBoolean } from '../shared/guards.js';
 import {
   OPENCHAMBER_AGENT_TOOL_ACTION_DEFINITIONS,
   OPENCHAMBER_AGENT_TOOL_ACTIONS,
+  OPENCHAMBER_IMAGE_ACTION_DEFINITIONS,
+  OPENCHAMBER_IMAGE_ACTIONS,
   OPENCHAMBER_KNOWLEDGE_ACTION_DEFINITIONS,
   OPENCHAMBER_KNOWLEDGE_ACTIONS,
   OPENCHAMBER_MEMORY_ACTION_DEFINITIONS,
@@ -13,18 +15,34 @@ import {
   OPENCHAMBER_NOTIFY_ACTIONS,
   OPENCHAMBER_RENDER_ACTION_DEFINITIONS,
   OPENCHAMBER_RENDER_ACTIONS,
+  OPENCHAMBER_SECRET_ACTION_DEFINITIONS,
+  OPENCHAMBER_SECRET_ACTIONS,
   OPENCHAMBER_SCHEDULE_ACTION_DEFINITIONS,
   OPENCHAMBER_SCHEDULE_ACTIONS,
+  OPENCHAMBER_USAGE_ACTION_DEFINITIONS,
+  OPENCHAMBER_USAGE_ACTIONS,
   resolveAgentToolAction,
   OPENCHAMBER_WEB_ACTION_DEFINITIONS,
   OPENCHAMBER_WEB_ACTIONS,
+  OPENCHAMBER_WORKFLOW_ACTION_DEFINITIONS,
+  OPENCHAMBER_WORKFLOW_ACTIONS,
+  OPENCHAMBER_WORKFLOW_ANSWER_ACTION_DEFINITIONS,
+  OPENCHAMBER_WORKFLOW_ANSWER_ACTIONS,
+  WORKFLOW_ANSWER_TOOL,
 } from '../openchamber-control/actions.js';
+import { MAX_AGENTS_PER_RUN, MAX_CONCURRENT_AGENTS } from '../workflows/runtime.js';
 import {
   RENDER_PAGE_CLOSED_IN_CHAT_NOTE,
   RENDER_PAGE_IMAGE_BUDGET_BYTES,
   RENDER_PAGE_MAX_HTML_LENGTH,
   RENDER_PAGE_MAX_TITLE_LENGTH,
 } from '../openchamber-control/render-page.js';
+import {
+  SECRET_REQUEST_CLOSED_IN_CHAT_NOTE,
+  SECRET_REQUEST_MAX_LABEL_LENGTH,
+  SECRET_REQUEST_MAX_PLACEHOLDER_LENGTH,
+  SECRET_REQUEST_MAX_REASON_LENGTH,
+} from '../openchamber-control/secret-request.js';
 import { createCallbackAddress } from './callback-address.js';
 
 const TOOL_SCHEMA_VERSION = 1;
@@ -39,6 +57,11 @@ const ACTIONS = new Set([
   ...OPENCHAMBER_KNOWLEDGE_ACTIONS,
   ...OPENCHAMBER_NOTIFY_ACTIONS,
   ...OPENCHAMBER_RENDER_ACTIONS,
+  ...OPENCHAMBER_IMAGE_ACTIONS,
+  ...OPENCHAMBER_SECRET_ACTIONS,
+  ...OPENCHAMBER_USAGE_ACTIONS,
+  ...OPENCHAMBER_WORKFLOW_ACTIONS,
+  ...OPENCHAMBER_WORKFLOW_ANSWER_ACTIONS,
 ]);
 const AGENT_TOOL_ACTION_TITLES = Object.fromEntries(
   [
@@ -49,6 +72,11 @@ const AGENT_TOOL_ACTION_TITLES = Object.fromEntries(
     ...OPENCHAMBER_KNOWLEDGE_ACTION_DEFINITIONS,
     ...OPENCHAMBER_NOTIFY_ACTION_DEFINITIONS,
     ...OPENCHAMBER_RENDER_ACTION_DEFINITIONS,
+    ...OPENCHAMBER_IMAGE_ACTION_DEFINITIONS,
+    ...OPENCHAMBER_SECRET_ACTION_DEFINITIONS,
+    ...OPENCHAMBER_USAGE_ACTION_DEFINITIONS,
+    ...OPENCHAMBER_WORKFLOW_ACTION_DEFINITIONS,
+    ...OPENCHAMBER_WORKFLOW_ANSWER_ACTION_DEFINITIONS,
   ].map(({ action, title }) => [action, title]),
 );
 
@@ -66,7 +94,7 @@ const MEMORY_ONLY_PARAMETER_NAMES = ['body', 'scope', 'memoryId', 'type'];
 const MEMORY_PARAMETER_NAMES = [...MEMORY_ONLY_PARAMETER_NAMES, 'title'];
 // The task inputs; the schedule tool shares the scope and the run settings
 // (prompt, model, agent, goal) with the control tool.
-const SCHEDULE_ONLY_PARAMETER_NAMES = ['taskId', 'name', 'targetSessionId', 'daily', 'weekly', 'once', 'time', 'cron', 'timezone', 'disabled'];
+const SCHEDULE_ONLY_PARAMETER_NAMES = ['taskId', 'name', 'targetSessionId', 'daily', 'weekly', 'once', 'time', 'cron', 'timezone', 'disabled', 'runInWorktree', 'baseBranch', 'cleanupWorktree'];
 const SCHEDULE_PARAMETER_NAMES = [...SCHEDULE_ONLY_PARAMETER_NAMES, 'projectId', 'directory', 'prompt', 'model', 'variant', 'agent', 'goal', 'goalTokenBudget'];
 
 /**
@@ -74,8 +102,8 @@ const SCHEDULE_PARAMETER_NAMES = [...SCHEDULE_ONLY_PARAMETER_NAMES, 'projectId',
  * picks them for every run, so the schedule tool says what they mean there.
  */
 const SCHEDULE_PARAMETER_OVERRIDES = {
-  model: { type: 'string', description: 'provider/model; required unless targetSessionId is set, which keeps that session\'s model' },
-  agent: { type: 'string', description: 'Only when the user asks. Default: build' },
+  model: { type: 'string', description: 'provider/model; required unless targetSessionId is set. With targetSessionId, the task\'s model becomes that session\'s model; create the task without one to keep the session\'s own. A named model is checked against the catalog when the task is written' },
+  agent: { type: 'string', description: 'Only when the user asks. Default: build for a new session. With targetSessionId, the task\'s agent becomes that session\'s agent; without one the session keeps its own' },
 };
 
 /**
@@ -85,7 +113,7 @@ const SCHEDULE_PARAMETER_OVERRIDES = {
  * repeatedly in practice — so memory states what its own `title` is.
  */
 const MEMORY_PARAMETER_OVERRIDES = {
-  title: { type: 'string', description: 'As the session index spells it; prefer it over memoryId for an entry you can see' },
+  title: { type: 'string', description: 'As the session index spells it; prefer it over memoryId for an entry you can see. On save: at most 60 characters, no date (the store keeps dates)' },
   scope: { type: 'string', enum: ['global', 'project', 'both'], description: 'global: about the user, every project. project: this codebase. Required for save and delete; read and list search both when omitted' },
 };
 
@@ -113,7 +141,7 @@ const ALL_PARAMETER_PROPERTIES = {
   agent: { type: 'string', description: 'Only when the user asks. Default: build for a new session, unchanged for an existing one' },
   variant: { type: 'string', description: 'Only when the user asks' },
   worktree: { type: 'string', description: 'Folder name of a new worktree, named after the task (fix-login-timeout). Required for session.moveToWorktree; on session.create only when the user asks, and uncommitted changes stay behind' },
-  branch: { type: 'string', description: 'Default: the worktree name' },
+  branch: { type: 'string', description: 'session.create: default the worktree name. work.name: the new name of a placeholder branch' },
   startRef: { type: 'string', description: "Ref the new branch starts from; default: the repository's default branch" },
   carry: { type: 'array', items: { type: 'string' }, description: 'Files you changed whose uncommitted changes move along; nothing else moves' },
   existingBranch: { type: 'string', description: 'Check out this existing local or remote branch (origin/feature) instead of a new one; not with branch or startRef' },
@@ -139,6 +167,9 @@ const ALL_PARAMETER_PROPERTIES = {
   cron: { type: 'string' },
   timezone: { type: 'string', description: 'IANA' },
   disabled: { type: 'boolean' },
+  runInWorktree: { type: 'boolean', description: 'Run each run in a fresh worktree of the project (git only); conflicts with targetSessionId' },
+  baseBranch: { type: 'string', description: 'Source ref the isolated run branches from (git only); default the checked-out HEAD at run time' },
+  cleanupWorktree: { type: 'boolean', description: 'False keeps the run\'s worktree and branch for review; default removes them when the run settles (git only)' },
   path: { type: 'string', description: 'Absolute, or relative to the session directory' },
   url: { type: 'string', description: 'http(s)' },
   selector: { type: 'string', description: 'From browser.snapshot' },
@@ -158,13 +189,17 @@ const pickParameters = (names) => Object.fromEntries(
   Object.entries(ALL_PARAMETER_PROPERTIES).filter(([name]) => names.includes(name)),
 );
 
-const CONTROL_PARAMETER_PROPERTIES = pickParameters(
-  Object.keys(ALL_PARAMETER_PROPERTIES).filter((name) => (
-    !WEB_PARAMETER_NAMES.includes(name)
-    && !MEMORY_ONLY_PARAMETER_NAMES.includes(name)
-    && !SCHEDULE_ONLY_PARAMETER_NAMES.includes(name)
-  )),
-);
+const CONTROL_PARAMETER_PROPERTIES = {
+  ...pickParameters(
+    Object.keys(ALL_PARAMETER_PROPERTIES).filter((name) => (
+      !WEB_PARAMETER_NAMES.includes(name)
+      && !MEMORY_ONLY_PARAMETER_NAMES.includes(name)
+      && !SCHEDULE_ONLY_PARAMETER_NAMES.includes(name)
+    )),
+  ),
+  // The web tool's `url` is a page to load; here it names what pr.watch follows.
+  url: { type: 'string', description: 'pr.watch: the pull or merge request address' },
+};
 const SCHEDULE_PARAMETER_PROPERTIES = {
   ...pickParameters(SCHEDULE_PARAMETER_NAMES),
   ...SCHEDULE_PARAMETER_OVERRIDES,
@@ -198,6 +233,15 @@ const NOTIFY_PARAMETER_PROPERTIES = {
   showWhenFocused: { type: 'boolean', description: 'Show it while the user is in OpenChamber too, otherwise it shows only while they are away. Only for what cannot wait' },
 };
 
+const IMAGE_PARAMETER_PROPERTIES = {
+  prompt: { type: 'string', description: 'What to draw, or for images what to change in them. Up to 8000 characters' },
+  images: { type: 'array', items: { type: 'string' }, description: 'Paths of PNG, JPEG, GIF or WebP files to edit or to use as references, in order; at most 8' },
+  aspect: { type: 'string', description: 'width:height, such as 16:9. Default: the model\'s' },
+  resolution: { type: 'string', description: 'Size tier such as 1K, 2K or 4K. Default: the model\'s' },
+  count: { type: 'integer', description: 'How many images, 1 to 4. Default 1' },
+  path: { type: 'string', description: "Where to save, absolute or relative to the project; more images get -2, -3 before the extension. Default: OpenCode's temporary folder" },
+};
+
 // Where the agent saves a screenshot for a page, so it stays out of the
 // project. The image grant route (../markdown-image-grants/routes.js) reads a
 // page's images from anywhere on the machine.
@@ -210,27 +254,82 @@ const OPENCODE_TEMP_DIRECTORY = path.join(os.tmpdir(), 'opencode');
 // The variables are the ones packages/ui/src/components/chat/message/parts/htmlRender.ts
 // injects; change both together.
 const RENDER_PAGE_HTML_DESCRIPTION = [
-  `One self-contained HTML document, at most ${RENDER_PAGE_MAX_HTML_LENGTH} characters, with inline <style> and <script>. Remote scripts and stylesheets do not load in every client, so draw charts with inline SVG or your own script.`,
-  "Layout: fluid width, as wide as the reply column (about 720px on desktop, 360px on phones), no horizontal padding on the outermost element, nothing wider; stack or wrap, and give a wide table its own overflow-x:auto box. The frame takes the page's height, so keep it short, give charts fixed pixel heights, and never use 100vh or height:100% on html or body.",
+  `One self-contained HTML document, at most ${RENDER_PAGE_MAX_HTML_LENGTH} characters, with inline <style> and <script>. Never data: a chart, table or comparison is an openui-lang block in your reply. Remote scripts and stylesheets do not load in every client, so draw with inline SVG or your own script.`,
+  "Layout: fluid width, as wide as the reply column (about 720px on desktop, 360px on phones), no horizontal padding on the outermost element, nothing wider; stack or wrap, and give a wide table its own overflow-x:auto box. The frame takes the page's height, so keep it short, give drawings fixed pixel heights, and never use 100vh or height:100% on html or body.",
   "Ready classes in the app's look, so these need no CSS of your own: .oc-box (a box; a box inside it steps up a tone), .oc-muted (secondary text), .oc-table on a div around a <table> (scrolls sideways when wide), .oc-num (tabular figures, end-aligned), .oc-badge with optional data-tone=\"success|warning|error|info\", .oc-dot (a legend dot) and .oc-bar (a horizontal bar) colored by --color (default --chart-1), the bar as long as --value (a percentage), .oc-field (a <label> around its text and control), .oc-input on an input, select or textarea, .oc-switch on a checkbox, .oc-segmented around <button>s (aria-pressed=\"true\" on the chosen one; also tabs). A line only where it means something, such as a divider between sections.",
   "Theme variables on :root, updated live on a theme switch: --background, --foreground, --muted, --muted-foreground, --card, --card-foreground, --border, --primary, --primary-foreground, --destructive, --warning, --success, --info, --code-background, --code-foreground, --chart-1 to --chart-6 (series), --radius, --font-sans, --font-mono. A base stylesheet already sets text color, font and size; the root font size is the chat's text size and follows the user's interface size, so size text in rem or em, not px. A page with its own colors, such as a mockup of the user's project, sets a color on all its text and gives itself a background: text without a color takes the theme's, and without a background the page shows the chat's.",
   "Scripts may add tooltips, tabs, toggles, sorting. On a phone a tap shows a hover tooltip, so keep tooltips and popups inside the page and flip them near an edge.",
-  `Images: https, data:, or a local PNG, JPEG, GIF or WebP named by absolute path in src, CSS url() or a quoted script string, at most 10 MB each and ${RENDER_PAGE_IMAGE_BUDGET_BYTES / (1024 * 1024)} MB together per page; the result names any that do not show. Save a screenshot for a page in ${OPENCODE_TEMP_DIRECTORY}.`,
+  `Images: https, data:, or local PNG, JPEG, GIF or WebP files named by complete absolute paths in src, CSS url() or quoted script strings. The renderer finds and inlines these paths before the page runs, so do not build paths from directory and filename fragments. To switch images, put each full path in a script string and assign the selected value to img.src, for example: const images = { a: '/absolute/path/a.png', b: '/absolute/path/b.png' }; image.src = images[key]. Each file can be 10 MB; all images together can be ${RENDER_PAGE_IMAGE_BUDGET_BYTES / (1024 * 1024)} MB per page. The result names any that do not show. Save a screenshot for a page in ${OPENCODE_TEMP_DIRECTORY}.`,
   "The page is sandboxed: no access to OpenChamber, the network session or local files; links open in the user's browser.",
 ].join(' ');
 
 const RENDER_PAGE_AWAIT_DESCRIPTION = [
-  "Wait for the user to choose, fill in fields, or both, on the page. Give it one button whose click calls openchamber.submit(data, summary): data is the JSON your next step needs, summary the choice in a few words of the user's language, shown under the page. submit works only from a click on a waiting page and returns a promise; disable the button once it resolves.",
-  "The call returns summary and data, or answered: false when the user wrote in the chat instead; their message follows.",
+  "Wait for the user to choose, fill in fields, or both, on the page. With ui, the form adds its own Send button; add a Button only when the choice is between actions, and any Button sends the whole form. With html, give it one button whose click calls openchamber.submit(data, summary): data is the JSON your next step needs, summary the choice in a few words of the user's language, shown under the page. submit works only from a click on a waiting page and returns a promise; disable the button once it resolves.",
+  "The call returns summary and data, or answered: false when the user declined or wrote in the chat instead; the note says which and what to do.",
   "Reloaded, the page gets openchamber.answer set to its data, to show the choice. Base classes: .oc-options (a grid), .oc-option on a <button> (aria-pressed=\"true\" when chosen), .oc-button (the send button; data-variant=\"outline\" for a secondary action, \"destructive\" for a dangerous one).",
 ].join(' ');
 
 // Its own names: `title` here names the page.
+// A question asked with `ui` looks the same whatever model writes it, which is
+// why the description sends questions there first.
+const RENDER_PAGE_UI_DESCRIPTION = [
+  "Instead of html: one complete openui-lang program, the language of UI blocks, without the fence. Prefer it to html for a question: Choice and Input fields, drawn with the chat's own controls.",
+  "With awaitAnswer the call returns summary (the button and the values in words) and data: { button, value, values, note }: the pressed button's label and value, each field's value under its name, and the note the user added, if any.",
+].join(' ');
+
 const RENDER_PARAMETER_PROPERTIES = {
+  ui: { type: 'string', description: RENDER_PAGE_UI_DESCRIPTION },
   html: { type: 'string', description: RENDER_PAGE_HTML_DESCRIPTION },
   title: { type: 'string', description: `At most ${RENDER_PAGE_MAX_TITLE_LENGTH} characters; without it the page's <title> or first heading names it` },
   awaitAnswer: { type: 'boolean', description: RENDER_PAGE_AWAIT_DESCRIPTION },
 };
+
+// Its own names: `label` means something else in the web tool.
+const SECRET_PARAMETER_PROPERTIES = {
+  label: { type: 'string', description: `What the secret is, the card's title, such as Cloudflare API token. At most ${SECRET_REQUEST_MAX_LABEL_LENGTH} characters` },
+  reason: { type: 'string', description: `In the user's language: what you will do with it, and where to create it when that is not obvious. At most ${SECRET_REQUEST_MAX_REASON_LENGTH} characters` },
+  placeholder: { type: 'string', description: `The value's shape, such as sk-ant-...; at most ${SECRET_REQUEST_MAX_PLACEHOLDER_LENGTH} characters` },
+};
+
+const USAGE_PARAMETER_PROPERTIES = {
+  providerId: { type: 'string', description: 'One provider, such as claude or codex, from an earlier read; omit for every configured provider' },
+};
+
+// How to write a script lives on `script`, read while the agent writes it,
+// for the same reason the page rules live on render's `html`.
+const WORKFLOW_SCRIPT_DESCRIPTION = [
+  "JavaScript. It starts with export const meta = { name: 'audit-routes', description: 'One sentence', phases: ['Find', 'Audit'] }, then a body with top-level await and return.",
+  "The body sees: agent(prompt, { label, phase, agent, model, schema }) runs one agent in a fresh session and resolves to its final answer text, to the JSON value matching schema (JSON Schema: type, properties, required, items, enum; the agent hands it over through a checking tool), or to null when it failed. model is provider/model, optionally #variant; without it the agent runs on this session's model. The agent has none of this conversation, so the prompt carries everything it needs: paths, the question, what to answer.",
+  "parallel([() => agent(...), ...]) runs tasks together and waits for all of them: a barrier, resolving to their results, null for a failed one. pipeline(items, stage1, stage2, ...) runs each item through the stages on its own, each stage called as (previous, item, index) with previous the last stage's result (the item itself for the first), with no wait between stages; a stage that gives null ends that item as null; prefer it, and use parallel() between steps only when a step needs every earlier result at once, such as deduplicating across them. phase(title) groups the agents that follow under a title listed in meta.phases; inside parallel() or pipeline() pass phase to agent() instead. log(message) shows a line in the run. args is the JSON passed to workflow.run, {} when none was.",
+  `At most ${MAX_CONCURRENT_AGENTS} agents work at once and ${MAX_AGENTS_PER_RUN} per run. No imports, files, network, timers, Date.now(), new Date() or Math.random(): agents read and write files and run commands, the script only coordinates them, and a resumed run replays it.`,
+  "Return a short report value: each agent's full answer stays readable with workflow.result.",
+].join(' ');
+
+const WORKFLOW_PARAMETER_PROPERTIES = {
+  script: { type: 'string', description: WORKFLOW_SCRIPT_DESCRIPTION },
+  name: { type: 'string', description: 'A saved workflow, instead of script' },
+  args: { type: 'object', description: 'An object the script reads as args, such as { paths: [...] }' },
+  runId: { type: 'string', description: 'From workflow.run' },
+  agent: { type: 'string', description: "workflow.result: one agent's key or session id, from workflow.status" },
+  overwrite: { type: 'boolean', description: 'workflow.save: replace a saved workflow of the same name' },
+};
+
+// A JSON object, not JSON text in a string: text made models escape JSON
+// inside JSON, and some looped on it until their output budget ran out.
+const WORKFLOW_ANSWER_PARAMETER_PROPERTIES = {
+  answer: { type: 'object', description: 'Your answer, the JSON value matching the schema in your prompt. When that schema is not an object, pass { "value": <your value> }' },
+};
+
+const WORKFLOW_ANSWER_TOOL_DESCRIPTION = 'Hand over your answer when your prompt asks for one matching a JSON Schema. It is checked on the spot: a mismatch says what to fix, so call again until it is accepted, then end your turn.';
+
+/**
+ * Permission rules the managed config adds for the tools of this plugin.
+ * OpenCode appends config rules to every agent, and a session's own rules are
+ * read after them, which is what lets one session allow what all others deny.
+ */
+export const managedPermissionRules = ({ includeWorkflow = false } = {}) => (
+  includeWorkflow ? [{ action: WORKFLOW_ANSWER_TOOL, resource: '*', effect: 'deny' }] : []
+);
 
 // When to act (link an issue, save a memory, draw a page) is stated once, in
 // every session's context (../session-knowledge/runtime.js): a rule the agent
@@ -249,7 +348,7 @@ const SCHEDULE_TOOL_DESCRIPTION = "Scheduled tasks: prompts OpenChamber runs on 
 
 const WEB_TOOL_DESCRIPTION = "OpenChamber's browser panel, to check your work by looking at it. One action per call: open, snapshot for text, selectors and errors, then click, type, select or scroll by those selectors. Close tabs you opened for your own work with browser.close; leave open the ones you opened to show the user something. The page runs with the user's real logins; treat it as their live session.";
 
-const MEMORY_TOOL_DESCRIPTION = "Memory that persists across sessions. One fact per entry. Save what code and docs do not show: a decision and its reason, a rejected alternative, a deliberate \"leave this as it is\", the user's corrections and preferences, a hard-won pointer. Never one-off task state, secrets or credentials, or what the user asked you not to keep; what the user explicitly asks you to remember, save. Put project conventions in project scope.";
+const MEMORY_TOOL_DESCRIPTION = "Memory that persists across sessions. One fact per entry, under a title that names what it holds, so the session index tells when to read it: \"Session row menu is full: no new items\", not \"Sidebar decisions\". Save what code and docs do not show: a decision and its reason, a rejected alternative, a deliberate \"leave this as it is\", the user's corrections and preferences, a hard-won pointer. Never one-off task state, secrets or credentials, or what the user asked you not to keep; what the user explicitly asks you to remember, save. Project scope holds what concerns this project, global what concerns the user in every project.";
 
 const KNOWLEDGE_TOOL_DESCRIPTION = "The project's Notes, Todos and Plans, shown in OpenChamber's Project knowledge panel and shared by its sessions. One action per call; list returns everything unless planId or ready narrows it. "
   + "Notes: short facts the user wants at hand; your own learnings go to memory. Todos: the user's backlog; add one when asked or when you stop with work left, never for the steps of your current task. "
@@ -259,9 +358,32 @@ const KNOWLEDGE_TOOL_DESCRIPTION = "The project's Notes, Todos and Plans, shown 
 
 const NOTIFY_TOOL_DESCRIPTION = "Notify the user outside the chat: when long work finishes and they have likely stepped away, when you are blocked on them, or when they asked to be told. Routine progress and what your reply already says stay in the chat.";
 
+// The pointer to UI blocks sits here because a model choosing how to show
+// data reads this description, and with the page as the only visual it named,
+// a weak model drew HTML for a plain comparison.
 const RENDER_TOOL_DESCRIPTION = "Draw a finished HTML page inline in the chat, above your reply, or ask the user to choose on one (awaitAnswer). "
+  + "Never for data: tables, charts, comparisons, steps and flows are openui-lang UI blocks in your reply, even when the user asks to see them. "
+  + "A choice that sets the direction of the work: send ui with awaitAnswer; the form adds a note field for the user's conditions. html is for mockups and custom drawings. "
   + "The page is part of your reply and sits on the chat's background: leave html, body and the outermost element without a background, add no outer card, border or banner title, and set boxes apart by tone. Style with the theme variables listed under html. "
-  + "Read html before writing a page and awaitAnswer before asking on one.";
+  + "How to write a page is in the descriptions of the ui and html parameters, how to ask on one in awaitAnswer's; there is no read action.";
+
+const IMAGE_TOOL_DESCRIPTION = "Generate or edit images with the image model the user chose in OpenChamber's settings; your own model stays. "
+  + "The call returns the saved file paths, and the chat shows the images to the user, so do not repeat them in your reply. Read a file to look at it. "
+  + "Without path the files go to OpenCode's temporary folder: move one into the project when it belongs there. Every call costs the user money: make what was asked, not extra variations.";
+
+const SECRET_TOOL_DESCRIPTION = "Ask the user for a secret (API key, token, password) on a private card in the chat, and wait for it. The card takes one line. "
+  + "A saved secret goes to a file only this user can read, deleted after 24 hours, and the call returns only its path. Read it inside the command that needs it (TOKEN=\"$(cat <file>)\" some-cli ...); never print, echo or log it, and never copy it into the project. "
+  + "The call returns status declined when the user declines, or answered: false when they wrote in the chat instead.";
+
+// What a read costs and how fresh it is, because an agent checking a limit
+// before a task otherwise polls it in a loop or trusts an old sample.
+const USAGE_TOOL_DESCRIPTION = "Provider usage limits as OpenChamber's Settings > Usage shows them: per provider, each window's used and remaining percent, its length and when it resets, plus plan, per-model windows and credit balances. "
+  + "ok false with configured true is a failed read, not zero usage; notConfigured lists providers without a credential. "
+  + "Every call asks each provider again, sometimes with several requests, so read once per decision and never poll in a loop. fetchedAt is when the result was built; a provider that is rate limiting answers with its last sample.";
+
+const WORKFLOW_TOOL_DESCRIPTION = 'Workflows: a script that fans a large task out to many agents, which OpenChamber runs in the background while you stay free. '
+  + 'For work with many similar independent pieces (a review per file, an audit across many routes, a migration of many files, research cross-checked across sources) or a check that must run on every piece. A single feature or a few steps is not one: do it yourself or with a subagent. '
+  + 'One action per call. Check a script with workflow.check, then workflow.run: the user approves the plan in the chat, and the report arrives as a message when the run ends. Read script before writing one.';
 
 // A field means the same thing in every tool that declares it, so one set
 // covers them all.
@@ -272,6 +394,8 @@ const BOOLEAN_PARAMETER_NAMES = [...new Set([
   KNOWLEDGE_PARAMETER_PROPERTIES,
   NOTIFY_PARAMETER_PROPERTIES,
   RENDER_PARAMETER_PROPERTIES,
+  IMAGE_PARAMETER_PROPERTIES,
+  WORKFLOW_PARAMETER_PROPERTIES,
 ].flatMap((properties) => Object.entries(properties)
   .filter(([, schema]) => schema.type === 'boolean')
   .map(([name]) => name)))];
@@ -319,16 +443,17 @@ const createResult = ({ ok, action, data, error, exitCode }) => ({
 });
 
 /**
- * A page that waits for the user's answer (render.page with awaitAnswer)
- * holds its call open. A message the user writes in the chat meanwhile would
- * sit behind that call: OpenCode delivers it only after the call returns. So
+ * A call that waits for the user's answer (render.page with awaitAnswer, and
+ * every secret.request) holds its call open. A message the user writes in the
+ * chat meanwhile would sit behind that call: OpenCode delivers it only after
+ * the call returns. So
  * the call registers itself under its session, and the plugin's prompt hook
  * (createPluginSource) aborts it the moment any prompt for that session
  * arrives, whichever way it was sent. The call then returns "answered in the
  * chat" and the agent reads the message next.
  */
-const ANSWER_WAIT_SETUP = String.raw`        const chatController = new AbortController()
-        const waiting = args.awaitAnswer === true
+const answerWaitSetup = (waitsWhen) => String.raw`        const chatController = new AbortController()
+        const waiting = ${waitsWhen}
         if (waiting) {
           const set = pagesWaitingForChat.get(context.sessionID) ?? new Set()
           set.add(chatController)
@@ -358,10 +483,10 @@ const ANSWER_WAIT_RELEASE = String.raw` finally {
           releaseWait()
         }`;
 
-const ANSWER_CLOSED_IN_CHAT = String.raw`
+const answerClosedInChat = (note) => String.raw`
           if (chatController.signal.aborted && !context.signal?.aborted) {
             const answer = { answered: false, reason: "chat" }
-            const payload = { schemaVersion: ${TOOL_SCHEMA_VERSION}, ok: true, action: args.action, data: { answer, note: ${JSON.stringify(RENDER_PAGE_CLOSED_IN_CHAT_NOTE)} } }
+            const payload = { schemaVersion: ${TOOL_SCHEMA_VERSION}, ok: true, action: args.action, data: { answer, note: ${JSON.stringify(note)} } }
             await progress({ ok: true })
             return { content: JSON.stringify(payload), metadata: { openchamber: { schemaVersion: ${TOOL_SCHEMA_VERSION}, action: args.action, description: title, ok: true, answer } } }
           }`;
@@ -458,17 +583,18 @@ const singleActionSchema = (definition) => ({
  * answer with an empty completion instead of an error, and the `oneOf` branches
  * are what carry the per-action descriptions the model reads.
  */
-const createToolEntry = ({ name, description, definitions, parameters, codeMode, answers = false }) => {
+/**
+ * `answers` makes a tool's call wait for the user: `waitsWhen` is the JS
+ * expression (over `args`) that says whether this call waits, and
+ * `closedInChatNote` what the agent reads when the user wrote in the chat.
+ */
+const createToolEntry = ({ name, description, definitions, parameters, codeMode, answers = null }) => {
   const normalizeBooleans = booleanNormalizationBlock(parameters);
   const reviveDependsOn = dependsOnRevivalBlock(parameters);
   const actionSchema = definitions.length === 1 ? singleActionSchema(definitions[0]) : multiActionSchema(definitions);
   return String.raw`    tools.add({
       name: ${JSON.stringify(name)},
       description: ${JSON.stringify(description)},
-      // OpenCode 2 puts a plugin tool behind its Code Mode execute tool
-      // unless told otherwise. There the model sees only a size-limited
-      // catalog, and with a few large MCP servers ours dropped out of it, so
-      // agents concluded the tool did not exist. Direct is the default.
       options: { codemode: ${codeMode ? 'true' : 'false'} },
       input: {
         type: "object",
@@ -522,7 +648,7 @@ ${reviveDependsOn}${actionSchema.normalize}${normalizeBooleans}        const act
         if (!endpoint || !token) {
           return failure({ schemaVersion: ${TOOL_SCHEMA_VERSION}, ok: false, action: args.action, error: { message: "OpenChamber managed tool connection is unavailable" } })
         }
-${answers ? ANSWER_WAIT_SETUP : ''}
+${answers ? answerWaitSetup(answers.waitsWhen) : ''}
         try {
           const response = await fetch(endpoint, {
             method: "POST",
@@ -544,12 +670,45 @@ ${answers ? ANSWER_WAIT_SETUP : ''}
           await progress({ ok: valid && result.ok === true })
           if (valid) return { content, metadata: { openchamber: { schemaVersion: ${TOOL_SCHEMA_VERSION}, action: args.action, description: title, ok: result.ok === true${answers ? ANSWER_METADATA : ''} } } }
           return failure({ schemaVersion: ${TOOL_SCHEMA_VERSION}, ok: false, action: args.action, error: { message: "OpenChamber returned an invalid response", kind: "runtime", status: response.status } })
-        } catch (error) {${answers ? ANSWER_CLOSED_IN_CHAT : ''}
+        } catch (error) {${answers ? answerClosedInChat(answers.closedInChatNote) : ''}
           return failure({ schemaVersion: ${TOOL_SCHEMA_VERSION}, ok: false, action: args.action, error: { message: error instanceof Error ? error.message : String(error), kind: "runtime" } })
         }${answers ? ANSWER_WAIT_RELEASE : ''}
       },
     })
 `;
+};
+
+/**
+ * The control, schedule, browser, memory, knowledge and notify tools always
+ * sit behind OpenCode's Code Mode `execute` tool. Measured on
+ * scripts/tool-use-bench with three models, that cut the first request of a
+ * session by about 30% with the same or better use of the tools, and one
+ * provider's tool-call streaming stalled on their direct schemas. The tools
+ * whose call the chat draws (render, secret, image, workflow) stay direct.
+ *
+ * Behind Code Mode the catalog lists every namespace with its description, but
+ * a tool only while its budget lasts, and with large MCP servers connected each
+ * of ours showed as a bare row such as `openchamber_web (1 tool, none shown)`.
+ * Agents asked to open a page in the browser panel then fetched it and said
+ * they had no browser (scripts/tool-use-bench). So each Code Mode tool gets a
+ * namespace of its own name, which OpenCode lets share the tool's path, and
+ * the catalog row carries this line.
+ *
+ * Names and paths stay as they are: agents call `tools.openchamber(...)`
+ * straight from the session guidance, and both a renamed control tool and one
+ * with a namespace of other tools under it made them stop calling it.
+ */
+// A use the session guidance does not state lives here, where it is always
+// seen, and not only in the tool description the agent reads once it has
+// already picked the tool.
+const CODE_MODE_CATALOG_LINES = {
+  openchamber: 'OpenChamber projects, sessions and worktrees: dispatch a session, link a PR, list models, move this session into a worktree (it can help when the checkout looks busy; ask unless the request already calls for separate work)',
+  openchamber_schedule: 'Scheduled tasks: prompts OpenChamber runs on a schedule',
+  openchamber_web: "OpenChamber's browser panel, to check your work by looking at it: open a page, read it, click and type",
+  openchamber_memory: 'Memory that persists across sessions',
+  openchamber_knowledge: "The project's notes, todos and plans. Add a todo when asked or when you stop with work left",
+  openchamber_notify: 'Notify the user outside the chat: when long work finishes and they have likely stepped away, when you are blocked on them, or when they asked to be told',
+  openchamber_usage: 'Provider usage limits and reset times. Read it when the user asks about limits or usage, or when picking a model for work depends on them; never poll',
 };
 
 /**
@@ -564,8 +723,13 @@ ${answers ? ANSWER_WAIT_SETUP : ''}
  */
 const OPENCODE_TOOLS_REPLACED_BY_CONTROL = ['opencode_worktree_create', 'opencode_models'];
 
-const createPluginSource = ({ includeControl, includeSchedule, includeWeb, includeMemory, includeKnowledge, includeNotify, includeRender, codeMode }) => {
+const createPluginSource = ({ includeControl, includeSchedule, includeWeb, includeMemory, includeKnowledge, includeNotify, includeRender, includeImage, includeSecret, includeUsage, includeWorkflow }) => {
   const entries = [];
+  const included = { openchamber: includeControl, openchamber_schedule: includeSchedule, openchamber_web: includeWeb, openchamber_memory: includeMemory, openchamber_knowledge: includeKnowledge, openchamber_notify: includeNotify, openchamber_usage: includeUsage };
+  for (const [name, description] of Object.entries(CODE_MODE_CATALOG_LINES)) {
+    if (included[name]) entries.push(`    tools.namespace(${JSON.stringify({ name, description })})
+`);
+  }
   if (includeControl) {
     entries.push(`    for (const id of ${JSON.stringify(OPENCODE_TOOLS_REPLACED_BY_CONTROL)}) tools.remove(id)
 `);
@@ -576,7 +740,7 @@ const createPluginSource = ({ includeControl, includeSchedule, includeWeb, inclu
       description: CONTROL_TOOL_DESCRIPTION,
       definitions: OPENCHAMBER_AGENT_TOOL_ACTION_DEFINITIONS,
       parameters: CONTROL_PARAMETER_PROPERTIES,
-      codeMode,
+      codeMode: true,
     }));
   }
   if (includeSchedule) {
@@ -585,7 +749,7 @@ const createPluginSource = ({ includeControl, includeSchedule, includeWeb, inclu
       description: SCHEDULE_TOOL_DESCRIPTION,
       definitions: OPENCHAMBER_SCHEDULE_ACTION_DEFINITIONS,
       parameters: SCHEDULE_PARAMETER_PROPERTIES,
-      codeMode,
+      codeMode: true,
     }));
   }
   if (includeWeb) {
@@ -594,7 +758,7 @@ const createPluginSource = ({ includeControl, includeSchedule, includeWeb, inclu
       description: WEB_TOOL_DESCRIPTION,
       definitions: OPENCHAMBER_WEB_ACTION_DEFINITIONS,
       parameters: WEB_PARAMETER_PROPERTIES,
-      codeMode,
+      codeMode: true,
     }));
   }
   if (includeMemory) {
@@ -603,7 +767,7 @@ const createPluginSource = ({ includeControl, includeSchedule, includeWeb, inclu
       description: MEMORY_TOOL_DESCRIPTION,
       definitions: OPENCHAMBER_MEMORY_ACTION_DEFINITIONS,
       parameters: MEMORY_PARAMETER_PROPERTIES,
-      codeMode,
+      codeMode: true,
     }));
   }
   if (includeKnowledge) {
@@ -612,7 +776,7 @@ const createPluginSource = ({ includeControl, includeSchedule, includeWeb, inclu
       description: KNOWLEDGE_TOOL_DESCRIPTION,
       definitions: OPENCHAMBER_KNOWLEDGE_ACTION_DEFINITIONS,
       parameters: KNOWLEDGE_PARAMETER_PROPERTIES,
-      codeMode,
+      codeMode: true,
     }));
   }
   if (includeNotify) {
@@ -621,7 +785,7 @@ const createPluginSource = ({ includeControl, includeSchedule, includeWeb, inclu
       description: NOTIFY_TOOL_DESCRIPTION,
       definitions: OPENCHAMBER_NOTIFY_ACTION_DEFINITIONS,
       parameters: NOTIFY_PARAMETER_PROPERTIES,
-      codeMode,
+      codeMode: true,
     }));
   }
   if (includeRender) {
@@ -635,7 +799,59 @@ const createPluginSource = ({ includeControl, includeSchedule, includeWeb, inclu
       // script, the call is only an entry in execute's list, so the page
       // never showed and an answer had no call to reach.
       codeMode: false,
-      answers: true,
+      answers: { waitsWhen: 'args.awaitAnswer === true', closedInChatNote: RENDER_PAGE_CLOSED_IN_CHAT_NOTE },
+    }));
+  }
+  if (includeSecret) {
+    entries.push(createToolEntry({
+      name: 'openchamber_secret',
+      description: SECRET_TOOL_DESCRIPTION,
+      definitions: OPENCHAMBER_SECRET_ACTION_DEFINITIONS,
+      parameters: SECRET_PARAMETER_PROPERTIES,
+      // Never behind Code Mode, like render: the chat draws the card from
+      // this tool's own call, and the answer has to reach that call.
+      codeMode: false,
+      answers: { waitsWhen: 'true', closedInChatNote: SECRET_REQUEST_CLOSED_IN_CHAT_NOTE },
+    }));
+  }
+  if (includeImage) {
+    entries.push(createToolEntry({
+      name: 'openchamber_image',
+      description: IMAGE_TOOL_DESCRIPTION,
+      definitions: OPENCHAMBER_IMAGE_ACTION_DEFINITIONS,
+      parameters: IMAGE_PARAMETER_PROPERTIES,
+      // Never behind Code Mode, like render: the chat draws the images from
+      // this tool's own call, which an execute script would hide.
+      codeMode: false,
+    }));
+  }
+  if (includeUsage) {
+    entries.push(createToolEntry({
+      name: 'openchamber_usage',
+      description: USAGE_TOOL_DESCRIPTION,
+      definitions: OPENCHAMBER_USAGE_ACTION_DEFINITIONS,
+      parameters: USAGE_PARAMETER_PROPERTIES,
+      codeMode: true,
+    }));
+  }
+  if (includeWorkflow) {
+    entries.push(createToolEntry({
+      name: 'openchamber_workflow',
+      description: WORKFLOW_TOOL_DESCRIPTION,
+      definitions: OPENCHAMBER_WORKFLOW_ACTION_DEFINITIONS,
+      parameters: WORKFLOW_PARAMETER_PROPERTIES,
+      // Never behind Code Mode, like render: the chat draws the run's card
+      // from this tool's own call, which an execute script would hide.
+      codeMode: false,
+    }));
+    entries.push(createToolEntry({
+      name: WORKFLOW_ANSWER_TOOL,
+      description: WORKFLOW_ANSWER_TOOL_DESCRIPTION,
+      definitions: OPENCHAMBER_WORKFLOW_ANSWER_ACTION_DEFINITIONS,
+      parameters: WORKFLOW_ANSWER_PARAMETER_PROPERTIES,
+      // Direct: only the sessions that allow it see it, and the prompt that
+      // asks for it names it.
+      codeMode: false,
     }));
   }
 
@@ -654,7 +870,8 @@ const createPluginSource = ({ includeControl, includeSchedule, includeWeb, inclu
   }
 }
 
-// Session id -> abort controllers of the calls whose page waits for an answer.
+// Session id -> abort controllers of the calls that wait for the user's answer
+// (a page, or a secret card).
 const pagesWaitingForChat = new Map()
 
 export default {
@@ -662,7 +879,7 @@ export default {
   setup: async (ctx) => {
     exemptCallbackFromProxy()
     await ctx.tool.transform((tools) => {
-${entries.join('')}    })${includeRender ? `
+${entries.join('')}    })${includeRender || includeSecret ? `
     await ctx.session.hook("prompt", (event) => {
       for (const controller of pagesWaitingForChat.get(event.sessionID) ?? []) controller.abort()
     })` : ''}
@@ -709,13 +926,13 @@ export const createAgentToolRuntime = (dependencies) => {
    * change while it runs, so the source on disk always matches the settings —
    * the running OpenCode reloads the directory it already has configured.
    */
-  const materializePlugin = async ({ includeControl = true, includeSchedule = false, includeWeb = true, includeMemory = true, includeKnowledge = false, includeNotify = false, includeRender = false, codeMode = false } = {}) => {
-    if (!includeControl && !includeSchedule && !includeWeb && !includeMemory && !includeKnowledge && !includeNotify && !includeRender) {
+  const materializePlugin = async ({ includeControl = true, includeSchedule = false, includeWeb = true, includeMemory = true, includeKnowledge = false, includeNotify = false, includeRender = false, includeImage = false, includeSecret = false, includeUsage = false, includeWorkflow = false } = {}) => {
+    if (!includeControl && !includeSchedule && !includeWeb && !includeMemory && !includeKnowledge && !includeNotify && !includeRender && !includeImage && !includeSecret && !includeUsage && !includeWorkflow) {
       throw new Error('At least one OpenChamber managed tool must be enabled to inject the plugin');
     }
     await fsPromises.mkdir(pluginDirectory, { recursive: true });
     await fsPromises.writeFile(pluginManifestPath, PLUGIN_PACKAGE_JSON, { mode: 0o600 });
-    await fsPromises.writeFile(pluginPath, createPluginSource({ includeControl, includeSchedule, includeWeb, includeMemory, includeKnowledge, includeNotify, includeRender, codeMode }), { mode: 0o600 });
+    await fsPromises.writeFile(pluginPath, createPluginSource({ includeControl, includeSchedule, includeWeb, includeMemory, includeKnowledge, includeNotify, includeRender, includeImage, includeSecret, includeUsage, includeWorkflow }), { mode: 0o600 });
     return pluginDirectory;
   };
 

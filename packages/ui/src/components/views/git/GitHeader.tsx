@@ -43,6 +43,7 @@ import { useSourceControlAuthStore } from '@/stores/useSourceControlAuthStore';
 import { openExternalUrl } from '@/lib/url';
 import { useToolbarFit } from '@/components/views/useDiffToolbarFit';
 import { GIT_PANEL_HEADER_FIT } from './gitPanelHeaderFit';
+import { SpaceApplyButton } from '@/components/session/spaces/SpaceApplyButton';
 
 type SyncAction = 'fetch' | 'pull' | 'sync' | 'publish' | null;
 
@@ -88,9 +89,9 @@ interface GitHeaderProps {
   /** The chain the branch's change is in, as its status names it (hosts that create changes by pushing for review). */
   pullRequestStack?: PullRequestStack | null;
   onOpenPullRequest?: () => void;
-  // Nested repository picker: shown when the Git tab's root is not a
-  // repository, or is one with no commits yet, and has repositories nested
-  // inside it. Options are absolute repository paths; `repositoryRoot` is the
+  // Nested repository picker: shown when the Git tab's root has repositories
+  // nested inside it (submodules included), whether or not the root is one
+  // itself. Options are absolute repository paths; `repositoryRoot` is the
   // root those paths are relative to.
   repositoryOptions?: string[];
   selectedRepository?: string | null;
@@ -131,14 +132,15 @@ interface IdentityIconProps {
   icon?: string | null;
   className?: string;
   colorToken?: string | null;
+  quiet?: boolean;
 }
 
-const IdentityIcon: React.FC<IdentityIconProps> = ({ icon, className, colorToken }) => {
+const IdentityIcon: React.FC<IdentityIconProps> = ({ icon, className, colorToken, quiet = false }) => {
   // Identities made from a connected account carry the provider's mark: their icon key is the provider id.
   const providers = useSourceControlProviderRegistry((state) => state.byId);
   const iconName = IDENTITY_ICON_MAP[icon ?? 'branch'];
   const provider = !iconName && icon ? providers.get(icon) : undefined;
-  const style = { color: getIdentityColor(colorToken) };
+  const style = quiet ? undefined : { color: getIdentityColor(colorToken) };
   if (provider) {
     return (
       <span className="inline-flex shrink-0" style={style}>
@@ -182,6 +184,8 @@ interface IdentityDropdownProps {
   menuAlign?: 'start' | 'end';
   /** Called when the menu opens, so connected accounts can be re-read before choosing. */
   onOpen?: () => void;
+  /** The trigger leaves out the identity's colour; the menu keeps it. */
+  quiet?: boolean;
 }
 
 export const IdentityDropdown: React.FC<IdentityDropdownProps> = ({
@@ -196,6 +200,7 @@ export const IdentityDropdown: React.FC<IdentityDropdownProps> = ({
   triggerClassName,
   menuAlign = 'end',
   onOpen,
+  quiet = false,
 }) => {
   const { t } = useI18n();
   const isDisabled = isApplying || identities.length === 0;
@@ -209,7 +214,7 @@ export const IdentityDropdown: React.FC<IdentityDropdownProps> = ({
               variant="ghost"
               size="sm"
               className={cn('min-w-0 max-w-[15rem] justify-start gap-1.5 px-2 py-1 typography-ui-label', triggerClassName)}
-              style={{ color: getIdentityColor(activeProfile?.color) }}
+              style={quiet ? undefined : { color: getIdentityColor(activeProfile?.color) }}
               disabled={isDisabled}
               aria-label={t('gitView.header.identityTooltip')}
             >
@@ -219,7 +224,8 @@ export const IdentityDropdown: React.FC<IdentityDropdownProps> = ({
                 <IdentityIcon
                   icon={activeProfile?.icon}
                   colorToken={activeProfile?.color}
-                  className="size-4"
+                  quiet={quiet}
+                  className={cn('size-4', quiet && 'text-muted-foreground')}
                 />
               )}
               {!iconOnly && (
@@ -611,6 +617,7 @@ export const GitHeader: React.FC<GitHeaderProps> = ({
         <ContextPanelHeaderToolbar>
           <div ref={panelToolbarRef} className="flex min-w-0 flex-1 items-center gap-2 pe-1">
             {branchControls}
+            <SpaceApplyButton directory={directory} />
             {managementButtons}
             <div className="shrink-0">{syncButtons}</div>
           </div>
@@ -642,6 +649,7 @@ export const GitHeader: React.FC<GitHeaderProps> = ({
         {upstreamStatusPill ? (
           <div className="min-w-0 shrink">{upstreamStatusPill}</div>
         ) : null}
+        <SpaceApplyButton directory={directory} />
         {managementButtons}
         <div className="shrink-0">{syncButtons}</div>
       </div>

@@ -1,18 +1,12 @@
 import React from 'react';
 import { CodeMirrorEditor } from '@/components/ui/CodeMirrorEditor';
-import { PreviewToggleButton } from './PreviewToggleButton';
 import { SimpleMarkdownRenderer } from '@/components/chat/MarkdownRenderer';
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
+import { OverlayScrollbar } from '@/components/ui/OverlayScrollbar';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
-import { Button } from '@/components/ui/button';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
-import { buildCodeMirrorCommentWidgets, FilePreviewCommentMenu, normalizeLineRange, useInlineCommentController } from '@/components/comments';
+import { ActionToolbar } from '@/components/ui/action-toolbar';
+import { DropdownMenuItem } from '@/components/ui/dropdown-menu';
+import { buildCodeMirrorCommentWidgets, FilePreviewCommentMenu, normalizeLineRange, useInlineCommentController, useLineNumberDragSelection } from '@/components/comments';
 
 import { useDeviceInfo } from '@/lib/device';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
@@ -38,8 +32,8 @@ import { observeProjectContext } from '@/lib/projectContextSync';
 import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
 import { useProjectContextStore } from '@/stores/useProjectContextStore';
 import { createWorktreeSessionForNewBranch } from '@/lib/worktreeSessionCreator';
-import { TodoSendDialog, type TodoSendExecution } from '@/components/session/TodoSendDialog';
-import { Icon } from "@/components/icon/Icon";
+import { TodoSendDialog } from '@/components/session/TodoSendDialog';
+import { resolveExecutionForDirectory, type TodoSendExecution } from '@/components/session/todoSendExecution';
 import { useMessageTTS } from '@/hooks/useMessageTTS';
 import { toast } from '@/components/ui';
 import { loadMagicPrompts, type MagicPromptSnapshot } from '@/lib/magicPrompts';
@@ -48,6 +42,10 @@ import { ContextPanelHeaderToolbar } from '@/components/layout/contextPanelHeade
 import { useInContextPanelHeader } from '@/components/layout/contextPanelHeaderSlotContext';
 import { cn } from '@/lib/utils';
 import { useMarkdownLocalAssets } from './files/previews/useMarkdownLocalAssets';
+import { watchFileOnScreen } from '@/lib/watchedFiles';
+
+/** The open plan's check while OpenCode watches its file: only for a watch lost on an OpenCode restart. */
+const WATCHED_PLAN_POLL_MS = 30_000;
 
 type PlanViewProps = {
   /** False while the panel holding the view is closed: nothing to keep fresh. */
@@ -265,20 +263,6 @@ export const PlanView: React.FC<PlanViewProps> = ({ visible = true, savedProject
       // ignore
     }
   }, []);
-  const isSelectingRef = React.useRef(false);
-  const selectionStartRef = React.useRef<number | null>(null);
-  const [isDragging, setIsDragging] = React.useState(false);
-
-  React.useEffect(() => {
-    const handleGlobalMouseUp = () => {
-      isSelectingRef.current = false;
-      selectionStartRef.current = null;
-      setIsDragging(false);
-    };
-    document.addEventListener('mouseup', handleGlobalMouseUp);
-    return () => document.removeEventListener('mouseup', handleGlobalMouseUp);
-  }, []);
-
   const extractSelectedCode = React.useCallback((text: string, range: SelectedLineRange): string => {
     const lines = text.split('\n');
     const startLine = Math.max(1, range.start);
@@ -309,6 +293,13 @@ export const PlanView: React.FC<PlanViewProps> = ({ visible = true, savedProject
     deleteDraft,
   } = commentController;
 
+  const { isDragging, lineNumbersConfig, isDragReleaseClick } = useLineNumberDragSelection({
+    lineSelection,
+    setLineSelection,
+    onClear: cancel,
+    isMobile,
+  });
+
   React.useEffect(() => {
     setLineSelection(null);
     reset();
@@ -327,8 +318,9 @@ export const PlanView: React.FC<PlanViewProps> = ({ visible = true, savedProject
     if (rangeOverride) {
       setLineSelection(rangeOverride);
     }
-    saveComment(textToSave, rangeOverride ?? lineSelection ?? undefined);
-    setLineSelection(null);
+    const saved = saveComment(textToSave, rangeOverride ?? lineSelection ?? undefined);
+    if (saved) setLineSelection(null);
+    return saved;
   }, [lineSelection, saveComment]);
 
   React.useEffect(() => {
@@ -339,6 +331,7 @@ export const PlanView: React.FC<PlanViewProps> = ({ visible = true, savedProject
     }
 
     const handleClickOutside = (e: MouseEvent) => {
+      if (isDragReleaseClick()) return;
       const target = e.target as HTMLElement;
       if (
         target.closest('[data-comment-card="true"]') ||
@@ -365,7 +358,7 @@ export const PlanView: React.FC<PlanViewProps> = ({ visible = true, savedProject
       window.clearTimeout(timeoutId);
       document.removeEventListener('click', handleClickOutside);
     };
-  }, [cancel, commentText, editingDraftId, isMobile, lineSelection]);
+  }, [cancel, commentText, editingDraftId, isDragReleaseClick, isMobile, lineSelection]);
 
   const editorFontSize = useUIStore((state) => state.editorFontSize);
 
@@ -511,8 +504,8 @@ export const PlanView: React.FC<PlanViewProps> = ({ visible = true, savedProject
   // a later edit starts from it instead of writing the old document back over
   // it. Unsaved edits win: the next save replaces the agent's version, the way
   // typing in a note does. A save through the API announces itself; a file
-  // edit does not, so the open plan also checks for one every two seconds, as
-  // the file panel does for open files.
+  // edit does not, so the open plan also watches or polls its file, as the
+  // file panel does for open files.
   React.useEffect(() => {
     if (!visible || !savedPlanProjectRef || !savedPlanId || !savedPlanKey || loadedProjectPlanId !== savedPlanId) return;
     const doc = docRef.current;
@@ -534,23 +527,47 @@ export const PlanView: React.FC<PlanViewProps> = ({ visible = true, savedProject
       },
     });
     let polling = false;
+    // A change reported while a check runs gets a check of its own after it.
+    let pollAgain = false;
     const poll = async () => {
-      if (polling || document.visibilityState === 'hidden') return;
+      if (document.visibilityState === 'hidden') return;
+      if (polling) {
+        pollAgain = true;
+        return;
+      }
       polling = true;
       try {
         await poller.poll();
       } finally {
         polling = false;
+        if (pollAgain) {
+          pollAgain = false;
+          void poll();
+        }
       }
     };
     const release = observeProjectContext(savedPlanProjectRef, poll);
-    const interval = window.setInterval(() => { void poll(); }, 2000);
-    return () => {
+    let interval = window.setInterval(() => { void poll(); }, 2000);
+    // A plan kept in the repository is watched by OpenCode, so its change
+    // event starts the check and the poll only covers a watch lost on an
+    // OpenCode restart. A plan in OpenChamber's own data folder keeps polling.
+    const watch = loadedProjectPlanPath
+      ? watchFileOnScreen(savedPlanProjectRef.path, loadedProjectPlanPath, () => { void poll(); })
+      : null;
+    let stopped = false;
+    void watch?.watching.then((watching) => {
+      if (!watching || stopped) return;
       window.clearInterval(interval);
+      interval = window.setInterval(() => { void poll(); }, WATCHED_PLAN_POLL_MS);
+    });
+    return () => {
+      stopped = true;
+      window.clearInterval(interval);
+      watch?.stop();
       release();
       poller.dispose();
     };
-  }, [loadedProjectPlanId, savedPlanId, savedPlanKey, savedPlanProjectRef, saveQueue, visible]);
+  }, [loadedProjectPlanId, loadedProjectPlanPath, savedPlanId, savedPlanKey, savedPlanProjectRef, saveQueue, visible]);
 
   // Synchronous buffer tracking: if an edit and an unmount land in the same
   // batch, the passive content effect would never run and a flush would save
@@ -603,7 +620,7 @@ export const PlanView: React.FC<PlanViewProps> = ({ visible = true, savedProject
   }, [onNavigatedToChat, setSessionSwitcherOpen]);
 
   const handleConfirmPlanSend = React.useCallback(
-    async (execution: TodoSendExecution) => {
+    async (dialogExecution: TodoSendExecution) => {
       // A saved plan sends against its own project — the one it is stored
       // under — not against whatever directory the viewer is currently in.
       const sendTargetProject = savedPlanProjectRef ?? currentProjectRef;
@@ -656,6 +673,7 @@ export const PlanView: React.FC<PlanViewProps> = ({ visible = true, savedProject
 
         let sessionId: string | null = null;
         let directoryHint: string | null = sendTargetProject.path;
+        let execution = dialogExecution;
 
         if (pendingPlanSend.target === 'worktree') {
           if (!canCreateWorktree) {
@@ -667,6 +685,7 @@ export const PlanView: React.FC<PlanViewProps> = ({ visible = true, savedProject
           }
           sessionId = created.id;
           directoryHint = created.directory;
+          execution = await resolveExecutionForDirectory(created.directory, dialogExecution);
         } else {
           const sessionResult = await createSession(undefined, sendTargetProject.path, undefined, {
             model: { providerID: execution.providerID, id: execution.modelID, variant: execution.variant || undefined },
@@ -770,147 +789,109 @@ export const PlanView: React.FC<PlanViewProps> = ({ visible = true, savedProject
     });
   }, [commentText, deleteDraft, editingDraftId, handleCancelComment, handleSaveComment, isDragging, lineSelection, planFileDrafts, planFileLabel, setCommentText, startEdit]);
 
+  // Improve and implement each open the same choice of where the plan goes.
+  const sendMenu = (action: 'improve' | 'implement') => (
+    <>
+      <DropdownMenuItem
+        onClick={() => setPendingPlanSend({ action, target: 'session' })}
+        disabled={isManagedChatPlan}
+      >
+        {t('planView.actions.sendToNewSession')}
+      </DropdownMenuItem>
+      <DropdownMenuItem
+        onClick={() => setPendingPlanSend({ action, target: 'worktree' })}
+        disabled={!canCreateWorktree}
+      >
+        {t('planView.actions.sendToNewWorktreeSession')}
+      </DropdownMenuItem>
+    </>
+  );
+
+  const copyPlanContents = async () => {
+    const result = await copyTextToClipboard(content);
+    if (!result.ok) return;
+    setCopiedContent(true);
+    if (copiedContentTimeoutRef.current !== null) {
+      window.clearTimeout(copiedContentTimeoutRef.current);
+    }
+    copiedContentTimeoutRef.current = window.setTimeout(() => {
+      setCopiedContent(false);
+    }, 1200);
+  };
+
   return (
     <div className="relative flex h-full min-h-0 min-w-0 w-full flex-col overflow-hidden bg-background">
       <ContextPanelHeaderToolbar>
-      <div className={cn('flex min-w-0 items-center gap-2', inPanelHeader ? 'flex-1 py-1 pe-1' : 'border-b border-border/40 px-3 py-1.5 flex-shrink-0')}>
+      <div className={cn('flex min-w-0 items-center gap-2', inPanelHeader ? 'flex-1 py-1 pe-1' : 'border-b border-edge-muted px-3 py-1.5 flex-shrink-0')}>
         {leading}
-        <div className="min-w-0 flex-1">
-          <div className="typography-ui-label font-medium truncate">{parsedTitle}</div>
-          {loadError ? (
-            <div className="typography-micro text-[color:var(--status-error)] truncate" title={loadError}>
-              {t('planView.error.loadFailed')}
+        <ActionToolbar
+          className="flex-1"
+          start={(
+            <div className="min-w-0 flex-1">
+              <div className="typography-ui-label font-medium truncate">{parsedTitle}</div>
+              {loadError ? (
+                <div className="typography-micro text-[color:var(--status-error)] truncate" title={loadError}>
+                  {t('planView.error.loadFailed')}
+                </div>
+              ) : null}
+              {saveError ? (
+                <div className="typography-micro text-[color:var(--status-error)] truncate" title={saveError}>
+                  {t('planView.error.saveFailed')}
+                </div>
+              ) : null}
             </div>
-          ) : null}
-          {saveError ? (
-            <div className="typography-micro text-[color:var(--status-error)] truncate" title={saveError}>
-              {t('planView.error.saveFailed')}
-            </div>
-          ) : null}
-        </div>
-        {hasDocument ? (
-          <div className="flex items-center gap-1">
-            <DropdownMenu>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <DropdownMenuTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-5 w-5 p-0"
-                      aria-label={t('planView.actions.improvePlanAria')}
-                      disabled={!content.trim() || isManagedChatPlan}
-                    >
-                      <Icon name="loop-right-ai" className="size-4" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                </TooltipTrigger>
-                <TooltipContent sideOffset={8}>{t('planView.actions.improve')}</TooltipContent>
-              </Tooltip>
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem
-                  onClick={() => setPendingPlanSend({ action: 'improve', target: 'session' })}
-                  disabled={isManagedChatPlan}
-                >
-                  {t('planView.actions.sendToNewSession')}
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  onClick={() => setPendingPlanSend({ action: 'improve', target: 'worktree' })}
-                  disabled={!canCreateWorktree}
-                >
-                  {t('planView.actions.sendToNewWorktreeSession')}
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-            <DropdownMenu>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <DropdownMenuTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-5 w-5 p-0"
-                      aria-label={t('planView.actions.implementPlanAria')}
-                      disabled={!content.trim() || isManagedChatPlan}
-                    >
-                      <Icon name="code-ai" className="size-4" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                </TooltipTrigger>
-                <TooltipContent sideOffset={8}>{t('planView.actions.implement')}</TooltipContent>
-              </Tooltip>
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem
-                  onClick={() => setPendingPlanSend({ action: 'implement', target: 'session' })}
-                  disabled={isManagedChatPlan}
-                >
-                  {t('planView.actions.sendToNewSession')}
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  onClick={() => setPendingPlanSend({ action: 'implement', target: 'worktree' })}
-                  disabled={!canCreateWorktree}
-                >
-                  {t('planView.actions.sendToNewWorktreeSession')}
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-            <PreviewToggleButton
-              currentMode={mdViewMode}
-              onToggle={() => saveMdViewMode(mdViewMode === 'preview' ? 'edit' : 'preview')}
-            />
-            {mdViewMode === 'preview' && showMessageTTSButtons && (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-5 w-5 p-0"
-                    aria-label={isTTSPlaying ? t('planView.tts.stopSpeaking') : t('planView.tts.readAloud')}
-                    onClick={() => {
-                      if (isTTSPlaying) {
-                        stopTTS();
-                      } else if (content.trim()) {
-                        void playTTS(content);
-                      }
-                    }}
-                  >
-                    <Icon name="volume-up" className={isTTSPlaying ? 'h-4 w-4 text-[var(--primary-text)]' : 'h-4 w-4'} />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent sideOffset={8}>
-                  {isTTSPlaying ? t('planView.tts.stopSpeaking') : t('planView.tts.readAloud')}
-                </TooltipContent>
-              </Tooltip>
-            )}
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={async () => {
-                const result = await copyTextToClipboard(content);
-                if (result.ok) {
-                  setCopiedContent(true);
-                  if (copiedContentTimeoutRef.current !== null) {
-                    window.clearTimeout(copiedContentTimeoutRef.current);
+          )}
+          groups={hasDocument ? [
+            [{
+              id: 'mode',
+              label: t('documentToolbar.preview'),
+              icon: 'eye',
+              pressed: mdViewMode === 'preview',
+              onSelect: () => saveMdViewMode(mdViewMode === 'preview' ? 'edit' : 'preview'),
+              pinned: true,
+            }],
+            [
+              {
+                id: 'improve',
+                label: t('planView.actions.improve'),
+                icon: 'loop-right-ai',
+                disabled: !content.trim() || isManagedChatPlan,
+                menu: sendMenu('improve'),
+              },
+              {
+                id: 'implement',
+                label: t('planView.actions.implement'),
+                icon: 'code-ai',
+                disabled: !content.trim() || isManagedChatPlan,
+                menu: sendMenu('implement'),
+              },
+            ],
+            [
+              // Reads the plan's text, so it works in either mode.
+              showMessageTTSButtons && {
+                id: 'read-aloud',
+                label: isTTSPlaying ? t('planView.tts.stopSpeaking') : t('planView.tts.readAloud'),
+                icon: 'volume-up',
+                iconClassName: isTTSPlaying ? 'text-[var(--primary-text)]' : undefined,
+                onSelect: () => {
+                  if (isTTSPlaying) {
+                    stopTTS();
+                  } else if (content.trim()) {
+                    void playTTS(content);
                   }
-                  copiedContentTimeoutRef.current = window.setTimeout(() => {
-                    setCopiedContent(false);
-                  }, 1200);
-                } else {
-                  // ignored
-                }
-              }}
-              className="h-5 w-5 p-0"
-              title={t('planView.actions.copyPlanContents')}
-              aria-label={t('planView.actions.copyPlanContents')}
-            >
-              {copiedContent ? (
-                <Icon name="check" className="h-4 w-4 text-[color:var(--status-success)]" />
-              ) : (
-                <Icon name="clipboard" className="h-4 w-4" />
-              )}
-            </Button>
-          </div>
-        ) : null}
+                },
+              },
+              {
+                id: 'copy-contents',
+                label: t('planView.actions.copyPlanContents'),
+                icon: 'file-copy',
+                done: copiedContent,
+                onSelect: () => void copyPlanContents(),
+              },
+            ],
+          ] : []}
+          fold
+        />
       </div>
       </ContextPanelHeaderToolbar>
 
@@ -936,7 +917,8 @@ export const PlanView: React.FC<PlanViewProps> = ({ visible = true, savedProject
             <div className="relative h-full">
               <div className="h-full">
                 {mdViewMode === 'preview' ? (
-                  <div className="h-full overflow-auto p-3" ref={setPreviewContainer}>
+                  <>
+                  <div className="overlay-scrollbar-target overlay-scrollbar-container h-full overflow-auto p-3" ref={setPreviewContainer}>
                     {/* Same comment-on-selection as a markdown file preview. */}
                     <FilePreviewCommentMenu
                       containerRef={previewRef}
@@ -956,6 +938,8 @@ export const PlanView: React.FC<PlanViewProps> = ({ visible = true, savedProject
                       <SimpleMarkdownRenderer content={content} documentAssets={markdownDocumentAssets} className="typography-markdown-body" frontmatter="properties" enableFileReferences={false} />
                     </ErrorBoundary>
                   </div>
+                  <OverlayScrollbar containerRef={previewRef} />
+                  </>
                 ) : (
                   <div className="relative h-full" ref={editorWrapperRef}>
                     <CodeMirrorEditor
@@ -973,71 +957,7 @@ export const PlanView: React.FC<PlanViewProps> = ({ visible = true, savedProject
                           end: Math.max(lineSelection.start, lineSelection.end),
                         }
                         : undefined}
-                      lineNumbersConfig={{
-                        domEventHandlers: {
-                          mousedown: (view, line, event) => {
-                            if (!(event instanceof MouseEvent)) return false;
-                            if (event.button !== 0) return false;
-                            event.preventDefault();
-                            const lineNumber = view.state.doc.lineAt(line.from).number;
-
-                            if (
-                              lineSelection &&
-                              !event.shiftKey &&
-                              Math.min(lineSelection.start, lineSelection.end) === lineNumber &&
-                              Math.max(lineSelection.start, lineSelection.end) === lineNumber
-                            ) {
-                              setLineSelection(null);
-                              cancel();
-                              isSelectingRef.current = false;
-                              selectionStartRef.current = null;
-                              setIsDragging(false);
-                              return true;
-                            }
-
-                            if (isMobile && lineSelection && !event.shiftKey) {
-                              const start = Math.min(lineSelection.start, lineSelection.end, lineNumber);
-                              const end = Math.max(lineSelection.start, lineSelection.end, lineNumber);
-                              setLineSelection({ start, end });
-                              isSelectingRef.current = false;
-                              selectionStartRef.current = null;
-                              setIsDragging(false);
-                              return true;
-                            }
-
-                            isSelectingRef.current = true;
-                            selectionStartRef.current = lineNumber;
-                            setIsDragging(true);
-
-                            if (lineSelection && event.shiftKey) {
-                              const start = Math.min(lineSelection.start, lineNumber);
-                              const end = Math.max(lineSelection.end, lineNumber);
-                              setLineSelection({ start, end });
-                            } else {
-                              setLineSelection({ start: lineNumber, end: lineNumber });
-                            }
-
-                            return true;
-                          },
-                          mouseover: (view, line, event) => {
-                            if (!(event instanceof MouseEvent)) return false;
-                            if (event.buttons !== 1) return false;
-                            if (!isSelectingRef.current || selectionStartRef.current === null) return false;
-                            const lineNumber = view.state.doc.lineAt(line.from).number;
-                            const start = Math.min(selectionStartRef.current, lineNumber);
-                            const end = Math.max(selectionStartRef.current, lineNumber);
-                            setLineSelection({ start, end });
-                            setIsDragging(true);
-                            return false;
-                          },
-                          mouseup: () => {
-                            isSelectingRef.current = false;
-                            selectionStartRef.current = null;
-                            setIsDragging(false);
-                            return false;
-                          },
-                        },
-                    }}
+                      lineNumbersConfig={lineNumbersConfig}
                   />
                 </div>
                 )}

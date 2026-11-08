@@ -361,7 +361,7 @@ describe('core-routes', () => {
     }
   });
 
-  it('lets only GET html-preview and extension-frame file reads past API auth; the grant in the path is checked by the owning route', async () => {
+  it('lets only GET html-preview, extension-frame file reads and MCP OAuth callbacks past API auth; the owning route checks the grant or state', async () => {
     const app = express();
     const requireAuth = vi.fn((_req, res) => res.status(401).json({ error: 'Unauthorized' }));
     registerAuthAndAccessRoutes(app, {
@@ -395,6 +395,7 @@ describe('core-routes', () => {
     app.get(/^\/api\/guest-files\/.+$/, (_req, res) => res.json({ reached: true }));
     app.post(/^\/api\/guest-files\/.+$/, (_req, res) => res.json({ reached: true }));
     app.post('/api/guests/panel/frame-grant', (_req, res) => res.json({ reached: true }));
+    app.get('/api/mcp/oauth/docs/callback', (_req, res) => res.json({ reached: true }));
 
     await request(app).get('/api/fs/preview/grant-1/repo/index.html').expect(200, { reached: true });
     await request(app).post('/api/fs/preview').send({ path: '/repo/index.html' }).expect(401);
@@ -405,7 +406,13 @@ describe('core-routes', () => {
     await request(app).get('/api/guest-files/grant-1').expect(401);
     await request(app).post('/api/guest-files/grant-1/index.html').expect(401);
     await request(app).post('/api/guests/panel/frame-grant').expect(401);
-    expect(requireAuth).toHaveBeenCalledTimes(6);
+    // An MCP sign-in callback arrives without a UI session, and only the exact
+    // GET shape is let through.
+    await request(app).get('/api/mcp/oauth/docs/callback?code=1&state=2').expect(200, { reached: true });
+    await request(app).get('/api/mcp/oauth/Docs/callback?code=1&state=2').expect(401);
+    await request(app).get('/api/mcp/oauth/docs/callback/extra').expect(401);
+    await request(app).post('/api/mcp/oauth/docs/callback').expect(401);
+    expect(requireAuth).toHaveBeenCalledTimes(9);
   });
 
   it('should probe loopback preview URLs and return ok: true for status codes 200-599', async () => {
@@ -835,6 +842,44 @@ describe('client auth routes', () => {
 
     const listedAfterPurge = await request(app).get('/api/client-auth/clients');
     expect(listedAfterPurge.body.clients).toHaveLength(0);
+  });
+
+  it('removes a revoked client\'s push registrations, and a failure leaves the revocation answered as done', async () => {
+    const app = express();
+    const dependencies = createDependencies();
+    const removeClientPushDevices = vi.fn(async () => {});
+    registerAuthAndAccessRoutes(app, { ...dependencies, removeClientPushDevices });
+    await request(app).post('/api/client-auth/clients').send({ label: 'Phone' });
+
+    removeClientPushDevices.mockRejectedValueOnce(new Error('disk full'));
+    const revoked = await request(app).delete('/api/client-auth/clients/client-1');
+
+    expect(revoked.status).toBe(200);
+    expect(revoked.body.revoked).toBe(true);
+    expect(removeClientPushDevices).toHaveBeenCalledWith(['client-1']);
+  });
+
+  it('keeps revoked rows when their push registrations cannot be removed', async () => {
+    const app = express();
+    const dependencies = createDependencies();
+    const removeClientPushDevices = vi.fn(async () => {});
+    registerAuthAndAccessRoutes(app, { ...dependencies, removeClientPushDevices });
+    app.use((error, _req, res, _next) => res.status(500).json({ error: error.message }));
+    await request(app).post('/api/client-auth/clients').send({ label: 'Revoked' });
+    await request(app).post('/api/client-auth/clients').send({ label: 'Active' });
+    await request(app).delete('/api/client-auth/clients/client-1');
+    removeClientPushDevices.mockClear();
+
+    removeClientPushDevices.mockRejectedValueOnce(new Error('disk full'));
+    const failed = await request(app).delete('/api/client-auth/clients');
+    expect(failed.status).toBe(500);
+    expect(removeClientPushDevices).toHaveBeenCalledWith(['client-1']);
+    expect(dependencies.testHooks.clients).toHaveLength(2);
+
+    const purged = await request(app).delete('/api/client-auth/clients');
+    expect(purged.status).toBe(200);
+    expect(purged.body.purged).toBe(1);
+    expect(dependencies.testHooks.clients.map((client) => client.id)).toEqual(['client-2']);
   });
 
   it('reports current connection candidates with server identity for paired devices', async () => {

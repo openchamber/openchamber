@@ -49,22 +49,26 @@ const DURATION_TICK_MS = 1000;
 const toError = (value: unknown): Error =>
     value instanceof Error ? value : new Error(String(value));
 
-const getDictationStartOptions = (): DictationStartOptions => {
+export const getDictationStartOptions = (): DictationStartOptions => {
     const state = useConfigStore.getState();
     const language = state.sttLanguage?.trim();
+    const correct = state.sttCorrectTranscript ? { correct: true } : {};
     if (state.sttProvider === 'openai-compatible') {
         return {
             provider: 'openai-compatible',
             ...(language ? { language } : {}),
+            ...correct,
             openaiCompatible: {
                 baseUrl: state.sttServerUrl,
                 model: state.sttModel,
+                endpointPath: state.sttEndpointPath || undefined,
             },
         };
     }
     return {
         provider: 'local',
         ...(language ? { language } : {}),
+        ...correct,
         localModel: state.sttLocalModel,
     };
 };

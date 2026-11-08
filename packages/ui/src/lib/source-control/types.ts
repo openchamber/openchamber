@@ -7,6 +7,12 @@ export interface SourceControlIdentity {
   provider: SourceControlProvider;
   /** Stable provider installation or host identifier, such as `github.com`. */
   instance: string;
+  /**
+   * The instance's separate SSH address, where its Git SSH host is not its web
+   * address (`SSH_DOMAIN`). Remotes there are recognised as this instance.
+   * Named apart from a repository's own `sshUrl` clone address.
+   */
+  instanceSshUrl?: string;
 }
 
 export interface SourceControlRepositoryEndpoint {
@@ -34,6 +40,11 @@ export interface SourceControlReadContext extends SourceControlIdentity {
   accountId: string;
   bindingRevision: number;
   primaryRemote: string;
+  /**
+   * Reads an item a link named wherever its repository is, with this account.
+   * The server honours it on reads only, so such a context changes nothing.
+   */
+  linked?: true;
 }
 
 export interface SourceControlProviderBinding extends SourceControlIdentity {
@@ -357,6 +368,9 @@ export interface ChangeRequest extends SourceControlIdentity {
   headProject?: Project | null;
   mergeable?: boolean | null;
   mergeableState?: string | null;
+  isInMergeQueue?: boolean;
+  mergeQueueEntry?: { state: string; position: number } | null;
+  autoMergeRequest?: { enabledAt: string; mergeMethod: string } | null;
   labels?: Label[];
   /** A review host's work-in-progress flag; `draft` carries the same meaning for gating. */
   workInProgress?: boolean;
@@ -691,7 +705,7 @@ export interface SourceControlMergeMutationResult {
    * merge queue, or still merging in the background (GitHub, a stack's lower
    * layers included). The PR's live state shows the outcome.
    */
-  outcome?: 'queued' | 'merging';
+  outcome?: 'queued' | 'merging' | 'auto-merge' | 'cancelled';
 }
 export interface SourceControlReadyMutationResult {
   ready: boolean;
@@ -719,6 +733,8 @@ export interface UpdateChangeRequestInput extends SourceControlMutationContext<S
 
 export interface MergeChangeRequestInput extends SourceControlMutationContext<SourceControlExistingMutationTarget> {
   method: MergeMethod;
+  /** GitHub only: remove from the queue or disable auto-merge. */
+  cancel?: boolean;
 }
 
 export type ReadyChangeRequestInput = SourceControlMutationContext<SourceControlExistingMutationTarget>;
@@ -739,7 +755,86 @@ export interface ThreadResolveInput extends SourceControlMutationContext<SourceC
   resolved: boolean;
 }
 
-export type ReviewVerdict = 'approve' | 'request-changes';
+/** `comment` publishes a review with no verdict: its draft comments and text. */
+export type ReviewVerdict = 'approve' | 'request-changes' | 'comment';
+
+/** Which side of a diff a review comment sits on. */
+export type ReviewCommentSide = 'old' | 'new';
+
+/** Where a comment goes in a review: lines of one side, or without `line` the whole file. */
+export type ReviewCommentPosition =
+  | { path: string; side: ReviewCommentSide; line: number; startLine?: number }
+  | { path: string; side?: never; line?: never; startLine?: never };
+
+/** A comment for the viewer's review draft. The target's `headSha` is the commit the lines are from. */
+export type ReviewCommentInput = SourceControlMutationContext<SourceControlExistingMutationTarget> & ReviewCommentPosition & {
+  body: string;
+};
+
+export interface ReviewCommentUpdateInput extends SourceControlMutationContext<SourceControlExistingMutationTarget> {
+  commentId: string;
+  body: string;
+}
+
+export interface ReviewCommentDeleteInput extends SourceControlMutationContext<SourceControlExistingMutationTarget> {
+  commentId: string;
+}
+
+export type ReviewDiscardInput = SourceControlMutationContext<SourceControlExistingMutationTarget>;
+
+export interface ReviewPerson {
+  login: string;
+  avatarUrl?: string;
+}
+
+/** An unpublished comment of the viewer's. `line` null: on the whole file. */
+export interface ReviewDraftComment {
+  id: string;
+  path: string;
+  side: ReviewCommentSide;
+  line: number | null;
+  startLine: number | null;
+  body: string;
+  author: ReviewPerson | null;
+}
+
+export interface ReviewThreadComment {
+  id: string;
+  body: string;
+  createdAt: string;
+  url: string;
+  author: ReviewPerson | null;
+}
+
+/** A published thread on current lines of the diff. `line` null: on the whole file. */
+export interface ReviewThread {
+  id: string;
+  path: string;
+  side: ReviewCommentSide;
+  line: number | null;
+  startLine: number | null;
+  resolved: boolean;
+  canReply: boolean;
+  canResolve: boolean;
+  comments: ReviewThreadComment[];
+}
+
+/**
+ * A change request's review as the diff draws it. The draft lives on the
+ * host, so one started on another device or by an agent reads the same.
+ */
+export interface ChangeRequestReviewState {
+  viewerIsAuthor: boolean;
+  headSha: string;
+  draft: { id: string; body: string; comments: ReviewDraftComment[] } | null;
+  threads: ReviewThread[];
+  /** More threads exist than one read returns. */
+  truncated: boolean;
+}
+
+export type ChangeRequestReviewStateResult =
+  | { connected: false }
+  | ({ connected: true } & ChangeRequestReviewState);
 
 /** The whole label set of a change request or an issue; an empty one clears it. */
 export interface SetLabelsInput extends SourceControlMutationContext<SourceControlExistingMutationTarget> {
@@ -756,6 +851,26 @@ export interface SetStateInput extends SourceControlMutationContext<SourceContro
   state: 'open' | 'closed';
 }
 
+/** Why a discussion is closed: answered or settled, no longer relevant, or a copy of another. */
+export type DiscussionCloseReason = 'resolved' | 'outdated' | 'duplicate';
+
+/** A comment on a discussion, or with `replyTo` (a comment's id) a reply in that comment's thread. */
+export interface DiscussionCommentInput extends CommentInput {
+  replyTo?: string;
+}
+
+/** Close a discussion for a reason, or reopen it. */
+export type SetDiscussionStateInput = SourceControlMutationContext<SourceControlExistingMutationTarget> & (
+  | { state: 'closed'; reason: DiscussionCloseReason }
+  | { state: 'open'; reason?: never }
+);
+
+/** Choose a comment as the discussion's answer (`answer: true`), or unchoose it. */
+export interface SetDiscussionAnswerInput extends SourceControlMutationContext<SourceControlExistingMutationTarget> {
+  commentId: string;
+  answer: boolean;
+}
+
 /**
  * A review: a verdict where the host reviews by verdicts, or votes on labels
  * (label name to value) where it reviews by votes. The target's `headSha` is
@@ -765,5 +880,6 @@ export type ReviewChangeRequestInput = SourceControlMutationContext<SourceContro
   body?: string;
 } & (
   | { verdict: ReviewVerdict; votes?: never }
-  | { votes: Record<string, number>; verdict?: never }
+  /** `publishDrafts`: send the review even with no votes, for its draft comments alone. */
+  | { votes: Record<string, number>; verdict?: never; publishDrafts?: boolean }
 );

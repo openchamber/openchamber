@@ -1,12 +1,12 @@
 import { z } from 'zod';
 import { sourceControlProviderIdSchema } from '@/lib/source-control/providers/descriptor';
-import type { IssueLiveSummary, ChangeRequestLiveSummary, TrackerLiveSummary } from '@/lib/api/types';
+import type { DiscussionLiveSummary, IssueLiveSummary, ChangeRequestLiveSummary, TrackerLiveSummary } from '@/lib/api/types';
 import { trackerProviderIdSchema } from '@/lib/trackers/descriptor';
 import { linearStateCategory } from '@/lib/trackers/legacyLinear';
 import { joinProjectPath } from '@/lib/source-control/projectPath';
 
 /**
- * A pull request, merge request, issue or tracker work item whose live state the server follows
+ * A pull request, merge request, issue, discussion or tracker work item whose live state the server follows
  * for this client. The key is the server's: `trackedItemKey` here and in
  * `packages/web/server/lib/tracked-items/items.js` must agree.
  */
@@ -16,7 +16,8 @@ import { joinProjectPath } from '@/lib/source-control/projectPath';
  * `provider` is any source-control provider id and `instance` its instance
  * (a host or an origin, as the provider names it).
  */
-export type TrackedThread<Kind extends 'pull' | 'issue' = 'pull' | 'issue'> = {
+export type TrackedThreadKind = 'pull' | 'issue' | 'discussion';
+export type TrackedThread<Kind extends TrackedThreadKind = TrackedThreadKind> = {
   provider: string;
   instance: string;
   kind: Kind;
@@ -27,7 +28,7 @@ export type TrackedThread<Kind extends 'pull' | 'issue' = 'pull' | 'issue'> = {
 };
 /** A tracker's work item (a Linear issue), named by its tracker id and its human identifier. */
 export type TrackedWorkItem = { provider: string; kind: 'work-item'; identifier: string };
-export type TrackedItem = TrackedThread<'pull'> | TrackedThread<'issue'> | TrackedWorkItem;
+export type TrackedItem = TrackedThread<'pull'> | TrackedThread<'issue'> | TrackedThread<'discussion'> | TrackedWorkItem;
 
 export const isTrackedWorkItem = (item: TrackedItem): item is TrackedWorkItem => item.kind === 'work-item';
 
@@ -64,6 +65,9 @@ const pullSummarySchema = z.object({
   base: z.string().optional(),
   mergeable: z.boolean().nullable(),
   mergeableState: z.string().nullable(),
+  isInMergeQueue: z.boolean().optional(),
+  mergeQueueEntry: z.object({ state: z.string(), position: z.number().int().nonnegative() }).nullish(),
+  autoMergeRequest: z.object({ enabledAt: z.string(), mergeMethod: z.string() }).nullish(),
   checks: checksSchema.nullable(),
 }) satisfies z.ZodType<ChangeRequestLiveSummary>;
 
@@ -74,6 +78,15 @@ const issueSummarySchema = z.object({
   title: z.string(),
   state: z.enum(['open', 'completed', 'not_planned']),
 }) satisfies z.ZodType<IssueLiveSummary>;
+
+const discussionSummarySchema = z.object({
+  owner: z.string(),
+  repo: z.string(),
+  number: z.number(),
+  title: z.string(),
+  state: z.enum(['open', 'resolved', 'outdated', 'duplicate']),
+  answered: z.boolean().nullable(),
+}) satisfies z.ZodType<DiscussionLiveSummary>;
 
 const workItemStateSchema = z.object({
   name: z.string(),
@@ -105,7 +118,7 @@ const trackedThreadSchema = z.object({
   owner: z.string(),
   repo: z.string().min(1),
   number: z.number().int().positive(),
-  kind: z.enum(['pull', 'issue']),
+  kind: z.enum(['pull', 'issue', 'discussion']),
   accountId: z.string().min(1).optional(),
 });
 // Records written before trackers had a `kind` are Linear issues: `{ provider: 'linear', identifier }`.
@@ -129,6 +142,7 @@ const trackedItemSchema = z.union([
 export type TrackedItemState =
   | { type: 'pull'; item: TrackedThread<'pull'>; state: ChangeRequestLiveSummary | null; fetchedAt: number }
   | { type: 'issue'; item: TrackedThread<'issue'>; state: IssueLiveSummary | null; fetchedAt: number }
+  | { type: 'discussion'; item: TrackedThread<'discussion'>; state: DiscussionLiveSummary | null; fetchedAt: number }
   | { type: 'work-item'; item: TrackedWorkItem; state: TrackerLiveSummary | null; fetchedAt: number };
 
 const recordSchema = z.object({ key: z.string(), item: trackedItemSchema, state: z.unknown(), fetchedAt: z.number() });
@@ -146,6 +160,11 @@ const toRecord = ({ key, item, state, fetchedAt }: z.infer<typeof recordSchema>)
     const summary = state === null ? null : pullSummarySchema.safeParse(state);
     if (summary && !summary.success) return null;
     return { key, record: { type: 'pull', item: { ...item, kind: 'pull' as const }, state: summary ? summary.data : null, fetchedAt } };
+  }
+  if (item.kind === 'discussion') {
+    const summary = state === null ? null : discussionSummarySchema.safeParse(state);
+    if (summary && !summary.success) return null;
+    return { key, record: { type: 'discussion', item: { ...item, kind: 'discussion' as const }, state: summary ? summary.data : null, fetchedAt } };
   }
   const summary = state === null ? null : issueSummarySchema.safeParse(state);
   if (summary && !summary.success) return null;

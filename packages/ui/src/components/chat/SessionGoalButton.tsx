@@ -153,7 +153,7 @@ export const SessionGoalObjectiveCounter: React.FC<SessionGoalObjectiveCounterPr
     <span
       className={cn(
         'flex-shrink-0 self-center typography-micro tabular-nums',
-        over ? 'text-[var(--status-error)]' : 'text-muted-foreground/70',
+        over ? 'text-[var(--status-error)]' : 'text-muted-foreground',
       )}
       aria-label={t('chat.goal.counter.aria')}
       title={t('chat.goal.counter.aria')}

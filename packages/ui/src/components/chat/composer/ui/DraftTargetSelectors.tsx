@@ -5,14 +5,17 @@
  * select; mobile uses bottom sheets, because a native select over a
  * keyboard-resized viewport is unusable. Both render the same options from
  * the same hook, and both offer creating a worktree inline so the user does
- * not have to leave the draft to make one.
+ * not have to leave the draft to make one. The project's isolated spaces are
+ * a section of their own, by name, with the way to make a new one under it.
  */
 
 import React from 'react';
+import { useWidthMorph } from '@/lib/motion/useSizeMorph';
 
 import { Icon } from '@/components/icon/Icon';
-import { Input } from '@/components/ui/input';
+import type { IconName } from '@/components/icon/icons';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
+import { MobileSheetRow, MobileSheetSearch, MobileSheetSection } from '@/components/ui/MobileSheetList';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Popover } from '@base-ui/react/popover';
@@ -41,12 +44,16 @@ import { useI18n } from '@/lib/i18n';
 import { matchesRankQuery, rankByQuery } from '@/lib/search/fuzzySearch';
 import { PROJECT_ICON_MAP, resolveProjectColor, ProjectIconImage } from '@/lib/projectMeta';
 import { createWorktreeDraft } from '@/lib/worktreeSessionCreator';
-import { shortcutRegistry } from '@/lib/shortcuts';
+import { formatShortcutForDisplay, getEffectiveShortcutCombo, shortcutRegistry } from '@/lib/shortcuts';
+import { TooltipLabelWithShortcut } from '@/components/ui/action-toolbar';
+import { useUIStore } from '@/stores/useUIStore';
 import { useKeybind } from '@/hooks/useKeybind';
 import type { Theme } from '@/types/theme';
+import { isSpaceDirectory } from '@/lib/spaces/space-route';
 import { normalizePath } from '../attachments/filePaths';
 import { getProjectDisplayLabel, type DraftTargetProject } from '../state/useDraftTarget';
 import { useProjectsInSidebarOrder } from '@/components/session/sidebar/list/useProjectsInSidebarOrder';
+import { DraftsHerePicker, MobileDraftsHerePicker } from './DraftsHerePicker';
 
 interface BranchOption {
     value: string;
@@ -64,6 +71,8 @@ export interface DraftTargetProps {
     hasUncommittedChanges: boolean;
     projectRootBranchOption: BranchOption | null;
     worktreeBranchOptions: readonly BranchOption[];
+    /** The project's isolated spaces a new chat can start in, by name. */
+    spaceBranchOptions: readonly BranchOption[];
     branchItems: readonly BranchOption[];
     showBranchSelector: boolean;
     onProjectChange: (projectId: string) => void;
@@ -111,11 +120,11 @@ export function ProjectLabel({ project, theme }: { project: DraftTargetProject; 
     const projectIconName = project.icon ? PROJECT_ICON_MAP[project.icon] : null;
     const iconColor = getProjectIconColor(project.color);
     const fallbackIcon = project.kind === 'chat' ? (
-        <Icon name="chat-4" className="h-3.5 w-3.5 shrink-0 text-muted-foreground/80" />
+        <Icon name="chat-4" className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
     ) : projectIconName ? (
         <Icon name={projectIconName} className="h-3.5 w-3.5 shrink-0" style={iconColor ? { color: iconColor } : undefined} />
     ) : (
-        <Icon name="folder" className="h-3.5 w-3.5 shrink-0 text-muted-foreground/80" style={iconColor ? { color: iconColor } : undefined} />
+        <Icon name="folder" className="h-3.5 w-3.5 shrink-0 text-muted-foreground" style={iconColor ? { color: iconColor } : undefined} />
     );
 
     return (
@@ -144,6 +153,7 @@ export function ProjectLabel({ project, theme }: { project: DraftTargetProject; 
 /** Desktop: inline project and branch selects. */
 function DraftTargetSelectorsView(props: DraftTargetProps) {
     const { t } = useI18n();
+    const shortcutOverrides = useUIStore((state) => state.shortcutOverrides);
     const {
         projects,
         selectedProject,
@@ -153,6 +163,7 @@ function DraftTargetSelectorsView(props: DraftTargetProps) {
         hasUncommittedChanges,
         projectRootBranchOption,
         worktreeBranchOptions,
+        spaceBranchOptions,
         branchItems,
         showBranchSelector,
         onProjectChange,
@@ -163,11 +174,15 @@ function DraftTargetSelectorsView(props: DraftTargetProps) {
         theme,
     } = props;
     const [openPicker, setOpenPicker] = React.useState<'project' | 'worktree' | null>(null);
+    const selectedIsSpace = isSpaceDirectory(selectedDirectory);
     const [projectQuery, setProjectQuery] = React.useState('');
     const [projectActiveId, setProjectActiveId] = React.useState<string | null>(null);
     const [projectFocusReturn, setProjectFocusReturn] = React.useState(false);
     const projectTriggerRef = React.useRef<HTMLButtonElement>(null);
     const worktreeTriggerRef = React.useRef<HTMLButtonElement>(null);
+    // Another project or branch eases each picker into its new width.
+    useWidthMorph(projectTriggerRef);
+    useWidthMorph(worktreeTriggerRef);
     // Controlled Select closes can omit finalFocus's interaction type.
     const keyboardCloseRef = React.useRef(false);
     const getComposerInput = () => projectTriggerRef.current?.closest('form')?.querySelector<HTMLElement>('[data-chat-input="true"] .cm-content');
@@ -305,6 +320,8 @@ function DraftTargetSelectorsView(props: DraftTargetProps) {
                     if (open && openPicker === 'project') projectSearchRef.current?.focus();
                 }}
             >
+                <Tooltip>
+                <TooltipTrigger asChild>
                 <Popover.Trigger
                     render={
                         <Button
@@ -312,7 +329,7 @@ function DraftTargetSelectorsView(props: DraftTargetProps) {
                             variant="ghost"
                             size="sm"
                             aria-haspopup="dialog"
-                            className="h-7 min-w-0 w-fit max-w-[42vw] justify-start gap-1 px-1.5 normal-case hover:bg-transparent data-[popup-open]:bg-transparent sm:max-w-[18rem]"
+                            className="h-7 min-w-0 w-fit max-w-[42vw] justify-start gap-1 overflow-hidden px-1.5 normal-case hover:bg-transparent data-[popup-open]:bg-transparent sm:max-w-[18rem]"
                             onPointerDownCapture={(event) => syncProjectPopupContainers(event.currentTarget)}
                             onFocusCapture={(event) => syncProjectPopupContainers(event.currentTarget)}
                         />
@@ -325,6 +342,11 @@ function DraftTargetSelectorsView(props: DraftTargetProps) {
                         <Icon name="arrow-down-s" className="size-4 shrink-0 opacity-50" />
                     </span>
                 </Popover.Trigger>
+                </TooltipTrigger>
+                <TooltipContent side="top" sideOffset={8}>
+                    <TooltipLabelWithShortcut label={t('chat.chatInput.draftPicker.projectTitle')} shortcut={formatShortcutForDisplay(getEffectiveShortcutCombo('open_draft_project_picker', shortcutOverrides), '')} />
+                </TooltipContent>
+                </Tooltip>
                 <Popover.Portal container={projectPortalContainer ?? undefined}>
                     {/* The search field sits on the trigger's edge of the
                         popup and stays fixed while filtering; only the
@@ -441,8 +463,15 @@ function DraftTargetSelectorsView(props: DraftTargetProps) {
                             <SelectTrigger
                                 ref={worktreeTriggerRef}
                                 onKeyDown={handlePickerKeyDown}
-                                className="h-7 min-w-0 w-fit max-w-[48vw] sm:max-w-[20rem] bg-transparent dark:bg-transparent shadow-none px-1.5 hover:[background-image:none] data-[popup-open]:[background-image:none]"
+                                className="h-7 min-w-0 w-fit max-w-[48vw] overflow-hidden sm:max-w-[20rem] bg-transparent dark:bg-transparent shadow-none px-1.5 hover:[background-image:none] data-[popup-open]:[background-image:none]"
                             >
+                                {selectedIsSpace ? <Icon name="instance" className="size-3.5 shrink-0 text-muted-foreground" aria-label={t('sessions.sidebar.group.space')} /> : null}
+                                <SelectValue>
+                                    {selectedBranchLabel ?? t('chat.chatInput.branch')}
+                                </SelectValue>
+                                {/* After the name: the check answers once the branch is
+                                    picked, and a mark arriving at the start would push
+                                    the name over. Here the picker grows into it. */}
                                 {hasUncommittedChanges ? (
                                     <Icon
                                         name="alert"
@@ -450,16 +479,12 @@ function DraftTargetSelectorsView(props: DraftTargetProps) {
                                         aria-label={t('chat.draftDirtyNotice.indicatorAria')}
                                     />
                                 ) : null}
-                                <SelectValue>
-                                    {selectedBranchLabel ?? t('chat.chatInput.branch')}
-                                </SelectValue>
                             </SelectTrigger>
                         </TooltipTrigger>
-                        {hasUncommittedChanges ? (
-                            <TooltipContent showArrow side="top" sideOffset={8} className="max-w-72">
-                                <span className="block whitespace-pre-line">{t('chat.draftDirtyNotice.tooltip')}</span>
-                            </TooltipContent>
-                        ) : null}
+                        <TooltipContent showArrow side="top" sideOffset={8} className="max-w-72">
+                            <TooltipLabelWithShortcut label={t('chat.chatInput.branch')} shortcut={formatShortcutForDisplay(getEffectiveShortcutCombo('open_draft_worktree_picker', shortcutOverrides), '')} />
+                            {hasUncommittedChanges ? <span className="block whitespace-pre-line">{t('chat.draftDirtyNotice.tooltip')}</span> : null}
+                        </TooltipContent>
                     </Tooltip>
                     <SelectContent side={worktreePopupSide} align="start" sideOffset={4} collisionAvoidance={{ side: 'none' }} constrainToMain className="w-max min-w-48" onKeyDown={handlePickerKeyDown} finalFocus={getFinalFocus}>
                         {projectRootBranchOption ? (
@@ -491,24 +516,36 @@ function DraftTargetSelectorsView(props: DraftTargetProps) {
                                 {selectedBranchLabel}
                             </SelectItem>
                         ) : null}
+                        {spaceBranchOptions.length > 0 || onCreateSpace ? <SelectSeparator /> : null}
+                        {spaceBranchOptions.length > 0 ? (
+                            <SelectGroup>
+                                <SelectLabel>{t('spaces.picker.section')}</SelectLabel>
+                                {spaceBranchOptions.map((option) => (
+                                    <SelectItem key={option.value} value={option.value} className="max-w-[24rem] truncate">
+                                        <span className="inline-flex min-w-0 items-center gap-1.5">
+                                            <Icon name="instance" className="size-3.5 shrink-0 text-muted-foreground" />
+                                            <span className="truncate">{option.label}</span>
+                                        </span>
+                                    </SelectItem>
+                                ))}
+                            </SelectGroup>
+                        ) : null}
                         {onCreateSpace ? (
-                            <>
-                                <SelectSeparator />
-                                <div className="px-2 py-1.5">
-                                    <button
-                                        type="button"
-                                        className="text-muted-foreground typography-meta hover:text-foreground cursor-pointer"
-                                        onPointerDown={(e) => { e.stopPropagation(); }}
-                                        onClick={(e) => { e.preventDefault(); e.stopPropagation(); setOpenPicker(null); onCreateSpace(); }}
-                                    >
-                                        {t('spaces.picker.new')}
-                                    </button>
-                                </div>
-                            </>
+                            <div className="px-2 py-1.5">
+                                <button
+                                    type="button"
+                                    className="text-muted-foreground typography-meta hover:text-foreground cursor-pointer"
+                                    onPointerDown={(e) => { e.stopPropagation(); }}
+                                    onClick={(e) => { e.preventDefault(); e.stopPropagation(); setOpenPicker(null); onCreateSpace(); }}
+                                >
+                                    {t('spaces.picker.new')}
+                                </button>
+                            </div>
                         ) : null}
                     </SelectContent>
                 </Select>
             ) : null}
+            <DraftsHerePicker />
         </div>
     );
 }
@@ -543,6 +580,7 @@ export function MobileDraftTargetTriggers(
                     <Icon name="arrow-down-s" className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground" />
                 </button>
             ) : null}
+            <MobileDraftsHerePicker />
         </div>
     );
 }
@@ -581,35 +619,25 @@ export function ProjectPickerSheet({
     }, [open]);
 
     return (
-        <MobileOverlayPanel open={open} title={title} onClose={onClose}>
-            <div className="flex flex-col gap-2 px-3 pb-4 pt-1">
-                <Input
-                    value={query}
-                    onChange={(event) => setQuery(event.target.value)}
-                    aria-label={searchPlaceholder}
-                    placeholder={searchPlaceholder}
-                    className="h-9"
-                />
-                <div className="flex flex-col">
-                    {rankByQuery(projects, query, (project) => [getProjectDisplayLabel(project), project.path])
-                        .map((project) => (
-                            <button
-                                key={project.id}
-                                type="button"
-                                className="flex w-full cursor-pointer items-center gap-2 rounded-lg px-2 py-2.5 text-start typography-ui-label hover:bg-[var(--interactive-hover)]"
-                                onClick={() => {
-                                    onSelectProject(project.id);
-                                    onClose();
-                                }}
-                            >
-                                <span className="min-w-0 flex-1"><ProjectLabel project={project} theme={theme} /></span>
-                                {project.id === selectedProjectId ? (
-                                    <Icon name="check" className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
-                                ) : null}
-                            </button>
-                        ))}
-                </div>
-            </div>
+        <MobileOverlayPanel
+            open={open}
+            title={title}
+            onClose={onClose}
+            subheader={<MobileSheetSearch value={query} onChange={setQuery} placeholder={searchPlaceholder} />}
+        >
+            {rankByQuery(projects, query, (project) => [getProjectDisplayLabel(project), project.path])
+                .map((project) => (
+                    <MobileSheetRow
+                        key={project.id}
+                        selected={project.id === selectedProjectId}
+                        onClick={() => {
+                            onSelectProject(project.id);
+                            onClose();
+                        }}
+                    >
+                        <ProjectLabel project={project} theme={theme} />
+                    </MobileSheetRow>
+                ))}
         </MobileOverlayPanel>
     );
 }
@@ -633,6 +661,7 @@ export function MobileDraftTargetSheets(
         selectedBranchIsKnown,
         projectRootBranchOption,
         worktreeBranchOptions,
+        spaceBranchOptions,
         branchItems,
         onProjectChange,
         onDirectoryChange,
@@ -667,81 +696,68 @@ export function MobileDraftTargetSheets(
                 open={openPicker === 'branch'}
                 title={t('chat.chatInput.branch')}
                 onClose={() => onOpenPickerChange(null)}
+                subheader={<MobileSheetSearch value={branchQuery} onChange={setBranchQuery} placeholder={t('chat.chatInput.draftPicker.searchBranches')} />}
             >
-                <div className="flex flex-col gap-2 px-3 pb-4 pt-1">
-                    <Input
-                        value={branchQuery}
-                        onChange={(event) => setBranchQuery(event.target.value)}
-                        placeholder={t('chat.chatInput.draftPicker.searchBranches')}
-                        className="h-9"
-                    />
-                    <div className="flex flex-col">
-                        {(() => {
-                            const matches = (label: string) => matchesRankQuery([label], branchQuery);
-                            const selectedValue = selectedDirectory
-                                ?? branchItems[0]?.value
-                                ?? normalizePath(selectedProject.path)
-                                ?? '';
-                            const renderRow = (value: string, label: React.ReactNode, key?: string) => (
-                                <button
-                                    key={key ?? value}
-                                    type="button"
-                                    className="flex w-full cursor-pointer items-center gap-2 rounded-lg px-2 py-2.5 text-start typography-ui-label hover:bg-[var(--interactive-hover)]"
-                                    onClick={() => {
-                                        onDirectoryChange(value);
-                                        onOpenPickerChange(null);
-                                    }}
-                                >
-                                    <span className="min-w-0 flex-1 truncate">{label}</span>
-                                    {value === selectedValue ? (
-                                        <Icon name="check" className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
-                                    ) : null}
-                                </button>
-                            );
-                            return (
-                                <>
-                                    {projectRootBranchOption && matches(projectRootBranchOption.label) ? (
-                                        <>
-                                            <div className="px-2 pb-1 pt-1.5 text-muted-foreground typography-meta">
-                                                {t('chat.chatInput.projectRoot')}
-                                            </div>
-                                            {renderRow(projectRootBranchOption.value, projectRootBranchOption.label)}
-                                        </>
-                                    ) : null}
-                                    <div className="my-1 h-px bg-border" />
-                                    <WorktreeCreateActions
-                                        className="flex w-full cursor-pointer items-center gap-2 rounded-lg px-2 py-2.5 text-start typography-ui-label hover:bg-[var(--interactive-hover)]"
-                                        onQuick={() => { onOpenPickerChange(null); void createWorktreeDraft(); }}
-                                        onCustom={onCreateCustomWorktree ? () => { onOpenPickerChange(null); onCreateCustomWorktree(); } : undefined}
-                                    />
-                                    <div className="my-1 h-px bg-border" />
-                                    <div className="px-2 pb-1 pt-2 text-muted-foreground typography-meta">
-                                        {t('chat.chatInput.worktrees')}
-                                    </div>
-                                    {rankByQuery(worktreeBranchOptions, branchQuery, (option) => [option.label])
-                                        .map((option) => renderRow(option.value, `${option.pending ? '⏳ ' : ''}${option.label}`))}
-                                    {selectedDirectory && !selectedBranchIsKnown && matches(selectedBranchLabel ?? '')
-                                        ? renderRow(selectedDirectory, selectedBranchLabel, 'unknown-current')
-                                        : null}
+                {(() => {
+                    const matches = (label: string) => matchesRankQuery([label], branchQuery);
+                    const selectedValue = selectedDirectory
+                        ?? branchItems[0]?.value
+                        ?? normalizePath(selectedProject.path)
+                        ?? '';
+                    const renderRow = (value: string, label: React.ReactNode, key?: string, icon?: IconName) => (
+                        <MobileSheetRow
+                            key={key ?? value}
+                            icon={icon}
+                            selected={value === selectedValue}
+                            onClick={() => {
+                                onDirectoryChange(value);
+                                onOpenPickerChange(null);
+                            }}
+                        >
+                            {label}
+                        </MobileSheetRow>
+                    );
+                    return (
+                        <>
+                            {projectRootBranchOption && matches(projectRootBranchOption.label) ? (
+                                <MobileSheetSection title={t('chat.chatInput.projectRoot')}>
+                                    {renderRow(projectRootBranchOption.value, projectRootBranchOption.label)}
+                                </MobileSheetSection>
+                            ) : null}
+                            <MobileSheetSection title={t('chat.chatInput.worktrees')}>
+                                <MobileSheetRow icon="flashlight" onClick={() => { onOpenPickerChange(null); void createWorktreeDraft(); }}>
+                                    {t('chat.chatInput.worktreeQuick')}
+                                </MobileSheetRow>
+                                {onCreateCustomWorktree ? (
+                                    <MobileSheetRow icon="git-branch" onClick={() => { onOpenPickerChange(null); onCreateCustomWorktree(); }}>
+                                        {t('chat.chatInput.worktreeCustom')}
+                                    </MobileSheetRow>
+                                ) : null}
+                                {rankByQuery(worktreeBranchOptions, branchQuery, (option) => [option.label])
+                                    .map((option) => renderRow(option.value, `${option.pending ? '⏳ ' : ''}${option.label}`))}
+                                {selectedDirectory && !selectedBranchIsKnown && matches(selectedBranchLabel ?? '')
+                                    ? renderRow(selectedDirectory, selectedBranchLabel, 'unknown-current')
+                                    : null}
+                            </MobileSheetSection>
+                            {spaceBranchOptions.length > 0 || onCreateSpace ? (
+                                <MobileSheetSection title={t('spaces.picker.section')}>
+                                    {rankByQuery(spaceBranchOptions, branchQuery, (option) => [option.label])
+                                        .map((option) => renderRow(option.value, option.label, undefined, 'instance'))}
                                     {onCreateSpace ? (
-                                        <div className="px-2 pb-1 pt-2">
-                                            <button
-                                                type="button"
-                                                className="cursor-pointer text-muted-foreground typography-meta hover:text-foreground"
-                                                onClick={() => {
-                                                    onOpenPickerChange(null);
-                                                    onCreateSpace();
-                                                }}
-                                            >
-                                                {t('spaces.picker.new')}
-                                            </button>
-                                        </div>
+                                        <MobileSheetRow
+                                            onClick={() => {
+                                                onOpenPickerChange(null);
+                                                onCreateSpace();
+                                            }}
+                                        >
+                                            {t('spaces.picker.new')}
+                                        </MobileSheetRow>
                                     ) : null}
-                                </>
-                            );
-                        })()}
-                    </div>
-                </div>
+                                </MobileSheetSection>
+                            ) : null}
+                        </>
+                    );
+                })()}
             </MobileOverlayPanel>
         </>
     );

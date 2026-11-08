@@ -40,7 +40,7 @@ Rozwiń kartę **GitHub** i wybierz **Connect GitHub**, aby zalogować się kró
 GitLab, Gitea, Forgejo i Gerrit mają każdy własną kartę obok GitHub. Po połączeniu ich issues i pull requesty (merge requesty na GitLab, zmiany na Gerrit) pojawiają się na tablicy [Issues i PR-y](/pl/issues-and-prs/) i w menu **+** czatu, tak jak te z GitHub.
 
 - **GitLab**: na gitlab.com zaloguj się krótkim kodem urządzenia, personal access tokenem albo logowaniem `glab` na serwerze. Dla self-managed GitLab dodaj jego adres i wklej personal access token z zakresem `api`. Logowanie kodem urządzenia działa tam tylko wtedy, gdy serwer ustawia `OPENCHAMBER_GITLAB_CLIENT_ID` na aplikację zarejestrowaną w tej instancji.
-- **Gitea**: dodaj adres swojej instancji, na przykład `https://gitea.example.com`, i wklej personal access token z zakresami `write:repository`, `write:issue` i `read:user`. Karta prowadzi do strony w Twojej instancji, na której się go tworzy. Gitea nie ma logowania kodem urządzenia ani przez CLI. Wymaga Gitea 1.21 lub nowszej, serwowanej z katalogu głównego swojego adresu.
+- **Gitea**: dodaj adres swojej instancji, na przykład `https://gitea.example.com`, i wklej personal access token z zakresami `write:repository`, `write:issue` i `read:user`. Karta prowadzi do strony w Twojej instancji, na której się go tworzy. Jeśli na serwerze jesteś zalogowany przez CLI `gt` Gitea (`gt auth login`), instancja sama pojawia się na karcie: wybierz **Użyj gt CLI**, aby pracować jako ten login. Login `gt` obsługuje issues i pull requesty; do push i pull połącz token albo skonfiguruj Git samodzielnie, na przykład przez `gt auth setup-git`. Wymaga Gitea 1.21 lub nowszej, serwowanej z katalogu głównego swojego adresu.
 - **Forgejo**: Codeberg jest już na karcie, więc do połączenia wystarczy personal access token z zakresami `write:repository`, `write:issue` i `read:user`; karta prowadzi do strony w Codeberg, na której się go tworzy. Dla innego serwera Forgejo dodaj jego adres, na przykład `https://forgejo.example.com`, i wklej token z tymi samymi zakresami. Wymaga Forgejo 7.0 lub nowszego, serwowanego z katalogu głównego swojego adresu. Serwer Forgejo łączy się na tej karcie, a serwer Gitea na karcie Gitea.
 - **Gerrit**: dodaj adres swojej instancji, na przykład `https://gerrit.example.com`, a potem swoją nazwę użytkownika Gerrit i hasło HTTP. Wygeneruj hasło w Gerrit w **Settings → HTTP Credentials**; karta prowadzi tam. Twoje hasło logowania nie zadziała, a konto bez nazwy użytkownika nie może się połączyć. Wymaga Gerrit 3.8 lub nowszego, serwowanego z katalogu głównego swojego adresu. Witryny, w których adres recenzji różni się od adresu Git, takie jak googlesource.com z `.gitcookies`, nie są obsługiwane.
 
@@ -90,6 +90,18 @@ Włącz **Session comments** na karcie Linear, a sesja rozpoczęta z issue albo 
 4. Wybierz **Set up** i zaloguj się. Modele pojawią się potem w selektorze modeli na czacie.
 
 Integracje instalują się dla Twojego użytkownika, więc działają w każdym projekcie. W każdej chwili możesz je zaktualizować lub usunąć z tej samej karty.
+
+## Kanały powiadomień z rozszerzeń
+
+[Rozszerzenie](/pl/extensions/) może dostarczać Twoje powiadomienia na Slack, Matrix albo na własny serwer. Gdy zezwolisz na nie w **Settings → Extensions**, dostaje kartę w sekcji **Extension accounts** na tej stronie. Wpisz tam token konta oraz adres serwera, gdy karta o niego prosi, i połącz: od tej chwili rozszerzenie dostaje te same powiadomienia, które dostałby Twój telefon, zgodnie z Twoimi [przełącznikami powiadomień](/pl/notifications/). Token zostaje w OpenChamber; usługa rozszerzenia wysyła przez OpenChamber i nigdy go nie widzi.
+
+Jeśli serwer później odrzuci token, karta mówi, że konto wymaga uwagi; połącz ponownie z nowym tokenem. Odłącz, żeby zatrzymać dostarczanie bez usuwania rozszerzenia, albo wstrzymaj rozszerzenie. Usunięcie rozszerzenia zapomina konto.
+
+## Trackery z rozszerzeń
+
+[Rozszerzenie](/pl/extensions/) może dodać tracker elementów pracy obok Linear. Gdy zezwolisz na nie w **Settings → Extensions**, dostaje kartę w sekcji **Extension accounts** na tej stronie. Wpisz adres serwera, gdy karta o niego prosi, a potem połącz konto: wklej token albo zapisz client id aplikacji, którą zarejestrowałeś w trackerze, i zaloguj się w przeglądarce. Tam, gdzie tracker trzyma kilka kont, **Add account** łączy kolejne, a **Switch to** zmienia używane. Mapowanie projektów i komentarze sesji pojawiają się na karcie, gdy tracker je oferuje, tak jak dla Linear.
+
+Jego elementy pojawiają się wtedy w oknie wyboru, w menu **+** czatu, w New Worktree, wśród powiązanych elementów sesji i w stanach na żywo elementów, które śledzisz. Tokeny zostają w OpenChamber; usługa rozszerzenia dociera do trackera przez OpenChamber i nigdy ich nie widzi. Jeśli tracker później odrzuci dane logowania, karta mówi, że konto wymaga uwagi; połącz je ponownie. Wstrzymanie rozszerzenia zabiera tracker ze wszystkich miejsc i zachowuje konta; usunięcie je zapomina.
 
 ## Claude Code
 

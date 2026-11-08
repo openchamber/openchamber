@@ -17,6 +17,7 @@ import { isPrimaryMode } from '@/components/chat/mobileControlsUtils';
 import { useI18n } from '@/lib/i18n';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useAgentsStore } from '@/stores/useAgentsStore';
+import { isAutoReviewAvailable } from '@/stores/useAutoReviewStore';
 import { listModelVariantIds, type ModelVariantSource } from '@/lib/modelVariants';
 
 export type ReviewFlowExecution = {
@@ -168,15 +169,18 @@ function ReviewFlowDialogView({
             <span>{t('diffView.reviewDialog.generateHandoff')}</span>
           </label>
 
-          <label className="flex items-center gap-2 typography-ui-label text-foreground">
-            <Checkbox
-              checked={execution.autoReview}
-              onChange={(autoReview) => setExecution((prev) => ({ ...prev, autoReview }))}
-              disabled={submitting}
-              ariaLabel={t('diffView.reviewDialog.autoReview')}
-            />
-            <span>{t('diffView.reviewDialog.autoReview')}</span>
-          </label>
+          {/* The loop runs on the OpenChamber server, which VS Code does not have. */}
+          {isAutoReviewAvailable() ? (
+            <label className="flex items-center gap-2 typography-ui-label text-foreground">
+              <Checkbox
+                checked={execution.autoReview}
+                onChange={(autoReview) => setExecution((prev) => ({ ...prev, autoReview }))}
+                disabled={submitting}
+                ariaLabel={t('diffView.reviewDialog.autoReview')}
+              />
+              <span>{t('diffView.reviewDialog.autoReview')}</span>
+            </label>
+          ) : null}
 
           <div className="flex min-w-0 flex-col gap-1.5">
             <span className="typography-meta font-medium text-muted-foreground">{t('chat.modelControls.model')}</span>

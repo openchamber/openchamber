@@ -8,7 +8,7 @@ import { PROJECT_ICON_MAP, resolveProjectColor, ProjectIconImage } from '@/lib/p
 /** The project fields the icon needs — a structural subset of the sheet's
     ProjectMeta, so both the sheet and the timeline list can pass their own
     project objects without sharing a type. */
-export type MobileProjectIconProject = {
+type MobileProjectIconProject = {
   id: string;
   icon?: string | null;
   color?: string | null;
@@ -46,11 +46,11 @@ export const MobileProjectIcon: React.FC<{
   const imageBackground = project.iconBackground ? { backgroundColor: project.iconBackground } : undefined;
 
   if (size === 'md') {
-    // A header's 32px slot, which the rows under it align to. No tile: a
-    // glyph sits bare at 20px, and an image takes 24px with its own corners,
-    // so both read at about the same weight next to the label.
+    // A header's 24px slot, centred on the column of the rows' chevrons and
+    // states. No tile: a glyph sits bare at 20px, and an image fills the slot
+    // with its own corners, so both read at about the same weight.
     return (
-      <span className="flex size-8 shrink-0 items-center justify-center text-muted-foreground">
+      <span className="flex size-6 shrink-0 items-center justify-center text-muted-foreground">
         {image ? (
           <span className="flex size-6 items-center justify-center overflow-hidden rounded-md" style={imageBackground}>{image}</span>
         ) : fallbackIcon}
@@ -61,7 +61,7 @@ export const MobileProjectIcon: React.FC<{
   return (
     <span
       className="flex size-3.5 shrink-0 items-center justify-center overflow-hidden rounded-[3px] text-muted-foreground"
-      style={imageBackground}
+      style={image ? imageBackground : undefined}
     >
       {image ?? fallbackIcon}
     </span>

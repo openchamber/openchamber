@@ -19,7 +19,11 @@ Une session worktree s’exécute dans sa propre copie extraite de votre dépôt
 
 OpenChamber crée la branche, prépare le dossier et y ouvre une nouvelle session, prête pour votre premier message. Vous pouvez aussi en lancer une directement depuis une [todo](/notes-todos-plans/) ou une [issue ou pull request](/github/).
 
-Pour éviter les questions, choisissez **Worktree rapide** dans le même menu : OpenChamber nomme la branche pour vous et y place la nouvelle session.
+Pour éviter les questions, choisissez **Worktree rapide** dans le même menu : OpenChamber donne à la branche un nom provisoire et y place la nouvelle session. Une fois que l’agent a nommé la tâche, il renomme aussi la branche d’après elle, par exemple `fix/login-timeout`, tant que la branche n’a pas encore été poussée.
+
+## Dans la barre latérale
+
+Un worktree occupe une ligne dans la barre latérale, avec toutes ses sessions dessous. Sous son projet, il est classé parmi les autres sessions du projet selon sa dernière activité : un worktree où vous venez de travailler se trouve donc près du haut. La ligne affiche le nom de la tâche dès que l’agent l’a nommée (avant cela, le titre de la dernière session où vous y avez travaillé), la pull request ou l’issue qu’il suit sous forme de marque colorée, et si une session y tourne ou a du nouveau pour vous. Un worktree créé pour une pull request ou une issue porte d’abord le titre de cet élément, jusqu’à ce que l’agent choisisse un nom plus court. Survolez-la pour voir la branche. Cliquez dessus pour ouvrir la dernière session où vous y avez travaillé ; pour déplier la liste, survolez l’icône de branche à sa gauche et cliquez sur la flèche qui prend sa place. Son menu renomme la tâche, range le worktree dans un dossier du projet, l’archive ou le supprime. Sur le téléphone, touchez la flèche de la ligne pour déplier la liste, et faites glisser la ligne sur le côté pour la marquer comme terminée, renommer la tâche, archiver le worktree ou le supprimer. Voir [Sessions en cours](/fr/sessions-in-work/) pour savoir comment les travaux entrent dans le bloc En cours et en sortent.
 
 ## Projets ouverts sur un dossier du dépôt
 
@@ -31,7 +35,13 @@ Quand le travail est bon, utilisez **Integrate** dans la vue Git pour ramener le
 
 ## Nettoyer
 
-Supprimer ou archiver la session peut retirer le worktree. Vous choisissez aussi si la branche doit être supprimée — locale, et distante s’il y en a une. Rien n’est supprimé sans votre demande.
+Quand la tâche est finie, choisissez **Archiver le worktree** dans le menu de la ligne, ou maintenez Maj et cliquez sur le bouton d’archivage qui remplace le bouton de nouvelle session sur la ligne. OpenChamber l’archive : le dossier disparaît, et ses sessions, ses changements non commités et sa branche attendent sur la page Archives. Si une session y tourne encore, le worktree reste.
+
+Marquer la ligne comme terminée la retire seulement du bloc En cours. Pour archiver un worktree chaque fois que vous le marquez comme terminé, ou une fois sa PR fusionnée, activez-le dans **Paramètres → Sessions → Worktrees terminés**.
+
+Sur la page Archives, les worktrees archivés sont rangés sous leur projet. **Restaurer** en ramène un avec sa branche, lance les commandes de configuration du projet et remet ses changements et ses sessions en place ; restaurer une de ses sessions fait la même chose. Les fichiers que git ignore, comme `node_modules` ou `.env`, ne sont pas conservés, et ce sont les commandes de configuration qui les recréent. La page Worktrees du projet liste aussi les worktrees archivés.
+
+Pour vous débarrasser d’un worktree pour de bon, supprimez-le depuis son menu, ou supprimez un worktree archivé depuis la page Archives. Quand vous supprimez depuis le menu, vous choisissez aussi si la branche doit être supprimée — locale, et distante s’il y en a une.
 
 ## Si quelque chose semble étrange
 

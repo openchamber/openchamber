@@ -14,6 +14,7 @@
  */
 
 import type { OpenCodeEvent } from "@opencode/client"
+import type { WorkflowRun } from "@/lib/workflows/model"
 import {
   compact,
   partIds,
@@ -77,7 +78,7 @@ export type ToolTransition =
   | { kind: "called"; input: Record<string, JsonValue>; executed: boolean; start: number }
   | { kind: "progress"; metadata: Metadata }
   | { kind: "success"; output: string; attachments?: FilePart[]; metadata?: Metadata; executed: boolean; end: number }
-  | { kind: "failed"; error: string; output?: string; metadata?: Metadata; executed: boolean; end: number }
+  | { kind: "failed"; error: string; errorType?: string; output?: string; metadata?: Metadata; executed: boolean; end: number }
 
 /**
  * What OpenCode rebuilt. v2 watches its own config files and announces the
@@ -156,12 +157,22 @@ export type SyncEvent =
   | { type: "permission.asked"; properties: PermissionRequest }
   | { type: "permission.replied"; properties: { sessionID: string; requestID: string } }
   | { type: "form.created"; properties: { form: FormRequest } }
-  | { type: "form.settled"; properties: { sessionID: string; formID: string } }
+  | {
+    type: "form.settled"
+    properties: {
+      sessionID: string
+      formID: string
+      /** Replies veto recovery; cancellations need tool-specific evidence. */
+      disposition?: "replied" | "cancelled"
+    }
+  }
   /** A session's shell command started; commands that belong to no session are not reported. */
   | { type: "shell.started"; properties: { shell: RunningShell } }
   /** A shell command exited or was removed. */
   | { type: "shell.ended"; properties: { shellID: string; end: ShellEnd; endedAt: number } }
   | { type: "vcs.branch.updated"; properties: { branch?: string } }
+  /** A file someone asked OpenCode to watch (`lib/watchedFiles`) changed or was removed; `file` is absolute. */
+  | { type: "filesystem.changed"; properties: { file: string } }
   | { type: "mcp.status.changed"; properties: { server: string } }
   | { type: "catalog.updated"; properties: { kind: CatalogKind } }
   /**
@@ -182,6 +193,9 @@ export type SyncEvent =
   | { type: "openchamber.page-settled"; properties: { sessionID: string; pageID: string } }
   /** The server started or stopped waiting to write a session's recap and suggestion. */
   | { type: "openchamber.session-assist"; properties: { sessionID: string; directory: string | null; pending: boolean } }
+  /** A workflow run changed: proposed, approved, an agent moved on, or it ended. */
+  | { type: "openchamber.workflow-run"; properties: { run: WorkflowRun } }
+  | { type: "openchamber.workflow-run-removed"; properties: { runId: string; parentSessionId: string } }
 
 /** Agent-completion / restart notices the OpenChamber server publishes for non-web runtimes. */
 export type OpenchamberNotification = {
@@ -685,6 +699,7 @@ export function translateWireEvent(event: OpenCodeEvent): SyncEvent[] {
           compact({
             kind: "failed",
             error: structuredErrorText(event.data.error),
+            errorType: event.data.error.type,
             output: toolOutputText(event.data.content) || undefined,
             metadata: event.data.metadata,
             executed: event.data.executed,
@@ -799,8 +814,9 @@ export function translateWireEvent(event: OpenCodeEvent): SyncEvent[] {
     case "form.created":
       return [{ type: "form.created", properties: { form: event.data.form } }]
     case "form.replied":
+      return [{ type: "form.settled", properties: { sessionID: event.data.sessionID, formID: event.data.id, disposition: "replied" } }]
     case "form.cancelled":
-      return [{ type: "form.settled", properties: { sessionID: event.data.sessionID, formID: event.data.id } }]
+      return [{ type: "form.settled", properties: { sessionID: event.data.sessionID, formID: event.data.id, disposition: "cancelled" } }]
 
     // --- location-level notices ------------------------------------------------
 
@@ -860,10 +876,10 @@ export function translateWireEvent(event: OpenCodeEvent): SyncEvent[] {
     // (`mcp.status.changed`).
     case "mcp.resources.changed":
       return []
-    // 2.x watches only the repository HEAD here, not the project's files. File
-    // browsers refresh from tool and step results instead (`lib/fileTreeChanges`).
+    // Only files a client asked to watch (`lib/watchedFiles`) report here; file
+    // listings still refresh from tool and step results (`lib/fileTreeChanges`).
     case "filesystem.changed":
-      return []
+      return [{ type: "filesystem.changed", properties: { file: event.data.file } }]
     // Worktrees go through OpenChamber's own git API, not OpenCode's.
     case "worktree.updated":
     case "worktree.resolved":
@@ -895,6 +911,10 @@ export function translateWireEvent(event: OpenCodeEvent): SyncEvent[] {
     case "pty.exited":
     case "persistent-pty.added":
     case "persistent-pty.removed":
+    case "persistent-pty.updated":
+      return []
+    // Experimental artifacts (`experimental.artifacts`) have no OpenChamber view.
+    case "artifact.updated":
       return []
     // Never framed onto the public stream in 2.0.8, so they cannot reach here
     // and are not listed above: `session.message.content.updated` (replay-only

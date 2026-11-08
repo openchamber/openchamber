@@ -404,7 +404,7 @@ export function createSpacesHost({
     const answers = new Map(index.snapshot().map((entry) => [entry.spaceId, entry]));
     return mergeSessionLists(hostPayload, spaces.flatMap((space) => {
       const answer = answers.get(space.id);
-      return answer === undefined ? [] : [{ ...answer, name: space.name, projectDirectory: space.projectDirectory, directory: space.directory }];
+      return answer === undefined ? [] : [{ ...answer, name: space.name, taskTitle: records.read(space.id).record?.taskTitle ?? null, projectDirectory: space.projectDirectory, directory: space.directory }];
     }));
   };
 
@@ -440,7 +440,16 @@ export function createSpacesHost({
      */
     startEvents: (globalEventHub, { broadcastUiEvent = null, broadcastGlobalUiEvent = null } = {}) => {
       hub = globalEventHub;
-      events = createSpaceEventSources({ requestInside: dispatcher.requestInside, index, hub: globalEventHub, broadcastUiEvent, broadcastGlobalUiEvent, logger, now });
+      events = createSpaceEventSources({ requestInside: dispatcher.requestInside, index, hub: globalEventHub, broadcastUiEvent, broadcastGlobalUiEvent, logger, now,
+        onTaskTitle: (spaceId, title) => {
+          try {
+            const result = records.setTaskTitle(spaceId, { title, by: 'agent' });
+            if (result.applied) globalEventHub.injectEvent({ payload: { type: 'openchamber:space-task-title.updated', properties: { spaceId, taskTitle: result.taskTitle } }, directory: 'global', spaceId });
+          } catch (error) {
+            logger.warn?.(`[spaces] could not save the task title of space ${spaceId}: ${error?.code ?? error?.message ?? error}`);
+          }
+        },
+      });
       unsubscribeHostEvents = globalEventHub.subscribeEvent((event) => { if (event.spaceId === null) index.observeHostEvent(event.payload); });
       followTimer = setTimer(() => { void follow(); }, FOLLOW_INTERVAL_MS);
       followTimer?.unref?.();

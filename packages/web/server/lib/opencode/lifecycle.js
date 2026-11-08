@@ -24,6 +24,7 @@ const HEALTH_CHECK_MAX_CONSECUTIVE_FAILURES = parsePositiveInt(
 );
 const HEALTH_CHECK_INTERVAL_OVERRIDE_MS = parsePositiveInt(process.env.OPENCHAMBER_OPENCODE_HEALTH_INTERVAL_MS, 0);
 const HEALTH_CHECK_RESULT_CACHE_MS = parsePositiveInt(process.env.OPENCHAMBER_OPENCODE_HEALTH_CACHE_MS, 750);
+const BOOTSTRAP_RETRY_DELAYS_MS = [5_000, 15_000, 30_000, 60_000];
 const OPENCODE_HEALTH_PATH = '/api/info';
 const OPENCODE_REQUIRED_MAJOR_VERSION = 2;
 
@@ -709,7 +710,14 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
 
   const START_OPEN_CODE_MAX_ATTEMPTS = 2;
 
+  let lastBootstrapError = null;
+  let bootstrapRetryCount = 0;
+  let bootstrapRetryRun = null;
+
   const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+  // Trying the same binary again cannot help; the user has to change it first.
+  const isBinaryRejected = (error) => error instanceof UnsupportedOpenCodeVersionError || error?.code === 'OPENCODE_BINARY_INVALID';
 
   const startOpenCodeOnce = async (attempt) => {
     const attemptStartedAt = performance.now();
@@ -752,11 +760,16 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     });
     phaseStartedAt = performance.now();
 
+    // The user's variables go over the inherited environment (a PATH entry
+    // in front of the managed PATH) and under everything OpenChamber itself
+    // sets for OpenCode.
+    const inheritedEnv = overlayEnvironment({ ...shellEnv, ...process.env, PATH: envPath }, getUserEnvironment());
+
     // Re-arm OpenCode's own V1 -> V2 session import for sessions a bundled
     // OpenCode 1.x created after the migration already completed. Only for the
     // managed process, only while it is not running, and never fatal.
     try {
-      const topUp = topUpV1SessionMigration();
+      const topUp = topUpV1SessionMigration({ env: inheritedEnv });
       if (topUp && topUp.status !== 'skipped') {
         console.log('[OpenCode] V1 session migration top-up:', topUp);
       }
@@ -764,10 +777,6 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       console.warn('[OpenCode] V1 session migration top-up failed:', error instanceof Error ? error.message : error);
     }
 
-    // The user's variables go over the inherited environment (a PATH entry
-    // in front of the managed PATH) and under everything OpenChamber itself
-    // sets for OpenCode.
-    const inheritedEnv = overlayEnvironment({ ...shellEnv, ...process.env, PATH: envPath }, getUserEnvironment());
     // What OpenChamber sets for OpenCode is recorded as injected, so a shell
     // the agent opens can tell it from the user's own variables.
     const processEnv = stripAppImageLauncherEnv(stripAppImageArgv0Leak(applyProviderEnvAliases(assignInjectedEnv(
@@ -860,7 +869,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
         return await startOpenCodeOnce(attempt);
       } catch (error) {
         lastError = error;
-        if (state.isShuttingDown || error instanceof UnsupportedOpenCodeVersionError || error?.code === 'OPENCODE_BINARY_INVALID') {
+        if (state.isShuttingDown || isBinaryRejected(error)) {
           break;
         }
         if (attempt >= START_OPEN_CODE_MAX_ATTEMPTS) {
@@ -880,13 +889,27 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     throw lastError;
   };
 
-  const restartOpenCode = async (reason = 'managed-restart') => {
+  // `whileStopped` runs after the managed process has exited and before the
+  // new one starts. Its failure is reported after the restart, so the server
+  // comes back either way.
+  const restartOpenCode = async (reason = 'managed-restart', { whileStopped } = {}) => {
     if (state.isShuttingDown) return;
+    if (whileStopped && state.isExternalOpenCode) throw new Error('An external OpenCode server cannot be stopped by OpenChamber.');
     if (state.currentRestartPromise) {
-      await state.currentRestartPromise;
-      return;
+      if (!whileStopped) {
+        await state.currentRestartPromise;
+        return;
+      }
+      // A restart already in flight never ran this task; restart once more for it.
+      await state.currentRestartPromise.catch(() => {});
+      if (state.isShuttingDown) return;
     }
+    // A startup retry in flight may have read the state this restart is for,
+    // and two starts at once would orphan a process: wait, then really restart.
+    while (bootstrapRetryRun) await bootstrapRetryRun;
+    if (state.isShuttingDown) return;
 
+    let whileStoppedError = null;
     state.currentRestartPromise = (async () => {
       managedPreflight = null;
       state.isRestartingOpenCode = true;
@@ -940,6 +963,14 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       killProcessOnPort(portToKill);
       if (!(await waitForPortRelease(portToKill, 5000))) {
         console.warn(`Timed out waiting for OpenCode port ${portToKill} to be released`);
+      }
+
+      if (whileStopped) {
+        try {
+          await whileStopped();
+        } catch (error) {
+          whileStoppedError = error;
+        }
       }
 
       if (env.ENV_CONFIGURED_OPENCODE_PORT) {
@@ -997,6 +1028,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       state.currentRestartPromise = null;
       state.isRestartingOpenCode = false;
     }
+    if (whileStoppedError) throw whileStoppedError;
   };
 
   const waitForOpenCodeReady = async (timeoutMs = 20000, intervalMs = 400) => {
@@ -1201,7 +1233,8 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
           syncToHmrState();
         }
 
-        state.lastOpenCodeError = null;
+        // The last error stays readable until a start succeeds or fails anew:
+        // the UI shows it while a retry runs.
         state.openCodeProcess = await startOpenCode();
         syncToHmrState();
       }
@@ -1222,6 +1255,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       console.log('Continuing without OpenCode integration...');
       state.lastOpenCodeError = error.message;
     }
+    lastBootstrapError = bootstrapError;
     diagnosticJournal.record(bootstrapError ? 'bootstrap failed' : 'bootstrap ready');
     recordStartupPerformance(
       bootstrapError ? 'opencode.bootstrap.error' : 'opencode.bootstrap.ready',
@@ -1231,8 +1265,48 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       },
     );
     if (!bootstrapError) {
+      bootstrapRetryCount = 0;
       void warmOpenCodeDirectories();
     }
+  };
+
+  const runBootstrapRetry = async (bootstrap, onAlreadyRunning) => {
+    while (state.currentRestartPromise) await state.currentRestartPromise.catch(() => {});
+    if (state.isShuttingDown) return;
+    // A restart got there first. Starting again would orphan its process.
+    if (state.openCodeProcess) {
+      lastBootstrapError = null;
+      onAlreadyRunning();
+      return;
+    }
+    bootstrapRetryRun = bootstrap()
+      .catch((error) => console.error(`OpenCode startup retry failed: ${error?.message ?? error}`))
+      .finally(() => {
+        bootstrapRetryRun = null;
+      });
+  };
+
+  /**
+   * Runs `bootstrap` again later when the last bootstrap left no managed
+   * OpenCode. Nothing else would start one: the health monitor only watches a
+   * running process. `onAlreadyRunning` replaces that run when a restart has
+   * started OpenCode by then. Answers whether a retry is scheduled.
+   */
+  const scheduleBootstrapRetry = (bootstrap, onAlreadyRunning) => {
+    if (
+      !lastBootstrapError
+      || isBinaryRejected(lastBootstrapError)
+      || state.openCodeProcess
+      || state.isExternalOpenCode
+      || state.isShuttingDown
+    ) {
+      return false;
+    }
+    const delayMs = BOOTSTRAP_RETRY_DELAYS_MS[Math.min(bootstrapRetryCount, BOOTSTRAP_RETRY_DELAYS_MS.length - 1)];
+    bootstrapRetryCount += 1;
+    console.log(`Retrying OpenCode startup in ${delayMs / 1000}s...`);
+    setTimeout(() => void runBootstrapRetry(bootstrap, onAlreadyRunning), delayMs).unref?.();
+    return true;
   };
 
   // The directory server-side reads use when they have none of their own: the
@@ -1563,6 +1637,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     waitForAgentPresence,
     refreshOpenCodeAfterConfigChange,
     bootstrapOpenCodeAtStartup,
+    scheduleBootstrapRetry,
     startHealthMonitoring,
     triggerHealthCheck,
     waitForPortRelease,

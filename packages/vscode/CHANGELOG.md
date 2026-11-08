@@ -1,3 +1,119 @@
+## [2.7.0] - 2026-11-08
+
+### New
+
+- Chat: a waiting form split into tabs has a Next button on each tab and Send on the last one (thanks to @JosueGalRe).
+- Chat: a page that waits for your answer has a Decline button. The agent hears that you declined and doesn't choose for you (thanks to @yulia-ivashko).
+- Chat: an eye button on a secret request shows what you typed before you save it (thanks to @Naputt1).
+- Composer: Shift+Enter continues a numbered list (thanks to @gabrielantoniosilvaoficial).
+- Plugins: a switch on each plugin card turns it off and keeps its config entry and options (thanks to @jwcrystal).
+- Stats: a Today range (thanks to @Eveerme).
+
+### Improvements
+
+- Composer: the thinking level after the model name is coloured by level, and the / list is as wide as @ (thanks to @yulia-ivashko).
+
+### Fixes
+
+- Remote-SSH: an OpenCode path set on your own computer no longer stops OpenChamber from starting on the server (thanks to @yulia-ivashko).
+- Composer: pasted text like @john.doe or @types/node stays text, and a mention of a missing file no longer stops the send.
+- Composer: attached context survives a send after a revert (thanks to @IbrahimKhan12), and so does a form answer or ! command given while a revert is staged (thanks to @yulia-ivashko).
+- Chat: a form in a reply always has Send, and one broken part of a reply's block no longer hides the charts and tables around it.
+- Chat: an answered question stays between the text before it and the reply after it with Activity collapsed.
+- Chat: a collapsed message with many comments takes two lines, and Show more on a long message opens it in place (thanks to @yulia-ivashko).
+- Chat: rendered pages no longer jump between two heights at a fractional display scale, and stay selectable while a form waits (thanks to @ChangeHow).
+- Chat: a finished tool row no longer says "Could not load the result" for a session shown under another folder (thanks to @yangyaofei).
+- Plugins: the page lists plugins from every config file OpenCode reads.
+- Usage: Codex shows numbers when OpenChamber signed in with ChatGPT and the Codex CLI is signed in, and OpenCode Go Teams shows its limits, where it said "no subscription" (thanks to @yulia-ivashko).
+
+## [2.6.1] - 2026-11-04
+
+### New
+
+- Sessions: a session whose folder was renamed or deleted offers Move session above the composer and keeps what you typed (thanks to @yulia-ivashko).
+
+### Improvements
+
+- Performance: the extension asks for less in the background. It refreshes only recent sessions while idle, and usage limits only while they are on screen.
+- Settings/MCP: servers OpenCode adds on its own show as read-only rows with their status (thanks to @DeryFerd).
+- Chat: wrap toggles on tables and code blocks show when they are on (thanks to @DeryFerd).
+
+### Fixes
+
+- Shortcuts: Cmd/Ctrl+P, Cmd/Ctrl+J and Cmd/Ctrl+Shift+F stay with VS Code (thanks to @AlexKutas).
+- Chat: going back to a session restores your place more reliably (thanks to @DeryFerd).
+- Chat: the actions under your message show on machines with no hover, such as a touch screen (thanks to @DeryFerd).
+- Composer: a model you picked holds when you then pick an agent (thanks to @DeryFerd), and a send always switches to the agent shown in the composer (thanks to @IbrahimKhan12).
+- Composer: a long message reference no longer pushes your text past the edge (thanks to @ChangeHow).
+- Multi-run: an armed goal runs in every lane and no longer leaks into your next prompt, and the agent picker stays in parallel mode.
+- MCP: a connected remote server that still needs consent offers sign-in (thanks to @DeryFerd).
+- Settings/Providers: a provider you're signed in to with no models, such as a free Copilot account, keeps its card, so you can remove the account or add another (thanks to @yulia-ivashko).
+
+## [2.6.0] - 2026-11-02
+
+### New
+
+- Composer: Cmd+Up (Ctrl+Up on Windows and Linux) opens a searchable list of your earlier prompts (thanks to @mattv8).
+
+### Improvements
+
+- Chat: long sessions open faster and long answers draw only what is on screen.
+- Composer: the model, agent and thinking pickers are calmer, the model list opens fast with many models, and the thinking level is remembered per model (thanks to @Hayston1001).
+- Chat: the line above the composer says what the agent is doing in your language.
+
+### Fixes
+
+- Chats work without an open workspace (thanks to @cemarta7).
+- Providers: saving a custom model keeps its limits, image input and reasoning levels (thanks to @yulia-ivashko).
+- Chat: Alt+Enter inserts a new line (thanks to @Cyneric).
+- Chat: a single tilde no longer strikes text through (thanks to @gaojunran), and inline code no longer breaks inside a word (thanks to @bashrusakh).
+- Chat: the $ skill list says it is loading while skills are read, and the @ list no longer jumps while you type.
+- Composer: a forked mention no longer sends its file twice (thanks to @xhang1108).
+
+## [2.5.3] - 2026-10-28
+
+### New
+
+- Snippets: rename a snippet, move it between project and global, and preview what it expands to.
+- Appearance: Interface font weight under Density & type, from Regular to Strong.
+- Usage: the OpenCode Go page shows your OpenCode Console budgets.
+
+### Fixes
+
+- Settings/Providers: a custom provider kept in `opencode.jsonc` can be edited (thanks to @yulia-ivashko).
+- Plugins: enable and disable rules in the plugin list no longer show as broken plugins.
+- Chat: reference chips no longer cut off letters.
+
+### Misc
+
+- OpenCode 2.2.0 is now the minimum supported version.
+
+## [2.5.2] - 2026-10-26
+
+### New
+
+- **Folder trust:** before OpenCode runs a folder's plugins, MCP servers or other commands from its configuration, the extension shows what would run and asks you to trust it. It asks again when that configuration changes.
+- Chat: a `diff` code block in a reply shows as a proposed change in the diff preview (thanks to @cemarta7).
+- Chat: emoji autocomplete on `:` in the message box.
+
+### Improvements
+
+- Chat: the prompt navigator is a small indicator in the chat's top corner. Hover, click or the shortcut open a list of every prompt in the session.
+- Composer: autocomplete lists open next to the text you are typing.
+- Chat: a failed `!` command shows why it failed on its collapsed row (thanks to @kemaladlig, @yulia-ivashko).
+- Interface size: toasts and fixed-size text follow the interface size and font (thanks to @mossgowild, @yulia-ivashko).
+- Composer: with messages queued, ArrowUp in an empty message box takes the newest one out of the queue to edit.
+
+### Fixes
+
+- Skills: the Skills catalog opens without timing out, and no longer starts thousands of git processes (thanks to @yulia-ivashko).
+- Skills: on Windows, catalog copies a virus scanner kept in the temp folder get cleaned up, and one that can't be deleted is named in the OpenChamber output (thanks to @yulia-ivashko).
+- Composer: a message goes out with the agent the picker shows. Returning to a session could send it as Plan or another agent.
+- Sessions: the turn timer keeps its start after the view reloads (thanks to @Naputt1, @yulia-ivashko).
+- Chat: permission and form card buttons have their tinted fill again (thanks to @mossgowild).
+- Chat: the effort button is capitalized the same as its menu (thanks to @mossgowild).
+- Chat: the model picker opened with its shortcut stays open while you type to search (thanks to @ChangeHow).
+
 ## [2.5.1] - 2026-10-23
 
 ### New

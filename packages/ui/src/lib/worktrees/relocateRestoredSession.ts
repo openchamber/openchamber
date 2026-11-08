@@ -13,6 +13,8 @@ import { useSessionUIStore } from '@/sync/session-ui-store';
 
 export type RestoredSessionRelocation =
   | { outcome: 'kept' }
+  /** The session belonged to an archived worktree, which came back with it. */
+  | { outcome: 'worktreeRestored' }
   | { outcome: 'moved'; projectRoot: string }
   | { outcome: 'failed'; error: Error };
 
@@ -22,6 +24,8 @@ type RelocationDeps = {
   getDirectoryAvailability: (directory: string) => Promise<'available' | 'missing' | 'unknown'>;
   resolveProjectRoot: (session: Session) => string | null;
   moveSession: (session: Session, sourceDirectory: string, destinationDirectory: string) => Promise<void>;
+  /** Restores the archived worktree holding the session, if one does; false when none does or it did not come back. */
+  restoreArchivedWorktree: (session: Session, projectRoot: string) => Promise<boolean>;
 };
 
 // The project a session belongs to, the way the sidebar groups it: by its
@@ -43,12 +47,32 @@ const resolveProjectRootFromStores = (session: Session): string | null => {
   return ownership.bySessionId.get(session.id)?.projectRoot ?? null;
 };
 
+// A failed restore is said here and the session still moves to the project
+// root, so it can be written to either way.
+const restoreArchivedWorktreeOfSession = async (session: Session, projectRoot: string): Promise<boolean> => {
+  const project = useProjectsStore.getState().projects.find((entry) => normalizePath(entry.path) === projectRoot);
+  if (!project) return false;
+  const { findWorktreeArchiveForSession, restoreArchivedWorktree } = await import('@/lib/worktrees/worktreeArchive');
+  try {
+    const archive = await findWorktreeArchiveForSession(projectRoot, session.id);
+    if (!archive) return false;
+    const result = await restoreArchivedWorktree({ project: { id: project.id, path: project.path }, archive });
+    return result.outcome === 'restored';
+  } catch (error) {
+    toast.error(formatMessage(useI18nStore.getState().dictionary, 'sessions.archive.worktree.restoreFailed'), {
+      description: error instanceof Error ? error.message : String(error),
+    });
+    return false;
+  }
+};
+
 const defaultDeps: RelocationDeps = {
   getSession: (sessionId) => useGlobalSessionsStore.getState().entityById.get(sessionId),
   getActiveSessions: () => useGlobalSessionsStore.getState().activeSessions,
   getDirectoryAvailability: (directory) => opencodeClient.getDirectoryAvailability(directory),
   resolveProjectRoot: resolveProjectRootFromStores,
   moveSession: moveSessionToDirectory,
+  restoreArchivedWorktree: restoreArchivedWorktreeOfSession,
 };
 
 // Subsessions working in the same directory move with their root, deepest
@@ -64,7 +88,8 @@ const collectDescendantsInDirectory = (
 
 /**
  * A session restored from the archive may still point at a worktree that was
- * removed meanwhile. OpenCode cannot run a prompt there (it answers 500), so
+ * removed meanwhile. When the worktree was archived with it, the worktree is
+ * restored. Otherwise OpenCode cannot run a prompt there (it answers 500), so
  * the session moves to its project root, where it works again. OpenCode
  * records the move and tells the model its working directory changed.
  *
@@ -82,6 +107,12 @@ export async function relocateRestoredSessionIfDirectoryMissing(
 
   const projectRoot = normalizePath(deps.resolveProjectRoot(session));
   if (!projectRoot || projectRoot === sourceDirectory) return { outcome: 'kept' };
+  // A session archived with its worktree brings the worktree back: in the
+  // project root it would miss the changes it worked on.
+  if (await deps.restoreArchivedWorktree(session, projectRoot)) return { outcome: 'worktreeRestored' };
+  // Its subsessions come back one by one, and the first may already have
+  // restored the worktree (and closed its archive) since the check above.
+  if (await deps.getDirectoryAvailability(sourceDirectory) !== 'missing') return { outcome: 'kept' };
   if (await deps.getDirectoryAvailability(projectRoot) !== 'available') return { outcome: 'kept' };
 
   try {
@@ -108,6 +139,14 @@ const projectLabelFor = (projectRoot: string): string => {
 export async function relocateRestoredSessionWithNotice(sessionId: string): Promise<void> {
   const result = await relocateRestoredSessionIfDirectoryMissing(sessionId);
   const dictionary = useI18nStore.getState().dictionary;
+  if (result.outcome === 'worktreeRestored') {
+    // One toast for the session and the subsessions that come back with it.
+    toast.success(formatMessage(dictionary, 'sessions.archive.worktree.restored'), {
+      id: 'worktree-restored-with-session',
+      description: formatMessage(dictionary, 'sessions.archive.worktree.restoredWithSession'),
+    });
+    return;
+  }
   if (result.outcome === 'moved') {
     toast.info(formatMessage(dictionary, 'sessions.sidebar.session.restore.relocatedTitle'), {
       description: formatMessage(dictionary, 'sessions.sidebar.session.restore.relocatedDescription', {

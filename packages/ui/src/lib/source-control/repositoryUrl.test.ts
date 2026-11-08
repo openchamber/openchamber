@@ -36,6 +36,14 @@ test('configured instance ports and path prefixes are retained', () => {
   expect(link('https://code.example.com:8443/gitlab/group/project.git', identities)).toEqual({ provider: 'gitlab', url: 'https://code.example.com:8443/gitlab/group/project' });
 });
 
+test('separate SSH addresses produce web links only for SSH remotes', () => {
+  const identities: SourceControlIdentity[] = [{ provider: 'github', instance: 'https://code.example.com', instanceSshUrl: 'ssh://git.example.com' }];
+  for (const url of ['git@git.example.com:team/repo.git', 'ssh://git@git.example.com/team/repo.git', 'ssh://git@git.example.com:22/team/repo.git']) {
+    expect(link(url, identities)).toEqual({ provider: 'github', url: 'https://code.example.com/team/repo' });
+  }
+  expect(link('https://git.example.com/team/repo.git', identities)).toBeNull();
+});
+
 test('unsupported hosts and malformed repository paths have no entry', () => {
   for (const url of ['', 'not a url', 'https://example.com/group/project', 'https://github.com/team', 'https://github.com/team/repo/tree/main', 'git@gitlab.com:group//repo.git', 'git@gitlab.com:group/../repo.git', 'git@gitlab.com:group/repo.git?token=secret', 'file://github.com/team/repo']) {
     expect(link(url)).toBeNull();

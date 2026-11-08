@@ -173,7 +173,7 @@ export const ClassificationProvidersPage: React.FC<ClassificationProvidersPagePr
               {/* Enterprise mode leaves Off as the only choice. */}
               {locked ? null : (
                 <>
-                  {/* The promotion is offered only while it runs; after that it is not a choice. */}
+                  {/* The promotion is offered only while the server can use it; otherwise only an existing pick still shows it. */}
                   {promoUsable || classifier.selected === 'zen-promo' ? (
                     <SettingsRadioOption
                       selected={classifier.selected === 'zen-promo'}
@@ -182,7 +182,7 @@ export const ClassificationProvidersPage: React.FC<ClassificationProvidersPagePr
                       label={t('settings.classification.source.zenPromo.name')}
                       description={promoUsable
                         ? t('settings.classification.source.zenPromo.description')
-                        : t('settings.classification.source.zenPromo.ended')}
+                        : t('settings.classification.source.zenPromo.unavailable')}
                     />
                   ) : null}
                   <SettingsRadioOption

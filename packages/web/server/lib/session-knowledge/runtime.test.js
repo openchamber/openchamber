@@ -1,12 +1,19 @@
 import { describe, expect, test } from 'bun:test';
 
-import { KNOWLEDGE_ENTRY_KEYS, RENDER_PAGE_GUIDANCE, SESSION_LINK_GUIDANCE, buildKnowledgeEntries, createSessionKnowledgeRuntime } from './runtime.js';
+import { KNOWLEDGE_ENTRY_KEYS, RENDER_PAGE_GUIDANCE, REPLY_COMMAND_GUIDANCE, SECRET_REQUEST_GUIDANCE, SESSION_LINK_GUIDANCE, WORK_NAME_GUIDANCE, WORKFLOW_GUIDANCE, buildKnowledgeEntries, createSessionKnowledgeRuntime, directToolsGuidance } from './runtime.js';
+import { UI_BLOCKS_GUIDANCE } from './ui-blocks-guidance.js';
 
 const DIRECTORY = '/work/project';
 const PROJECT_ID = 'path_project';
 const PINS = { notes: ['n1'], plans: ['p1'] };
 const NO_PINS = { notes: [], plans: [] };
-const { checkout: CHECKOUT, pinned: PINNED, memory: MEMORY, guidance: GUIDANCE } = KNOWLEDGE_ENTRY_KEYS;
+const {
+  checkout: CHECKOUT,
+  pinned: PINNED,
+  memory: MEMORY,
+  guidance: GUIDANCE,
+  responseStyle: RESPONSE_STYLE,
+} = KNOWLEDGE_ENTRY_KEYS;
 
 const note = (overrides = {}) => ({
   id: 'n1', body: 'Pinned note body.', createdAt: 1, updatedAt: 1, pinned: true, source: 'manual', ...overrides,
@@ -33,7 +40,7 @@ const createRuntime = (overrides = {}) => {
   };
   for (const key of [
     'readSessionMetadata', 'persistSessionMetadata', 'isAgentMemoryEnabled', 'isSessionLinkingAvailable',
-    'isPageRenderingAvailable', 'readCheckoutBranch', 'instructionEntries',
+    'isPageRenderingAvailable', 'isSecretRequestAvailable', 'isWorkflowAvailable', 'readCheckoutBranch', 'readPlaceholderBranch', 'instructionEntries', 'isWorkNamingAvailable',
   ]) {
     if (key in overrides) dependencies[key] = overrides[key];
   }
@@ -88,11 +95,12 @@ describe('writing the knowledge into a session', () => {
     const instructionEntries = createEntriesStub();
     const runtime = createRuntime({ ...pinnedStore(), instructionEntries });
 
-    expect(await runtime.sync('ses_a', DIRECTORY)).toBe(true);
+    expect(await runtime.sync('ses_a', DIRECTORY, 'Keep replies short.')).toBe(true);
 
     expect(instructionEntries.held.get(PINNED)).toContain('Pinned note body.');
     expect(instructionEntries.held.get(PINNED)).toContain('Plan body.');
     expect(instructionEntries.held.get(MEMORY)).toContain('Uses bun');
+    expect(instructionEntries.held.get(RESPONSE_STYLE)).toBe('Keep replies short.');
     // No tool: no guidance and no branch, so those keys are cleared.
     expect(instructionEntries.calls).toContainEqual(['remove', 'ses_a', DIRECTORY, GUIDANCE]);
     expect(instructionEntries.calls).toContainEqual(['remove', 'ses_a', DIRECTORY, CHECKOUT]);
@@ -110,6 +118,51 @@ describe('writing the knowledge into a session', () => {
     await runtime.sync('ses_a', DIRECTORY);
 
     expect(instructionEntries.held.has(PINNED)).toBe(false);
+  });
+
+  test('an omitted response style leaves the existing entry alone, while an empty one clears it', async () => {
+    const instructionEntries = createEntriesStub();
+    const runtime = createRuntime({ ...pinnedStore(), instructionEntries });
+
+    await runtime.sync('ses_a', DIRECTORY, 'Keep replies short.');
+    await runtime.sync('ses_a', DIRECTORY);
+    expect(instructionEntries.held.get(RESPONSE_STYLE)).toBe('Keep replies short.');
+
+    await runtime.sync('ses_a', DIRECTORY, '');
+    expect(instructionEntries.held.has(RESPONSE_STYLE)).toBe(false);
+  });
+
+  test('serialises concurrent syncs for one session', async () => {
+    const held = new Map();
+    const calls = [];
+    let releaseFirst;
+    let firstPutStarted;
+    const firstPut = new Promise((resolve) => { firstPutStarted = resolve; });
+    let first = true;
+    const instructionEntries = {
+      put: async (sessionId, directory, key, value) => {
+        calls.push([sessionId, directory, key, value]);
+        if (first) {
+          first = false;
+          firstPutStarted();
+          await new Promise((resolve) => { releaseFirst = resolve; });
+        }
+        held.set(key, value);
+      },
+      remove: async (_sessionId, _directory, key) => { held.delete(key); },
+    };
+    const runtime = createRuntime({ ...pinnedStore(), instructionEntries });
+    const firstSync = runtime.sync('ses_a', DIRECTORY, 'old style');
+    await firstPut;
+    const secondSync = runtime.sync('ses_a', DIRECTORY, 'new style');
+
+    expect(calls.filter((call) => call[2] === RESPONSE_STYLE).map((call) => call[3])).toEqual(['old style']);
+    releaseFirst();
+    await firstSync;
+    await secondSync;
+
+    expect(held.get(RESPONSE_STYLE)).toBe('new style');
+    expect(calls.filter((call) => call[2] === RESPONSE_STYLE).map((call) => call[3])).toEqual(['old style', 'new style']);
   });
 
   test('one entry that will not write does not hold back the others', async () => {
@@ -155,6 +208,25 @@ describe('when to link', () => {
     expect(entries[MEMORY]).toBe('');
   });
 
+  test('asks for the task name in the language of the user, the branch in English', () => {
+    expect(WORK_NAME_GUIDANCE).toContain("in the language of the user's latest message");
+    expect(WORK_NAME_GUIDANCE).toContain('A branch name stays in English.');
+  });
+
+  test('naming guidance is restricted to linked worktrees and spaces', async () => {
+    const runtime = createRuntime({
+      isSessionLinkingAvailable: async () => true,
+      isWorkNamingAvailable: async (directory) => directory === '/linked' || directory === '/spaces/abcdef123456/project',
+    });
+    for (const directory of ['/linked', '/spaces/abcdef123456/project']) {
+      expect((await entriesFor(runtime, NO_PINS, directory))[GUIDANCE]).toContain(WORK_NAME_GUIDANCE);
+    }
+    for (const directory of ['/main', '/plain']) {
+      expect((await entriesFor(runtime, NO_PINS, directory))[GUIDANCE]).not.toContain(WORK_NAME_GUIDANCE);
+    }
+    expect((await entriesFor(createRuntime({ isSessionLinkingAvailable: async () => true, isWorkNamingAvailable: async () => { throw new Error('unavailable'); } })))[GUIDANCE]).not.toContain(WORK_NAME_GUIDANCE);
+  });
+
   test('is left out without the tool, or when the check fails', async () => {
     for (const isSessionLinkingAvailable of [async () => false, async () => { throw new Error('settings unreadable'); }]) {
       const entries = await entriesFor(createRuntime({ isSessionLinkingAvailable }));
@@ -172,8 +244,9 @@ describe('when to draw a page', () => {
   test('is told in a session whose agent has the render tool', async () => {
     const entries = await entriesFor(createRuntime({ ...bare, isPageRenderingAvailable: async () => true }), NO_PINS);
 
-    expect(entries[GUIDANCE]).toBe(RENDER_PAGE_GUIDANCE);
-    expect(entries[GUIDANCE]).toContain('Skip it for a few numbers');
+    expect(entries[GUIDANCE]).toBe(`${UI_BLOCKS_GUIDANCE}\n\n${RENDER_PAGE_GUIDANCE}\n\n${REPLY_COMMAND_GUIDANCE}\n\n${directToolsGuidance(['openchamber_render'])}`);
+    expect(entries[GUIDANCE]).toContain('Not for a few numbers');
+    expect(entries[GUIDANCE]).toContain('root = Stack([...])');
   });
 
   test('is left out without the tool, or when the check fails', async () => {
@@ -181,6 +254,47 @@ describe('when to draw a page', () => {
       const entries = await entriesFor(createRuntime({ ...bare, isPageRenderingAvailable }), NO_PINS);
       expect(entries[GUIDANCE]).toBe('');
     }
+  });
+});
+
+describe('when to ask for a secret', () => {
+  const bare = {
+    isAgentMemoryEnabled: async () => false,
+    projectContextRuntime: { readContext: async () => ({ notes: [], todos: [], plans: [] }) },
+  };
+
+  test('is told only in a session whose agent has the secret tool', async () => {
+    const withTool = await entriesFor(createRuntime({ ...bare, isSecretRequestAvailable: async () => true }), NO_PINS);
+    expect(withTool[GUIDANCE]).toBe(`${SECRET_REQUEST_GUIDANCE}\n\n${directToolsGuidance(['openchamber_secret'])}`);
+
+    const without = await entriesFor(createRuntime({ ...bare, isSecretRequestAvailable: async () => { throw new Error('settings unreadable'); } }), NO_PINS);
+    expect(without[GUIDANCE]).toBe('');
+  });
+});
+
+describe('when to offer a workflow', () => {
+  const bare = {
+    isAgentMemoryEnabled: async () => false,
+    projectContextRuntime: { readContext: async () => ({ notes: [], todos: [], plans: [] }) },
+  };
+
+  test('is told only in a session whose agent has the workflow tool', async () => {
+    const withTool = await entriesFor(createRuntime({ ...bare, isWorkflowAvailable: async () => true }), NO_PINS);
+    expect(withTool[GUIDANCE]).toBe(`${WORKFLOW_GUIDANCE}\n\n${directToolsGuidance(['openchamber_workflow'])}`);
+    expect(withTool[GUIDANCE]).toContain('never start one unasked');
+
+    const without = await entriesFor(createRuntime({ ...bare, isWorkflowAvailable: async () => { throw new Error('settings unreadable'); } }), NO_PINS);
+    expect(without[GUIDANCE]).toBe('');
+  });
+});
+
+describe('where the managed tools are called', () => {
+  test('names the direct tools the session has, and none for tools behind Code Mode', async () => {
+    const control = await entriesFor(createRuntime({ isSessionLinkingAvailable: async () => true }));
+    expect(control[GUIDANCE]).not.toContain('direct tool');
+    const all = await entriesFor(createRuntime({ isPageRenderingAvailable: async () => true, isSecretRequestAvailable: async () => true, isWorkflowAvailable: async () => true }));
+    expect(all[GUIDANCE]).toContain('openchamber_render, openchamber_secret, openchamber_workflow are direct tool calls: never call them from inside a Code Mode execute script');
+    expect(directToolsGuidance(['openchamber_render'])).toBe('openchamber_render is a direct tool call: never call it from inside a Code Mode execute script, where it does not exist.');
   });
 });
 
@@ -259,6 +373,33 @@ describe('which branch the session works on', () => {
     branch = new Error('git failed');
     await runtime.sync('ses_a', '/work/unreadable');
     expect(instructionEntries.held.get(CHECKOUT)).toBe(noBranch);
+  });
+
+  test('a placeholder branch asks for a rename with work.name, until it is renamed', async () => {
+    const instructionEntries = createEntriesStub();
+    let branch = 'agile-chipmunk';
+    const runtime = runtimeOn(null, {
+      ...pinnedStore(),
+      instructionEntries,
+      readCheckoutBranch: async () => branch,
+      readPlaceholderBranch: async () => (branch === 'agile-chipmunk' ? branch : null),
+    });
+    await runtime.sync('ses_a', DIRECTORY);
+    const told = instructionEntries.held.get(CHECKOUT);
+    expect(told).toContain('`agile-chipmunk` is a placeholder');
+    expect(told).toContain('passing branch too');
+    expect(told).toContain('work.name');
+
+    branch = 'fix/login-timeout';
+    await runtime.sync('ses_a', DIRECTORY);
+    expect(instructionEntries.held.get(CHECKOUT)).toBe('This session works in `/work/project`, on branch `fix/login-timeout`.');
+  });
+
+  test('a placeholder check that fails tells only the branch', async () => {
+    const entries = await entriesFor(runtimeOn('agile-chipmunk', {
+      readPlaceholderBranch: async () => { throw new Error('git failed'); },
+    }));
+    expect(entries[CHECKOUT]).toBe('This session works in `/work/project`, on branch `agile-chipmunk`.');
   });
 
   test('is not read without the tool, and the entry is cleared', async () => {
@@ -442,6 +583,45 @@ describe('size', () => {
 
     expect(entries[PINNED].length).toBeLessThan(8_100);
     expect(entries[PINNED]).toContain('(truncated)');
+  });
+
+  test('a memory index over budget keeps the newest whole titles and counts the rest', () => {
+    const entry = (index) => ({ title: `Project decision number ${index} about something`, type: 'fact', createdAt: index, updatedAt: index });
+    const project = Array.from({ length: 300 }, (_, index) => entry(index));
+    const memory = buildKnowledgeEntries({
+      notes: [], plans: [], memory: { global: [], project, enabled: true, complete: true },
+    })[MEMORY];
+
+    expect(memory.length).toBeLessThanOrEqual(8_000);
+    expect(memory).not.toContain('(truncated)');
+    expect(memory).toContain('- Project decision number 299 about something');
+    expect(memory).not.toContain('- Project decision number 0 about something');
+    const shown = memory.split('\n').filter((line) => line.startsWith('- Project decision')).length;
+    expect(memory).toContain(`${300 - shown} older titles did not fit here; memory.list gives every title.`);
+  });
+});
+
+describe('response style', () => {
+  test('preserves the full custom instruction without increasing knowledge budgets', () => {
+    const instruction = `${'x'.repeat(49900)}\nUse this final instruction.`;
+    const entries = buildKnowledgeEntries({
+      notes: [note({ body: 'n'.repeat(10000) })], plans: [],
+      memory: { global: [], project: [] }, responseStyleInstruction: instruction,
+    });
+    expect(entries[RESPONSE_STYLE]).toBe(instruction);
+    expect(entries[PINNED]).toContain('(truncated)');
+    expect(entries[PINNED].length).toBeLessThan(8100);
+  });
+
+  test('keeps the user response style in a session instruction entry', () => {
+    const entries = buildKnowledgeEntries({
+      notes: [],
+      plans: [],
+      memory: { global: [], project: [] },
+      responseStyleInstruction: 'Keep replies short and informal.',
+    });
+
+    expect(entries[RESPONSE_STYLE]).toBe('Keep replies short and informal.');
   });
 });
 

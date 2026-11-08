@@ -3,13 +3,15 @@ import { spawn } from 'node:child_process';
 const keyPath = process.env.OPENCHAMBER_GIT_SSH_KEY;
 if (!keyPath || /[\0\r\n]/.test(keyPath)) process.exit(1);
 
-const child = spawn('ssh', [
+const child = spawn(process.env.OPENCHAMBER_GIT_SSH_EXECUTABLE || 'ssh', [
   '-F', 'none',
   '-o', 'IdentityFile=none',
   '-i', keyPath,
   '-o', 'IdentitiesOnly=yes',
   '-o', 'IdentityAgent=none',
-  '-o', 'BatchMode=yes',
+  '-o', process.env.OPENCHAMBER_GIT_SSH_PASSPHRASE ? 'BatchMode=no' : 'BatchMode=yes',
+  '-o', 'PasswordAuthentication=no',
+  '-o', 'PreferredAuthentications=publickey',
   '-o', 'StrictHostKeyChecking=yes',
   ...process.argv.slice(2),
 ], {

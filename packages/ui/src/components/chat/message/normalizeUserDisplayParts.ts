@@ -69,6 +69,15 @@ const linkAttachmentPart = (part: TextPart, descriptorOf: SourceControlDescripto
                 filename: `Issue #${payload.number}: ${payload.title}`,
                 url: payload.url,
             };
+        case 'repository-discussion':
+            return {
+                ...identity,
+                type: 'file',
+                // Drawn like an issue chip, with the provider's mark.
+                mime: repositoryIssueLinkMime(payload.provider),
+                filename: `Discussion #${payload.number}: ${payload.title}`,
+                url: payload.url,
+            };
         case 'change-request':
             return {
                 ...identity,

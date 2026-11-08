@@ -9,11 +9,13 @@
 
 import React from 'react';
 
-import { useCommentSnippetPicker } from '@/components/comments/useCommentSnippetPicker';
+import { useCommentEnterSubmit } from '@/components/comments/useCommentEnterSubmit';
+import { useCommentFieldPicker } from '@/components/comments/useCommentFieldPicker';
 import { ComposerDictation } from '@/components/dictation/ComposerDictation';
 import { Button } from '@/components/ui/button';
 import { Icon } from '@/components/icon/Icon';
 import { useI18n } from '@/lib/i18n';
+import { isIMECompositionEvent } from '@/lib/ime';
 import { cn } from '@/lib/utils';
 import { useSnippetsStore } from '@/stores/useSnippetsStore';
 import type { Theme } from '@/types/theme';
@@ -37,7 +39,7 @@ const commentLanguageContext = (knownSnippetTriggers: ReadonlySet<string>): Comp
     attachmentFilenames: [],
 });
 
-const MOBILE_COMMENT_RADIUS = '1.5rem';
+const MOBILE_COMMENT_RADIUS = '1.25rem';
 const MOBILE_COMMENT_MAX_LINES = 6;
 const FOOTER_ICON_BUTTON_CLASS = 'flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center text-foreground outline-none focus:outline-none';
 const FOOTER_PADDING_CLASS = 'px-1.5 py-1.5';
@@ -73,6 +75,7 @@ export function MobileCommentComposer({ draft, theme: currentTheme, handlers }: 
     const { t } = useI18n();
     const editorRef = React.useRef<ComposerEditorHandle>(null);
     const snippets = useSnippetsStore((state) => state.snippets);
+    const commentKeys = useCommentEnterSubmit();
     const languageContext = React.useMemo(() => {
         const triggers = new Set<string>();
         for (const snippet of snippets) {
@@ -86,22 +89,45 @@ export function MobileCommentComposer({ draft, theme: currentTheme, handlers }: 
         editorRef.current?.replaceRange(from, to, insert);
         editorRef.current?.focus();
     }, []);
-    const snippetPicker = useCommentSnippetPicker({ text: draft.text, getCaret, replaceRange });
+    const caretCoords = React.useCallback((position: number) => editorRef.current?.caretCoords(position) ?? null, []);
+    const fieldPicker = useCommentFieldPicker({ text: draft.text, getCaret, replaceRange, caretCoords });
+
+    const handleKeyDown = (event: KeyboardEvent): boolean => {
+        if (isIMECompositionEvent(event)) return false;
+        if (fieldPicker.handleKeyDown(event)) return true;
+        if (event.key === 'Enter' && commentKeys.shouldSubmit(event)) {
+            event.preventDefault();
+            handlers.onAttach();
+            return true;
+        }
+        return false;
+    };
 
     // The opening tap flushes the controller update through React before it
     // returns, so this focus still runs inside the gesture's call stack — the
     // only focus iOS raises the soft keyboard for.
+    // An edit opens with the comment's text; the caret goes after it.
     React.useLayoutEffect(() => {
         editorRef.current?.focus();
+        if (draft.text) editorRef.current?.setSelection(draft.text.length);
+        // Mount only: the shell is keyed per open.
+        // oxlint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
     // Let the available row width clip long quotes, with a fade before Close.
     const quotePreview = mobileCommentQuotePreview(draft.quote.plainText);
+    // Editing an attached comment: the primary action saves it, Close cancels.
+    const editing = Boolean(draft.draftId);
+    const closeLabel = editing ? t('chat.chatInput.contextPreview.cancelEdit') : t('mobile.surface.closeAria');
+    const primaryLabel = editing ? t('chat.textSelection.comment.save') : t('chat.textSelection.comment.attach');
 
     return (
         <div
             data-mobile-comment-composer="true"
-            className="relative flex flex-col rounded-[1.5rem] border border-border/80 shadow-[0_4px_16px_-4px_rgb(0_0_0_/_0.12)]"
+            // Stands in for the composer while a comment is open; its height
+            // is not the composer's resting height (ChatContainer).
+            data-composer-transient=""
+            className="relative flex flex-col rounded-[1.25rem] border border-edge shadow-[0_4px_16px_-4px_rgb(0_0_0_/_0.12)]"
             style={{ backgroundColor: currentTheme?.colors?.surface?.subtle }}
         >
             <div className="flex items-center gap-2 ps-3.5 pe-1.5 pt-2">
@@ -117,14 +143,14 @@ export function MobileCommentComposer({ draft, theme: currentTheme, handlers }: 
                     size="icon"
                     className="ms-auto size-8 shrink-0 text-muted-foreground"
                     onClick={handlers.onCancel}
-                    title={t('mobile.surface.closeAria')}
-                    aria-label={t('mobile.surface.closeAria')}
+                    title={closeLabel}
+                    aria-label={closeLabel}
                 >
                     <Icon name="close" className={cn(ICON_SIZE_CLASS, 'text-current')} />
                 </Button>
             </div>
             <div className="relative flex items-end gap-1 pb-1 ps-1 pe-1.5">
-                {snippetPicker.picker}
+                {fieldPicker.picker}
                 <ComposerEditor
                     ref={editorRef}
                     data-testid="mobile-comment-input"
@@ -133,16 +159,18 @@ export function MobileCommentComposer({ draft, theme: currentTheme, handlers }: 
                     languageContext={languageContext}
                     onChange={(change) => {
                         handlers.onTextChange(change.value);
-                        snippetPicker.sync(change.value, change.selection.start);
+                        fieldPicker.sync(change.value, change.selection.start, !change.fromPaste && !change.fromValueProp);
                     }}
-                    onSelectionChange={(selection) => snippetPicker.sync(editorRef.current?.getValue() ?? draft.text, selection.start)}
-                    onKeyDown={snippetPicker.handleKeyDown}
+                    onSelectionChange={(selection) => fieldPicker.sync(editorRef.current?.getValue() ?? draft.text, selection.start, false)}
+                    onKeyDown={handleKeyDown}
                     onFocus={handlers.onEditorFocus}
                     onBlur={handlers.onEditorBlur}
                     placeholder={t('chat.textSelection.comment.placeholder')}
                     editable
                     autoCorrect={composerAutoCorrect({ isMobile: true })}
                     autoCapitalize="sentences"
+                    preserveDeferredEnterShift={commentKeys.preserveDeferredEnterShift}
+                    returnKeySends={commentKeys.returnKeySends}
                     spellCheck
                     maxLines={MOBILE_COMMENT_MAX_LINES}
                     className="min-h-[44px] flex-1 px-2.5 py-2 typography-markdown"
@@ -166,10 +194,10 @@ export function MobileCommentComposer({ draft, theme: currentTheme, handlers }: 
                     className="mb-1 shrink-0 rounded-full border-0 [corner-shape:round] transition-opacity hover:opacity-90 active:opacity-80"
                     style={{ backgroundColor: 'var(--primary-base)', color: 'var(--primary-foreground)' }}
                     onClick={handlers.onAttach}
-                    title={t('chat.textSelection.comment.attach')}
-                    aria-label={t('chat.textSelection.comment.attach')}
+                    title={primaryLabel}
+                    aria-label={primaryLabel}
                 >
-                    <Icon name="attachment-2" className="h-4 w-4" />
+                    <Icon name={editing ? 'check' : 'attachment-2'} className="h-4 w-4" />
                 </Button>
             </div>
         </div>

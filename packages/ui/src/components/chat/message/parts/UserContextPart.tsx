@@ -2,6 +2,7 @@ import React from 'react';
 
 import { Icon } from '@/components/icon/Icon';
 import type { IconName } from '@/components/icon/icons';
+import { HoverTooltip } from '@/components/ui/row-tooltip';
 import { useI18n } from '@/lib/i18n';
 import { changeRequestCopy } from '@/lib/source-control/changeRequestCopy';
 import { useChangeRequestTerm } from '@/lib/source-control/providers/registry';
@@ -10,6 +11,8 @@ import { cn } from '@/lib/utils';
 import { withAttachmentChips } from './attachmentCitationChips';
 import { legacyChatQuoteAnchor } from '@/lib/chatQuoteAnchor';
 import { useChatQuoteHighlightApi } from '../../hooks/chatQuoteHighlightStore';
+import { fileWithDiffCommentOrigin } from '@/lib/diffCommentOrigin';
+import { isWholeFileComment } from '@/components/comments/wholeFileComment';
 
 /**
  * A context item attached to a user message: an inline code comment, a
@@ -75,7 +78,7 @@ const ContextCard: React.FC<{
                         <span className="text-sm text-[var(--surface-foreground)]">{withAttachmentChips(comment, attachmentFilenames, 'comment')}</span>
                     ) : null}
                 </span>
-                <Icon name="arrow-down-s" className="ms-auto h-3.5 w-3.5 shrink-0 text-muted-foreground/70" />
+                <Icon name="arrow-down-s" className="ms-auto h-3.5 w-3.5 shrink-0 text-muted-foreground" />
             </div>
         );
     }
@@ -91,19 +94,22 @@ const ContextCard: React.FC<{
                     <Icon name={icon} className="h-3.5 w-3.5 shrink-0" />
                     <span className="truncate">{summary}</span>
                     {reveal ? (
-                        <button
-                            type="button"
-                            className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full hover:bg-interactive-hover hover:text-foreground"
-                            style={{ minHeight: 0, minWidth: 0 }}
-                            onClick={(event) => {
-                                event.stopPropagation();
-                                reveal.onReveal();
-                            }}
-                            aria-label={reveal.label}
-                            title={reveal.label}
-                        >
-                            <Icon name="arrow-up" className="h-3.5 w-3.5" />
-                        </button>
+                        <HoverTooltip label={reveal.label}>
+                            <button
+                                type="button"
+                                className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full hover:bg-interactive-hover hover:text-foreground"
+                                style={{ minHeight: 0, minWidth: 0 }}
+                                onClick={(event) => {
+                                    event.stopPropagation();
+                                    reveal.onReveal();
+                                }}
+                                aria-label={reveal.label}
+                                // Empty: keeps the card's native title off this button.
+                                title=""
+                            >
+                                <Icon name="arrow-up" className="h-3.5 w-3.5" />
+                            </button>
+                        </HoverTooltip>
                     ) : null}
                 </div>
                 {hasBody ? (
@@ -147,13 +153,19 @@ const UserContextPart: React.FC<{
 
     switch (payload.kind) {
         case 'code-comment': {
-            const file = basename(payload.fileLabel);
-            const summary = payload.startLine === payload.endLine
+            const file = fileWithDiffCommentOrigin(basename(payload.fileLabel), payload.origin);
+            const fullFile = fileWithDiffCommentOrigin(payload.fileLabel, payload.origin);
+            const wholeFile = isWholeFileComment(payload);
+            const summary = wholeFile
+                ? t('chat.message.context.codeCommentFile', { file })
+                : payload.startLine === payload.endLine
                 ? t('chat.message.context.codeCommentLine', { file, line: payload.startLine })
                 : t('chat.message.context.codeComment', { file, start: payload.startLine, end: payload.endLine });
-            const fullTitle = payload.startLine === payload.endLine
-                ? t('chat.message.context.codeCommentLine', { file: payload.fileLabel, line: payload.startLine })
-                : t('chat.message.context.codeComment', { file: payload.fileLabel, start: payload.startLine, end: payload.endLine });
+            const fullTitle = wholeFile
+                ? t('chat.message.context.codeCommentFile', { file: fullFile })
+                : payload.startLine === payload.endLine
+                ? t('chat.message.context.codeCommentLine', { file: fullFile, line: payload.startLine })
+                : t('chat.message.context.codeComment', { file: fullFile, start: payload.startLine, end: payload.endLine });
             return <ContextCard icon="chat-1" summary={summary} title={fullTitle} body={payload.code} text={payload.text} mono {...shared} />;
         }
         case 'terminal':
@@ -231,10 +243,13 @@ const UserContextPart: React.FC<{
             );
         }
         case 'repository-issue':
+        case 'repository-discussion':
         case 'change-request':
         case 'tracker-item':
         case 'guest-issue':
         case 'guest-pr':
+        case 'session':
+        case 'session-message':
             // Rendered as link attachments by normalizeUserDisplayParts.
             return null;
     }

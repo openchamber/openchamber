@@ -1,4 +1,6 @@
-// Issues and pull requests for the reference picker.
+// Issues, pull requests and discussions for the reference picker. Discussions
+// are a search type of their own and are read by `discussion(number:)`;
+// issues and PRs share the issue search and `issueOrPullRequest`.
 //
 // A page carries what the rows and most of the preview need: state, author,
 // labels, comment count, body, and for a PR its draft flag and branches. One
@@ -23,7 +25,7 @@
 import { z } from 'zod';
 import { createHash } from 'node:crypto';
 
-import { checkContextSchema, isGraphqlRateLimitError, parseSummaryRefs, summarizeCheckContexts } from './pr-summaries.js';
+import { checkContextSchema, isGraphqlRateLimitError, parseSummaryRefs, summarizeCheckContexts, toDiscussionState } from './pr-summaries.js';
 
 const REFERENCE_PAGE_SIZE = 30;
 const ACROSS_REPO_CHUNK_SIZE = 40;
@@ -40,8 +42,8 @@ const acrossContextSchema = z.strictObject({
 });
 const acrossRequestSchema = z.strictObject({
   contexts: z.array(acrossContextSchema),
-  kind: z.enum(['issue', 'pull']),
-  state: z.enum(['open', 'closed', 'merged', 'all']).optional(),
+  kind: z.enum(['issue', 'pull', 'discussion']),
+  state: z.enum(['open', 'closed', 'merged', 'all', 'unanswered']).optional(),
   people: z.enum(['any', 'assigned', 'created', 'reviewRequested']).optional(),
   query: z.string().optional(),
   // The first page sends no cursor as null, like the single-repository list.
@@ -82,6 +84,8 @@ const SEARCH_STATES = {
   closed: 'is:closed',
   merged: 'is:merged',
   all: '',
+  // GitHub counts only discussions in a category that takes answers.
+  unanswered: 'is:open is:unanswered',
 };
 const SEARCH_PEOPLE = {
   any: '',
@@ -117,6 +121,20 @@ fragment PullReference on PullRequest {
   baseRefName
   headRefOid
   headRepository { name url sshUrl owner { login } }
+}
+`;
+
+// A discussion's category carries its emoji as a short HTML snippet around
+// the character; `isAnswered` is null outside a category that takes answers.
+const DISCUSSION_FRAGMENT = `
+fragment DiscussionReference on Discussion {
+  ${COMMON_FIELDS}
+  closed
+  stateReason
+  isAnswered
+  locked
+  upvoteCount
+  category { name emojiHTML isAnswerable }
 }
 `;
 
@@ -178,7 +196,7 @@ query ReferenceDetail($owner: String!, $repo: String!, $number: Int!) {
             viewerCanUnresolve
             viewerCanReply
             comments(first: ${DETAIL_THREAD_COMMENT_LIMIT}) {
-              nodes { author { login avatarUrl } body createdAt url path line originalLine }
+              nodes { author { login avatarUrl } body createdAt url path line originalLine startLine originalStartLine diffHunk }
             }
           }
         }
@@ -187,6 +205,37 @@ query ReferenceDetail($owner: String!, $repo: String!, $number: Int!) {
   }
 }
 fragment DetailComment on IssueComment { author { login avatarUrl } body createdAt url }
+`;
+
+// A discussion's comments each open a thread of replies; a comment in a
+// category that takes answers may be its answer.
+const DISCUSSION_DETAIL_QUERY = `
+query DiscussionDetail($owner: String!, $repo: String!, $number: Int!) {
+  repository(owner: $owner, name: $repo) {
+    discussion(number: $number) {
+      number
+      locked
+      viewerCanUpdate
+      viewerCanClose
+      viewerCanReopen
+      category { isAnswerable }
+      comments(last: ${DETAIL_COMMENT_LIMIT}) {
+        totalCount
+        nodes {
+          id
+          author { login avatarUrl }
+          body
+          createdAt
+          url
+          isAnswer
+          viewerCanMarkAsAnswer
+          viewerCanUnmarkAsAnswer
+          replies(first: ${DETAIL_THREAD_COMMENT_LIMIT}) { nodes { author { login avatarUrl } body createdAt url } }
+        }
+      }
+    }
+  }
+}
 `;
 
 const SEARCH_QUERY = `
@@ -202,6 +251,20 @@ query ReferenceSearch($q: String!, $first: Int!, $after: String) {
   }
 }
 ${REFERENCE_FRAGMENTS}
+`;
+
+const DISCUSSION_SEARCH_QUERY = `
+query DiscussionSearch($q: String!, $first: Int!, $after: String) {
+  search(type: DISCUSSION, query: $q, first: $first, after: $after) {
+    discussionCount
+    pageInfo { hasNextPage endCursor }
+    nodes {
+      __typename
+      ...DiscussionReference
+    }
+  }
+}
+${DISCUSSION_FRAGMENT}
 `;
 
 const userSchema = z.object({ login: z.string(), avatarUrl: z.string().nullable().optional() }).nullable();
@@ -243,11 +306,45 @@ const pullNodeSchema = z.object({
   }).nullable(),
 });
 
+const discussionNodeSchema = z.object({
+  __typename: z.literal('Discussion'),
+  ...commonSchema,
+  closed: z.boolean(),
+  stateReason: z.string().nullable(),
+  isAnswered: z.boolean().nullable(),
+  locked: z.boolean(),
+  upvoteCount: z.number().int(),
+  category: z.object({ name: z.string(), emojiHTML: z.string().nullable().optional(), isAnswerable: z.boolean() }),
+});
+
 const detailCommentSchema = z.object({
   author: userSchema,
   body: z.string(),
   createdAt: z.string().nullable(),
   url: z.string(),
+});
+
+const discussionDetailSchema = z.object({
+  repository: z.object({
+    discussion: z.object({
+      number: z.number().int(),
+      locked: z.boolean(),
+      viewerCanUpdate: z.boolean(),
+      viewerCanClose: z.boolean(),
+      viewerCanReopen: z.boolean(),
+      category: z.object({ isAnswerable: z.boolean() }),
+      comments: z.object({
+        totalCount: z.number().int(),
+        nodes: z.array(detailCommentSchema.extend({
+          id: z.string().min(1),
+          isAnswer: z.boolean(),
+          viewerCanMarkAsAnswer: z.boolean(),
+          viewerCanUnmarkAsAnswer: z.boolean(),
+          replies: z.object({ nodes: z.array(detailCommentSchema) }),
+        })),
+      }),
+    }).nullable(),
+  }).nullable(),
 });
 
 const detailSchema = z.object({
@@ -316,6 +413,10 @@ const detailSchema = z.object({
                 path: z.string().nullable(),
                 line: z.number().int().nullable(),
                 originalLine: z.number().int().nullable(),
+                // Older hosts may not answer these; a comment without them shows no excerpt.
+                startLine: z.number().int().nullable().optional(),
+                originalStartLine: z.number().int().nullable().optional(),
+                diffHunk: z.string().nullable().optional(),
               })),
             }),
           })),
@@ -324,6 +425,29 @@ const detailSchema = z.object({
     ]).nullable(),
   }).nullable(),
 });
+
+// More lines than any suggestion a person reviews; a longer range shows no excerpt.
+const EXCERPT_LINE_LIMIT = 200;
+
+/**
+ * The lines a review comment sits on, as the new side of its diff showed
+ * them, so a suggestion in it can be drawn against them. GitHub's hunk ends
+ * at the comment's last line; an outdated comment reads its original lines.
+ * Undefined when the hunk does not cover the range.
+ */
+export const reviewCommentExcerpt = (comment) => {
+  const current = comment.line !== null && comment.line !== undefined;
+  const end = current ? comment.line : comment.originalLine;
+  const start = (current ? comment.startLine : comment.originalStartLine) ?? end;
+  if (!comment.diffHunk || !Number.isSafeInteger(end) || !Number.isSafeInteger(start) || start < 1 || start > end) return undefined;
+  const count = end - start + 1;
+  if (count > EXCERPT_LINE_LIMIT) return undefined;
+  const [header, ...body] = comment.diffHunk.replace(/\r\n/g, '\n').split('\n');
+  if (!header?.startsWith('@@')) return undefined;
+  const newSide = body.filter((line) => line.startsWith(' ') || line.startsWith('+')).map((line) => line.slice(1));
+  if (newSide.length < count) return undefined;
+  return { startLine: start, lines: newSide.slice(-count) };
+};
 
 // A stack is rarely taller than a handful of layers; GitHub pages the rest.
 const STACK_LAYER_LIMIT = 50;
@@ -396,12 +520,18 @@ export async function fetchPullStack({ octokit, owner, repo, number }) {
   return { number: stack.number, base: stack.baseRefName, layers };
 }
 
-const referenceNodeSchema = z.discriminatedUnion('__typename', [issueNodeSchema, pullNodeSchema]);
+const referenceNodeSchema = z.discriminatedUnion('__typename', [issueNodeSchema, pullNodeSchema, discussionNodeSchema]);
 
 const REVIEW_DECISIONS = { APPROVED: 'approved', CHANGES_REQUESTED: 'changes_requested', REVIEW_REQUIRED: 'review_required' };
 const PULL_STATES = { OPEN: 'open', CLOSED: 'closed', MERGED: 'merged' };
 
 const repoKey = (owner, repo) => `${owner.toLowerCase()}/${repo.toLowerCase()}`;
+
+/** The emoji a category's HTML snippet draws (`<div>💡</div>`), or null when it holds none that fits a label. */
+const categoryEmoji = (html) => {
+  const text = String(html ?? '').replace(/<[^>]*>/g, '').trim();
+  return text && text.length <= 16 && !/[<>&]/.test(text) ? text : null;
+};
 
 const previewBody = (body) => {
   const text = body ?? '';
@@ -440,6 +570,17 @@ export function toReference(value, repos) {
       ? 'open'
       : node.stateReason === 'NOT_PLANNED' || node.stateReason === 'DUPLICATE' ? 'not_planned' : 'completed';
     return { kind: 'issue', ...common, state };
+  }
+  if (node.__typename === 'Discussion') {
+    return {
+      kind: 'discussion',
+      ...common,
+      state: toDiscussionState(node),
+      answered: node.category.isAnswerable ? node.isAnswered === true : null,
+      upvotes: node.upvoteCount,
+      locked: node.locked,
+      category: { name: node.category.name, emoji: categoryEmoji(node.category.emojiHTML), answerable: node.category.isAnswerable },
+    };
   }
   const state = PULL_STATES[node.state];
   return {
@@ -507,15 +648,20 @@ export async function fetchReferenceDetail({ octokit, owner, repo, number }) {
       comments.push({ author: toAuthor(review.author), body: review.body, createdAt: review.createdAt, url: review.url, path: null, line: null, review: state });
     }
   }
-  const lineComment = (comment) => ({
-    author: toAuthor(comment.author),
-    body: comment.body,
-    createdAt: comment.createdAt,
-    url: comment.url,
-    path: comment.path,
-    line: comment.line ?? comment.originalLine,
-    review: 'commented',
-  });
+  const lineComment = (comment) => {
+    const result = {
+      author: toAuthor(comment.author),
+      body: comment.body,
+      createdAt: comment.createdAt,
+      url: comment.url,
+      path: comment.path,
+      line: comment.line ?? comment.originalLine,
+      review: 'commented',
+    };
+    const excerpt = reviewCommentExcerpt(comment);
+    if (excerpt) result.excerpt = excerpt;
+    return result;
+  };
   // A thread reads as its first comment with the answers under it.
   for (const thread of item.reviewThreads.nodes) {
     const [first, ...replies] = thread.comments.nodes;
@@ -567,6 +713,48 @@ export async function fetchReferenceDetail({ octokit, owner, repo, number }) {
   return detail;
 }
 
+/**
+ * Comments of one discussion, oldest first. Each comment opens a thread of
+ * its replies, answered through `/discussions/comment` with its id; in a
+ * category that takes answers it also says whether it is the answer and
+ * whether this account may choose or unchoose it. A locked discussion takes
+ * comments only from those who may update it. Null when the repo has no such
+ * discussion.
+ */
+export async function fetchDiscussionDetail({ octokit, owner, repo, number }) {
+  const parsed = discussionDetailSchema.parse(await octokit.graphql(DISCUSSION_DETAIL_QUERY, { owner, repo, number }));
+  const discussion = parsed.repository?.discussion;
+  if (!discussion) return null;
+  const answerable = discussion.category.isAnswerable;
+  const canReply = !discussion.locked || discussion.viewerCanUpdate;
+  const plain = (comment) => ({
+    author: toAuthor(comment.author),
+    body: comment.body,
+    createdAt: comment.createdAt,
+    url: comment.url,
+    path: null,
+    line: null,
+    review: null,
+  });
+  const commentOf = (comment) => {
+    const entry = {
+      ...plain(comment),
+      thread: { id: comment.id, resolved: false, canResolve: false, canReply, replies: comment.replies.nodes.map(plain) },
+    };
+    if (answerable) {
+      entry.answer = { chosen: comment.isAnswer, canChange: comment.isAnswer ? comment.viewerCanUnmarkAsAnswer : comment.viewerCanMarkAsAnswer };
+    }
+    return entry;
+  };
+  return {
+    number: discussion.number,
+    comments: discussion.comments.nodes.map(commentOf),
+    commentTotal: discussion.comments.totalCount,
+    pull: null,
+    discussion: { canComment: canReply, canClose: discussion.viewerCanClose, canReopen: discussion.viewerCanReopen },
+  };
+}
+
 // One request per listed page of PRs.
 const PULL_STATUS_LIMIT = REFERENCE_PAGE_SIZE;
 
@@ -595,7 +783,7 @@ export function readPullStatusRefs(value) {
   return parseSummaryRefs(refs);
 }
 
-const stateSchema = z.enum(['open', 'closed', 'merged', 'all']).catch('open');
+const stateSchema = z.enum(['open', 'closed', 'merged', 'all', 'unanswered']).catch('open');
 const peopleSchema = z.enum(['any', 'assigned', 'created', 'reviewRequested']).catch('any');
 
 /** A list's state; anything else reads as `open`. */
@@ -609,68 +797,87 @@ export function readReferencePeople(value) {
 }
 
 
-const searchResultSchema = z.object({
-  search: z.object({
-    issueCount: z.number().int(),
-    pageInfo: z.object({ hasNextPage: z.boolean(), endCursor: z.string().nullable() }),
-    nodes: z.array(z.unknown()),
-  }),
+const searchPageSchema = z.object({
+  pageInfo: z.object({ hasNextPage: z.boolean(), endCursor: z.string().nullable() }),
+  nodes: z.array(z.unknown()),
 });
+const searchResultSchema = z.object({ search: searchPageSchema.extend({ issueCount: z.number().int() }) });
+const discussionSearchResultSchema = z.object({ search: searchPageSchema.extend({ discussionCount: z.number().int() }) });
 
 /**
  * The item a pasted link or number names: a number for every searched repo,
- * a URL only for its own repo. Null when the text is a search.
+ * a URL only for its own repo. Discussions are looked up apart from issues
+ * and PRs (`family`), though all three share one number space: a number reads
+ * as the list's own family, and a link of the other family is searched as
+ * text. Null when the text is a search.
  */
-export function parseReferenceLookup(text, repos) {
+export function parseReferenceLookup(text, repos, kind = 'issue') {
   const trimmed = text.trim();
+  const family = kind === 'discussion' ? 'discussion' : 'item';
   const hash = trimmed.match(/^#?(\d+)$/);
   if (hash) {
-    return { number: Number(hash[1]), repos };
+    return { number: Number(hash[1]), repos, family };
   }
-  const url = trimmed.match(/^(?:https?:\/\/)?github\.com\/([^/\s]+)\/([^/\s]+)\/(?:issues|pull)\/(\d+)(?:[/?#]\S*)?$/i);
-  if (url) {
+  const url = trimmed.match(/^(?:https?:\/\/)?github\.com\/([^/\s]+)\/([^/\s]+)\/(issues|pull|discussions)\/(\d+)(?:[/?#]\S*)?$/i);
+  if (url && (url[3].toLowerCase() === 'discussions') === (family === 'discussion')) {
     const target = repos.filter((entry) => repoKey(entry.owner, entry.repo) === repoKey(url[1], url[2]));
-    return { number: Number(url[3]), repos: target };
+    return { number: Number(url[4]), repos: target, family };
   }
   return null;
 }
 
 /**
+ * The repository and number a link to an item on `host` names, wherever the
+ * repository is; null for anything else.
+ */
+export function parseReferenceLink(text, host) {
+  const url = text.trim().match(/^https?:\/\/(?:www\.)?([^/\s]+)\/([^/\s]+)\/([^/\s]+)\/(?:issues|pull|discussions)\/(\d+)(?:[/?#]\S*)?$/i);
+  if (!url || url[1].toLowerCase() !== String(host).toLowerCase()) return null;
+  return { owner: url[2], repo: url[3], number: Number(url[4]) };
+}
+
+/**
  * The GitHub search string for one picker page. The user's text may carry
- * its own qualifiers; state and sort are added only when it does not.
+ * its own qualifiers; state and sort are added only when it does not. A
+ * discussion search is its own search type, so it names no kind.
  */
 export function buildReferenceSearchQuery({ repos, kind, state, people, text }) {
   const userText = text.trim();
   const parts = repos.map((entry) => `repo:${entry.owner}/${entry.repo}`);
-  parts.push(kind === 'pull' ? 'is:pr' : 'is:issue');
-  if (!/(^|\s)(is:(open|closed|merged|unmerged)|state:\S+)/i.test(userText)) {
-    // An issue is never merged; the nearest list is its closed one.
-    const stateQualifier = SEARCH_STATES[kind === 'issue' && state === 'merged' ? 'closed' : state];
+  if (kind !== 'discussion') parts.push(kind === 'pull' ? 'is:pr' : 'is:issue');
+  if (!/(^|\s)(is:(open|closed|merged|unmerged|answered|unanswered)|state:\S+)/i.test(userText)) {
+    // Only a PR merges, and only a discussion is answered; elsewhere the nearest list stands in.
+    const shown = kind !== 'pull' && state === 'merged' ? 'closed' : kind !== 'discussion' && state === 'unanswered' ? 'open' : state;
+    const stateQualifier = SEARCH_STATES[shown];
     if (stateQualifier) parts.push(stateQualifier);
   }
   if (!/(^|\s)sort:\S+/i.test(userText)) {
     parts.push('sort:updated-desc');
   }
-  // Review requests exist for pull requests only.
-  const peopleQualifier = kind === 'issue' && people === 'reviewRequested' ? '' : SEARCH_PEOPLE[people];
+  // Review requests exist for pull requests only, and a discussion has no assignee.
+  const peopleQualifier = (kind !== 'pull' && people === 'reviewRequested') || (kind === 'discussion' && people === 'assigned')
+    ? ''
+    : SEARCH_PEOPLE[people];
   if (peopleQualifier) parts.push(peopleQualifier);
   if (userText) parts.push(userText);
   return parts.join(' ');
 }
 
-function buildLookupQuery(number, repos) {
+function buildLookupQuery(number, repos, family) {
   const variables = { number };
   const declarations = ['$number: Int!'];
+  const field = family === 'discussion'
+    ? 'discussion(number: $number) { __typename ...DiscussionReference }'
+    : 'issueOrPullRequest(number: $number) { __typename ...IssueReference ...PullReference }';
   const selections = repos.map((entry, index) => {
     variables[`o${index}`] = entry.owner;
     variables[`n${index}`] = entry.repo;
     declarations.push(`$o${index}: String!, $n${index}: String!`);
-    return `a${index}: repository(owner: $o${index}, name: $n${index}) {
-      issueOrPullRequest(number: $number) { __typename ...IssueReference ...PullReference }
-    }`;
+    return `a${index}: repository(owner: $o${index}, name: $n${index}) {\n      ${field}\n    }`;
   });
+  const fragments = family === 'discussion' ? DISCUSSION_FRAGMENT : REFERENCE_FRAGMENTS;
   return {
-    query: `query ReferenceLookup(${declarations.join(', ')}) {\n${selections.join('\n')}\n}\n${REFERENCE_FRAGMENTS}`,
+    query: `query ReferenceLookup(${declarations.join(', ')}) {\n${selections.join('\n')}\n}\n${fragments}`,
     variables,
   };
 }
@@ -690,28 +897,33 @@ async function runPartialQuery(octokit, query, variables) {
 
 /**
  * One page of the picker. `repos` is the project's repo network, origin
- * first. A lookup answers every repo that has the number, both kinds; a
- * search answers one kind, newest activity first.
+ * first. A lookup answers every repo that has the number: an issue or PR
+ * from those lists, a discussion from the discussions list. A search answers
+ * one kind, newest activity first.
  */
 export async function searchGitHubReferences({ octokit, repos, kind, state, people, text, cursor }) {
-  const lookup = parseReferenceLookup(text, repos);
+  const lookup = parseReferenceLookup(text, repos, kind);
   if (lookup) {
     if (lookup.repos.length === 0) {
       return { items: [], cursor: null, hasMore: false, total: 0 };
     }
-    const { query, variables } = buildLookupQuery(lookup.number, lookup.repos);
+    const { query, variables } = buildLookupQuery(lookup.number, lookup.repos, lookup.family);
     const data = await runPartialQuery(octokit, query, variables);
+    const field = lookup.family === 'discussion' ? 'discussion' : 'issueOrPullRequest';
     const items = lookup.repos
-      .map((_entry, index) => toReference(data?.[`a${index}`]?.issueOrPullRequest, repos))
+      .map((_entry, index) => toReference(data?.[`a${index}`]?.[field], repos))
       .filter((item) => item !== null);
     return { items, cursor: null, hasMore: false, total: items.length };
   }
 
-  const { search } = searchResultSchema.parse(await octokit.graphql(SEARCH_QUERY, {
+  const variables = {
     q: buildReferenceSearchQuery({ repos, kind, state, people, text }),
     first: REFERENCE_PAGE_SIZE,
     after: cursor || null,
-  }));
+  };
+  const search = kind === 'discussion'
+    ? discussionSearchResultSchema.parse(await octokit.graphql(DISCUSSION_SEARCH_QUERY, variables)).search
+    : searchResultSchema.parse(await octokit.graphql(SEARCH_QUERY, variables)).search;
   const items = search.nodes
     .map((node) => toReference(node, repos))
     .filter((item) => item !== null && item.kind === kind);
@@ -719,7 +931,7 @@ export async function searchGitHubReferences({ octokit, repos, kind, state, peop
     items,
     cursor: search.pageInfo.endCursor,
     hasMore: search.pageInfo.hasNextPage,
-    total: search.issueCount,
+    total: search.discussionCount ?? search.issueCount,
   };
 }
 
@@ -772,7 +984,7 @@ export async function searchGitHubReferencesAcross({ groups, kind, state, people
     }
     return chunks;
   });
-  const lookup = parseReferenceLookup(text, []);
+  const lookup = parseReferenceLookup(text, [], kind);
   if (lookup && cursor) throw invalidAcrossCursor();
   const scope = createHash('sha256').update(JSON.stringify({
     kind, state, people, text,

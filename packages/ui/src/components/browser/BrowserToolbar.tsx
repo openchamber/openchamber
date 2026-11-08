@@ -20,22 +20,25 @@ type ToolbarButtonProps = {
 const ToolbarButton: React.FC<ToolbarButtonProps> = ({ icon, label, onClick, disabled, pressed }) => (
   <Tooltip>
     <TooltipTrigger asChild>
-      <Button
-        type="button"
-        variant={pressed ? 'secondary' : 'ghost'}
-        size="xs"
-        className={cn(
-          'w-6 shrink-0 rounded-full px-0 text-muted-foreground',
-          'hover:text-foreground',
-          pressed && 'text-foreground',
-        )}
-        onClick={onClick}
-        disabled={disabled}
-        aria-label={label}
-        aria-pressed={pressed}
-      >
-        <Icon name={icon} className="size-3.5" aria-hidden="true" />
-      </Button>
+      {/* The span keeps the tooltip on a disabled button, which takes no pointer events. */}
+      <span className="inline-flex shrink-0">
+        <Button
+          type="button"
+          variant={pressed ? 'secondary' : 'ghost'}
+          size="xs"
+          className={cn(
+            'w-6 shrink-0 rounded-full px-0 text-muted-foreground',
+            'hover:text-foreground',
+            pressed && 'text-foreground',
+          )}
+          onClick={onClick}
+          disabled={disabled}
+          aria-label={label}
+          aria-pressed={pressed}
+        >
+          <Icon name={icon} className="size-3.5" aria-hidden="true" />
+        </Button>
+      </span>
     </TooltipTrigger>
     <TooltipContent sideOffset={6}>{label}</TooltipContent>
   </Tooltip>

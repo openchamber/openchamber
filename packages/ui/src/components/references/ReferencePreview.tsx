@@ -7,21 +7,27 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { dropdownTriggerVariants } from '@/components/ui/dropdown-trigger';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import type { CISummary, ChangeRequestListStatus, ChangeRequestRevision, ChangeRequestRevisionKind, RepositoryReference, RepositoryReferenceComment, RepositoryReferenceDetail, TrackerItem, TrackerItemSummary, PullRequestStackLayer } from '@/lib/api/types';
+import { useAvatarImage } from '@/hooks/useAvatarImage';
+import { useEmojiShortcodes } from '@/lib/emoji/shortcodes';
 import { useI18n, type I18nKey } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 
+import { ButtonTooltip } from '@/components/ui/action-toolbar';
 import type { CachedValue } from './referenceCache';
 import { ReferenceMarkdownRewriteContext, useProjectUploadRewrite } from './projectUploads';
+import { ReferenceLinksContext, useReferenceLinks } from './referenceLinks';
 import { useSourceControlProvider } from '@/lib/source-control/providers/registry';
 import { trackerPresentation } from '@/lib/trackers/presentation';
 import { useTrackerDescriptor } from '@/lib/trackers/registry';
 import { isSettledTrackerState, trackerStateGlyph } from '@/lib/trackers/stateLook';
 import { ReferenceComments, type ReferenceThreadActions } from './ReferenceComments';
 import { buildReferenceTimeline, type ReferenceCommentItem, type ReferenceTimelineEntry } from './referenceTimeline';
-import { ChecksGlyph, ReferenceLabelChips } from './ReferencePickerRow';
+import { ChecksGlyph, DiscussionCategory, ReferenceLabelChips } from './ReferencePickerRow';
 import { PullStackRows } from './PullStackRows';
 import { useReferenceImagePreview } from './useReferenceImagePreview';
+import { useCopyReferenceLink } from './useCopyReferenceLink';
 import {
     repositoryStateLook,
     labelColor,
@@ -52,25 +58,25 @@ const PreviewFrame: React.FC<{ pinned: boolean; header: React.ReactNode; meta: R
         return (
             <article className={cn('flex flex-col gap-4', ZOOMABLE_IMAGE_CLASS)} onClick={imagePreview.onClick}>
                 <header className="flex flex-col gap-2">{header}</header>
-                <div className="border-b border-border/60 pb-4">{meta}</div>
+                <div className="border-b border-edge pb-4">{meta}</div>
                 {children}
-                <div className="rounded-lg border border-border/60 px-3 py-2.5">{footer}</div>
+                <div className="rounded-lg border border-edge px-3 py-2.5">{footer}</div>
                 {imagePreview.viewer}
             </article>
         );
     }
     return (
         <div className="flex h-full min-h-0 flex-col">
-            <div className="shrink-0 border-b border-border/60 px-6 pb-4 pt-5">
+            <div className="shrink-0 border-b border-edge px-6 pb-4 pt-5">
                 <header className="flex flex-col gap-2">{header}</header>
             </div>
             <ScrollableOverlay outerClassName="min-h-0 flex-1" className="px-6 pb-5 pt-4" disableHorizontal>
                 <article className={cn('flex flex-col gap-4', ZOOMABLE_IMAGE_CLASS)} onClick={imagePreview.onClick}>
-                    <div className="border-b border-border/60 pb-4">{meta}</div>
+                    <div className="border-b border-edge pb-4">{meta}</div>
                     {children}
                 </article>
             </ScrollableOverlay>
-            <div className="shrink-0 border-t border-border/60 px-6 py-3">{footer}</div>
+            <div className="shrink-0 border-t border-edge px-6 py-3">{footer}</div>
             {imagePreview.viewer}
         </div>
     );
@@ -125,6 +131,18 @@ export const ChecksSummaryLine: React.FC<{ checks: CISummary }> = ({ checks }) =
     </>
 );
 
+/** What the agent gets from an attached item, and what a worktree started from one gets. */
+const SENDS_KEYS = {
+    issue: 'references.picker.preview.sends.issue',
+    pull: 'references.picker.preview.sends.pull',
+    discussion: 'references.picker.preview.sends.discussion',
+} as const satisfies Record<RepositoryReference['kind'], I18nKey>;
+const WORKTREE_KEYS = {
+    issue: 'references.picker.preview.worktree.issue',
+    pull: 'references.picker.preview.worktree.pull',
+    discussion: 'references.picker.preview.worktree.discussion',
+} as const satisfies Record<RepositoryReference['kind'], I18nKey>;
+
 const REVIEW_KEYS = {
     approved: 'references.picker.preview.review.approved',
     changes_requested: 'references.picker.preview.review.changesRequested',
@@ -162,16 +180,21 @@ const RevisionPicker: React.FC<{ choice: RevisionChoice }> = ({ choice }) => {
         : t('references.picker.preview.revision.number', { number: revision.number }));
     return (
         <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-                <button
-                    type="button"
-                    className={cn(dropdownTriggerVariants(), 'min-w-0 max-w-[14rem] font-normal')}
-                    aria-label={t('references.picker.preview.revision.label')}
-                >
-                    <span className="truncate">{labelOf(shown)}</span>
-                    <Icon name="arrow-down-s" className="size-3.5" />
-                </button>
-            </DropdownMenuTrigger>
+            <Tooltip>
+                <TooltipTrigger asChild>
+                    <DropdownMenuTrigger asChild>
+                        <button
+                            type="button"
+                            className={cn(dropdownTriggerVariants(), 'min-w-0 max-w-[14rem] font-normal')}
+                            aria-label={t('references.picker.preview.revision.label')}
+                        >
+                            <span className="truncate">{labelOf(shown)}</span>
+                            <Icon name="arrow-down-s" className="size-3.5" />
+                        </button>
+                    </DropdownMenuTrigger>
+                </TooltipTrigger>
+                <TooltipContent sideOffset={6}>{t('contextTooltips.tracker.choosePatchset')}</TooltipContent>
+            </Tooltip>
             <DropdownMenuContent align="start" className="w-64">
                 <DropdownMenuRadioGroup
                     value={shown.sha}
@@ -218,8 +241,21 @@ const ChangeFlags: React.FC<{ reference: RepositoryReference }> = ({ reference }
 /** Description with images and the HTML GitHub allows; the agent gets the source. */
 const ReferenceBody: React.FC<{ content: string }> = ({ content }) => {
     const rewrite = React.useContext(ReferenceMarkdownRewriteContext);
+    const links = React.useContext(ReferenceLinksContext);
     const shown = React.useMemo(() => (rewrite ? rewrite(content) : content), [content, rewrite]);
-    return <SimpleMarkdownRenderer content={shown} className={MARKDOWN_CLASS} enableFileReferences={false} allowRawHtml />;
+    const emojiShortcodes = useEmojiShortcodes(shown);
+    return (
+        <SimpleMarkdownRenderer
+            content={shown}
+            className={MARKDOWN_CLASS}
+            enableFileReferences={false}
+            allowRawHtml
+            singleTilde
+            repositoryLinks={links.repository}
+            emojiShortcodes={emojiShortcodes}
+            directory={links.directory}
+        />
+    );
 };
 
 /** The thread section under the body: loading, failure, empty, or the comments. */
@@ -236,7 +272,7 @@ const CommentsSection: React.FC<{
     const { t } = useI18n();
     const shown = state.status === 'ready' ? state.value.filter((entry) => entry.kind === 'comment').length : 0;
     return (
-        <section className="flex flex-col gap-3 border-t border-border/60 pt-4">
+        <section className="flex flex-col gap-3 border-t border-edge pt-4">
             <h4 className="flex items-center gap-2 typography-ui-label font-semibold text-foreground">
                 {t(activity ? 'references.picker.preview.activity' : 'references.picker.preview.comments')}
                 {state.status === 'ready' && total !== null && total > shown ? (
@@ -245,14 +281,19 @@ const CommentsSection: React.FC<{
                     </span>
                 ) : null}
                 {attachments && shown > 0 && state.status === 'ready' ? (
-                    <button
-                        type="button"
-                        onClick={() => attachments.onAttachAll(state.value.flatMap((entry) => (entry.kind === 'comment' ? [entry, ...(entry.thread?.replies ?? [])] : [])))}
-                        className={cn('ms-auto inline-flex items-center gap-1 typography-meta font-normal hover:text-foreground', REFERENCE_META_TEXT)}
-                    >
-                        <Icon name="attachment-2" className="size-3.5" />
-                        {t('gitView.pr.comments.addAll')}
-                    </button>
+                    <Tooltip>
+                        <TooltipTrigger asChild>
+                            <button
+                                type="button"
+                                onClick={() => attachments.onAttachAll(state.value.flatMap((entry) => (entry.kind === 'comment' ? [entry, ...(entry.thread?.replies ?? [])] : [])))}
+                                className={cn('ms-auto inline-flex items-center gap-1 typography-meta font-normal hover:text-foreground', REFERENCE_META_TEXT)}
+                            >
+                                <Icon name="attachment-2" className="size-3.5" />
+                                {t('gitView.pr.comments.addAll')}
+                            </button>
+                        </TooltipTrigger>
+                        <TooltipContent sideOffset={6}>{t('contextTooltips.tracker.attachAllComments')}</TooltipContent>
+                    </Tooltip>
                 ) : null}
             </h4>
             {state.status === 'error' ? (
@@ -325,15 +366,20 @@ const PullDetailRows: React.FC<{
                 checks.value && checks.value.total > 0 ? (
                     <MetaRow label={t('references.picker.preview.checks')}>
                         {onOpenChecks ? (
-                            <Button
-                                variant="ghost"
-                                size="xs"
-                                onClick={onOpenChecks}
-                                className="-ms-1.5 gap-1.5 px-1.5 typography-meta font-normal normal-case text-muted-foreground"
-                            >
-                                <ChecksSummaryLine checks={checks.value} />
-                                <Icon name="arrow-right-s" className="size-3.5 opacity-60" />
-                            </Button>
+                            <Tooltip>
+                                <TooltipTrigger asChild>
+                                    <Button
+                                        variant="ghost"
+                                        size="xs"
+                                        onClick={onOpenChecks}
+                                        className="-ms-1.5 gap-1.5 px-1.5 typography-meta font-normal normal-case text-muted-foreground"
+                                    >
+                                        <ChecksSummaryLine checks={checks.value} />
+                                        <Icon name="arrow-right-s" className="size-3.5 opacity-60" />
+                                    </Button>
+                                </TooltipTrigger>
+                                <TooltipContent sideOffset={6}>{t('contextTooltips.tracker.showChecks')}</TooltipContent>
+                            </Tooltip>
                         ) : (
                             <span className="inline-flex items-center gap-1.5">
                                 <ChecksSummaryLine checks={checks.value} />
@@ -350,6 +396,27 @@ const PullDetailRows: React.FC<{
                 <MetaRow label={t('references.picker.preview.review')}>{t(REVIEW_KEYS[pull.reviewDecision])}</MetaRow>
             ) : null}
         </>
+    );
+};
+
+/** Copies the item's address, beside the link that opens it on its host. */
+const CopyReferenceLinkButton: React.FC<{ url: string; className?: string }> = ({ url, className }) => {
+    const { t } = useI18n();
+    const copyLink = useCopyReferenceLink();
+    return (
+        <Tooltip>
+            <TooltipTrigger asChild>
+                <button
+                    type="button"
+                    className={cn('inline-flex size-6 shrink-0 items-center justify-center rounded-md hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring', REFERENCE_META_TEXT, className)}
+                    aria-label={t('references.link.copy')}
+                    onClick={() => copyLink(url)}
+                >
+                    <Icon name="link" className="size-3.5" />
+                </button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom" sideOffset={6}>{t('references.link.copy')}</TooltipContent>
+        </Tooltip>
     );
 };
 
@@ -396,6 +463,7 @@ const RepositoryPreview: React.FC<{
 }> = ({ reference, pullStatus, detail, purpose, pinned, includeDiff, onIncludeDiffChange, now, footer: footerOverride, pullLinks, reply, labelsControl, reviewersControl, onOpenChecks, commentAttachments, stateMenu, onRefresh, threadActions, onOpenStackLayer, revisionChoice }) => {
     const { t } = useI18n();
     const [refreshing, setRefreshing] = React.useState(false);
+    const { broken: authorBroken, onError } = useAvatarImage(reference.author?.avatarUrl);
     const refresh = onRefresh ? () => {
         setRefreshing(true);
         void onRefresh().finally(() => setRefreshing(false));
@@ -413,6 +481,8 @@ const RepositoryPreview: React.FC<{
                 context: location ?? (comment.review && comment.review !== 'commented' ? t(REVIEW_VERDICT_KEYS[comment.review]) : null),
                 location,
             };
+            if (comment.answer) item.answer = comment.answer;
+            if (comment.excerpt) item.excerpt = comment.excerpt;
             if (comment.thread) {
                 item.thread = {
                     id: comment.thread.id,
@@ -448,9 +518,7 @@ const RepositoryPreview: React.FC<{
     const footer = footerOverride ?? (
         <div className="flex flex-col gap-2">
             <p className="typography-meta text-muted-foreground">
-                {purpose === 'worktree'
-                    ? t(reference.kind === 'pull' ? 'references.picker.preview.worktree.pull' : 'references.picker.preview.worktree.issue')
-                    : t(reference.kind === 'pull' ? 'references.picker.preview.sends.pull' : 'references.picker.preview.sends.issue')}
+                {t((purpose === 'worktree' ? WORKTREE_KEYS : SENDS_KEYS)[reference.kind])}
             </p>
             {reference.kind === 'pull' ? (
                 <label className="flex cursor-pointer items-center gap-2 typography-meta text-foreground">
@@ -470,20 +538,25 @@ const RepositoryPreview: React.FC<{
                     <div className="flex items-center gap-2">
                         {stateMenu ? (
                             <DropdownMenu>
-                                <DropdownMenuTrigger asChild>
-                                    <button
-                                        type="button"
-                                        aria-label={t('references.picker.preview.stateMenuAria', { state: t(look.labelKey) })}
-                                        className="shrink-0 rounded-full outline-none transition-opacity hover:opacity-85 focus-visible:ring-2 focus-visible:ring-ring"
-                                    >
-                                        <StatePill
-                                            icon={look.icon}
-                                            color={look.color}
-                                            label={t(look.labelKey)}
-                                            trailing={<Icon name="arrow-down-s" className="size-3.5 opacity-70" />}
-                                        />
-                                    </button>
-                                </DropdownMenuTrigger>
+                                <Tooltip>
+                                    <TooltipTrigger asChild>
+                                        <DropdownMenuTrigger asChild>
+                                            <button
+                                                type="button"
+                                                aria-label={t('references.picker.preview.stateMenuAria', { state: t(look.labelKey) })}
+                                                className="shrink-0 rounded-full outline-none transition-opacity hover:opacity-85 focus-visible:ring-2 focus-visible:ring-ring"
+                                            >
+                                                <StatePill
+                                                    icon={look.icon}
+                                                    color={look.color}
+                                                    label={t(look.labelKey)}
+                                                    trailing={<Icon name="arrow-down-s" className="size-3.5 opacity-70" />}
+                                                />
+                                            </button>
+                                        </DropdownMenuTrigger>
+                                    </TooltipTrigger>
+                                    <TooltipContent side="bottom" sideOffset={6}>{t('contextTooltips.tracker.changeState')}</TooltipContent>
+                                </Tooltip>
                                 <DropdownMenuContent align="start" className="w-56">{stateMenu}</DropdownMenuContent>
                             </DropdownMenu>
                         ) : (
@@ -493,26 +566,33 @@ const RepositoryPreview: React.FC<{
                             {joinProjectPath(reference.sourceRepo.owner, reference.sourceRepo.repo)} {referenceNumberLabel(reference, descriptor)}
                         </span>
                         {refresh ? (
-                            <button
-                                type="button"
-                                className={cn('ms-auto inline-flex size-6 shrink-0 items-center justify-center rounded-md hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none', REFERENCE_META_TEXT)}
-                                aria-label={t('references.picker.preview.refresh')}
-                                title={t('references.picker.preview.refresh')}
-                                disabled={refreshing}
-                                onClick={refresh}
-                            >
-                                <Icon name="refresh" className={cn('size-3.5', refreshing && 'animate-spin')} />
-                            </button>
+                            <ButtonTooltip label={t('references.picker.preview.refresh')} side="bottom" className="ms-auto shrink-0">
+                                <button
+                                    type="button"
+                                    className={cn('inline-flex size-6 shrink-0 items-center justify-center rounded-md hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none', REFERENCE_META_TEXT)}
+                                    aria-label={t('references.picker.preview.refresh')}
+                                    disabled={refreshing}
+                                    onClick={refresh}
+                                >
+                                    <Icon name="refresh" className={cn('size-3.5', refreshing && 'animate-spin')} />
+                                </button>
+                            </ButtonTooltip>
                         ) : null}
-                        <a
-                            href={reference.url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className={cn('inline-flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 typography-meta hover:bg-interactive-hover hover:text-foreground', !refresh && 'ms-auto', REFERENCE_META_TEXT)}
-                        >
-                            {descriptor.label}
-                            <Icon name="external-link" className="size-3.5" />
-                        </a>
+                        <CopyReferenceLinkButton url={reference.url} className={refresh ? undefined : 'ms-auto'} />
+                        <Tooltip>
+                            <TooltipTrigger asChild>
+                                <a
+                                    href={reference.url}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className={cn('inline-flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 typography-meta hover:bg-interactive-hover hover:text-foreground', REFERENCE_META_TEXT)}
+                                >
+                                    {descriptor.label}
+                                    <Icon name="external-link" className="size-3.5" />
+                                </a>
+                            </TooltipTrigger>
+                            <TooltipContent side="bottom" sideOffset={6}>{t('contextTooltips.tracker.openOnHost', { host: descriptor.label })}</TooltipContent>
+                        </Tooltip>
                     </div>
                     <h3 className="typography-ui-header font-semibold break-words text-foreground">{reference.title}</h3>
                     <ChangeFlags reference={reference} />
@@ -523,14 +603,41 @@ const RepositoryPreview: React.FC<{
                     {reference.author ? (
                         <MetaRow label={t('references.picker.preview.author')}>
                             <span className="inline-flex items-center gap-1.5">
-                                {reference.author.avatarUrl ? (
-                                    <img src={reference.author.avatarUrl} alt="" className="size-4 rounded-full" loading="lazy" />
+                                {reference.author.avatarUrl && !authorBroken ? (
+                                    <img src={reference.author.avatarUrl} alt="" className="size-4 rounded-full" loading="lazy" onError={onError} />
+                                ) : reference.author.avatarUrl ? (
+                                    <span className="flex size-4 items-center justify-center rounded-full bg-surface-muted text-[0.625rem] leading-none">
+                                        {reference.author.login.slice(0, 1).toUpperCase()}
+                                    </span>
                                 ) : null}
                                 {reference.author.login}
                             </span>
                         </MetaRow>
                     ) : null}
                     {updated ? <MetaRow label={t('references.picker.preview.updated')}>{updated}</MetaRow> : null}
+                    {reference.kind === 'discussion' ? (
+                        <>
+                            <MetaRow label={t('references.picker.preview.category')}><DiscussionCategory category={reference.category} /></MetaRow>
+                            {reference.category.answerable ? (
+                                <MetaRow label={t('references.picker.preview.answer')}>
+                                    {reference.answered ? (
+                                        <span className="inline-flex items-center gap-1">
+                                            <Icon name="checkbox-circle" className="size-3.5 text-[var(--status-success)]" />
+                                            {t('references.picker.state.answered')}
+                                        </span>
+                                    ) : t('references.picker.discussion.unanswered')}
+                                </MetaRow>
+                            ) : null}
+                            {reference.upvotes > 0 ? (
+                                <MetaRow label={t('references.picker.preview.upvotes')}>
+                                    <span className="tabular-nums">{reference.upvotes}</span>
+                                </MetaRow>
+                            ) : null}
+                            {reference.locked ? (
+                                <MetaRow label={t('references.picker.preview.locked')}>{t('references.picker.discussion.lockedNote')}</MetaRow>
+                            ) : null}
+                        </>
+                    ) : null}
                     {reference.kind === 'pull' ? (
                         <>
                             <MetaRow label={t('references.picker.preview.branch')}>
@@ -567,7 +674,7 @@ const RepositoryPreview: React.FC<{
             }
         >
             {stack ? (
-                <section className="flex flex-col gap-2 border-b border-border/60 pb-4">
+                <section className="flex flex-col gap-2 border-b border-edge pb-4">
                     <h4 className="flex items-center gap-2 typography-ui-label font-semibold text-foreground">
                         {t('stacks.preview.label')}
                         {stackPosition > 0 ? (
@@ -638,7 +745,7 @@ const RelatedTrackerItem: React.FC<{
             type="button"
             onClick={() => onOpen(issue)}
             title={issue.title}
-            className={cn(className, 'rounded-sm text-muted-foreground/80 outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring')}
+            className={cn(className, 'rounded-sm text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring')}
         >
             {content}
         </button>
@@ -655,7 +762,7 @@ const SubIssuesSection: React.FC<{
     if (subIssues.length === 0) return null;
     const done = subIssues.filter((sub) => isSettledTrackerState(sub.state?.category)).length;
     return (
-        <section className="flex flex-col gap-2 border-t border-border/60 pt-4">
+        <section className="flex flex-col gap-2 border-t border-edge pt-4">
             <h4 className="flex items-center gap-2 typography-ui-label font-semibold text-foreground">
                 {t('references.picker.preview.subIssues')}
                 {issue.childrenMore ? null : (
@@ -736,15 +843,21 @@ const TrackerPreview: React.FC<{
                     <div className="flex items-center gap-2">
                         {stateControl ?? (issue.state?.name ? <StatePill icon={look.icon} color={look.color} label={issue.state.name} /> : null)}
                         <span className={cn('truncate typography-meta', REFERENCE_META_TEXT)}>{issue.identifier}</span>
-                        <a
-                            href={issue.url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className={cn('ms-auto inline-flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 typography-meta hover:bg-interactive-hover hover:text-foreground', REFERENCE_META_TEXT)}
-                        >
-                            {descriptor.name}
-                            <Icon name="external-link" className="size-3.5" />
-                        </a>
+                        <CopyReferenceLinkButton url={issue.url} className="ms-auto" />
+                        <Tooltip>
+                            <TooltipTrigger asChild>
+                                <a
+                                    href={issue.url}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className={cn('inline-flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 typography-meta hover:bg-interactive-hover hover:text-foreground', REFERENCE_META_TEXT)}
+                                >
+                                    {descriptor.name}
+                                    <Icon name="external-link" className="size-3.5" />
+                                </a>
+                            </TooltipTrigger>
+                            <TooltipContent side="bottom" sideOffset={6}>{t('contextTooltips.tracker.openOnHost', { host: descriptor.name })}</TooltipContent>
+                        </Tooltip>
                     </div>
                     <h3 className="typography-ui-header font-semibold break-words text-foreground">{issue.title}</h3>
                 </>
@@ -824,7 +937,7 @@ export const ReferencePreview: React.FC<{
     onOpenTrackerItem?: (item: TrackerItemSummary) => void;
     /** Reads an issue or PR again from its host, past every cached answer; settles when the reads are asked. */
     onRefresh?: () => Promise<void>;
-    /** Answer and resolve a PR's review threads; without it they are read only. */
+    /** Answer and resolve a PR's review threads, or answer a discussion's comments and choose its answer; without it they are read only. */
     threadActions?: ReferenceThreadActions;
     /** Opens another layer of the previewed PR's stack; without it the layers are plain text. */
     onOpenStackLayer?: (layer: PullRequestStackLayer) => void;
@@ -833,6 +946,7 @@ export const ReferencePreview: React.FC<{
 }> = ({ item, directory, pullStatus, trackerDetail, repositoryDetail, purpose, pinned, includeDiff, onIncludeDiffChange, now, footer, pullLinks, trackerStateControl, reply, labelsControl, reviewersControl, onOpenChecks, commentAttachments, stateMenu, onOpenTrackerItem, onRefresh, threadActions, onOpenStackLayer, revisionChoice }) => {
     const { t } = useI18n();
     const rewriteMarkdown = useProjectUploadRewrite(directory, item?.source === 'repository' ? item.reference : null);
+    const links = useReferenceLinks(directory, item?.source === 'repository' ? item.reference : null);
     if (!item) {
         return (
             <div className="flex h-full items-center justify-center px-6 text-center typography-meta text-muted-foreground">
@@ -845,28 +959,30 @@ export const ReferencePreview: React.FC<{
     }
     return (
         <ReferenceMarkdownRewriteContext.Provider value={rewriteMarkdown}>
-            <RepositoryPreview
-                reference={item.reference}
-                pullStatus={pullStatus}
-                detail={repositoryDetail}
-                purpose={purpose}
-                pinned={pinned}
-                includeDiff={includeDiff}
-                onIncludeDiffChange={onIncludeDiffChange}
-                now={now}
-                footer={footer}
-                pullLinks={pullLinks}
-                reply={reply}
-                labelsControl={labelsControl}
-                reviewersControl={reviewersControl}
-                onOpenChecks={onOpenChecks}
-                commentAttachments={commentAttachments}
-                stateMenu={stateMenu}
-                onRefresh={onRefresh}
-                threadActions={threadActions}
-                onOpenStackLayer={onOpenStackLayer}
-                revisionChoice={revisionChoice}
-            />
+            <ReferenceLinksContext.Provider value={links}>
+                <RepositoryPreview
+                    reference={item.reference}
+                    pullStatus={pullStatus}
+                    detail={repositoryDetail}
+                    purpose={purpose}
+                    pinned={pinned}
+                    includeDiff={includeDiff}
+                    onIncludeDiffChange={onIncludeDiffChange}
+                    now={now}
+                    footer={footer}
+                    pullLinks={pullLinks}
+                    reply={reply}
+                    labelsControl={labelsControl}
+                    reviewersControl={reviewersControl}
+                    onOpenChecks={onOpenChecks}
+                    commentAttachments={commentAttachments}
+                    stateMenu={stateMenu}
+                    onRefresh={onRefresh}
+                    threadActions={threadActions}
+                    onOpenStackLayer={onOpenStackLayer}
+                    revisionChoice={revisionChoice}
+                />
+            </ReferenceLinksContext.Provider>
         </ReferenceMarkdownRewriteContext.Provider>
     );
 };

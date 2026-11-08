@@ -8,8 +8,16 @@ import path from 'path';
 import { z } from 'zod';
 import { unwrapOpenCodeResponse } from '../opencode/response-envelope.js';
 
-/** Idle time between keep-alive requests; OpenCode's warming default. */
+/** Idle time between keep-alive requests when the cache lifetime is unknown; OpenCode's warming default. */
 export const WARMING_INTERVAL_MS = 4 * 60 * 1000;
+/** A ping goes at this share of the cache lifetime, as OpenCode's `interval: "auto"` does. */
+const CACHE_LIFETIME_SHARE = 0.9;
+/**
+ * Claude Code caches a subscriber's SDK requests for an hour (its own rule;
+ * extra usage drops it to 5 minutes), and OpenCode does not report it.
+ */
+const CLAUDE_SUBSCRIPTION_CACHE_MS = 60 * 60 * 1000;
+const CACHE_TTL_UNITS = { ms: 1, s: 1000, m: 60 * 1000, h: 60 * 60 * 1000, d: 24 * 60 * 60 * 1000 };
 /** The warm durations Settings offers, in minutes; the same steps for OpenCode's global warming. */
 const WARMING_DURATION_STEPS = [30, 60, 120, 180];
 /** How long after a session's last turn it is kept warm, until Settings picks another step. */
@@ -46,6 +54,31 @@ const storedSessionSchema = z.object({
 });
 /** `/api/session/active` lists only the sessions running now; an absent id is idle. */
 const activeSessionsSchema = z.record(z.string(), z.unknown());
+const sessionModelSchema = z.object({ model: z.object({ id: z.string(), providerID: z.string() }) });
+const modelListSchema = z.array(z.object({
+  id: z.string(),
+  providerID: z.string(),
+  cost: z.array(z.unknown()).catch([]),
+  settings: z.object({ cache: z.object({ ttl: z.string() }).partial().nullish() }).passthrough().nullish(),
+}).passthrough());
+
+/** Milliseconds a cache `ttl` such as "5m" or "1h" stands for, or null. */
+const parseCacheTtl = (ttl) => {
+  const match = typeof ttl === 'string' ? /^(\d+(?:\.\d+)?)(ms|s|m|h|d)$/.exec(ttl.trim()) : null;
+  return match ? Number(match[1]) * CACHE_TTL_UNITS[match[2]] : null;
+};
+
+/**
+ * How long the session's model keeps its prompt cache: the model's `cache.ttl`
+ * when configured; an hour for Claude Agent on a subscription, which OpenCode
+ * shows as a model without a price; otherwise unknown (null).
+ */
+const cacheLifetimeOf = (model) => {
+  const configured = parseCacheTtl(model?.settings?.cache?.ttl);
+  if (configured) return configured;
+  if (model?.providerID === 'claude-agent' && model.cost.length === 0) return CLAUDE_SUBSCRIPTION_CACHE_MS;
+  return null;
+};
 
 const statusPayloadSchema = z.object({
   type: z.literal('session.status'),
@@ -90,7 +123,7 @@ export const createSessionWarmingRuntime = ({
    * the next turn starts a new one. `epoch` changes with every state change, so
    * a ping or a status read that was in flight across one does not act on it.
    */
-  const sessions = new Map(); // sessionId → { directory, warmUntil, timer, epoch }
+  const sessions = new Map(); // sessionId → { directory, warmUntil, intervalMs, lastAt, pendingEpoch, timer, epoch }
   /**
    * What the event stream said last about each session, so a toggle knows when
    * its turn ended. Cleared when the stream reconnects: a gap may hide changes.
@@ -191,6 +224,41 @@ export const createSessionWarmingRuntime = ({
     }
   };
 
+  const readJson = async (route, directory) => {
+    const response = await fetchImpl(buildOpenCodeUrl(route, ''), {
+      headers: {
+        Accept: 'application/json',
+        'x-opencode-directory': encodeURIComponent(directory),
+        ...getOpenCodeAuthHeaders(),
+      },
+      signal: AbortSignal.timeout(STATUS_TIMEOUT_MS),
+    });
+    if (!response.ok) {
+      await response.body?.cancel().catch(() => undefined);
+      throw new Error(`OpenCode answered ${response.status}`);
+    }
+    return unwrapOpenCodeResponse(await response.json());
+  };
+
+  /**
+   * Time between pings for the session: just inside its model's cache lifetime
+   * when that is known, so a long-lived cache is not pinged every 4 minutes.
+   * Anything unreadable keeps the 4 minutes, which suits every cache.
+   */
+  const readPingInterval = async (sessionId, directory) => {
+    try {
+      const session = sessionModelSchema.safeParse(await readJson(`/api/session/${encodeURIComponent(sessionId)}`, directory));
+      if (!session.success) return WARMING_INTERVAL_MS;
+      const models = modelListSchema.safeParse(await readJson('/api/model', directory));
+      const { id, providerID } = session.data.model;
+      const model = models.success ? models.data.find((item) => item.id === id && item.providerID === providerID) : null;
+      const lifetime = cacheLifetimeOf(model);
+      return lifetime ? lifetime * CACHE_LIFETIME_SHARE : WARMING_INTERVAL_MS;
+    } catch {
+      return WARMING_INTERVAL_MS;
+    }
+  };
+
   /** Arms the next ping at `at`, or lets the session go cold when its window is over by then. */
   const schedulePing = (sessionId, entry, at) => {
     if (entry.warmUntil === null || at >= entry.warmUntil) {
@@ -204,6 +272,8 @@ export const createSessionWarmingRuntime = ({
         return;
       }
       let result;
+      // Like an interval read, a ping in flight counts as armed work.
+      entry.pendingEpoch = epoch;
       try {
         result = await ping(sessionId, entry);
       } catch (error) {
@@ -216,14 +286,37 @@ export const createSessionWarmingRuntime = ({
         forget(sessionId, entry);
         return;
       }
-      schedulePing(sessionId, entry, now() + WARMING_INTERVAL_MS);
+      entry.lastAt = now();
+      schedulePing(sessionId, entry, entry.lastAt + entry.intervalMs);
     });
   };
 
-  /** A turn ended: the session is warm for the chosen duration. */
-  const startWindow = (sessionId, entry, firstPingAt) => {
+  /**
+   * Reads the session's ping interval, then arms its next ping: one interval
+   * after the turn ended at `idleAt`, or now when that is past or unknown
+   * (null), since the cache may be about to lapse.
+   */
+  const resumePings = (sessionId, entry, idleAt) => {
+    cancelTimer(entry);
+    const epoch = entry.epoch;
+    // No timer is armed while the interval is read; this marks the read as
+    // pending, so a reconnect does not take the session for one left unarmed.
+    entry.pendingEpoch = epoch;
+    if (idleAt !== null) entry.lastAt = idleAt;
+    void readPingInterval(sessionId, entry.directory).then((intervalMs) => {
+      if (!isCurrent(sessionId, entry, epoch)) return;
+      entry.pendingEpoch = null;
+      entry.intervalMs = intervalMs;
+      schedulePing(sessionId, entry, idleAt === null ? now() : Math.max(now(), idleAt + intervalMs));
+    });
+  };
+
+  const isUnarmed = (entry) => !entry.timer && entry.pendingEpoch !== entry.epoch;
+
+  /** A turn ended at `idleAt` (null: unseen): the session is warm for the chosen duration. */
+  const startWindow = (sessionId, entry, idleAt) => {
     entry.warmUntil = now() + minutes * MINUTE_MS;
-    schedulePing(sessionId, entry, firstPingAt);
+    resumePings(sessionId, entry, idleAt);
   };
 
   /**
@@ -249,11 +342,11 @@ export const createSessionWarmingRuntime = ({
       return;
     }
     if (entry.warmUntil === null) {
-      startWindow(sessionId, entry, now());
+      startWindow(sessionId, entry, null);
       commit();
-    } else if (!entry.timer) {
+    } else if (isUnarmed(entry)) {
       // Back from a restart in the middle of the window.
-      schedulePing(sessionId, entry, now());
+      resumePings(sessionId, entry, null);
     }
   };
 
@@ -290,7 +383,7 @@ export const createSessionWarmingRuntime = ({
     for (const [sessionId, value] of Object.entries(parsed.sessions)) {
       const stored = storedSessionSchema.safeParse(value);
       if (!stored.success || !sessionIdSchema.safeParse(sessionId).success) continue;
-      const entry = { directory: stored.data.directory, warmUntil: stored.data.warmUntil, timer: null, epoch: 0 };
+      const entry = { directory: stored.data.directory, warmUntil: stored.data.warmUntil, intervalMs: WARMING_INTERVAL_MS, lastAt: null, pendingEpoch: null, timer: null, epoch: 0 };
       sessions.set(sessionId, entry);
       // OpenCode starts with the server; ask once it has had a moment.
       if (entry.warmUntil === null || entry.warmUntil > now()) settleSoon(sessionId, entry, STATUS_RETRY_MS);
@@ -333,7 +426,7 @@ export const createSessionWarmingRuntime = ({
       cancelTimer(entry);
       entry.warmUntil = null;
     } else {
-      startWindow(sessionId, entry, now() + WARMING_INTERVAL_MS);
+      startWindow(sessionId, entry, now());
     }
     commit();
   };
@@ -362,8 +455,14 @@ export const createSessionWarmingRuntime = ({
       if (entry.warmUntil === null) continue;
       const wasWarm = entry.warmUntil > now();
       entry.warmUntil += shift;
-      // A window that ran out but fits the longer step resumes its pings.
-      if (!wasWarm && entry.warmUntil > now()) schedulePing(sessionId, entry, now());
+      if (entry.warmUntil <= now() || !isUnarmed(entry)) continue;
+      if (wasWarm) {
+        // A ping the shorter window had no room for goes out on its beat.
+        schedulePing(sessionId, entry, Math.max(now(), (entry.lastAt ?? now()) + entry.intervalMs));
+      } else {
+        // A window that ran out but fits the longer step pings again at once.
+        resumePings(sessionId, entry, null);
+      }
     }
     commit();
     return snapshot();
@@ -378,7 +477,7 @@ export const createSessionWarmingRuntime = ({
       return snapshot();
     }
     if (existing) return snapshot();
-    const entry = { directory, warmUntil: null, timer: null, epoch: 0 };
+    const entry = { directory, warmUntil: null, intervalMs: WARMING_INTERVAL_MS, lastAt: null, pendingEpoch: null, timer: null, epoch: 0 };
     sessions.set(sessionId, entry);
     const state = activity.get(sessionId);
     if (!state) {
@@ -386,9 +485,7 @@ export const createSessionWarmingRuntime = ({
     } else if (!state.busy) {
       // A turn that ended under an interval ago gets its ping on the usual
       // beat; otherwise the cache may be about to lapse, so the ping goes now.
-      const idleAt = state.idleAt;
-      const firstPingAt = idleAt !== null && idleAt + WARMING_INTERVAL_MS > now() ? idleAt + WARMING_INTERVAL_MS : now();
-      startWindow(sessionId, entry, firstPingAt);
+      startWindow(sessionId, entry, state.idleAt);
     }
     commit();
     return snapshot();

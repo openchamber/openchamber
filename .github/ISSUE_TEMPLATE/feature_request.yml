@@ -1,0 +1,47 @@
+name: Feature request
+description: Something new, or a change to how something works.
+title: "[Feature] "
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        A few sentences in your own words, the way you'd explain it to a person. A long generated write-up (headings, implementation plans, file lists, edge-case tables) isn't read: if an agent drafted this, keep only what you'd actually say.
+
+        Building starts after the maintainer marks the request `accepted`. A pull request before that is closed automatically and reopens once the request is accepted.
+
+        Please write in English. Machine translation is fine.
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched existing issues and didn't find this request
+          required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do, and what gets in the way?
+      description: The situation, not the solution.
+      placeholder: |
+        I keep several sessions running and lose track of which one finished. I end up clicking through each of them.
+    validations:
+      required: true
+
+  - type: textarea
+    id: want
+    attributes:
+      label: What would you want instead?
+      description: The shape of it, not a design. Not knowing how it should look is fine.
+      placeholder: |
+        Some sign in the sidebar that a session finished while I was elsewhere.
+    validations:
+      required: true
+
+  - type: textarea
+    id: references
+    attributes:
+      label: Anything that shows what you mean (optional)
+      description: A screenshot of where it hurts today, a rough mockup, another tool doing it.

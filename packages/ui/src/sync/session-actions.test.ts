@@ -3,11 +3,17 @@ import type { PermissionRequest } from "@/types/permission"
 import type { FormRequest } from "@/lib/opencode/model"
 import type { InputState } from "./input-store"
 
+const transportErrors = await import("@/lib/relay/transport-error")
+
 // Records the client calls the actions make. The actions talk to
 // `opencodeClient` only: OpenCode's own SDK never reaches this layer.
 const replyCalls: Array<{ method: string; params: Record<string, unknown> }> = []
 const registeredSessionDirectories: Array<{ sessionID: string; directory: string }> = []
 let formReplyError: unknown | null = null
+let selectionApplyError: unknown | null = null
+let selectionApplyGate: (() => Promise<void>) | null = null
+let formReplyGate: (() => void) | null = null
+let agentUnavailableForSelection = false
 let formCancelError: unknown | null = null
 let permissionReplyError: unknown | null = null
 const sessionMessageRecords = new Map<string, Array<{ info: Message; parts: Part[] }>>()
@@ -16,6 +22,7 @@ const sessionMessageRecords = new Map<string, Array<{ info: Message; parts: Part
 let cursorMessagePages: Array<{ items: Array<{ info: Message; parts: Part[] }>; cursor: { next?: string } }> | null = null
 const sessionRecords = new Map<string, Session>()
 const failingRevertSessionIds = new Set<string>()
+let commitRevertError: Error | null = null
 let sessionDeleteError: unknown | null = null
 let sessionForkResult: Session | null = null
 let sessionForkError: Error | null = null
@@ -55,14 +62,23 @@ const deletedCleanupIdentities: Array<{ runtimeKey: string; directory: string; s
 const movedSessionDirectories: Array<{ sessionID: string; directory: string }> = []
 const globalArchivedSessions: Session[] = []
 let runtimeKey = "default-runtime"
+let runtimeGeneration = 0
+const permissionPolicy = new Map<string, boolean>()
+let permissionPolicyRevision = 0
+const goalObjectives = new Map<string, string>()
 const AMBIGUOUS_TRANSPORT_FAILURE = Symbol("ambiguous-transport-failure")
 
 const notFound = (kind: string) => Object.assign(new Error(`${kind}NotFoundError`), { status: 404 })
 
+const sdkClient = {}
+
 mock.module("@/lib/opencode/client", () => ({
+  isOpencodeNotFound: (error: unknown) => error instanceof Error && "status" in error && error.status === 404,
   ascendingId: (prefix: string) => `${prefix}_${(idCounter += 1).toString(16).padStart(12, "0")}`,
   opencodeClient: {
     getDirectory: () => "/test/project",
+    getSdkClient: () => sdkClient,
+    captureSessionCleanup: async () => async () => undefined,
     getActiveSessionStatuses: mock((directory?: string | null) => readActiveStatusSnapshot(directory)),
     getSession: mock(async (sessionId: string, directory?: string | null): Promise<Session> => {
       replyCalls.push({ method: "session.get", params: { sessionID: sessionId, directory } })
@@ -119,6 +135,7 @@ mock.module("@/lib/opencode/client", () => ({
       sessionRecords.set(sessionId, { ...(record ?? sessionFixture(sessionId)), revert: { messageID: messageId } })
       return { messageID: messageId }
     }),
+    commitRevert: mock(async () => { if (commitRevertError) throw commitRevertError }),
     forkSession: mock(async (
       sessionId: string,
       options?: { before?: string; directory?: string | null },
@@ -152,8 +169,24 @@ mock.module("@/lib/opencode/client", () => ({
       directory?: string | null,
     ) => {
       replyCalls.push({ method: "form.reply", params: { sessionID: sessionId, formID: formId, answer, directory } })
+      formReplyGate?.()
       if (formReplyError) throw formReplyError
       return true
+    }),
+    applySendSelection: mock(async (
+      sessionId: string,
+      selection: { model?: { providerID: string; id: string; variant?: string | null }; agent?: string },
+      directory?: string | null,
+      _runtimeKey?: string,
+    ) => {
+      // The real entry checks the agent against the folder's list before it
+      // switches anything; mirror that so the unavailable-agent case behaves.
+      if (selection.agent && agentUnavailableForSelection) throw new AgentUnavailableError(selection.agent, directory ?? undefined)
+      if (selectionApplyError) throw selectionApplyError
+      await selectionApplyGate?.()
+      if (selection.model || selection.agent) {
+        replyCalls.push({ method: "selection.apply", params: { sessionID: sessionId, selection, directory } })
+      }
     }),
     cancelForm: mock(async (sessionId: string, formId: string, directory?: string | null) => {
       replyCalls.push({ method: "form.cancel", params: { sessionID: sessionId, formID: formId, directory } })
@@ -165,17 +198,51 @@ mock.module("@/lib/opencode/client", () => ({
 
 let idCounter = 0
 
-// Mock useConfigStore
+// Mock useConfigStore. The composer selection fields are configurable per
+// test: the form reply applies whatever the composer now shows (#6053).
+type ComposerSelectionState = {
+  currentProviderId: string
+  currentModelId: string
+  currentVariant?: string
+  variantOverride?: string | null
+  currentAgentName?: string
+}
+let configState: ComposerSelectionState = { currentProviderId: "", currentModelId: "" }
+// Agents listed in the folder catalog for the current test; empty by default
+// (nothing listed) so the unchanged-agent-not-in-catalog case passes through.
+let listedAgents: string[] = []
 mock.module("@/stores/useConfigStore", () => ({
   useConfigStore: {
     getState: () => ({
       isConnected: true,
       hasEverConnected: true,
+      currentProviderId: configState.currentProviderId,
+      currentModelId: configState.currentModelId,
+      currentVariant: configState.currentVariant,
+      currentVariantSelection: { override: configState.variantOverride },
+      currentAgentName: configState.currentAgentName,
     }),
   },
+  selectConfigAgentsForDirectory: () => listedAgents.map((id) => ({ id })),
+  selectCatalogLoadedForDirectory: () => true,
 }))
 
+// The session the main chat shows; the composer in the config store is its own.
+let mainSessionId: string | null = null
+
 // Mock useSessionUIStore
+type RecordedSend = {
+  content: string
+  providerID: string
+  modelID: string
+  agent?: string
+  variant?: string | null
+  queuedGoal?: null
+  target?: { runtimeKey: string; sessionId: string; directory: string }
+}
+const sendMessageCalls: RecordedSend[] = []
+let sendMessageBehavior: () => Promise<void> = async () => {}
+
 mock.module("./session-ui-store", () => ({
   useSessionUIStore: {
     getState: () => ({
@@ -184,13 +251,56 @@ mock.module("./session-ui-store", () => ({
         if (sessionId === "session-b") return "/other/project"
         return null
       },
-      currentSessionId: null,
+      currentSessionId: mainSessionId,
       setCurrentSession: (sessionId: string | null, directoryHint?: string | null) => {
         selectedSessions.push({ sessionId, directoryHint })
       },
+      markSessionAsOpenChamberCreated: () => {},
       setWorktreeMetadata: () => {},
       setSessionDirectory: (sessionID: string, directory: string) => {
         movedSessionDirectories.push({ sessionID, directory })
+      },
+      sendMessage: async (
+        content: string,
+        providerID: string,
+        modelID: string,
+        agent?: string,
+        attachments?: void,
+        agentMentionName?: void,
+        additionalParts?: void,
+        variant?: string | null,
+        inputMode?: void,
+        options?: { userInitiated?: boolean; queuedGoal?: null; target?: { runtimeKey: string; sessionId: string; directory: string } },
+      ) => {
+        sendMessageCalls.push({ content, providerID, modelID, agent, variant, queuedGoal: options?.queuedGoal, target: options?.target })
+        await sendMessageBehavior()
+      },
+    }),
+  },
+}))
+
+// Mock useSelectionStore (the model fallback for a recovered answer, and a
+// session's own picks for a form reply)
+const settledModelPicks: string[] = []
+const selectionPicks = {
+  models: new Map<string, { providerId: string; modelId: string }>(),
+  agents: new Map<string, string>(),
+  efforts: new Map<string, string | null>(),
+  switched: false,
+  settled: settledModelPicks,
+}
+mock.module("./selection-store", () => ({
+  useSelectionStore: {
+    getState: () => ({
+      getSessionModelSelection: () => null,
+      getSessionAgentSelection: () => null,
+      getSessionModelPick: (sessionId: string) => selectionPicks.models.get(sessionId) ?? null,
+      getSessionAgentPick: (sessionId: string) => selectionPicks.agents.get(sessionId) ?? null,
+      getAgentModelVariantForSession: (sessionId: string, agent: string, providerId: string, modelId: string) =>
+        selectionPicks.efforts.get(`${sessionId}/${agent}/${providerId}/${modelId}`),
+      isSessionModelSwitched: () => selectionPicks.switched,
+      captureSessionModelPickSettlement: (sessionId: string, providerId: string, modelId: string) => () => {
+        selectionPicks.settled.push(`${sessionId}:${providerId}/${modelId}`)
       },
     }),
   },
@@ -198,16 +308,26 @@ mock.module("./session-ui-store", () => ({
 
 // Mock useInputStore
 const inputState: Pick<InputState,
-  "pendingComposerRestore" | "pendingInputText" | "pendingInputMode" | "attachedFiles"
-  | "clearAttachedFiles" | "addRestoredAttachment"
+  "pendingComposerRestore" | "pendingInputText" | "pendingInputMode" | "pendingInputTarget" | "pendingSessionRestores" | "setPendingSessionRestore" | "attachedFiles"
+  | "clearAttachedFiles" | "addRestoredAttachment" | "getAttachedFiles" | "setAttachedFiles"
 > = {
   pendingComposerRestore: null,
   pendingInputText: "",
   pendingInputMode: "replace",
+  pendingInputTarget: null,
+  pendingSessionRestores: new Map(),
+  setPendingSessionRestore: (sessionId, text) => {
+    if (text === null) inputState.pendingSessionRestores.delete(sessionId)
+    else inputState.pendingSessionRestores.set(sessionId, text)
+  },
   attachedFiles: [],
   clearAttachedFiles: () => {
     inputState.attachedFiles = []
   },
+  setAttachedFiles: (files) => {
+    inputState.attachedFiles = files
+  },
+  getAttachedFiles: () => inputState.attachedFiles,
   addRestoredAttachment: (attachment) => {
     inputState.attachedFiles = [...inputState.attachedFiles, {
       id: attachment.url,
@@ -281,6 +401,19 @@ mock.module("@/lib/runtime-fetch", () => ({
     const payload = JSON.parse(String(init?.body ?? "{}"))
     openchamberRouteRequests.push({ path, body: payload })
     beforeArchiveRouteResolve?.(path)
+    if (path.startsWith("/api/goals/objective/")) {
+      const sessionId = path.slice("/api/goals/objective/".length)
+      if (typeof payload.content === "string") goalObjectives.set(sessionId, payload.content)
+      return Response.json({ content: goalObjectives.get(sessionId) })
+    }
+    if (path.startsWith("/api/permission-auto-accept")) {
+      const sessionId = path.split("/sessions/")[1]
+      if (sessionId) {
+        permissionPolicy.set(decodeURIComponent(sessionId), payload.enabled)
+        permissionPolicyRevision += 1
+      }
+      return Response.json({ sessions: Object.fromEntries(permissionPolicy), revision: permissionPolicyRevision })
+    }
     const answer = path.endsWith("/unarchive")
       ? unarchiveBatchResponse
       : path.endsWith("/links")
@@ -306,6 +439,7 @@ mock.module("./session-message-loader", () => ({
     invalidateSession: () => {},
     ensure: async () => {},
     refreshTail: async () => {},
+    initializeCreatedSession: () => {},
     getSnapshot: () => ({ status: "ready" as const }),
   }),
 }))
@@ -313,7 +447,13 @@ mock.module("./session-message-loader", () => ({
 mock.module("../lib/runtime-switch", () => ({
   getRuntimeApiBaseUrl: () => "http://session-actions.test",
   getRuntimeKey: () => runtimeKey,
+  captureRuntimeInstance: () => {
+    const captured = runtimeKey
+    const generation = runtimeGeneration
+    return () => captured === runtimeKey && generation === runtimeGeneration
+  },
   switchRuntimeEndpoint: ({ runtimeKey: nextRuntimeKey }: { runtimeKey: string }) => {
+    if (nextRuntimeKey !== runtimeKey) runtimeGeneration += 1
     runtimeKey = nextRuntimeKey
   },
   subscribeRuntimeEndpointWillChange: () => () => {},
@@ -321,6 +461,7 @@ mock.module("../lib/runtime-switch", () => ({
 }))
 
 mock.module("@/lib/relay/transport-error", () => ({
+  ...transportErrors,
   markAmbiguousTransportFailure: (error: Error) => Object.assign(error, { [AMBIGUOUS_TRANSPORT_FAILURE]: true }),
   isAmbiguousTransportFailure: (error: unknown) => Boolean(
     error
@@ -377,17 +518,29 @@ mock.module("./session-deletion-cleanup", () => ({
   },
 }))
 
+// Lets a test place a session record where resolveSendSelection reads it.
+let directoryStateOverride: ((directory?: string) => State | undefined) | null = null
 mock.module("./sync-refs", () => ({
+  getAllSyncSessionMap: () => sessionRecords,
+  getDirectoryState: (directory?: string) => (directoryStateOverride ? directoryStateOverride(directory) : undefined),
   getSyncSessionDirectory: () => null,
+  getAllSyncSessions: () => [],
   registerSessionDirectory: (sessionID: string, directory: string) => {
     registeredSessionDirectories.push({ sessionID, directory })
   },
 }))
 
+import { AgentUnavailableError } from "@/lib/opencode/agent-unavailable-error"
+import { getRuntimeApiBaseUrl, getRuntimeKey, switchRuntimeEndpoint } from "@/lib/runtime-switch"
+import { agentUnavailableFrom } from "./form-request-error"
 import { INITIAL_STATE } from "./types"
+import type { State } from "./types"
 import type { DirectoryStore } from "./child-store"
 import type { Message, Part, Session, SessionStatus } from "@/lib/opencode/model"
 import type { LinkedIssue } from "@/lib/linkedIssues"
+import { noteQuestionFormSnapshot, resetRecoverableQuestions, useRecoverableQuestionsStore, type RecoveredQuestion } from "./recoverable-questions"
+import { buildFormAnswer, type FormValues } from "../components/chat/formCardState"
+import { serializeFormAnswerAsMarkdown } from "../components/chat/formSerializers"
 
 type OptimisticAddCall = { sessionID: string; directory?: string | null; message: Message; parts: Part[] }
 type OptimisticRemoveCall = { sessionID: string; directory?: string | null; messageID: string }
@@ -1210,6 +1363,27 @@ describe("session restore (unarchive)", () => {
     expect(openchamberRouteRequests.map((request) => request.body.ids)).toEqual([["parent"], ["child"], ["grandchild"]])
   })
 
+  test("restores linked reviews with the source while leaving archived forks untouched", async () => {
+    globalArchivedSessions.push(
+      { ...archivedFixture("review"), metadata: { openchamber: { kind: "review", originalSessionID: "session-a" } } },
+      { ...archivedFixture("review-child"), parentID: "review" },
+      { ...archivedFixture("fork"), fork: { sessionID: "session-a", boundary: { type: "through", messageID: "message" } } },
+      { ...archivedFixture("promoted"), metadata: { openchamber: { btwPromoted: true } }, fork: { sessionID: "session-a", boundary: { type: "through", messageID: "message" } } },
+    )
+    beforeArchiveRouteResolve = (path) => {
+      if (!path.endsWith("/unarchive")) return
+      const ids = openchamberRouteRequests.at(-1)?.body.ids
+      const id = Array.isArray(ids) ? String(ids[0]) : ""
+      unarchiveBatchResponse = { status: 200, body: { restored: [{ id, archivedAt: null }], failedIds: [] } }
+    }
+    const source = createStore({}, { session: [] })
+    const { unarchiveSession, setActionRefs } = await import("./session-actions")
+    setActionRefs(createChildStores([["/test/project", source]]), () => "/test/project")
+
+    expect(await unarchiveSession("session-a")).toBe(true)
+    expect(openchamberRouteRequests.map((request) => request.body.ids)).toEqual([["session-a"], ["review"], ["review-child"]])
+  })
+
   test("restores a subsession on its own when its parent is active", async () => {
     globalActiveSessions = [sessionFixture("parent")]
     globalArchivedSessions.push({ ...archivedFixture("child"), parentID: "parent" }, { ...archivedFixture("grandchild"), parentID: "child" })
@@ -1521,6 +1695,7 @@ describe("updateSessionTitle live state", () => {
 describe("optimisticSend target directory", () => {
   beforeEach(() => {
     replyCalls.length = 0
+    commitRevertError = null
   })
 
   test("passes the prompt directory to optimistic state during session switch races", async () => {
@@ -1636,7 +1811,13 @@ describe("optimisticSend target directory", () => {
     expect(optimisticShadow.has((optimisticMessage as unknown as Message).id)).toBe(true)
   })
 
-  test("restores the reverted branch when sending fails", async () => {
+  // A failed send puts the revert back only while the server still has it staged.
+  for (const { outcome, commit, serverStaged, restored } of [
+    { outcome: "before the commit", commit: "none", serverStaged: true, restored: true },
+    { outcome: "after the server committed the revert", commit: "answered", serverStaged: false, restored: false },
+    { outcome: "after a lost commit response the server applied", commit: "lost", serverStaged: false, restored: false },
+    { outcome: "after a lost commit response the server did not apply", commit: "lost", serverStaged: true, restored: true },
+  ] as const) test(`${restored ? "restores" : "keeps dropped"} the reverted branch when sending fails ${outcome}`, async () => {
     const retainedMessage = { id: "msg_ffffffffffffRetained", role: "user", sessionID: "session-reverted", time: { created: 1 } } as Message
     const revertedMessage = { id: "msg_000000000000Reverted", role: "user", sessionID: "session-reverted", time: { created: 2 } } as Message
     const revertedPart = { id: "part_2", type: "text", text: "old branch" } as Part
@@ -1646,6 +1827,8 @@ describe("optimisticSend target directory", () => {
       part: { [revertedMessage.id]: [revertedPart] },
     })
     const childStores = createChildStores([["/target/project", targetStore]])
+    sessionRecords.set("session-reverted", serverStaged ? { ...sessionFixture("session-reverted"), revert: { messageID: revertedMessage.id } } : sessionFixture("session-reverted"))
+    if (commit === "lost") commitRevertError = Object.assign(new Error("gateway timeout"), { status: 504 })
 
     const { optimisticSend, setActionRefs, setOptimisticRefs } = await import("./session-actions")
     setActionRefs(childStores, () => "/target/project")
@@ -1664,12 +1847,15 @@ describe("optimisticSend target directory", () => {
       sessionId: "session-reverted",
       directory: "/target/project",
       content: "new branch",
-      send: async () => { throw new Error("rejected") },
-    })).rejects.toThrow("rejected")
+      send: async (_messageID, _context, commitRevert) => {
+        if (commit !== "none") await commitRevert?.()
+        throw new Error("rejected")
+      },
+    })).rejects.toThrow()
 
-    expect(targetStore.getState().session[0].revert?.messageID).toBe(revertedMessage.id)
-    expect(targetStore.getState().message["session-reverted"]).toEqual([retainedMessage, revertedMessage])
-    expect(targetStore.getState().part[revertedMessage.id]).toEqual([revertedPart])
+    expect(targetStore.getState().session[0].revert).toEqual(restored ? { messageID: revertedMessage.id } : undefined)
+    expect(targetStore.getState().message["session-reverted"]).toEqual(restored ? [retainedMessage, revertedMessage] : [retainedMessage])
+    expect(targetStore.getState().part[revertedMessage.id]).toEqual(restored ? [revertedPart] : undefined)
   })
 
   test("runs appendSubmissions before revert cleanup and optimistic insertion", async () => {
@@ -2339,6 +2525,72 @@ describe("forkAfterMessage", () => {
     expect(inputState.pendingComposerRestore).toBeNull()
   })
 
+  for (const entrypoint of ["forkAfterMessage", "forkFromLastCompletedTurn"] as const) {
+    test(`${entrypoint} retries a missing cut without copying a later turn`, async () => {
+      const messages = [
+        message("msg-user-1", "user"),
+        { ...message("msg-answer-1", "assistant"), time: { created: 1, completed: 2 }, finish: "stop" },
+        message("msg-user-2", "user"),
+      ] as Message[]
+      const source = createStore({}, {
+        session: [sourceSession], message: { [sourceSession.id]: messages },
+        session_status: { [sourceSession.id]: { type: "busy" } },
+      })
+      const actions = await import("./session-actions")
+      actions.setActionRefs(createChildStores([[sourceSession.directory, source]]), () => sourceSession.directory)
+      sessionForkError = notFound("Message")
+      let attempts = 0
+      beforeSessionForkResolve = () => {
+        attempts += 1
+        if (attempts === 1) messages.push(message("msg-answer-2", "assistant"))
+        else sessionForkError = null
+      }
+
+      if (entrypoint === "forkAfterMessage") await actions.forkAfterMessage(sourceSession.id, "msg-answer-1")
+      else await actions.forkFromLastCompletedTurn(sourceSession.id)
+
+      expect(replyCalls.filter((call) => call.method === "session.fork").map((call) => call.params.messageID))
+        .toEqual(["msg-user-2", "msg-user-2"])
+      expect(selectedSessions).toEqual([{ sessionId: forkedSession.id, directoryHint: sourceSession.directory }])
+    })
+
+    test(`${entrypoint} leaves the source open after two 404s`, async () => {
+      const messages = [
+        message("msg-user-1", "user"),
+        { ...message("msg-answer-1", "assistant"), time: { created: 1, completed: 2 }, finish: "stop" },
+        message("msg-user-2", "user"),
+      ] as Message[]
+      const source = createStore({}, {
+        session: [sourceSession], message: { [sourceSession.id]: messages },
+        session_status: { [sourceSession.id]: { type: "busy" } },
+      })
+      const actions = await import("./session-actions")
+      actions.setActionRefs(createChildStores([[sourceSession.directory, source]]), () => sourceSession.directory)
+      sessionForkError = notFound("Message")
+
+      const result = entrypoint === "forkAfterMessage"
+        ? actions.forkAfterMessage(sourceSession.id, "msg-answer-1")
+        : actions.forkFromLastCompletedTurn(sourceSession.id)
+      await expect(result).rejects.toThrow("MessageNotFoundError")
+      expect(replyCalls.filter((call) => call.method === "session.fork").map((call) => call.params.messageID))
+        .toEqual(["msg-user-2", "msg-user-2"])
+      expect(selectedSessions).toEqual([])
+      expect(source.getState().session).toEqual([sourceSession])
+    })
+  }
+
+  test("does not retry the cut on another runtime", async () => {
+    const source = createStore({}, { session: [sourceSession], message: { [sourceSession.id]: transcript } })
+    const { forkAfterMessage, setActionRefs } = await import("./session-actions")
+    setActionRefs(createChildStores([[sourceSession.directory, source]]), () => sourceSession.directory)
+    sessionForkError = notFound("Message")
+    beforeSessionForkResolve = () => { runtimeKey = "another-runtime" }
+
+    await expect(forkAfterMessage(sourceSession.id, "msg-answer-1")).rejects.toThrow("runtime changed")
+    expect(replyCalls.filter((call) => call.method === "session.fork")).toHaveLength(1)
+    expect(selectedSessions).toEqual([])
+  })
+
   test("leaves a compaction that followed the answer out of the fork", async () => {
     const compacted = [...transcript.slice(0, 2), message("msg-compaction", "compaction"), ...transcript.slice(2)]
     const source = createStore({}, { session: [sourceSession], message: { [sourceSession.id]: compacted } })
@@ -2350,6 +2602,28 @@ describe("forkAfterMessage", () => {
     expect(replyCalls).toEqual([{
       method: "session.fork",
       params: { sessionID: sourceSession.id, messageID: "msg-compaction", directory: sourceSession.directory },
+    }])
+  })
+
+  test("leaves a workflow report that followed the answer out of the fork", async () => {
+    const workflowReport: Message = {
+      id: "msg-workflow-report",
+      role: "synthetic",
+      sessionID: sourceSession.id,
+      time: { created: 1 },
+      metadata: { source: "openchamber-workflow", runId: "run-1", name: "Review", state: "completed" },
+      text: "<openchamber-workflow>\nreview done\n</openchamber-workflow>",
+    }
+    const messages = [...transcript.slice(0, 2), workflowReport, ...transcript.slice(2)]
+    const source = createStore({}, { session: [sourceSession], message: { [sourceSession.id]: messages } })
+    const { forkAfterMessage, setActionRefs } = await import("./session-actions")
+    setActionRefs(createChildStores([[sourceSession.directory, source]]), () => sourceSession.directory)
+
+    await forkAfterMessage(sourceSession.id, "msg-answer-1")
+
+    expect(replyCalls).toEqual([{
+      method: "session.fork",
+      params: { sessionID: sourceSession.id, messageID: workflowReport.id, directory: sourceSession.directory },
     }])
   })
 
@@ -2375,6 +2649,117 @@ describe("forkAfterMessage", () => {
     expect(replyCalls).toEqual([])
     expect(selectedSessions).toEqual([])
   })
+
+  for (const enabled of [false, true]) {
+    for (const forkPoint of ["answer", "prompt"] as const) {
+      test(`persists the source permission choice in VS Code (${enabled}, ${forkPoint})`, async () => {
+        const originalWindow = Object.getOwnPropertyDescriptor(globalThis, "window")
+        const { usePermissionStore } = await import("@/stores/permissionStore")
+        usePermissionStore.getState().reset()
+        Object.defineProperty(globalThis, "window", { configurable: true, value: { __VSCODE_CONFIG__: {} } })
+        permissionPolicy.clear()
+        permissionPolicy.set(sourceSession.id, enabled)
+        permissionPolicyRevision = 0
+        sessionRecords.set(sourceSession.id, sourceSession)
+        const source = createStore({}, { session: [sourceSession], message: { [sourceSession.id]: transcript } })
+        try {
+          const { forkAfterMessage, forkFromMessage, setActionRefs } = await import("./session-actions")
+          setActionRefs(createChildStores([[sourceSession.directory, source]]), () => sourceSession.directory)
+          if (forkPoint === "answer") await forkAfterMessage(sourceSession.id, "msg-answer-2")
+          else await forkFromMessage(sourceSession.id, "msg-user-2")
+          expect(permissionPolicy.get(forkedSession.id)).toBe(enabled)
+          expect(usePermissionStore.getState().getSessionMode(forkedSession.id)).toBe(enabled ? "auto" : "ask")
+        } finally {
+          if (originalWindow) Object.defineProperty(globalThis, "window", originalWindow)
+          else Reflect.deleteProperty(globalThis, "window")
+          usePermissionStore.getState().reset()
+          sessionRecords.delete(sourceSession.id)
+        }
+      })
+    }
+  }
+
+  for (const forkPoint of ["answer", "prompt"] as const) {
+    for (const outcome of ["runtime-switch", "read-failure", "write-failure", "write-failure-after-switch"] as const) {
+      test(`retains the VS Code fork and repairs metadata after ${outcome} (${forkPoint})`, async () => {
+        const originalWindow = Object.getOwnPropertyDescriptor(globalThis, "window")
+        const { usePermissionStore } = await import("@/stores/permissionStore")
+        usePermissionStore.getState().reset()
+        Object.defineProperty(globalThis, "window", { configurable: true, value: { __VSCODE_CONFIG__: {} } })
+        permissionPolicy.clear()
+        permissionPolicy.set(sourceSession.id, true)
+        permissionPolicyRevision = 0
+        sessionRecords.set(sourceSession.id, sourceSession)
+        const inheritedFork: Session = {
+          ...forkedSession,
+          metadata: { openchamber: {
+            kind: "scheduled",
+            btwSessionID: "source-btw",
+            reviewSessionID: "source-review",
+            goal: { id: "goal-1", objective: "fallback", objectiveFile: true, status: "active" },
+          } },
+        }
+        sessionForkResult = inheritedFork
+        sessionRecords.set(forkedSession.id, inheritedFork)
+        goalObjectives.set(sourceSession.id, "fork objective")
+        const repairedMetadata = { openchamber: {
+          goal: { id: "goal-1", objective: "fallback", objectiveFile: true, status: "paused", statusReason: "paused in fork" },
+        } }
+        const previousArchiveResponse = archiveBatchResponse
+        archiveBatchResponse = { status: 200, body: { metadata: repairedMetadata } }
+        openchamberRouteRequests.length = 0
+        beforeArchiveRouteResolve = (path) => {
+          if (!path.startsWith("/api/permission-auto-accept")) return
+          if (outcome === "runtime-switch") runtimeKey = "another-runtime"
+          else if (outcome === "read-failure" || path.includes("/sessions/")) {
+            if (outcome === "write-failure-after-switch") runtimeKey = "another-runtime"
+            throw new Error("policy unavailable")
+          }
+        }
+        const source = createStore({}, { session: [sourceSession], message: { [sourceSession.id]: transcript } })
+        try {
+          const { forkAfterMessage, forkFromMessage, setActionRefs } = await import("./session-actions")
+          setActionRefs(createChildStores([[sourceSession.directory, source]]), () => sourceSession.directory)
+          if (forkPoint === "answer") {
+            expect(await forkAfterMessage(sourceSession.id, "msg-answer-2")).toBe(inheritedFork)
+          } else {
+            await forkFromMessage(sourceSession.id, "msg-user-2")
+          }
+          expect(permissionPolicy.get(forkedSession.id)).toBeUndefined()
+          expect(usePermissionStore.getState().getSessionMode(forkedSession.id)).toBe("ask")
+          expect(selectedSessions).toEqual([{ sessionId: forkedSession.id, directoryHint: sourceSession.directory }])
+          const metadataRequest = openchamberRouteRequests.find((entry) => entry.path.endsWith(`/${forkedSession.id}/metadata`))
+          const objectiveRequests = openchamberRouteRequests.filter((entry) => entry.path.startsWith("/api/goals/objective/"))
+          if (outcome === "runtime-switch" || outcome === "write-failure-after-switch") {
+            expect(metadataRequest).toBeUndefined()
+            expect(objectiveRequests).toEqual([])
+            expect(source.getState().session).toEqual([sourceSession, inheritedFork])
+          } else {
+            expect(metadataRequest?.body).toEqual({ patch: { openchamber: {
+              kind: null, btwSessionID: null, reviewSessionID: null,
+              goal: { status: "paused", statusReason: "paused in fork" },
+            } } })
+            expect(objectiveRequests).toEqual([
+              { path: `/api/goals/objective/${sourceSession.id}`, body: {} },
+              { path: `/api/goals/objective/${forkedSession.id}`, body: { content: "fork objective" } },
+            ])
+            expect(goalObjectives.get(forkedSession.id)).toBe("fork objective")
+            expect(source.getState().session[1]?.metadata).toEqual(repairedMetadata)
+          }
+        } finally {
+          if (originalWindow) Object.defineProperty(globalThis, "window", originalWindow)
+          else Reflect.deleteProperty(globalThis, "window")
+          beforeArchiveRouteResolve = null
+          runtimeKey = "fork-runtime"
+          usePermissionStore.getState().reset()
+          sessionRecords.delete(sourceSession.id)
+          sessionRecords.delete(forkedSession.id)
+          archiveBatchResponse = previousArchiveResponse
+          goalObjectives.clear()
+        }
+      })
+    }
+  }
 })
 
 describe("forkFromLastCompletedTurn", () => {
@@ -2472,10 +2857,24 @@ describe("forkFromLastCompletedTurn", () => {
     sessionID: sourceSession.id,
     time: { created: 1 },
   } as Message
+  const shellCompletion: Message = {
+    id: "msg-shell-completion",
+    role: "synthetic",
+    sessionID: sourceSession.id,
+    time: { created: 1 },
+    metadata: { source: "shell", shellID: "shell-1", state: "completed" },
+    text: "<shell>\ndone\n</shell>",
+  }
 
   test("finds the finished reply when the running turn resumed from a background subagent", async () => {
     const { findLastCompletedTurnMessageId } = await import("./session-actions")
     const transcript = [message("u1", "user"), message("a1", "assistant", 2), subagentReport, message("a-live", "assistant")]
+    expect(findLastCompletedTurnMessageId(transcript, true)).toBe("a1")
+  })
+
+  test("finds the finished reply when the running turn resumed from a background command", async () => {
+    const { findLastCompletedTurnMessageId } = await import("./session-actions")
+    const transcript = [message("u1", "user"), message("a1", "assistant", 2), shellCompletion, message("a-live", "assistant")]
     expect(findLastCompletedTurnMessageId(transcript, true)).toBe("a1")
   })
 
@@ -2562,6 +2961,8 @@ describe("revertToMessage passes session directory", () => {
     Object.assign(inputState, {
       pendingInputText: "previous draft",
       pendingInputMode: "replace",
+      pendingInputTarget: null,
+      pendingSessionRestores: new Map(),
       attachedFiles: [],
     })
   })
@@ -2589,7 +2990,10 @@ describe("revertToMessage passes session directory", () => {
     expect(replyCalls.find((call) => call.method === "session.revert.stage")?.params.directory).toBe("/test/project")
     expect((sessionStore.getState().session[0] as Session & { revert?: { messageID?: string } }).revert?.messageID).toBe("msg_2")
     expect(currentStore.getState().session).toHaveLength(0)
-    expect(inputState.pendingInputText).toBe("edit this")
+    expect(inputState.pendingSessionRestores.get("session-a")).toBe("edit this")
+    // The reverted message's session, not whatever address was left behind.
+    expect(inputState.pendingInputText).toBe("previous draft")
+    expect(inputState.pendingInputTarget).toBeNull()
   })
 
   test("cuts the transcript at the message's context carriers so they leave with it", async () => {
@@ -2612,7 +3016,7 @@ describe("revertToMessage passes session directory", () => {
 
     expect(replyCalls.find((call) => call.method === "session.revert.stage")?.params.messageID).toBe("msg_ctx_1")
     expect((sessionStore.getState().session[0] as Session & { revert?: { messageID?: string } }).revert?.messageID).toBe("msg_ctx_1")
-    expect(inputState.pendingInputText).toBe("edit this")
+    expect(inputState.pendingSessionRestores.get("session-a")).toBe("edit this")
   })
 
   test("rolls back optimistic revert when the SDK returns an error", async () => {
@@ -2626,6 +3030,8 @@ describe("revertToMessage passes session directory", () => {
     })
     const childStores = createChildStores([["/test/project", sessionStore]])
     failingRevertSessionIds.add("session-a")
+    inputState.setPendingSessionRestore("session-a", "earlier restore")
+    inputState.setPendingSessionRestore("session-other", "other restore")
 
     const { setActionRefs, revertToMessage } = await import("./session-actions")
     setActionRefs(childStores, () => "/test/project")
@@ -2641,6 +3047,8 @@ describe("revertToMessage passes session directory", () => {
     expect((thrown as Error).message).toContain("session.revert.stage failed (500)")
     expect((sessionStore.getState().session[0] as Session & { revert?: { messageID?: string } }).revert).toBe(undefined)
     expect(inputState.pendingInputText).toBe("previous draft")
+    expect(inputState.pendingSessionRestores.get("session-a")).toBe("earlier restore")
+    expect(inputState.pendingSessionRestores.get("session-other")).toBe("other restore")
   })
 
   test("reverts recursive descendants at their first user message on or after the parent cutoff", async () => {
@@ -2919,6 +3327,266 @@ describe("cancelForm passes directory", () => {
   })
 })
 
+describe("replyToForm applies the composer selection", () => {
+  const OTHER_MODEL = { providerID: "openai", id: "gpt-6" }
+  const SESSION_MODEL = { providerID: "anthropic", id: "claude-3" }
+  const seedSession = (id: string, overrides: Partial<Session> = {}) => {
+    const record: Session = { ...sessionFixture(id), model: SESSION_MODEL, agent: "build", ...overrides }
+    sessionRecords.set(id, record)
+    // SAFETY: the selection helpers read only the session slice of the state.
+    directoryStateOverride = () => ({ session: [record] }) as State
+    return record
+  }
+  const replyInMainChat = async (sessionId = "session-a", answer: Record<string, boolean> = { choice: true }) => {
+    const { setActionRefs, replyToForm } = await import("./session-actions")
+    setActionRefs(createChildStores([]), () => "/test/project")
+    return replyToForm(sessionId, "q-1", answer)
+  }
+  const replyMethods = () => replyCalls.map((call) => call.method).filter((method) => method !== "session.get")
+  const reset = () => {
+    replyCalls.length = 0
+    formReplyError = null
+    selectionApplyError = null
+    agentUnavailableForSelection = false
+    selectionApplyGate = null
+    directoryStateOverride = null
+    configState = { currentProviderId: "", currentModelId: "" }
+    listedAgents = []
+    mainSessionId = null
+    selectionPicks.models.clear()
+    selectionPicks.agents.clear()
+    selectionPicks.efforts.clear()
+    selectionPicks.switched = false
+    selectionPicks.settled.length = 0
+    sessionRecords.clear()
+  }
+
+  beforeEach(reset)
+  afterEach(reset)
+
+  test("switches the main chat's session to the composer's selection before the answer", async () => {
+    mainSessionId = "session-a"
+    seedSession("session-a")
+    selectionPicks.agents.set("session-a", "plan")
+    configState = { currentProviderId: "openai", currentModelId: "gpt-6", currentVariant: "high", currentAgentName: "build" }
+
+    await replyInMainChat()
+
+    expect(replyMethods()).toEqual(["selection.apply", "form.reply"])
+    expect(replyCalls.find((call) => call.method === "selection.apply")?.params.selection).toEqual({
+      model: { ...OTHER_MODEL, variant: "high" },
+      agent: "plan",
+    })
+    expect(selectionPicks.settled).toEqual(["session-a:openai/gpt-6"])
+  })
+
+  test("an explicit Default takes the session off its effort", async () => {
+    mainSessionId = "session-a"
+    seedSession("session-a", { model: { ...SESSION_MODEL, variant: "high" } })
+    configState = { currentProviderId: "anthropic", currentModelId: "claude-3", currentVariant: "high", variantOverride: null, currentAgentName: "build" }
+    listedAgents = ["build"]
+
+    await replyInMainChat()
+
+    expect(replyMethods()).toEqual(["selection.apply", "form.reply"])
+    expect(replyCalls.find((call) => call.method === "selection.apply")?.params.selection).toEqual({ model: SESSION_MODEL })
+  })
+
+  test("a failed switch leaves the answer unsent and the pick in place", async () => {
+    mainSessionId = "session-a"
+    configState = { currentProviderId: "openai", currentModelId: "gpt-6" }
+    selectionApplyError = new Error("model switch failed")
+
+    await expect(replyInMainChat()).rejects.toThrow("model switch failed")
+
+    expect(replyMethods()).toEqual([])
+    expect(selectionPicks.settled).toEqual([])
+  })
+
+  test("a changed agent the folder lacks leaves the form pending, and the error names it", async () => {
+    mainSessionId = "session-a"
+    seedSession("session-a", { agent: "plan" })
+    configState = { currentProviderId: "anthropic", currentModelId: "claude-3", currentAgentName: "build" }
+    agentUnavailableForSelection = true
+
+    const error = await replyInMainChat().then(() => null, (caught: Error) => caught)
+
+    expect(agentUnavailableFrom(error)).toBe("build")
+    expect(replyMethods()).toEqual([])
+  })
+
+  test("an unchanged agent the folder's catalog lacks is still checked", async () => {
+    mainSessionId = "session-a"
+    seedSession("session-a")
+    configState = { currentProviderId: "anthropic", currentModelId: "claude-3", currentAgentName: "build" }
+    agentUnavailableForSelection = true
+
+    const error = await replyInMainChat().then(() => null, (caught: Error) => caught)
+
+    expect(agentUnavailableFrom(error)).toBe("build")
+    expect(replyMethods()).toEqual([])
+  })
+
+  test("an unchanged selection switches nothing", async () => {
+    mainSessionId = "session-a"
+    seedSession("session-a")
+    listedAgents = ["build"]
+    configState = { currentProviderId: "anthropic", currentModelId: "claude-3", currentAgentName: "build" }
+
+    await replyInMainChat()
+
+    expect(replyMethods()).toEqual(["form.reply"])
+  })
+
+  test("a composer whose catalog has not loaded switches nothing", async () => {
+    mainSessionId = "session-a"
+
+    await replyInMainChat()
+
+    expect(replyMethods()).toEqual(["form.reply"])
+  })
+
+  test("Auto reaches the session as the sentinel before the answer", async () => {
+    // The sentinel marks the session; the server then routes the reply to the
+    // concrete model before forwarding it (routing/routes.http.test.js).
+    mainSessionId = "session-a"
+    seedSession("session-a")
+    listedAgents = ["build"]
+    configState = { currentProviderId: "openchamber", currentModelId: "auto", currentAgentName: "build" }
+
+    await replyInMainChat()
+
+    expect(replyMethods()).toEqual(["selection.apply", "form.reply"])
+    expect(replyCalls.find((call) => call.method === "selection.apply")?.params.selection).toEqual({
+      model: { providerID: "openchamber", id: "auto" },
+    })
+  })
+
+  for (const surface of ["a pinned chat", "a /btw fork"]) {
+    test(`${surface} replies with its own picks, never the main chat's`, async () => {
+      mainSessionId = "session-main"
+      configState = { currentProviderId: "google", currentModelId: "gemini", currentVariant: "max", currentAgentName: "review" }
+      seedSession("session-a")
+      selectionPicks.models.set("session-a", { providerId: "openai", modelId: "gpt-6" })
+      selectionPicks.agents.set("session-a", "plan")
+      selectionPicks.efforts.set("session-a/plan/openai/gpt-6", "low")
+
+      await replyInMainChat()
+
+      expect(replyCalls.find((call) => call.method === "selection.apply")?.params.selection).toEqual({
+        model: { ...OTHER_MODEL, variant: "low" },
+        agent: "plan",
+      })
+    })
+  }
+
+  test("an effort-only change in a pinned chat keeps the session's model and agent", async () => {
+    mainSessionId = "session-main"
+    configState = { currentProviderId: "google", currentModelId: "gemini", currentAgentName: "review" }
+    seedSession("session-a", { model: { ...SESSION_MODEL, variant: "low" } })
+    selectionPicks.efforts.set("session-a/build/anthropic/claude-3", "high")
+
+    await replyInMainChat()
+
+    expect(replyMethods()).toEqual(["selection.apply", "form.reply"])
+    expect(replyCalls.find((call) => call.method === "selection.apply")?.params.selection).toEqual({
+      model: { ...SESSION_MODEL, variant: "high" },
+    })
+  })
+
+  test("a child session answered from its parent keeps what it is bound to", async () => {
+    mainSessionId = "session-parent"
+    configState = { currentProviderId: "google", currentModelId: "gemini", currentVariant: "max", currentAgentName: "review" }
+    seedSession("session-a", { model: { ...SESSION_MODEL, variant: "low" }, agent: "workflow" })
+
+    await replyInMainChat()
+
+    expect(replyCalls.map((call) => call.method)).toEqual(["form.reply"])
+  })
+
+  test("an effort saved before a switch made elsewhere does not undo that switch", async () => {
+    mainSessionId = "session-parent"
+    seedSession("session-a", { model: { ...SESSION_MODEL, variant: "low" } })
+    selectionPicks.efforts.set("session-a/build/anthropic/claude-3", "high")
+    selectionPicks.switched = true
+
+    await replyInMainChat()
+
+    expect(replyCalls.map((call) => call.method)).toEqual(["form.reply"])
+  })
+
+  test("a location-scoped form is answered with no switch, on its owning directory", async () => {
+    const form = buildForm("q-1", "global")
+    const store = createStore({}, { form: { global: [form] } })
+    mainSessionId = "global"
+    configState = { currentProviderId: "openai", currentModelId: "gpt-6", currentAgentName: "build" }
+
+    const { setActionRefs, replyToForm } = await import("./session-actions")
+    setActionRefs(createChildStores([["/test/project", store]]), () => "/somewhere/else")
+    await replyToForm("global", "q-1", { choice: true })
+
+    expect(replyCalls.map((call) => call.method)).toEqual(["form.reply"])
+    expect(replyCalls[0]?.params.directory).toBe("/test/project")
+  })
+
+  for (const roundTrip of [false, true]) {
+    test(`a runtime change during the switch stops the reply, return to original: ${roundTrip}`, async () => {
+      const original = { apiBaseUrl: getRuntimeApiBaseUrl(), runtimeKey: getRuntimeKey() }
+      const home = { apiBaseUrl: "http://form-home.test", runtimeKey: "form-home" }
+      switchRuntimeEndpoint(home)
+      mainSessionId = "session-a"
+      configState = { currentProviderId: "openai", currentModelId: "gpt-6" }
+      const form = buildForm("q-1", "session-a")
+      const store = createStore({}, { form: { "session-a": [form] } })
+      let release = () => {}
+      let started = () => {}
+      const reachedSwitch = new Promise<void>((resolve) => { started = resolve })
+      selectionApplyGate = () => {
+        started()
+        return new Promise<void>((resolve) => { release = resolve })
+      }
+
+      const { setActionRefs, replyToForm } = await import("./session-actions")
+      setActionRefs(createChildStores([["/test/project", store]]), () => "/test/project")
+      const reply = replyToForm("session-a", "q-1", { choice: true })
+      await reachedSwitch
+
+      try {
+        switchRuntimeEndpoint({ apiBaseUrl: "http://form-other.test", runtimeKey: "form-other" })
+        if (roundTrip) switchRuntimeEndpoint(home)
+        release()
+        await expect(reply).rejects.toThrow("runtime changed")
+      } finally {
+        switchRuntimeEndpoint(original)
+      }
+
+      expect(replyMethods()).not.toContain("form.reply")
+      expect(store.getState().form["session-a"]).toEqual([form])
+      expect(selectionPicks.settled).toEqual([])
+    })
+  }
+
+  test("a not-found answer from an old runtime cleans nothing up", async () => {
+    const original = { apiBaseUrl: getRuntimeApiBaseUrl(), runtimeKey: getRuntimeKey() }
+    switchRuntimeEndpoint({ apiBaseUrl: "http://form-home.test", runtimeKey: "form-home" })
+    const form = buildForm("q-1", "session-a")
+    const store = createStore({}, { form: { "session-a": [form] } })
+    formReplyError = Object.assign(new Error("FormNotFoundError"), { status: 404 })
+    formReplyGate = () => switchRuntimeEndpoint({ apiBaseUrl: "http://form-other.test", runtimeKey: "form-other" })
+
+    const { setActionRefs, replyToForm } = await import("./session-actions")
+    setActionRefs(createChildStores([["/test/project", store]]), () => "/test/project")
+    try {
+      await expect(replyToForm("session-a", "q-1", { choice: true })).rejects.toThrow("FormNotFoundError")
+    } finally {
+      formReplyGate = null
+      switchRuntimeEndpoint(original)
+    }
+
+    expect(store.getState().form["session-a"]).toEqual([form])
+  })
+})
+
 function archivedFixture(id: string): Session {
   return { ...sessionFixture(id), time: { created: 1, updated: 1, archived: 5 } }
 }
@@ -3026,6 +3694,11 @@ describe("blocking request reply routing and stale recovery (issue OPE-236)", ()
     formReplyError = null
     formCancelError = null
     materializationCalls.length = 0
+    // replyToForm reads the composer selection; an empty one keeps this suite
+    // about routing rather than model switching.
+    directoryStateOverride = null
+    configState = { currentProviderId: "", currentModelId: "" }
+    listedAgents = []
   })
 
   test("routes the form reply by the request's own session directory, not the containing store key", async () => {
@@ -3518,24 +4191,14 @@ describe("setSessionWorkState", () => {
     expect(request?.body).toMatchObject({ patch: { openchamber: { work: { state: "open", openedBy: "user" } } } })
   })
 
-  test("reports a deleted session folder as its own error", async () => {
-    const { SessionDirectoryMissingError, setSessionWorkState } = await import("./session-actions")
-    archiveBatchResponse = { status: 409, body: { error: "Location not found: /gone", code: "SESSION_DIRECTORY_MISSING" } }
-
-    const failure = await setSessionWorkState("ses-work", "/gone", "done").catch((error: Error) => error)
-
-    expect(failure instanceof SessionDirectoryMissingError).toBe(true)
-    expect(globalUpsertedSessions).toHaveLength(0)
-  })
-
-  test("keeps any other failed write a plain error", async () => {
-    const { SessionDirectoryMissingError, setSessionWorkState } = await import("./session-actions")
+  test("reports a failed write and stores nothing", async () => {
+    const { setSessionWorkState } = await import("./session-actions")
     archiveBatchResponse = { status: 500, body: { error: "OpenCode is down" } }
 
     const failure = await setSessionWorkState("ses-work", "/test/project", "done").catch((error: Error) => error)
 
     expect(failure instanceof Error).toBe(true)
-    expect(failure instanceof SessionDirectoryMissingError).toBe(false)
+    expect(globalUpsertedSessions).toHaveLength(0)
   })
 
   test("writes nothing to the new server when the runtime switches during the read", async () => {
@@ -3561,3 +4224,170 @@ describe("setSessionWorkState", () => {
     expect(globalUpsertedSessions).toHaveLength(0)
   })
 });
+
+describe("sendRecoveredFormAnswer", () => {
+  const recoveredForm: FormRequest = {
+    id: "frm_recovered",
+    sessionID: "session-a",
+    title: "Questions",
+    metadata: { kind: "question", tool: { messageID: "message-ask", id: "tool_ask" } },
+    fields: [{ key: "q0", title: "Color", type: "string", options: [{ value: "Red", label: "Red" }] }],
+  }
+
+  const askMessage: Message = {
+    id: "message-ask",
+    sessionID: "session-a",
+    role: "assistant",
+    time: { created: 1 },
+    agent: "build",
+    providerID: "prov",
+    modelID: "mod",
+    variant: "think",
+  }
+
+  const askSession: Session = {
+    id: "session-a",
+    projectID: "proj",
+    directory: "/test/project",
+    title: "Ask",
+    cost: 0,
+    tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+    time: { created: 1, updated: 1 },
+  }
+
+  const question: RecoveredQuestion = {
+    form: recoveredForm,
+    directory: "/test/project",
+    sessionID: "session-a",
+    toolMessageID: "message-ask",
+    evidence: "tool-interrupted",
+  }
+
+  const questionStore = () => createStore({}, {
+    session: [askSession],
+    message: { "session-a": [askMessage] },
+  })
+
+  beforeEach(() => {
+    resetRecoverableQuestions()
+    noteQuestionFormSnapshot("/test/project", [recoveredForm])
+    sendMessageCalls.length = 0
+    sendMessageBehavior = async () => {}
+    runtimeKey = "default-runtime"
+  })
+
+  test("starts a new turn on the session that asked, with its own configuration", async () => {
+    const { sendRecoveredFormAnswer, setActionRefs } = await import("./session-actions")
+    setActionRefs(createChildStores([["/test/project", questionStore()]]), () => "/test/project")
+
+    await sendRecoveredFormAnswer(question, "the answer")
+
+    expect(sendMessageCalls).toEqual([{
+      content: "the answer",
+      providerID: "prov",
+      modelID: "mod",
+      agent: "build",
+      variant: "think",
+      queuedGoal: null,
+      target: { runtimeKey: "default-runtime", sessionId: "session-a", directory: "/test/project" },
+    }])
+    // The card is done only after the send was accepted.
+    expect(useRecoverableQuestionsStore.getState().outcomes.get("frm_recovered")).toBe("answered")
+  })
+
+  test("the new turn carries the serialized answer payload", async () => {
+    const { sendRecoveredFormAnswer, setActionRefs } = await import("./session-actions")
+    setActionRefs(createChildStores([["/test/project", questionStore()]]), () => "/test/project")
+    const values: FormValues = {
+      q0: { text: '', number: null, boolean: false, selected: ['Red'], custom: false, acknowledged: false },
+    }
+
+    await sendRecoveredFormAnswer(question, serializeFormAnswerAsMarkdown(recoveredForm, buildFormAnswer(recoveredForm.fields, values)))
+
+    expect(sendMessageCalls).toHaveLength(1)
+    expect(sendMessageCalls[0]?.content).toContain('# Questions')
+    expect(sendMessageCalls[0]?.content).toContain('**Answer:** Red')
+    expect(sendMessageCalls[0]?.content).toContain('{"q0":"Red"}')
+  })
+
+  test("a rejected send keeps the question recoverable", async () => {
+    const { sendRecoveredFormAnswer, setActionRefs } = await import("./session-actions")
+    setActionRefs(createChildStores([["/test/project", questionStore()]]), () => "/test/project")
+    sendMessageBehavior = async () => {
+      throw new Error("send failed")
+    }
+
+    await expect(sendRecoveredFormAnswer(question, "the answer")).rejects.toThrow("send failed")
+
+    // No tombstone: the card and the draft the surface keeps stay for a retry.
+    expect(useRecoverableQuestionsStore.getState().outcomes.has("frm_recovered")).toBe(false)
+  })
+
+  test("a duplicate submission reuses the first send", async () => {
+    const { sendRecoveredFormAnswer, setActionRefs } = await import("./session-actions")
+    setActionRefs(createChildStores([["/test/project", questionStore()]]), () => "/test/project")
+    let release = () => {}
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    sendMessageBehavior = async () => {
+      await gate
+    }
+
+    const first = sendRecoveredFormAnswer(question, "the answer")
+    const second = sendRecoveredFormAnswer(question, "the answer")
+    await Promise.resolve()
+    expect(sendMessageCalls).toHaveLength(1)
+    release()
+    await Promise.all([first, second])
+    expect(sendMessageCalls).toHaveLength(1)
+  })
+
+  test("a completion after a runtime switch leaves the next runtime alone", async () => {
+    const { sendRecoveredFormAnswer, setActionRefs } = await import("./session-actions")
+    setActionRefs(createChildStores([["/test/project", questionStore()]]), () => "/test/project")
+    sendMessageBehavior = async () => {
+      runtimeKey = "runtime-b"
+    }
+
+    await sendRecoveredFormAnswer(question, "the answer")
+
+    expect(sendMessageCalls).toHaveLength(1)
+    expect(useRecoverableQuestionsStore.getState().outcomes.has("frm_recovered")).toBe(false)
+  })
+})
+
+describe("a session created with a title", () => {
+  beforeEach(() => {
+    replyCalls.length = 0
+    globalUpsertedSessions.length = 0
+    registeredSessionDirectories.length = 0
+  })
+
+  test("records the user's title and preserves existing metadata", async () => {
+    const source = createStore({}, { session: [] })
+    const { createSession, setActionRefs } = await import("./session-actions")
+    setActionRefs(createChildStores([["/test/project", source]]), () => "/test/project")
+
+    const session = await createSession("My task", "/test/project", { custom: "kept", openchamber: { kind: "review" } })
+
+    expect(session?.id).toBe("created")
+    const created = replyCalls.find((call) => call.method === "session.create")
+    expect(created?.params.metadata).toEqual({
+      custom: "kept",
+      openchamber: { kind: "review", workTitle: { title: "My task", by: "user" } },
+    })
+  })
+
+  test("leaves the metadata alone when no title is given", async () => {
+    const source = createStore({}, { session: [] })
+    const { createSession, setActionRefs } = await import("./session-actions")
+    setActionRefs(createChildStores([["/test/project", source]]), () => "/test/project")
+
+    const session = await createSession(undefined, "/test/project")
+
+    expect(session?.id).toBe("created")
+    const created = replyCalls.find((call) => call.method === "session.create")
+    expect(created?.params.metadata).toBeUndefined()
+  })
+})

@@ -7,10 +7,16 @@
 // dialog already understands: a `## [x.y.z] - YYYY-MM-DD` header per release,
 // the release title in bold, the intro, then the groups.
 //
+// A Canary build is offered with the nights of the `canary` pre-release's
+// `canary-notes.json` instead (scripts/changelog/canary-notes.mjs), rendered
+// the same way: one `## [version] - date` section per night.
+//
 // Any failure (network, 404, unexpected shape) yields null: the update is
 // still offered, only without notes.
 
 const CHANGELOG_INDEX_URL = 'https://raw.githubusercontent.com/openchamber/openchamber/main/changelog/index.json';
+const CANARY_NOTES_URL = 'https://github.com/openchamber/openchamber/releases/download/canary/canary-notes.json';
+const PULL_URL = 'https://github.com/openchamber/openchamber/pull/';
 
 const GROUPS = [
   ['new', 'New'],
@@ -21,6 +27,7 @@ const GROUPS = [
 ];
 
 const VERSION_PATTERN = /^\d+\.\d+\.\d+$/;
+const CANARY_VERSION_PATTERN = /^\d+\.\d+\.\d+-canary\.\d+\.\d+$/;
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
 // The file crosses a network boundary with no schema library on this side, so
@@ -55,28 +62,72 @@ const renderRelease = (release) => {
   return lines.join('\n').trim();
 };
 
-/**
- * Markdown for the releases in (fromVersion, toVersion], newest first, or
- * null when the index holds none of them.
- */
-export function renderUpdateNotes(index, fromVersion, toVersion, compareVersions) {
-  if (!Array.isArray(index)) return null;
-  const relevant = index
-    .map(parseRelease)
+// Commit scopes as people write the names.
+const AREA_NAMES = { ui: 'UI', sdk: 'SDK', vscode: 'VS Code', mcp: 'MCP', ssh: 'SSH', ios: 'iOS', api: 'API', cli: 'CLI', pwa: 'PWA' };
+
+const areaName = (area) => AREA_NAMES[area] ?? `${area.charAt(0).toUpperCase()}${area.slice(1).replaceAll('-', ' ')}`;
+
+// "**Chat:** remember thinking level per model [#5505](…)" from one commit.
+const canaryBullet = (change) => {
+  const body = text(change?.text);
+  if (!body) return null;
+  const area = text(change.area);
+  const label = area ? `**${areaName(area)}:** ` : '';
+  const pr = /^\d+$/.test(String(change.pr ?? '')) ? ` [#${change.pr}](${PULL_URL}${change.pr})` : '';
+  return `${label}${area ? body : `${body.charAt(0).toUpperCase()}${body.slice(1)}`}${pr}`;
+};
+
+const parseCanaryNight = (entry) => {
+  if (entry === null || entry === undefined) return null;
+  const version = text(entry.version);
+  const date = text(entry.date);
+  if (!version || !CANARY_VERSION_PATTERN.test(version) || !date || !DATE_PATTERN.test(date)) return null;
+  const bullets = (value) => (Array.isArray(value) ? value.map(canaryBullet).filter(Boolean) : []);
+  return {
+    version,
+    date,
+    title: null,
+    intro: null,
+    groups: [
+      { heading: 'New', bullets: bullets(entry.new) },
+      { heading: 'Fixes', bullets: bullets(entry.fixes) },
+    ],
+  };
+};
+
+const renderBetween = (entries, parse, fromVersion, toVersion, compareVersions) => {
+  if (!Array.isArray(entries)) return null;
+  const relevant = entries
+    .map(parse)
     .filter((release) => release !== null)
     .filter((release) => compareVersions(release.version, fromVersion) > 0 && compareVersions(release.version, toVersion) <= 0)
     .sort((a, b) => compareVersions(b.version, a.version));
   if (relevant.length === 0) return null;
   return relevant.map(renderRelease).join('\n\n');
+};
+
+/**
+ * Markdown for the releases in (fromVersion, toVersion], newest first, or
+ * null when the index holds none of them.
+ */
+export function renderUpdateNotes(index, fromVersion, toVersion, compareVersions) {
+  return renderBetween(index, parseRelease, fromVersion, toVersion, compareVersions);
 }
 
-/** Fetch the index and render the notes for one update; null on any failure. */
+/** The same for the Canary nights in (fromVersion, toVersion]. */
+export function renderCanaryNotes(nights, fromVersion, toVersion, compareVersions) {
+  return renderBetween(nights, parseCanaryNight, fromVersion, toVersion, compareVersions);
+}
+
+/** Fetch the notes and render them for one update; null on any failure. */
 export async function fetchUpdateNotes(fromVersion, toVersion, compareVersions, options = {}) {
   const fetchImpl = options.fetch ?? fetch;
+  const canary = CANARY_VERSION_PATTERN.test(String(toVersion ?? ''));
   try {
-    const response = await fetchImpl(CHANGELOG_INDEX_URL, { signal: AbortSignal.timeout(options.timeoutMs ?? 10_000) });
+    const response = await fetchImpl(canary ? CANARY_NOTES_URL : CHANGELOG_INDEX_URL, { signal: AbortSignal.timeout(options.timeoutMs ?? 10_000) });
     if (!response.ok) return null;
-    return renderUpdateNotes(await response.json(), fromVersion, toVersion, compareVersions);
+    const render = canary ? renderCanaryNotes : renderUpdateNotes;
+    return render(await response.json(), fromVersion, toVersion, compareVersions);
   } catch {
     return null;
   }

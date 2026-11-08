@@ -1,7 +1,9 @@
 import * as React from "react"
 
+import { useEmojiPicker } from "@/components/emoji/useEmojiPicker"
 import { useI18n } from "@/lib/i18n"
 import { cn } from "@/lib/utils"
+import { PopupOverlayScrollbar } from "./AttachedOverlayScrollbar"
 import { ScrollableOverlay } from "./ScrollableOverlay"
 
 type TextareaProps = React.ComponentProps<"textarea"> & {
@@ -94,6 +96,15 @@ const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(
   ) => {
     const { t } = useI18n();
     const wrapperRef = React.useRef<HTMLDivElement>(null);
+    // Every text field offers emoji on `:`; the caller's ref sees the same element.
+    const fieldRef = React.useRef<HTMLTextAreaElement | null>(null);
+    const [field, setField] = React.useState<HTMLTextAreaElement | null>(null);
+    const setFieldRef = React.useCallback((node: HTMLTextAreaElement | null) => {
+      fieldRef.current = node;
+      setField(node);
+    }, []);
+    React.useImperativeHandle<HTMLTextAreaElement | null, HTMLTextAreaElement | null>(ref, () => fieldRef.current);
+    const emojiPicker = useEmojiPicker(fieldRef);
     const dragStateRef = React.useRef<{ startY: number; startHeight: number; minHeight: number } | null>(null);
     const [resizedHeight, setResizedHeight] = React.useState<number | null>(null);
     const storedResizedHeight = controlledResizedHeight ?? resizedHeight;
@@ -178,29 +189,32 @@ const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(
     // Simple mode: bare textarea, caller owns the wrapper.
     if (simple) {
       return (
-        <ScrollableOverlay
-          as="textarea"
-          ref={ref as React.Ref<HTMLTextAreaElement>}
-          disableHorizontal
-          fillContainer={fillContainer}
-          useScrollShadow={useScrollShadow}
-          scrollShadowSize={scrollShadowSize}
-          outerClassName={outerClassName}
-          scrollbarClassName={scrollbarClassName}
-          className={cn(
-            "block w-full appearance-none resize-none bg-transparent text-foreground typography-markdown outline-none",
-            "px-3 py-2 md:typography-ui-label",
-            "placeholder:text-muted-foreground focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50",
-            fillContainer ? "[field-sizing:fixed]" : "field-sizing-content",
-            className,
-          )}
-          spellCheck={false}
-          autoComplete="off"
-          autoCorrect="off"
-          autoCapitalize="off"
-          disabled={disabled}
-          {...props}
-        />
+        <>
+          <ScrollableOverlay
+            as="textarea"
+            ref={fieldRef}
+            disableHorizontal
+            fillContainer={fillContainer}
+            useScrollShadow={useScrollShadow}
+            scrollShadowSize={scrollShadowSize}
+            outerClassName={outerClassName}
+            scrollbarClassName={scrollbarClassName}
+            className={cn(
+              "block w-full appearance-none resize-none bg-transparent text-foreground typography-markdown outline-none",
+              "px-3 py-2 md:typography-ui-label",
+              "placeholder:text-muted-foreground focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50",
+              fillContainer ? "[field-sizing:fixed]" : "field-sizing-content",
+              className,
+            )}
+            spellCheck={false}
+            autoComplete="off"
+            autoCorrect="off"
+            autoCapitalize="off"
+            disabled={disabled}
+            {...props}
+          />
+          {emojiPicker}
+        </>
       );
     }
 
@@ -229,9 +243,9 @@ const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(
       >
         <div className="flex h-full min-h-0 flex-1 flex-col gap-2">
           <textarea
-              ref={ref}
+              ref={setFieldRef}
               className={cn(
-                "block w-full flex-1 min-h-0 appearance-none resize-none bg-transparent text-foreground typography-markdown outline-none",
+                "overlay-scrollbar-target block w-full flex-1 min-h-0 appearance-none resize-none bg-transparent text-foreground typography-markdown outline-none",
                 "min-h-[82px] ps-3 pe-2.5 pt-2.5 md:typography-ui-label",
                 "focus-visible:outline-none disabled:cursor-not-allowed",
                 !disabled && [
@@ -254,6 +268,8 @@ const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(
             <ResizeHandle onResizeStart={handleResizeStart} ariaLabel={t('textarea.resizeHandleAria')} />
           </div>
         </div>
+        <PopupOverlayScrollbar scroller={field} disableHorizontal />
+        {emojiPicker}
       </div>
     )
   }

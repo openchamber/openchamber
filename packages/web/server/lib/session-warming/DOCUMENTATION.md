@@ -4,7 +4,8 @@
 
 Keeps the provider's prompt cache of the sessions the user picked alive while
 they sit idle. While a session is warmed, the server sends OpenCode's transient
-`POST /api/session/:id/generate` with a keep-alive prompt every 4 minutes,
+`POST /api/session/:id/generate` with a keep-alive prompt at 90% of its
+model's cache lifetime, or every 4 minutes when that lifetime is unknown,
 until the chosen duration (30 minutes, 1, 2 or 3 hours; 1 hour by default)
 after the session's last turn ended. The request reads the whole
 session context and adds nothing to its history.
@@ -55,6 +56,21 @@ which of the two a write goes to. The UI side is `packages/ui/src/stores/useSess
   one cache lifetime (`isSessionWarm`).
 
 ## Decisions
+
+### Why the ping interval follows the cache lifetime and not a fixed 4 minutes
+
+Four minutes keeps a 5-minute cache alive, and against an hour-long cache it
+sends 13 pings where one would do, each one reading the whole context. When a
+window starts, the runtime reads the session's model (`GET /api/session/:id`)
+and its entry in `/api/model`: a configured `cache.ttl` gives the lifetime,
+and Claude Agent on a subscription, which OpenCode lists without a price, gets
+an hour, because Claude Code caches a subscriber's SDK requests that long.
+That hour is Claude Code's own choice and OpenCode does not report it, so a
+subscriber on extra usage, which Claude Code drops to 5 minutes, loses the
+warming between pings; a gateway with a custom base URL also lists no price.
+Anything unreadable keeps 4 minutes, which suits every cache. With an
+hour-long cache and the 30-minute duration no ping goes out at all, since the
+cache outlives the window.
 
 ### Why OpenChamber pings and not OpenCode
 

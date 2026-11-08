@@ -5,8 +5,10 @@ import { createStartupPipelineRuntime } from './startup-pipeline-runtime.js';
 describe('startup pipeline runtime', () => {
   it('publishes the listening port before bootstrapping managed OpenCode', async () => {
     const order = [];
+    const broadcastUiEvent = vi.fn();
+    const createTerminalRuntime = vi.fn(() => ({}));
     const runtime = createStartupPipelineRuntime({
-      createTerminalRuntime: () => ({}),
+      createTerminalRuntime,
       createDictationRuntime: () => ({}),
       createMessageStreamWsRuntime: () => ({}),
       createServerStartupRuntime: () => ({
@@ -21,6 +23,7 @@ describe('startup pipeline runtime', () => {
 
     await runtime.run({
       app: {},
+      broadcastUiEvent,
       setupProxy: vi.fn(),
       staticRoutesRuntime: { registerStaticRoutes: vi.fn() },
       apiOnly: false,
@@ -36,5 +39,6 @@ describe('startup pipeline runtime', () => {
     });
 
     expect(order).toEqual(['listen', 'port:3901', 'detect', 'bootstrap']);
+    expect(createTerminalRuntime).toHaveBeenCalledWith(expect.objectContaining({ broadcastUiEvent }));
   });
 });

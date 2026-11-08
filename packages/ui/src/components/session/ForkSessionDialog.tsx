@@ -20,6 +20,7 @@ import { isVSCodeRuntime } from '@/lib/desktop';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useGitStore, useIsGitRepo } from '@/stores/useGitStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
+import { isSpaceDirectory } from '@/lib/spaces/space-route';
 import { listModelVariantIds, type ModelVariantSource } from '@/lib/modelVariants';
 
 export type ForkSessionExecution = {
@@ -69,7 +70,9 @@ export function ForkSessionDialog(props: ForkSessionDialogProps) {
   const [instructions, setInstructions] = React.useState(EXECUTION_FORK_DEFAULT_INSTRUCTIONS);
   const [createWorktree, setCreateWorktree] = React.useState(false);
   const [runAsGoal, setRunAsGoal] = React.useState(false);
-  const showCreateWorktree = !isVSCodeRuntime() && isGitRepository === true;
+  // A worktree is the host project's: one made from a space's session would hold none of the
+  // space's changes, so a fork there stays in the space.
+  const showCreateWorktree = !isVSCodeRuntime() && isGitRepository === true && !isSpaceDirectory(projectDirectory) && !isSpaceDirectory(resolvedWorktreeProjectDirectory);
   // The goal loop lives in the web server; VS Code only renders goal state.
   const showRunAsGoal = React.useMemo(() => !isVSCodeRuntime(), []);
 

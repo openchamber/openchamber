@@ -19,7 +19,11 @@ Sesja worktree działa we własnej wyewidencjonowanej kopii Twojego repozytorium
 
 OpenChamber tworzy gałąź, konfiguruje folder i otwiera w nim nową sesję, gotową na Twoją pierwszą wiadomość. Możesz też wystartować jedną prosto z [zadania](/pl/notes-todos-plans/) albo z [issue lub pull requesta](/pl/github/).
 
-Bez pytań: wybierz **Szybki worktree** w tym samym menu gałęzi. OpenChamber sam nazwie gałąź i skieruje na nią nową sesję.
+Bez pytań: wybierz **Szybki worktree** w tym samym menu gałęzi. OpenChamber nada gałęzi tymczasową nazwę i skieruje na nią nową sesję. Gdy agent nada zadaniu nazwę, zmieni też nazwę gałęzi zgodnie z zadaniem, np. na `fix/login-timeout`, o ile gałąź nie została jeszcze wypchnięta.
+
+## Na pasku bocznym
+
+Worktree to jeden wiersz na pasku bocznym, a pod nim wszystkie jego sesje. Pod swoim projektem stoi wśród pozostałych sesji projektu według ostatniej aktywności, więc worktree, w którym właśnie pracowałeś, jest blisko góry. Wiersz pokazuje nazwę zadania, gdy tylko agent ją nada (do tego czasu tytuł sesji, w której pracowałeś tam ostatnio), pull request lub issue, za którym podąża, w postaci kolorowego znacznika, i to, czy któraś sesja w nim działa albo ma dla Ciebie nowości. Worktree utworzony dla pull requesta lub issue zaczyna od tytułu tego elementu, dopóki agent nie wybierze krótszej nazwy. Najedź na niego kursorem, żeby zobaczyć gałąź. Kliknij go, żeby otworzyć sesję, w której pracowałeś tam ostatnio; żeby rozwinąć listę, najedź kursorem na ikonę gałęzi po lewej i kliknij strzałkę, która pojawi się w jej miejscu. Jego menu zmienia nazwę zadania, przenosi worktree do folderu projektu, archiwizuje go albo usuwa. Na telefonie dotknij strzałki w wierszu, żeby rozwinąć listę, i przesuń wiersz w bok, żeby oznaczyć go jako gotowy, zmienić nazwę zadania, zarchiwizować worktree albo go usunąć. Jak prace trafiają do bloku W toku i z niego wychodzą, opisuje strona [Sesje w toku](/pl/sessions-in-work/).
 
 ## Projekty otwarte na folderze repozytorium
 
@@ -31,7 +35,13 @@ Gdy praca jest gotowa, użyj **Integrate** w widoku Git, aby przenieść commity
 
 ## Posprzątaj
 
-Usunięcie lub zarchiwizowanie sesji może usunąć worktree. Sam decydujesz, czy usunąć również gałąź — lokalną, a zdalną, jeśli istnieje. Nic nie jest usuwane bez Twojej zgody.
+Gdy zadanie jest skończone, wybierz **Zarchiwizuj worktree** w menu wiersza albo przytrzymaj Shift i kliknij przycisk archiwizacji, który pojawia się w wierszu w miejscu przycisku nowej sesji. OpenChamber archiwizuje worktree: folder znika, a jego sesje, niezacommitowane zmiany i gałąź czekają na stronie Archiwum. Jeśli działa w nim jeszcze sesja, worktree zostaje.
+
+Oznaczenie wiersza jako gotowego tylko zabiera go z W toku. Żeby archiwizować worktree za każdym razem, gdy oznaczasz go jako gotowy, albo po scaleniu jego PR, włącz to w **Ustawienia → Sesje → Zakończone worktree**.
+
+Na stronie Archiwum zarchiwizowane worktree są pod swoim projektem. **Przywróć** przywraca worktree razem z gałęzią, uruchamia polecenia konfiguracyjne projektu i przywraca jego zmiany i sesje; przywrócenie jednej z jego sesji działa tak samo. Pliki ignorowane przez git, takie jak `node_modules` czy `.env`, nie są zachowywane, więc odtwarzają je polecenia konfiguracyjne. Zarchiwizowane worktree pokazuje też strona Worktree projektu.
+
+Aby pozbyć się worktree na dobre, usuń go z jego menu albo usuń zarchiwizowany worktree na stronie Archiwum. Przy usuwaniu z menu sam decydujesz, czy usunąć również gałąź — lokalną, a zdalną, jeśli istnieje.
 
 ## Jeśli coś wygląda nie tak
 

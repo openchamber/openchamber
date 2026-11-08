@@ -219,7 +219,7 @@ describe('walkthrough routes', () => {
       number: 42,
       readContext: expect.objectContaining({ accountId: PR_CONTEXT.accountId, primaryRemote: PR_CONTEXT.primaryRemote }),
       sourceRepo: source.sourceRepo,
-      file: { path: 'new.ts', previousPath: 'old.ts', status: 'R' },
+      file: { path: 'new.ts', previousPath: 'old.ts', status: 'R', binary: false },
     });
     expect((await request({ path: 'a.ts', status: 'M', source: JSON.stringify({ kind: 'branch', baseRef: 'main', headRef: 'x' }) })).status).toBe(400);
     expect((await request({ status: 'M' })).status).toBe(400);

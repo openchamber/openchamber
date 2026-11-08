@@ -7,13 +7,44 @@ import { create } from "zustand"
 import type { AttachIssueRequest } from '@openchamber/sdk'
 import type { ContextPartMetadata } from '@/lib/messages/contextParts'
 import type { AttachedFile } from "@/stores/types/sessionTypes"
+import type { InlineCommentDraftTarget } from "@/stores/useInlineCommentDraftStore"
 import { prepareAttachmentFiles } from "./attachment-files"
 import { getChatDraftIdentityKey, subscribeChatDraftDeletion, type ChatDraftIdentity } from "@/lib/chatDraftPersistence"
+import { pathForDroppedFile } from "@/lib/desktop"
+import { attachmentBasename } from "@/lib/attachmentIdentity"
+import { formatFileSize } from "@/lib/fileSize"
+import { formatMessage, useI18nStore } from "@/lib/i18n/store"
 
 const FILE_URI_PREFIX = "file://"
+// Past this a file is not read into the prompt: base64 makes it a third
+// larger, and OpenCode hands the model every byte of an attachment.
+const MAX_INLINE_ATTACHMENT_BYTES = 10 * 1024 * 1024
+// OpenCode refuses any attachment past this, by `file://` URL or by @-mention,
+// so a larger file would fail every send it rides along with.
+const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024
 const MAX_ATTACHMENT_PREPARATION_ATTEMPTS = 3
+// Their intake removes content the original still holds: credentials from HAR,
+// outputs from notebooks.
+const INTAKE_REDACTED_FILENAME = /\.(har|ipynb)$/i
 const pendingVSCodeSelectionKeys = new Set<string>()
 let attachmentReadGeneration = 0
+
+/** Attachments filed under `target`, or the current slot when none is named. */
+const attachedFilesFor = (state: InputState, target?: ChatDraftIdentity | null): AttachedFile[] => {
+  if (!target) return state.attachedFiles
+  const key = getChatDraftIdentityKey(target)
+  return key === state.attachmentDraftKey ? state.attachedFiles : state.attachmentDrafts.get(key) ?? []
+}
+
+const appendAttachedFiles = (state: InputState, files: AttachedFile[], target?: ChatDraftIdentity | null): Partial<InputState> => {
+  const appended = [...attachedFilesFor(state, target), ...files]
+  if (!target) return { attachedFiles: appended }
+  const key = getChatDraftIdentityKey(target)
+  if (key === state.attachmentDraftKey) return { attachedFiles: appended }
+  const drafts = new Map(state.attachmentDrafts)
+  drafts.set(key, appended)
+  return { attachmentDrafts: drafts }
+}
 
 const encodeFilePath = (filepath: string): string => {
   let normalized = filepath.replace(/\\/g, "/")
@@ -65,6 +96,8 @@ export const prepareLocalAttachments = async (
   const preparedFiles = preparedOrPending instanceof Promise ? await preparedOrPending : preparedOrPending
   if (!preparedFiles || preparedFiles.length === 0) return
 
+  const agentPath = pathForDroppedFile(file) ?? undefined
+
   const sourceDocumentId = preparedFiles.length > 1
     ? `${Date.now()}-${Math.random().toString(36).slice(2)}`
     : undefined
@@ -72,7 +105,7 @@ export const prepareLocalAttachments = async (
   for (const prepared of preparedFiles) {
     const dataUrl = await readFileAsDataUrl(prepared.file, prepared.mimeType)
     if (!dataUrl) return
-    attachedFiles.push({
+    const attached: AttachedFile = {
       id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
       file: prepared.file,
       dataUrl,
@@ -81,9 +114,42 @@ export const prepareLocalAttachments = async (
       size: prepared.file.size,
       source: "local",
       sourceDocumentId,
-    })
+    }
+    // HAR and notebooks must not point back to content omitted at intake.
+    // Only the first entry represents the original; the rest are extracted images.
+    if (agentPath && attachedFiles.length === 0 && !INTAKE_REDACTED_FILENAME.test(file.name)) {
+      attached.agentPath = agentPath
+      attached.filename = file.name
+    }
+    attachedFiles.push(attached)
   }
   return attachedFiles
+}
+
+/**
+ * A desktop file the prompt cannot carry, as a short note that names it on
+ * disk. OpenCode shares that disk, so the agent reads what it needs with its
+ * own tools. The note is an ordinary text attachment, so the chip, the queue,
+ * the draft and a later restore treat the file like any other.
+ */
+const prepareFileReference = async (file: File, path: string): Promise<AttachedFile> => {
+  const note = new File(
+    [`File on disk: ${path} (${formatFileSize(file.size)}). Its content is not in this message. Read what you need from it with your tools.\n`],
+    file.name,
+    { type: "text/plain" },
+  )
+  return {
+    id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    file: note,
+    dataUrl: await readFileAsDataUrl(note, "text/plain"),
+    mimeType: "text/plain",
+    filename: file.name,
+    size: file.size,
+    source: "local",
+    agentPath: path,
+    // An @-mention of the same path must not bring the whole file back.
+    serverPath: path,
+  }
 }
 
 const getDataUrlByteSize = (url: string): number => {
@@ -134,6 +200,13 @@ export type VSCodeActiveEditorFile = {
   selection: { startLine: number; endLine: number; text: string } | null
 }
 
+export type ComposerAddress = {
+  /** Inline-comment draft slot the composer reads and writes. */
+  inline: InlineCommentDraftTarget | null
+  /** Attachment slot: the composer's own draft identity. */
+  attachments: ChatDraftIdentity | null
+}
+
 export type InputState = {
   pendingComposerRestore: {
     target: ChatDraftIdentity
@@ -150,6 +223,10 @@ export type InputState = {
    * session, which text quoted inside that chat is written to.
    */
   pendingInputTarget: string | null
+  /** Restores wait for their session independently of column insertions. */
+  pendingSessionRestores: Map<string, string>
+  setPendingSessionRestore: (sessionId: string, text: string | null) => void
+  consumePendingSessionRestore: (sessionId: string) => string | null
   /** Pending context for the main chat's composer. */
   pendingSyntheticParts: SyntheticContextPart[] | null
   /** Pending context for pinned composers, by their session id. */
@@ -173,6 +250,15 @@ export type InputState = {
   attachedFiles: AttachedFile[]
   attachmentDraftKey: string | null
   attachmentDrafts: Map<string, AttachedFile[]>
+  /**
+   * Where the main chat's composer files what other surfaces hand it: inline
+   * drafts (comments on files, diffs, plans, terminals, PRs, pages) and
+   * attachments (a comment's pasted image, an annotation's screenshot). A
+   * `/btw` fork moves the whole address with the composer. Null while no
+   * composer is mounted to publish it.
+   */
+  composerAddress: ComposerAddress | null
+  setComposerAddress: (address: ComposerAddress | null) => void
   selectAttachmentDraft: (target: ChatDraftIdentity | null) => void
   restoreAttachedFiles: (files: AttachedFile[], target: ChatDraftIdentity | null) => void
   /** Moves one draft's files onto another draft's, as when `/btw` takes over the typed prompt. */
@@ -193,15 +279,17 @@ export type InputState = {
   setPendingSyntheticParts: (parts: SyntheticContextPart[] | null, target?: string | null) => void
   consumePendingSyntheticParts: (target?: string | null) => SyntheticContextPart[] | null
   getPendingSyntheticParts: (target?: string | null) => SyntheticContextPart[] | null
-  addAttachedFile: (file: File) => Promise<boolean>
+  addAttachedFile: (file: File, target?: ChatDraftIdentity | null) => Promise<boolean>
   removeAttachedFile: (id: string) => void
+  /** Files filed under `target`, or the current slot when none is named. */
+  getAttachedFiles: (target?: ChatDraftIdentity | null) => AttachedFile[]
   setAttachedFiles: (files: AttachedFile[], target?: ChatDraftIdentity | null) => void
   clearAttachedFiles: (target?: ChatDraftIdentity | null) => void
   addVSCodeFileAttachment: (path: string, name: string, fileSize: number | null) => void
   addVSCodeSelectionAttachment: (path: string, file: File) => Promise<void>
   setActiveEditorFile: (file: VSCodeActiveEditorFile | null) => void
   /** Add attachments restored from a reverted message (file already on server) */
-  addRestoredAttachment: (file: { url: string; mimeType: string; filename: string }) => void
+  addRestoredAttachment: (file: { url: string; mimeType: string; filename: string }, target?: ChatDraftIdentity | null) => void
 }
 
 export const useInputStore = create<InputState>()((set, get) => ({
@@ -215,6 +303,18 @@ export const useInputStore = create<InputState>()((set, get) => ({
   pendingInputText: null,
   pendingInputMode: "replace",
   pendingInputTarget: null,
+  pendingSessionRestores: new Map(),
+  setPendingSessionRestore: (sessionId, text) => {
+    const restores = new Map(get().pendingSessionRestores)
+    if (text === null) restores.delete(sessionId)
+    else restores.set(sessionId, text)
+    set({ pendingSessionRestores: restores })
+  },
+  consumePendingSessionRestore: (sessionId) => {
+    const text = get().pendingSessionRestores.get(sessionId) ?? null
+    if (text !== null) get().setPendingSessionRestore(sessionId, null)
+    return text
+  },
   pendingSyntheticParts: null,
   pinnedSyntheticParts: new Map(),
   pendingPresetSubmit: null,
@@ -224,6 +324,13 @@ export const useInputStore = create<InputState>()((set, get) => ({
   attachedFiles: [],
   attachmentDraftKey: null,
   attachmentDrafts: new Map(),
+  composerAddress: null,
+  setComposerAddress: (address) => {
+    const current = get().composerAddress
+    if (current === address) return
+    if (current && address && current.inline === address.inline && current.attachments === address.attachments) return
+    set({ composerAddress: address })
+  },
   selectAttachmentDraft: (target) => {
     const key = target ? getChatDraftIdentityKey(target) : null
     const state = get()
@@ -326,22 +433,44 @@ export const useInputStore = create<InputState>()((set, get) => ({
     target === null ? get().pendingSyntheticParts : get().pinnedSyntheticParts.get(target) ?? null
   ),
 
-  addAttachedFile: async (file: File) => {
+  addAttachedFile: async (file: File, target?: ChatDraftIdentity | null) => {
     const generation = attachmentReadGeneration
+    const referencePath = INTAKE_REDACTED_FILENAME.test(file.name) ? null : pathForDroppedFile(file)
+    const attachReference = async (path: string): Promise<boolean> => {
+      const reference = await prepareFileReference(file, path)
+      if (generation !== attachmentReadGeneration) return false
+      set((state) => appendAttachedFiles(state, [reference], target))
+      return true
+    }
+
+    if (file.size > MAX_INLINE_ATTACHMENT_BYTES) {
+      if (referencePath) return attachReference(referencePath)
+      const limit = file.size > MAX_ATTACHMENT_BYTES
+        ? { key: 'chat.fileAttachment.toast.overSendLimit', bytes: MAX_ATTACHMENT_BYTES } as const
+        : { key: 'chat.fileAttachment.toast.tooLarge', bytes: MAX_INLINE_ATTACHMENT_BYTES } as const
+      throw new Error(formatMessage(useI18nStore.getState().dictionary, limit.key, {
+        name: file.name,
+        size: formatFileSize(limit.bytes),
+      }))
+    }
+
     for (let attempt = 0; attempt < MAX_ATTACHMENT_PREPARATION_ATTEMPTS; attempt += 1) {
-      const reservedFilenames = get().attachedFiles.map((attachment) => attachment.filename)
+      const reservedFilenames = attachedFilesFor(get(), target).map((attachment) => attachment.filename)
       let attachedFiles: AttachedFile[] | undefined
       try {
         attachedFiles = await prepareLocalAttachments(file, reservedFilenames)
       } catch {
         return false
       }
-      if (!attachedFiles || generation !== attachmentReadGeneration) return false
+      if (generation !== attachmentReadGeneration) return false
+      // OpenCode drops a binary type it has no use for without a word, so a
+      // file we cannot prepare never goes as bytes.
+      if (!attachedFiles) return referencePath ? attachReference(referencePath) : false
 
       const generatedFilenames = attachedFiles.slice(1).map((attachment) => attachment.filename)
-      if (hasGeneratedFilenameCollision(generatedFilenames, get().attachedFiles)) continue
+      if (hasGeneratedFilenameCollision(generatedFilenames, attachedFilesFor(get(), target))) continue
 
-      set((state) => ({ attachedFiles: [...state.attachedFiles, ...attachedFiles] }))
+      set((state) => appendAttachedFiles(state, attachedFiles, target))
       return true
     }
     return false
@@ -356,6 +485,7 @@ export const useInputStore = create<InputState>()((set, get) => ({
       return { attachedFiles: s.attachedFiles.filter((f) => f.id !== id) }
     }),
 
+  getAttachedFiles: (target) => attachedFilesFor(get(), target),
   setAttachedFiles: (files, target) => {
     const state = get()
     const key = target === undefined ? state.attachmentDraftKey : target ? getChatDraftIdentityKey(target) : null
@@ -374,6 +504,12 @@ export const useInputStore = create<InputState>()((set, get) => ({
   clearAttachedFiles: (target) => get().setAttachedFiles([], target),
 
   addVSCodeFileAttachment: (path: string, name: string, fileSize: number | null) => {
+    if (fileSize !== null && fileSize > MAX_ATTACHMENT_BYTES) {
+      throw new Error(formatMessage(useI18nStore.getState().dictionary, 'chat.fileAttachment.toast.overSendLimit', {
+        name,
+        size: formatFileSize(MAX_ATTACHMENT_BYTES),
+      }))
+    }
     const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`
     const isDuplicate = get().attachedFiles.some(
       (f) => f.source === 'vscode' && f.vscodeSource === 'file' && (f.vscodePath || '') === path
@@ -434,23 +570,24 @@ export const useInputStore = create<InputState>()((set, get) => ({
     set({ activeEditorFile: file })
   },
 
-  addRestoredAttachment: ({ url, mimeType, filename }) => {
+  addRestoredAttachment: ({ url, mimeType, filename }, target) => {
     const id = `restored-${Date.now()}-${Math.random().toString(36).slice(2)}`
-    // Use "local" source so the file renders in AttachedFilesList.
+    const basename = attachmentBasename(filename)
     // Set serverPath to the URL so ImagePreview can use it as the img src
     // when dataUrl is not a data: URL. sanitizeAttachmentsForSend leaves
     // dataUrl alone for non-server sources, so the URL stays intact on send.
     const attached: AttachedFile = {
       id,
-      file: new File([], filename, { type: mimeType }),
+      file: new File([], basename, { type: mimeType }),
       dataUrl: url,
       mimeType,
-      filename,
+      filename: basename,
+      agentPath: basename !== filename ? filename : undefined,
       size: getDataUrlByteSize(url),
       source: "local",
       serverPath: url,
     }
-    set((s) => ({ attachedFiles: [...s.attachedFiles, attached] }))
+    set((state) => appendAttachedFiles(state, [attached], target))
   },
 }))
 

@@ -1,15 +1,34 @@
 import { cjk } from '@streamdown/cjk';
 import { createMathPlugin } from '@streamdown/math';
-import { defaultRehypePlugins, defaultRemarkPlugins, type MathPlugin, type StreamdownProps } from 'streamdown';
-import type { Processor } from 'unified';
+import { defaultRehypePlugins, defaultRemarkPlugins, type CjkPlugin, type MathPlugin, type StreamdownProps } from 'streamdown';
+import type { Pluggable, Plugin, Processor } from 'unified';
 import type { Root, RootContent } from 'mdast';
 import rehypeSanitize from 'rehype-sanitize';
+import { remarkAlerts, MARKDOWN_ALERT_KINDS } from './remarkAlerts';
 import { remarkDisclosures } from './remarkDisclosures';
 import { remarkMathCompatibility } from './remarkMathCompatibility';
 import { rehypeMarkdownPolicy, rehypeRestoreMarkdownLinks } from './rehypeMarkdownPolicy';
 import { isInvisibleText } from '@/lib/invisibleText';
 
-export const markdownCjk = cjk;
+// Micromark merges GFM and CJK registrations, so both must disable single tildes.
+const strictTildes = { singleTilde: false } as const;
+const gfmEntry = defaultRemarkPlugins.gfm as [Plugin, Record<string, unknown>];
+const defaultRemarkPluginList: Pluggable[] = [
+  [gfmEntry[0], strictTildes],
+  ...Object.values(defaultRemarkPlugins).filter((plugin) => plugin !== defaultRemarkPlugins.gfm),
+];
+
+// `@streamdown/cjk` is pinned to 1.0.4, which appends its strikethrough last.
+const cjkStrikethrough = cjk.remarkPluginsAfter.at(-1) as Plugin;
+const markdownCjk: CjkPlugin = {
+  ...cjk,
+  remarkPluginsAfter: [...cjk.remarkPluginsAfter.slice(0, -1), [cjkStrikethrough, strictTildes]],
+};
+
+export function getMarkdownCjk(singleTilde = false): CjkPlugin {
+  return singleTilde ? cjk : markdownCjk;
+}
+
 const officialMath = createMathPlugin({ singleDollarTextMath: false });
 // Streamdown appends math's remark plugin after the configured remark plugins.
 // Keeping the compatibility transformer here makes it run after remark-math.
@@ -26,8 +45,9 @@ const schema: NonNullable<Parameters<typeof rehypeSanitize>[0]> = {
   strip: ['script', 'style', 'iframe', 'object', 'embed', 'svg', 'math', 'form'],
   attributes: {
     '*': ['align', 'alt', 'checked', 'colSpan', 'height', 'media', 'open', 'rowSpan', 'start', 'title', 'width'],
-    a: ['href', 'id', 'ariaDescribedBy', 'ariaLabel', 'dataFootnoteRef', 'dataFootnoteBackref', 'dataOcLinkSource'],
-    code: [['className', /^language-[\w#+.-]+$/, 'math-inline', 'math-display'], 'metastring'],
+    a: ['href', 'id', 'ariaDescribedBy', 'ariaLabel', 'dataFootnoteRef', 'dataFootnoteBackref', 'dataOcLinkSource', 'dataOcReference'],
+    // `:` for GitLab's suggestion fences (`suggestion:-0+2`).
+    code: [['className', /^language-[\w#+.:-]+$/, 'math-inline', 'math-display'], 'metastring'],
     img: ['src', 'srcSet', 'alt', 'dataOcMediaSource'],
     source: ['src', 'srcSet', 'type', 'media', 'dataOcMediaSource'],
     video: ['src', 'controls', 'playsInline', 'preload', 'dataOcMediaSource'],
@@ -37,6 +57,7 @@ const schema: NonNullable<Parameters<typeof rehypeSanitize>[0]> = {
     ol: [['className', 'contains-task-list']],
     section: ['dataFootnotes', ['className', 'footnotes']],
     h2: ['id', ['className', 'sr-only']],
+    blockquote: [['dataOcAlert', ...MARKDOWN_ALERT_KINDS]],
   },
   // href has already passed the application URL classifier. Media still only
   // uses HTTP(S)/relative src; local files travel as validated source metadata.
@@ -85,9 +106,9 @@ function remarkVisibleBlocks() {
   };
 }
 
-function createOptions(allowRawHtml: boolean, isVSCode: boolean): Pick<StreamdownProps, 'remarkPlugins' | 'rehypePlugins'> {
+function createOptions(allowRawHtml: boolean, isVSCode: boolean, singleTilde: boolean): Pick<StreamdownProps, 'remarkPlugins' | 'rehypePlugins'> {
   return {
-    remarkPlugins: [...Object.values(defaultRemarkPlugins), remarkDisclosures, remarkVisibleBlocks, remarkSessionLinks],
+    remarkPlugins: [...(singleTilde ? Object.values(defaultRemarkPlugins) : defaultRemarkPluginList), remarkDisclosures, remarkAlerts, remarkVisibleBlocks, remarkSessionLinks],
     rehypePlugins: [
       ...(allowRawHtml ? [defaultRehypePlugins.raw] : []),
       [rehypeMarkdownPolicy, { isVSCode }],
@@ -97,7 +118,10 @@ function createOptions(allowRawHtml: boolean, isVSCode: boolean): Pick<Streamdow
     ],
   };
 }
-const policies = [createOptions(false, false), createOptions(false, true), createOptions(true, false), createOptions(true, true)];
-export function getMarkdownProcessingOptions(allowRawHtml: boolean, isVSCode: boolean): Pick<StreamdownProps, 'remarkPlugins' | 'rehypePlugins'> {
-  return policies[(allowRawHtml ? 2 : 0) + (isVSCode ? 1 : 0)];
+const policies = [false, true].flatMap(singleTilde => [
+  createOptions(false, false, singleTilde), createOptions(false, true, singleTilde),
+  createOptions(true, false, singleTilde), createOptions(true, true, singleTilde),
+]);
+export function getMarkdownProcessingOptions(allowRawHtml: boolean, isVSCode: boolean, singleTilde = false): Pick<StreamdownProps, 'remarkPlugins' | 'rehypePlugins'> {
+  return policies[(singleTilde ? 4 : 0) + (allowRawHtml ? 2 : 0) + (isVSCode ? 1 : 0)];
 }

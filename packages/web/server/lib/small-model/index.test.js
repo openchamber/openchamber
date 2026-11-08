@@ -28,7 +28,7 @@ const state = {
   generate: () => ({ text: 'generated' }),
   requests: [],
   generateErrors: [],
-  // Holds each /api/experimental/generate response open, so a client-side
+  // Holds each /api/experimental/generate/text response open, so a client-side
   // deadline can fire mid-request.
   generateDelayMs: 0,
 };
@@ -88,10 +88,10 @@ beforeAll(async () => {
       if (state.titleModel) agent.model = state.titleModel;
       return send({ location: LOCATION, data: agent });
     }
-    if (url.pathname === '/api/experimental/generate') {
+    if (url.pathname === '/api/experimental/generate/text') {
       const error = state.generateErrors.shift();
       if (error) {
-        res.writeHead(400, { 'content-type': 'application/json' });
+        res.writeHead({ ModelNotFoundError: 404, ServiceUnavailableError: 503 }[error._tag] ?? 400, { 'content-type': 'application/json' });
         return res.end(JSON.stringify(error));
       }
       if (state.generateDelayMs) await new Promise((resolve) => setTimeout(resolve, state.generateDelayMs));
@@ -125,10 +125,15 @@ beforeEach(() => {
   resetOpenCodeRuntimeProviders();
 });
 
-const lastGenerate = () => state.requests.filter((entry) => entry.path === '/api/experimental/generate').at(-1);
+const lastGenerate = () => state.requests.filter((entry) => entry.path === '/api/experimental/generate/text').at(-1);
 
 describe('generateSmallModelText', () => {
-  const unavailable = { _tag: 'InvalidRequestError', message: 'Model unavailable: zai-coding-plan/glm-5.3-flash' };
+  const unavailable = {
+    _tag: 'ModelNotFoundError',
+    providerID: 'zai-coding-plan',
+    modelID: 'glm-5.3-flash',
+    message: 'Model not found: zai-coding-plan/glm-5.3-flash',
+  };
   const options = { prompt: 'write a commit', model: 'zai-coding-plan/glm-5.3-flash' };
 
   beforeEach(() => setUnavailableRetryDelaysForTest([1, 1, 1]));
@@ -138,7 +143,7 @@ describe('generateSmallModelText', () => {
     state.generateErrors = [unavailable];
     const result = await generateSmallModelText(options);
     expect(result.text).toBe('generated');
-    const calls = state.requests.filter((entry) => entry.path === '/api/experimental/generate');
+    const calls = state.requests.filter((entry) => entry.path === '/api/experimental/generate/text');
     expect(calls).toHaveLength(2);
     expect(calls[0].body).toEqual(calls[1].body);
   });
@@ -147,27 +152,34 @@ describe('generateSmallModelText', () => {
     state.generateErrors = [unavailable, unavailable, unavailable];
     const result = await generateSmallModelText(options);
     expect(result.text).toBe('generated');
-    expect(state.requests.filter((entry) => entry.path === '/api/experimental/generate')).toHaveLength(4);
+    expect(state.requests.filter((entry) => entry.path === '/api/experimental/generate/text')).toHaveLength(4);
   });
 
   it('reports persistent model unavailability once the backoff runs out', async () => {
     state.generateErrors = [unavailable, unavailable, unavailable, unavailable];
     await expect(generateSmallModelText(options)).rejects.toMatchObject({
-      message: unavailable.message, statusCode: 503, code: 'small-model-unavailable',
+      message: 'Model unavailable: zai-coding-plan/glm-5.3-flash', statusCode: 503, code: 'small-model-unavailable',
     });
-    expect(state.requests.filter((entry) => entry.path === '/api/experimental/generate')).toHaveLength(4);
+    expect(state.requests.filter((entry) => entry.path === '/api/experimental/generate/text')).toHaveLength(4);
+  });
+
+  it('retries while the location plugins are still activating', async () => {
+    state.generateErrors = [{ _tag: 'ServiceUnavailableError', service: 'plugin', message: 'Location plugins did not finish activating' }];
+    const result = await generateSmallModelText(options);
+    expect(result.text).toBe('generated');
+    expect(state.requests.filter((entry) => entry.path === '/api/experimental/generate/text')).toHaveLength(2);
   });
 
   it('does not retry other invalid requests', async () => {
     state.generateErrors = [{ _tag: 'InvalidRequestError', message: 'Invalid prompt' }];
     await expect(generateSmallModelText(options)).rejects.toMatchObject({ message: 'Invalid prompt' });
-    expect(state.requests.filter((entry) => entry.path === '/api/experimental/generate')).toHaveLength(1);
+    expect(state.requests.filter((entry) => entry.path === '/api/experimental/generate/text')).toHaveLength(1);
   });
 
   it('does not retry provider failures with the same message', async () => {
     state.generateErrors = [{ _tag: 'ServiceUnavailableError', message: unavailable.message }];
     await expect(generateSmallModelText(options)).rejects.toMatchObject({ _tag: 'ServiceUnavailableError' });
-    expect(state.requests.filter((entry) => entry.path === '/api/experimental/generate')).toHaveLength(1);
+    expect(state.requests.filter((entry) => entry.path === '/api/experimental/generate/text')).toHaveLength(1);
   });
 
   it('cancels without sending the retry', async () => {
@@ -178,7 +190,7 @@ describe('generateSmallModelText', () => {
     const timer = setTimeout(() => controller.abort(), 100);
     try {
       await expect(pending).rejects.toThrow();
-      expect(state.requests.filter((entry) => entry.path === '/api/experimental/generate')).toHaveLength(1);
+      expect(state.requests.filter((entry) => entry.path === '/api/experimental/generate/text')).toHaveLength(1);
     } finally {
       clearTimeout(timer);
     }
@@ -188,7 +200,7 @@ describe('generateSmallModelText', () => {
     setUnavailableRetryDelaysForTest();
     state.generateErrors = [unavailable];
     await expect(generateSmallModelText({ ...options, timeoutMs: 100 })).rejects.toThrow();
-    expect(state.requests.filter((entry) => entry.path === '/api/experimental/generate')).toHaveLength(1);
+    expect(state.requests.filter((entry) => entry.path === '/api/experimental/generate/text')).toHaveLength(1);
   });
 
   it('reports a blown deadline as a 504 generation-timeout naming the model and budget', async () => {
@@ -325,6 +337,45 @@ describe('generateSmallModelText', () => {
     });
 
     expect(result).toMatchObject({ providerID: 'my-proxy', modelID: 'gemini-3.6-flash', source: 'session-provider-small' });
+  });
+
+  it('counts every lab\'s flash as a flash, keeps a session already on a small model, and ranks flash before luna', async () => {
+    state.models = [
+      MODEL({ id: 'deepseek-v4-pro', modelID: 'deepseek-v4-pro', providerID: 'deepseek', family: 'deepseek-thinking' }),
+      MODEL({ id: 'deepseek-v4.1-flash', modelID: 'deepseek-v4.1-flash', providerID: 'deepseek', family: 'deepseek-flash' }),
+      MODEL({ id: 'glm-5.3', modelID: 'glm-5.3', providerID: 'zai', family: 'glm' }),
+      MODEL({ id: 'glm-5.3-flash', modelID: 'glm-5.3-flash', providerID: 'zai', family: 'glm-flash' }),
+      MODEL({ id: 'mimo-v2.6-pro', modelID: 'mimo-v2.6-pro', providerID: 'xiaomi', family: 'mimo' }),
+      MODEL({ id: 'mimo-v2.6-flash', modelID: 'mimo-v2.6-flash', providerID: 'xiaomi', family: 'mimo' }),
+      MODEL({ id: 'kimi-k3', modelID: 'kimi-k3', providerID: 'gateway', family: 'kimi-k3' }),
+      MODEL({ id: 'deepseek-v4.1-flash', modelID: 'deepseek-v4.1-flash', providerID: 'gateway', family: 'deepseek-flash' }),
+      MODEL({ id: 'glm-5.3-flash', modelID: 'glm-5.3-flash', providerID: 'gateway', family: 'glm-flash', time: { released: 2 } }),
+      MODEL({ id: 'gpt-6-luna', modelID: 'gpt-6-luna', providerID: 'gateway', family: 'gpt-luna', time: { released: 3 } }),
+      MODEL({ id: 'claude-sonnet-5', modelID: 'claude-sonnet-5', providerID: 'luna-only', family: 'claude-sonnet' }),
+      MODEL({ id: 'gpt-6-luna', modelID: 'gpt-6-luna', providerID: 'luna-only', family: 'gpt-luna' }),
+    ];
+
+    const pick = (providerID, modelID) => generateSmallModelText({ prompt: 'hi', directory: '/proj', preferredProviderID: providerID, preferredModelID: modelID });
+
+    expect(await pick('deepseek', 'deepseek-v4-pro')).toMatchObject({ modelID: 'deepseek-v4.1-flash', source: 'session-provider-small' });
+    expect(await pick('zai', 'glm-5.3')).toMatchObject({ modelID: 'glm-5.3-flash', source: 'session-provider-small' });
+    expect(await pick('xiaomi', 'mimo-v2.6-pro')).toMatchObject({ modelID: 'mimo-v2.6-flash', source: 'session-provider-small' });
+    expect(await pick('gateway', 'deepseek-v4.1-flash')).toMatchObject({ modelID: 'deepseek-v4.1-flash', source: 'session-model' });
+    expect(await pick('gateway', 'kimi-k3')).toMatchObject({ modelID: 'glm-5.3-flash', source: 'session-provider-small' });
+    expect(await pick('luna-only', 'claude-sonnet-5')).toMatchObject({ modelID: 'gpt-6-luna', source: 'session-provider-small' });
+  });
+
+  it('moves past a small session model that OpenCode reports unusable', async () => {
+    state.models = [
+      MODEL({ id: 'claude-haiku-4-5', modelID: 'claude-haiku-4-5', family: 'claude-haiku', enabled: false }),
+      MODEL({ id: 'claude-haiku-4-6', modelID: 'claude-haiku-4-6', family: 'claude-haiku', status: 'deprecated' }),
+      MODEL({ id: 'claude-haiku-5', modelID: 'claude-haiku-5', family: 'claude-haiku', capabilities: { input: ['image'], output: ['image'] } }),
+      MODEL({ id: 'claude-haiku-5-5', modelID: 'claude-haiku-5-5', family: 'claude-haiku' }),
+    ];
+    for (const modelID of ['claude-haiku-4-5', 'claude-haiku-4-6', 'claude-haiku-5']) {
+      expect(await generateSmallModelText({ prompt: 'hi', directory: '/proj', preferredProviderID: 'anthropic', preferredModelID: modelID }))
+        .toMatchObject({ modelID: 'claude-haiku-5-5', source: 'session-provider-small' });
+    }
   });
 
   it('picks Claude Code haiku as the small model like any other provider', async () => {
@@ -694,7 +745,7 @@ describe('structured output', () => {
     await expect(generateSmallModelText({ prompt: 'describe', directory: '/proj', responseSchema: schema }))
       .rejects.toMatchObject({ statusCode: 422, code: 'structured-output-unsupported' });
 
-    expect(state.requests.filter((entry) => entry.path === '/api/experimental/generate')).toHaveLength(2);
+    expect(state.requests.filter((entry) => entry.path === '/api/experimental/generate/text')).toHaveLength(2);
   });
 });
 
@@ -824,6 +875,48 @@ describe('describeSmallModel', () => {
     expect(await describeSmallModel({ directory: '/proj' })).toBeNull();
   });
 
+  describe('free zen models without a login', () => {
+    const zen = (id, apiKey = 'public') => MODEL({ id, modelID: id, providerID: 'opencode', family: id, settings: { apiKey } });
+
+    afterEach(() => fs.rmSync(path.join(TEMP_DATA_DIR, 'settings.json'), { force: true }));
+
+    it('answers null on a setup with no login, where OpenCode\'s default is a free zen model', async () => {
+      state.models = [zen('big-pickle'), zen('deepseek-v4.1-flash-free')];
+      state.defaultModel = state.models[0];
+
+      expect(await describeSmallModel({ directory: '/proj' })).toBeNull();
+      expect(await describeSmallModel({ directory: '/proj', preferredProviderID: 'opencode', preferredModelID: 'big-pickle' })).toBeNull();
+    });
+
+    it('moves past a saved free zen model as if none were saved', async () => {
+      state.models = [MODEL(), zen('deepseek-v4.1-flash-free')];
+      fs.writeFileSync(
+        path.join(TEMP_DATA_DIR, 'settings.json'),
+        JSON.stringify({ smallModelUseDefault: false, smallModelOverride: 'opencode/deepseek-v4.1-flash-free' }),
+      );
+
+      expect(await describeSmallModel({ directory: '/proj' })).toMatchObject({ providerID: 'anthropic', source: 'default' });
+    });
+
+    it('moves past a free zen walkthrough model and OpenCode title model', async () => {
+      state.models = [MODEL(), zen('big-pickle')];
+      state.titleModel = { id: 'big-pickle', providerID: 'opencode' };
+
+      expect(await describeSmallModel({ directory: '/proj', overrideModel: 'opencode/big-pickle' }))
+        .toMatchObject({ providerID: 'anthropic', source: 'default' });
+    });
+
+    it('keeps a zen model behind a real zen credential', async () => {
+      state.models = [MODEL(), zen('gpt-5-nano', 'zen-key')];
+      fs.writeFileSync(
+        path.join(TEMP_DATA_DIR, 'settings.json'),
+        JSON.stringify({ smallModelUseDefault: false, smallModelOverride: 'opencode/gpt-5-nano' }),
+      );
+
+      expect(await describeSmallModel({ directory: '/proj' })).toMatchObject({ providerID: 'opencode', modelID: 'gpt-5-nano', source: 'settings' });
+    });
+  });
+
   it.each([
     ['http://127.0.0.1:8080/v1', true],
     ['http://localhost:1234/v1', true],
@@ -861,6 +954,18 @@ describe('listAuthenticatedProviders', () => {
     state.providers = [];
 
     expect(await listAuthenticatedProviders()).toEqual(['anthropic']);
+  });
+
+  it('leaves out zen without a login and offers it with a real credential', async () => {
+    const zen = (apiKey) => MODEL({ id: 'big-pickle', modelID: 'big-pickle', providerID: 'opencode', settings: { apiKey } });
+    state.providers = [{ id: 'opencode', name: 'OpenCode', activation: 'enabled', package: 'x' }];
+
+    state.models = [zen('public')];
+    expect(await listAuthenticatedProviders()).toEqual([]);
+
+    resetOpenCodeRuntimeProviders();
+    state.models = [zen('zen-key')];
+    expect(await listAuthenticatedProviders()).toEqual(['opencode']);
   });
 
   it('offers Claude Code', async () => {
@@ -937,10 +1042,13 @@ describe('small model failure response', () => {
       getSmallModelService: async () => ({ generateSmallModelText }),
     });
     setUnavailableRetryDelaysForTest([1]);
-    state.generateErrors = [
-      { _tag: 'InvalidRequestError', message: 'Model unavailable: zai-coding-plan/glm-5.3-flash' },
-      { _tag: 'InvalidRequestError', message: 'Model unavailable: zai-coding-plan/glm-5.3-flash' },
-    ];
+    const missing = {
+      _tag: 'ModelNotFoundError',
+      providerID: 'zai-coding-plan',
+      modelID: 'glm-5.3-flash',
+      message: 'Model not found: zai-coding-plan/glm-5.3-flash',
+    };
+    state.generateErrors = [missing, missing];
     let status;
     let payload;
     const response = {

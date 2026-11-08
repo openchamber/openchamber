@@ -47,9 +47,7 @@ const mergeRequestCopy = new Map<I18nKey, I18nKey>([
   ['chat.generatedResult.pullRequest.title', 'chat.generatedResult.mergeRequest.title'],
   ['chat.chatInput.linked.pr.openInBrowserAria', 'chat.chatInput.linked.mr.openInBrowserAria'],
   ['chat.chatInput.linked.pr.removeAria', 'chat.chatInput.linked.mr.removeAria'],
-  ['sessions.mergedCleanup.toast.removedTitle', 'sessions.mergedCleanup.toast.mr.removedTitle'],
   ['sessions.mergedCleanup.toast.archivedTitle', 'sessions.mergedCleanup.toast.mr.archivedTitle'],
-  ['sessions.mergedCleanup.toast.archivedDescription', 'sessions.mergedCleanup.toast.mr.archivedDescription'],
   ['sessions.mergedCleanup.toast.failedTitle', 'sessions.mergedCleanup.toast.mr.failedTitle'],
   ['sessions.sidebar.group.pr.status.open', 'sessions.sidebar.group.mr.status.open'],
   ['sessions.sidebar.group.pr.status.draft', 'sessions.sidebar.group.mr.status.draft'],
@@ -61,6 +59,8 @@ const mergeRequestCopy = new Map<I18nKey, I18nKey>([
   ['chat.workStatus.action.openPr', 'chat.workStatus.action.openMr'],
   ['chat.workStatus.breakdown.prCountSingle', 'chat.workStatus.breakdown.mrCountSingle'],
   ['chat.workStatus.breakdown.prCountPlural', 'chat.workStatus.breakdown.mrCountPlural'],
+  ['chat.prWatch.title', 'chat.prWatch.mr.title'],
+  ['chat.sessionNotice.pullRequest.title', 'chat.sessionNotice.mergeRequest.title'],
 ]);
 
 /** The same messages for a review host's changes. */
@@ -105,9 +105,7 @@ const changeCopy = new Map<I18nKey, I18nKey>([
   ['chat.generatedResult.pullRequest.title', 'chat.generatedResult.change.title'],
   ['chat.chatInput.linked.pr.openInBrowserAria', 'chat.chatInput.linked.change.openInBrowserAria'],
   ['chat.chatInput.linked.pr.removeAria', 'chat.chatInput.linked.change.removeAria'],
-  ['sessions.mergedCleanup.toast.removedTitle', 'sessions.mergedCleanup.toast.change.removedTitle'],
   ['sessions.mergedCleanup.toast.archivedTitle', 'sessions.mergedCleanup.toast.change.archivedTitle'],
-  ['sessions.mergedCleanup.toast.archivedDescription', 'sessions.mergedCleanup.toast.change.archivedDescription'],
   ['sessions.mergedCleanup.toast.failedTitle', 'sessions.mergedCleanup.toast.change.failedTitle'],
   ['sessions.sidebar.group.pr.status.open', 'sessions.sidebar.group.change.status.open'],
   ['sessions.sidebar.group.pr.status.draft', 'sessions.sidebar.group.change.status.draft'],
@@ -119,6 +117,8 @@ const changeCopy = new Map<I18nKey, I18nKey>([
   ['chat.workStatus.action.openPr', 'chat.workStatus.change.openChange'],
   ['chat.workStatus.breakdown.prCountSingle', 'chat.workStatus.change.countSingle'],
   ['chat.workStatus.breakdown.prCountPlural', 'chat.workStatus.change.countPlural'],
+  ['chat.prWatch.title', 'chat.prWatch.change.title'],
+  ['chat.sessionNotice.pullRequest.title', 'chat.sessionNotice.change.title'],
 ]);
 
 /** Each term's wording of the pull-request messages; every term maps every message the others do. */

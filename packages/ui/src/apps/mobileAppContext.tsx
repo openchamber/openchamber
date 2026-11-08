@@ -2,12 +2,13 @@
 import React from 'react';
 
 export type MobileAppActions = {
-  /** Open the Changes surface as a modal and (optionally) navigate it to a specific diff. */
-  openChanges: (options?: { diffPath?: string | null; staged?: boolean }) => void;
+  /**
+   * Open the Changes surface as a modal and (optionally) navigate it to a specific diff.
+   * Scope `turn` looks for the file in Last turn first, and in Changes when Last turn has nothing for it.
+   */
+  openChanges: (options?: { diffPath?: string | null; staged?: boolean; scope?: 'turn' }) => void;
   /** Open the Files surface as a modal. */
   openFiles: () => void;
-  /** Open the Settings surface as a modal. */
-  openSettings: () => void;
   /** Open the issues and PRs board page; what it shows is set in its store first. */
   openSourceBoard: () => void;
 };

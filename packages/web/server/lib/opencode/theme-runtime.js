@@ -110,50 +110,69 @@ export const createThemeRuntime = (dependencies) => {
     };
   };
 
+  // The last version of each file that loaded, by file name. A theme file
+  // saved half-written or with a typo keeps serving this version, so the
+  // theme on screen does not switch away while it is being edited.
+  const lastValidThemes = new Map();
+
+  /** The file's theme, `null` when it is broken, or `undefined` when it is not a theme file. */
+  const readThemeFile = async (name) => {
+    const filePath = path.join(themesDir, name);
+    try {
+      const stat = await fsPromises.stat(filePath);
+      if (!stat.isFile()) return undefined;
+      if (stat.size > maxThemeJsonBytes) {
+        logger.warn(`[themes] ${name} is too large (${stat.size} bytes)`);
+        return null;
+      }
+      const normalized = normalizeThemeJson(JSON.parse(await fsPromises.readFile(filePath, 'utf8')));
+      if (!normalized) logger.warn(`[themes] ${name} is not a valid theme`);
+      return normalized;
+    } catch (error) {
+      logger.warn(`[themes] Failed to read ${name}:`, error);
+      return null;
+    }
+  };
+
   const readCustomThemesFromDisk = async () => {
     try {
       const entries = await fsPromises.readdir(themesDir, { withFileTypes: true });
       const themes = [];
       const seen = new Set();
+      const listed = new Set();
 
       for (const entry of entries) {
         if (!entry.isFile() && !entry.isSymbolicLink()) continue;
         if (!entry.name.toLowerCase().endsWith('.json')) continue;
 
-        const filePath = path.join(themesDir, entry.name);
-        try {
-          const stat = await fsPromises.stat(filePath);
-          if (!stat.isFile()) continue;
-          if (stat.size > maxThemeJsonBytes) {
-            logger.warn(`[themes] Skip ${entry.name}: too large (${stat.size} bytes)`);
-            continue;
-          }
+        const loaded = await readThemeFile(entry.name);
+        if (loaded === undefined) continue;
+        listed.add(entry.name);
+        if (loaded) lastValidThemes.set(entry.name, loaded);
+        const theme = loaded ?? lastValidThemes.get(entry.name);
+        if (!theme) continue;
+        if (!loaded) logger.warn(`[themes] Keeping the last valid version of ${entry.name}`);
 
-          const rawText = await fsPromises.readFile(filePath, 'utf8');
-          const parsed = JSON.parse(rawText);
-          const normalized = normalizeThemeJson(parsed);
-          if (!normalized) {
-            logger.warn(`[themes] Skip ${entry.name}: invalid theme JSON`);
-            continue;
-          }
-
-          const id = normalized.metadata.id;
-          if (seen.has(id)) {
-            logger.warn(`[themes] Skip ${entry.name}: duplicate theme id "${id}"`);
-            continue;
-          }
-
-          seen.add(id);
-          themes.push(normalized);
-        } catch (error) {
-          logger.warn(`[themes] Failed to read ${entry.name}:`, error);
+        const id = theme.metadata.id;
+        if (seen.has(id)) {
+          logger.warn(`[themes] Skip ${entry.name}: duplicate theme id "${id}"`);
+          continue;
         }
+
+        seen.add(id);
+        themes.push(theme);
+      }
+
+      // A removed file takes its theme with it.
+      for (const name of lastValidThemes.keys()) {
+        if (!listed.has(name)) lastValidThemes.delete(name);
       }
 
       return themes;
     } catch (error) {
       // Missing dir is fine.
       if (error && typeof error === 'object' && error.code === 'ENOENT') {
+        lastValidThemes.clear();
         return [];
       }
       logger.warn('[themes] Failed to list custom themes dir:', error);
@@ -223,7 +242,9 @@ export const createThemeRuntime = (dependencies) => {
         }
         let theme;
         try { theme = normalizeThemeJson(JSON.parse(text)); }
-        catch { continue; }
+        catch { theme = null; }
+        // A broken file the list still shows from its last valid version is deleted by that ID.
+        theme ??= lastValidThemes.get(entry.name);
         if (theme?.metadata.id === id) matches.push(target);
       }
       // IDs identify themes, not filenames. Refuse ambiguous matches rather

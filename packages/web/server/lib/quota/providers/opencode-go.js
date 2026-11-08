@@ -1,5 +1,6 @@
 import { readOpenCodeCredentials } from '../../opencode/auth.js';
 import { deleteLegacyOpenCodeGoCredential } from '../credentials/store.js';
+import { readConsoleBudgets, withConsoleBudgets } from '../console-budgets.js';
 import {
   asNonEmptyString,
   asObject,
@@ -35,7 +36,7 @@ const CONSOLE_INTEGRATION_ID = 'opencode';
 // Console workspaces carry a `wrk_` id on current sign-ins; older stored
 // credentials still carry `org_`, so both prefixes count and nothing else.
 const ORGANIZATION_ID_PATTERN = /^(?:org|wrk)_[A-Za-z0-9]+$/;
-const CONSOLE_PRODUCTS = new Set(['go', 'go-plus']);
+const CONSOLE_PRODUCTS = new Set(['go', 'go-plus', 'go-teams']);
 const NO_CONSOLE_SUBSCRIPTION = 'No active OpenCode Go subscription on the selected Console account';
 // Console keys expire and nothing can renew them, while a Console sign-in is
 // renewed by OpenCode and serves OpenCode Go too. Providers offers that sign-in
@@ -281,7 +282,7 @@ const getConsoleCredential = (auth) => {
 
 export const isConfigured = (auth) => Boolean(getConsoleCredential(auth) || getApiKey(auth));
 
-export const fetchQuota = async ({ readAuth = readOpenCodeCredentials, fetchImpl = fetch } = {}) => {
+const fetchGoQuota = async ({ readAuth = readOpenCodeCredentials, fetchImpl = fetch } = {}) => {
   try {
     deleteLegacyOpenCodeGoCredential();
     const auth = await readAuth();
@@ -328,4 +329,10 @@ export const fetchQuota = async ({ readAuth = readOpenCodeCredentials, fetchImpl
   } catch (error) {
     return buildResult({ providerId, providerName, ok: false, configured: true, error: error instanceof Error ? error.message : 'Request failed' });
   }
+};
+
+/** The Go meters, with the Console budgets the same sign-in has read beside them. */
+export const fetchQuota = async ({ readBudgets = readConsoleBudgets, ...options } = {}) => {
+  const [result, consoleBudgets] = await Promise.all([fetchGoQuota(options), readBudgets()]);
+  return withConsoleBudgets(result, consoleBudgets);
 };

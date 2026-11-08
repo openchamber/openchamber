@@ -140,8 +140,8 @@ test('only the Implement send dialog offers Run as goal', async () => {
       await wait(30);
     };
 
-    expect((await openSendDialog('Improve plan')).textContent).not.toContain('Run as goal');
+    expect((await openSendDialog('Improve')).textContent).not.toContain('Run as goal');
     await closeDialog();
-    expect((await openSendDialog('Implement plan')).textContent).toContain('Run as goal');
+    expect((await openSendDialog('Implement')).textContent).toContain('Run as goal');
   });
 });

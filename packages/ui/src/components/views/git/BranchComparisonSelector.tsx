@@ -5,6 +5,7 @@ import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, Command
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { dropdownTriggerVariants } from '@/components/ui/dropdown-trigger';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
+import { HoverTooltip } from '@/components/ui/row-tooltip';
 import { useI18n } from '@/lib/i18n';
 import { useTabletLayout } from '@/lib/device';
 import { rankByQuery } from '@/lib/search/fuzzySearch';
@@ -43,7 +44,6 @@ export function BranchComparisonSelector({ branches, currentBranch, base, onSele
       aria-label={t('gitView.pr.field.baseBranch')}
       aria-haspopup={useSheet ? 'dialog' : undefined}
       aria-expanded={useSheet ? open : undefined}
-      title={label}
       disabled={!currentBranch}
       onClick={useSheet ? () => changeOpen(true) : undefined}
     >
@@ -53,12 +53,11 @@ export function BranchComparisonSelector({ branches, currentBranch, base, onSele
     </Button>
   );
   const picker = (
-    <Command shouldFilter={false} className={mobile ? '[&_[data-slot=command-input-wrapper]]:h-11' : undefined} onKeyDown={(event) => {
+    <Command shouldFilter={false} onKeyDown={(event) => {
       if (event.key !== 'Escape') event.stopPropagation();
     }}>
       <CommandInput
         autoFocus={!useSheet}
-        className={mobile ? 'h-11' : undefined}
         value={search}
         onValueChange={setSearch}
         placeholder={t('gitView.branch.searchPlaceholder')}
@@ -111,7 +110,9 @@ export function BranchComparisonSelector({ branches, currentBranch, base, onSele
   }
   return (
     <DropdownMenu open={open} onOpenChange={changeOpen}>
-      <DropdownMenuTrigger asChild>{trigger}</DropdownMenuTrigger>
+      <HoverTooltip label={base ? t('contextTooltips.diff.branchCompared', { branch: label }) : t('contextTooltips.diff.branchChoose')} side="bottom">
+        <DropdownMenuTrigger asChild>{trigger}</DropdownMenuTrigger>
+      </HoverTooltip>
       <DropdownMenuContent align="start" className="w-72 max-w-[calc(100vw-2rem)] p-0">
         {picker}
       </DropdownMenuContent>

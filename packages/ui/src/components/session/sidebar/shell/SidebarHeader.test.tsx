@@ -4,7 +4,6 @@ import { createRoot, type Root } from 'react-dom/client';
 import { Window } from 'happy-dom';
 import { I18nProvider } from '@/lib/i18n';
 import { TooltipProvider } from '@/components/ui/tooltip';
-import { useUIStore } from '@/stores/useUIStore';
 import { SidebarHeader } from './SidebarHeader';
 
 const baseProps = {
@@ -25,6 +24,7 @@ const baseProps = {
   searchMatchCount: 0,
   collapseAll: () => undefined,
   expandAll: () => undefined,
+  showStats: true,
 };
 
 function StatefulHeader({
@@ -54,8 +54,15 @@ beforeEach(() => {
     navigator: browser.navigator,
     Element: browser.Element,
     HTMLElement: browser.HTMLElement,
+    Node: browser.Node,
+    Event: browser.Event,
+    MouseEvent: browser.MouseEvent,
     InputEvent: browser.InputEvent,
     KeyboardEvent: browser.KeyboardEvent,
+    ResizeObserver: browser.ResizeObserver,
+    getComputedStyle: browser.getComputedStyle.bind(browser),
+    requestAnimationFrame: browser.requestAnimationFrame.bind(browser),
+    cancelAnimationFrame: browser.cancelAnimationFrame.bind(browser),
     IS_REACT_ACT_ENVIRONMENT: true,
   })) {
     descriptors.set(key, Object.getOwnPropertyDescriptor(globalThis, key));
@@ -151,55 +158,16 @@ describe('SidebarHeader', () => {
     expect(document.querySelector('[aria-label="Display mode"]')).not.toBeNull();
   });
 
-  test('a page button opens its page, shows it pressed, and closes it on the next click', async () => {
-    const initial = useUIStore.getState();
-    try {
-      useUIStore.getState().setOverviewFeatureAvailable(true);
-      await act(async () => root.render(
-        <I18nProvider>
-          <TooltipProvider>
-            <SidebarHeader {...baseProps} />
-          </TooltipProvider>
-        </I18nProvider>,
-      ));
-      const button = (label: string) => document.querySelector<HTMLButtonElement>(`[aria-label="${label}"]`)!;
-      for (const [label, isOpen] of [
-        ['Archive', () => useUIStore.getState().isArchivePageOpen],
-        ['Scheduled tasks', () => useUIStore.getState().isScheduledTasksDialogOpen],
-        ['Issues and PRs', () => useUIStore.getState().isSourceBoardOpen],
-        ['Overview', () => useUIStore.getState().isOverviewOpen],
-      ] as const) {
-        expect(button(label).getAttribute('aria-pressed')).toBe('false');
-        await act(async () => button(label).click());
-        expect(isOpen()).toBe(true);
-        expect(button(label).getAttribute('aria-pressed')).toBe('true');
-        await act(async () => button(label).click());
-        expect(isOpen()).toBe(false);
-        expect(button(label).getAttribute('aria-pressed')).toBe('false');
-      }
-    } finally {
-      useUIStore.setState(initial);
-    }
-  });
-
-  test('without the overview feature there is no overview button', async () => {
-    const initial = useUIStore.getState();
-    try {
-      useUIStore.getState().setOverviewFeatureAvailable(false);
-      await act(async () => root.render(
-        <I18nProvider>
-          <TooltipProvider>
-            <SidebarHeader {...baseProps} />
-          </TooltipProvider>
-        </I18nProvider>,
-      ));
-      expect(document.querySelector('[aria-label="Overview"]')).toBeNull();
-      expect(document.querySelector('[aria-label="Issues and PRs"]')).not.toBeNull();
-      useUIStore.getState().setOverviewOpen(true);
-      expect(useUIStore.getState().isOverviewOpen).toBe(false);
-    } finally {
-      useUIStore.setState(initial);
-    }
+  test('the row holds the list controls and one More menu, and no page buttons', async () => {
+    await act(async () => root.render(
+      <I18nProvider>
+        <TooltipProvider>
+          <SidebarHeader {...baseProps} />
+        </TooltipProvider>
+      </I18nProvider>,
+    ));
+    const labels = [...document.querySelectorAll('button')].map((button) => button.getAttribute('aria-label'));
+    expect(labels).toEqual(['Search sessions', 'Add project', 'Display mode', 'More']);
   });
 
   test('the search button opens the field and, once open, closes it', async () => {

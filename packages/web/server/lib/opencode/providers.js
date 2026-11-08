@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import {
   CONFIG_FILE,
   readConfigLayers,
@@ -16,6 +17,7 @@ import {
   toNpmPackage,
 } from './config-v2.js';
 
+const MODEL_TYPE_SCHEMA = z.string().trim().min(1);
 const PROVIDER_ID_PATTERN = /^[a-z0-9][a-z0-9-_]*$/;
 const BASE_URL_PATTERN = /^https?:\/\//;
 const OPENAI_COMPATIBLE_NPM = '@ai-sdk/openai-compatible';
@@ -34,19 +36,28 @@ function providerExistsIn(config, providerId) {
   return readSectionEntry(config, 'providers', providerId).value !== undefined;
 }
 
+// OpenCode reads both global files, and an `opencode.jsonc` beside
+// `opencode.json` overrides it, so the user scope of a provider is the file
+// that holds it: the override when the entry lives there, else the primary.
+function getUserProviderPath(layers, providerId) {
+  const { userPath, userOverridePath } = layers.paths;
+  return userOverridePath && providerExistsIn(layers.userOverrideConfig, providerId) ? userOverridePath : userPath;
+}
+
 function getProviderSources(providerId, workingDirectory) {
   const layers = readConfigLayers(workingDirectory);
-  const { userConfig, projectConfig, customConfig, paths } = layers;
+  const { userConfig, userOverrideConfig, projectConfig, customConfig, paths } = layers;
+  const userPath = getUserProviderPath(layers, providerId);
 
   return {
     sources: {
       auth: { exists: false },
-      user: { exists: providerExistsIn(userConfig, providerId), path: paths.userPath },
+      user: { exists: providerExistsIn(getConfigForPath(layers, userPath), providerId), path: userPath },
       project: { exists: providerExistsIn(projectConfig, providerId), path: paths.projectPath || null },
       custom: { exists: providerExistsIn(customConfig, providerId), path: paths.customPath },
     },
     // Same precedence as the edit scope: custom > project > user.
-    config: readStoredProviderEntry([customConfig, projectConfig, userConfig], providerId),
+    config: readStoredProviderEntry([customConfig, projectConfig, userOverrideConfig, userConfig], providerId),
   };
 }
 
@@ -113,6 +124,10 @@ function validateCustomProviderConfig(providerId, config, options = {}) {
       return { ok: false, error: `Model "${trimmedId}" requires a name` };
     }
     normalizedModels[trimmedId] = { modelID: trimmedId, name: modelName };
+    // Any type OpenCode knows (`chat`, `image`, `decision`, ...) passes through;
+    // absent keeps the stored one.
+    const modelType = MODEL_TYPE_SCHEMA.safeParse(modelValue.type).data;
+    if (modelType) normalizedModels[trimmedId].type = modelType;
     if (isPlainObject(modelValue.limit)) {
       const context = modelValue.limit.context;
       const output = modelValue.limit.output;
@@ -245,13 +260,13 @@ function upsertProviderConfig(providerId, config, workingDirectory, scope = 'use
   }
 
   const layers = readConfigLayers(workingDirectory);
-  let targetPath = layers.paths.userPath;
+  let targetPath = getUserProviderPath(layers, validated.value.providerId);
 
   if (scope === 'project') {
     if (!workingDirectory) {
       throw new Error('Working directory is required for project scope');
     }
-    targetPath = layers.paths.projectPath || targetPath;
+    targetPath = layers.paths.projectPath || layers.paths.userPath;
   } else if (scope === 'custom') {
     if (!layers.paths.customPath) {
       throw new Error('Custom config path (OPENCODE_CONFIG) is not set');
@@ -277,6 +292,18 @@ function upsertProviderConfig(providerId, config, workingDirectory, scope = 'use
   const writePath = targetPath || CONFIG_FILE;
   writeConfig(targetConfig, writePath);
 
+  // Settings turns providers off in the primary user file, so saving one that
+  // lives in the override turns it back on there as well.
+  const { userConfig } = layers;
+  if (writePath === layers.paths.userOverridePath
+    && Array.isArray(userConfig.disabled_providers)
+    && userConfig.disabled_providers.includes(validated.value.providerId)) {
+    userConfig.disabled_providers = userConfig.disabled_providers.filter(
+      (entry) => entry !== validated.value.providerId,
+    );
+    writeConfig(userConfig, layers.paths.userPath);
+  }
+
   return {
     providerId: validated.value.providerId,
     path: writePath,
@@ -290,13 +317,13 @@ function removeProviderConfig(providerId, workingDirectory, scope = 'user') {
   }
 
   const layers = readConfigLayers(workingDirectory);
-  let targetPath = layers.paths.userPath;
+  let targetPath = getUserProviderPath(layers, providerId);
 
   if (scope === 'project') {
     if (!workingDirectory) {
       throw new Error('Working directory is required for project scope');
     }
-    targetPath = layers.paths.projectPath || targetPath;
+    targetPath = layers.paths.projectPath || layers.paths.userPath;
   } else if (scope === 'custom') {
     if (!layers.paths.customPath) {
       return false;
@@ -348,6 +375,7 @@ function setProviderDisabled(providerId, disabled, workingDirectory) {
 
 export {
   getProviderSources,
+  mergeCustomProviderConfig,
   readDisabledProviders,
   setProviderDisabled,
   removeProviderConfig,

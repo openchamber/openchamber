@@ -14,6 +14,7 @@ const setup: ProjectSetup = {
   trust: { hash: 'sha256:fixture', trusted: false },
   setupWorktree: ['bun install', 'cp .env.example .env'],
   setupWorktreeWait: false,
+  teardownWorktree: [],
   projectActions: [],
   projectActionsPrimaryId: null,
   draftStarters: [],
@@ -22,6 +23,7 @@ const setup: ProjectSetup = {
     path: '.openchamber/project.json',
     setupWorktree: ['bun install'],
     setupWorktreeWait: null,
+    teardownWorktree: [],
     projectActions: [],
     draftStarters: [],
     plansDir: null,
@@ -30,6 +32,7 @@ const setup: ProjectSetup = {
     setupWorktree: ['cp .env.example .env'],
     setupWorktreeWait: null,
     setupWorktreeMode: 'append',
+    teardownWorktree: [],
     projectActions: [],
     projectActionsPrimaryId: null,
     draftStarters: [],
@@ -40,6 +43,7 @@ const setup: ProjectSetup = {
 
 mock.module('@/lib/openchamberConfig', () => ({
   getProjectSetup: async () => setup,
+  fetchProjectSetup: async () => setup,
   updateProjectSetup: async (_project: ProjectRef, patch: ProjectSetupPatch) => {
     patches.push(patch);
     return true;

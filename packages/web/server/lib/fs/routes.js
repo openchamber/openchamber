@@ -3,7 +3,7 @@ import { redactGitText } from '../git/redaction.js';
 import { resolveByteRange } from './byte-range.js';
 import { injectPreviewBridge } from './preview-bridge.js';
 import { createWorkspaceFileNameIndex } from './workspace-file-names.js';
-import { createGitCheckIgnoreTimeoutMs } from './search.js';
+import { createFsSearchRuntime, createGitCheckIgnoreTimeoutMs } from './search.js';
 import {
   CONTENT_SEARCH_DEFAULT_LIMIT,
   CONTENT_SEARCH_MAX_LIMIT,
@@ -414,10 +414,9 @@ const GIT_DIRS_SKIP_LIST = new Set(['node_modules', 'dist', 'build', '.venv', 't
 // containing a `.git` entry — a directory, a worktree pointer file, or a
 // symlink). A repository boundary stops descent: nested repos inside repos
 // are not reported. The root's own `.git` is the exception and the walk goes
-// on below it: whether a root repository hides the ones inside it is the
-// client's call, made from the root's status (a root with no commits yet
-// hides nothing). Clients ask only for roots that are not repositories or
-// have no commits, so an established root is never walked.
+// on below it, so a root repository's submodules and nested checkouts are
+// reported too; the client decides whether the root or a discovered repository
+// is the one a surface works in.
 // Symlinked directories are followed, the way the file tree follows them: a
 // parent folder of links to repositories kept elsewhere is a common way to
 // group them into one project. Each real directory is walked once, so a link
@@ -512,8 +511,14 @@ const deriveCloneDirectoryName = (remoteUrl) => {
 };
 
 const resolveReadPathFromContext = async ({ req, targetPath, scope, resolveProjectDirectory, path, os, fsPromises, normalizeDirectoryPath, managedRoots, chatsRoots }) => {
+  // Resolved file targets are exact names, not pasted directory inputs.
+  const normalizeReadPath = (value) => (
+    value === targetPath && typeof value === 'string' && path.isAbsolute(value)
+      ? value
+      : normalizeDirectoryPath(value)
+  );
   if (req.query?.allowOutsideWorkspace === 'true') {
-    const normalized = normalizeDirectoryPath(targetPath);
+    const normalized = normalizeReadPath(targetPath);
     if (!normalized || typeof normalized !== 'string') {
       return { ok: false, error: 'Path is required' };
     }
@@ -528,7 +533,7 @@ const resolveReadPathFromContext = async ({ req, targetPath, scope, resolveProje
     path,
     os,
     fsPromises,
-    normalizeDirectoryPath,
+    normalizeDirectoryPath: normalizeReadPath,
     managedRoots,
     chatsRoots,
   });
@@ -1020,6 +1025,79 @@ export const registerFsRoutes = (app, dependencies) => {
     return res.json({ paths: await workspaceFileNames.find(project.directory, name) });
   });
 
+  app.get('/api/fs/search', async (req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    const query = isString(req.query.query) ? String(req.query.query) : '';
+    const requestedLimit = isString(req.query.limit) ? Number.parseInt(String(req.query.limit), 10) : Number.NaN;
+    const limit = Number.isInteger(requestedLimit)
+      ? Math.min(Math.max(1, requestedLimit), 500)
+      : 60;
+    const includeHidden = req.query.includeHidden === 'true';
+    const respectGitignore = req.query.respectGitignore !== 'false';
+
+    const rawPath = typeof req.query.directory === 'string' && req.query.directory.trim().length > 0
+      ? req.query.directory.trim()
+      : '';
+    let requestedPath = '';
+    let resolvedPath = '';
+    try {
+      if (rawPath) {
+        requestedPath = path.resolve(normalizeDirectoryPath(rawPath));
+      } else {
+        const project = await resolveProjectDirectory(req);
+        if (!project.directory) {
+          return res.status(400).json({ error: project.error || 'Active workspace is required' });
+        }
+        requestedPath = path.resolve(normalizeDirectoryPath(project.requestedDirectory || project.directory));
+      }
+      resolvedPath = await realpathCache.resolve(requestedPath);
+      const stats = await fsPromises.stat(resolvedPath);
+      if (!stats.isDirectory()) {
+        return res.status(400).json({ error: 'Specified path is not a directory', reason: 'not-directory' });
+      }
+    } catch (error) {
+      const err = error;
+      const code = err && typeof err === 'object' && 'code' in err ? err.code : undefined;
+      if (code === 'ENOENT') {
+        return res.status(404).json({ error: 'Directory not found', reason: 'not-found' });
+      }
+      if (isOsPermissionError(err)) {
+        return sendOsPermissionDenied(res, 'Access to directory denied');
+      }
+      return res.status(500).json({ error: (error && error.message) || 'Failed to search files' });
+    }
+
+    const fsSearch = createFsSearchRuntime({ fsPromises, path, spawn, resolveGitBinaryForSpawn, workspaceSearch: true });
+    // A client that moved on (a new letter, a closed list) ends the walk and its
+    // Git reads instead of letting them finish for nobody.
+    const abort = new AbortController();
+    res.on('close', () => abort.abort());
+    // A client gone during the checks above has already closed the response.
+    if (res.destroyed) abort.abort();
+    let results;
+    try {
+      results = await fsSearch.searchFilesystemFiles(resolvedPath, {
+        query,
+        limit,
+        includeHidden,
+        respectGitignore,
+        signal: abort.signal,
+      });
+    } catch (error) {
+      if (abort.signal.aborted) return undefined;
+      throw error;
+    }
+
+    const mapped = results.map((file) => ({
+      name: file.name,
+      path: path.join(requestedPath, file.relativePath),
+      relativePath: file.relativePath,
+      extension: file.extension,
+    }));
+
+    return res.json({ files: mapped });
+  });
+
   // Find in files: lines of workspace files containing a text or a regex,
   // searched by ripgrep (content-search.js). Hitting the limit is a normal
   // answer with `stopped: 'limit'`; a failed search is never an empty one.
@@ -1112,7 +1190,7 @@ export const registerFsRoutes = (app, dependencies) => {
   });
 
   app.get('/api/fs/stat', async (req, res) => {
-    const filePath = typeof req.query.path === 'string' ? req.query.path.trim() : '';
+    const filePath = typeof req.query.path === 'string' ? req.query.path : '';
     const optional = req.query.optional === 'true';
     if (!filePath) {
       return res.status(400).json({ error: 'Path is required' });
@@ -1138,9 +1216,17 @@ export const registerFsRoutes = (app, dependencies) => {
         return res.status(400).json({ error: resolved.error });
       }
 
-      const canonicalPath = await fsPromises.realpath(resolved.resolved);
-
-      const stats = await fsPromises.stat(canonicalPath);
+      let canonicalPath;
+      let stats;
+      try {
+        canonicalPath = await fsPromises.realpath(resolved.resolved);
+        stats = await fsPromises.stat(canonicalPath);
+      } catch (error) {
+        if (optional && ['ENOENT', 'ENOTDIR', 'EINVAL', 'ENAMETOOLONG'].includes(error?.code)) {
+          return res.json({ path: filePath, exists: false });
+        }
+        throw error;
+      }
       if (!stats.isFile()) {
         return res.status(400).json({ error: 'Specified path is not a file' });
       }
@@ -1163,7 +1249,7 @@ export const registerFsRoutes = (app, dependencies) => {
   });
 
   app.get('/api/fs/read', async (req, res) => {
-    const filePath = typeof req.query.path === 'string' ? req.query.path.trim() : '';
+    const filePath = typeof req.query.path === 'string' ? req.query.path : '';
     const optional = req.query.optional === 'true';
     if (!filePath) {
       return res.status(400).json({ error: 'Path is required' });
@@ -1229,7 +1315,7 @@ export const registerFsRoutes = (app, dependencies) => {
   });
 
   app.get('/api/fs/raw', async (req, res) => {
-    const filePath = typeof req.query.path === 'string' ? req.query.path.trim() : '';
+    const filePath = typeof req.query.path === 'string' ? req.query.path : '';
     if (!filePath) {
       return res.status(400).json({ error: 'Path is required' });
     }
@@ -1514,7 +1600,11 @@ export const registerFsRoutes = (app, dependencies) => {
     const declaredSize = Number(req.headers?.['content-length']);
     if (Number.isFinite(declaredSize) && declaredSize > maxUploadBytes) {
       req.resume?.();
-      return res.status(413).json({ error: `File exceeds maximum size of ${maxUploadBytes} bytes` });
+      return res.status(413).json({
+        error: `File exceeds maximum size of ${maxUploadBytes} bytes`,
+        reason: 'too-large',
+        maxBytes: maxUploadBytes,
+      });
     }
 
     try {
@@ -1537,7 +1627,7 @@ export const registerFsRoutes = (app, dependencies) => {
       const requestedParent = path.dirname(resolved.resolved);
       const canonicalParent = await fsPromises.realpath(requestedParent);
       if (!isPathWithinRoot(canonicalParent, canonicalBase, path, os)) {
-        return res.status(403).json({ error: 'Access denied' });
+        return res.status(403).json({ error: 'Access denied', reason: 'outside-workspace' });
       }
 
       const existingPath = await fsPromises.realpath(resolved.resolved).catch((error) => {
@@ -1548,7 +1638,7 @@ export const registerFsRoutes = (app, dependencies) => {
       });
       const writePath = existingPath || path.join(canonicalParent, path.basename(resolved.resolved));
       if (!isPathWithinRoot(writePath, canonicalBase, path, os)) {
-        return res.status(403).json({ error: 'Access denied' });
+        return res.status(403).json({ error: 'Access denied', reason: 'outside-workspace' });
       }
 
       if (existingPath) {
@@ -1607,7 +1697,11 @@ export const registerFsRoutes = (app, dependencies) => {
         return res.status(404).json({ error: 'Destination directory not found', reason: 'not-found' });
       }
       if (err && typeof err === 'object' && err.uploadTooLarge) {
-        return res.status(413).json({ error: `File exceeds maximum size of ${maxUploadBytes} bytes` });
+        return res.status(413).json({
+          error: `File exceeds maximum size of ${maxUploadBytes} bytes`,
+          reason: 'too-large',
+          maxBytes: maxUploadBytes,
+        });
       }
       if (err && typeof err === 'object' && (err.code === 'EISDIR' || err.code === 'ENOTDIR')) {
         return res.status(400).json({ error: 'Specified path is a directory' });

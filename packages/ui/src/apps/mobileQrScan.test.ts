@@ -29,6 +29,32 @@ describe('parseConnectionPayload', () => {
     expect(payload.pairing.candidates.map((c) => c.type)).toEqual(['lan', 'relay']);
   });
 
+  test('accepts a pasted pairing link when the WebView URL parser loses its host', () => {
+    // Android WebView 124 parses openchamber://connect?... with hostname "" and pathname
+    // "//connect". The paste handler in MobileConnectionWelcome calls this function directly.
+    const OriginalURL = globalThis.URL;
+    class OldWebViewURL extends OriginalURL {
+      override get hostname() {
+        return this.protocol === 'openchamber:' ? '' : super.hostname;
+      }
+    }
+    const url = encodePairingConnectionPayload(buildPairingConnectionPayload({
+      pairingId: 'pair_abc',
+      secret: 'one-time',
+      candidates: [{ type: 'lan', url: 'http://192.168.1.20:4096', priority: 10 }],
+    }));
+
+    globalThis.URL = OldWebViewURL;
+    try {
+      const payload = parseConnectionPayload(url);
+      if (!payload || !('pairing' in payload)) throw new Error('expected a pairing payload');
+      expect(payload.pairing.pairingId).toBe('pair_abc');
+      expect(payload.pairing.candidates).toEqual([{ type: 'lan', url: 'http://192.168.1.20:4096', priority: 10 }]);
+    } finally {
+      globalThis.URL = OriginalURL;
+    }
+  });
+
   test('rejects non-connection and legacy/relay-offer payloads', () => {
     expect(parseConnectionPayload('')).toBeNull();
     expect(parseConnectionPayload('hello world')).toBeNull();

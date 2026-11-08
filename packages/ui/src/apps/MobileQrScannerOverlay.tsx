@@ -6,6 +6,8 @@ import { Button } from '@/components/ui/button';
 import { OpenChamberLogo } from '@/components/ui/OpenChamberLogo';
 import { useI18n } from '@/lib/i18n';
 
+import { qrScanDrawsOwnScreen } from './mobileQrScan';
+
 export const MobileQrScannerOverlay: React.FC<{ onCancel: () => void }> = ({ onCancel }) => {
   const { t } = useI18n();
   const overlayRef = React.useRef<HTMLDivElement>(null);
@@ -71,6 +73,12 @@ export const MobileQrScannerOverlay: React.FC<{ onCancel: () => void }> = ({ onC
     return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
   }, [onCancel]);
 
+  // iOS's scanner slides over the page before its camera starts: a plain
+  // backdrop keeps this screen from showing through its controls.
+  if (!qrScanDrawsOwnScreen()) {
+    return createPortal(<div ref={overlayRef} className="fixed inset-0 z-[1000] bg-background" aria-hidden />, document.body);
+  }
+
   return createPortal(
     <div
       ref={overlayRef}
@@ -81,7 +89,7 @@ export const MobileQrScannerOverlay: React.FC<{ onCancel: () => void }> = ({ onC
     >
       <div className="flex flex-1 flex-col items-center justify-center gap-6">
         <div className="aspect-square w-full max-w-72 rounded-[28px] border-2 border-foreground/90 shadow-[0_0_0_9999px_color-mix(in_srgb,var(--surface-background)_18%,transparent)]" aria-hidden />
-        <p className="max-w-sm rounded-[16px] border border-border/60 bg-background px-4 py-3 text-center typography-markdown text-foreground shadow-sm">
+        <p className="max-w-sm rounded-[16px] border border-edge bg-background px-4 py-3 text-center typography-markdown text-foreground shadow-sm">
           {t('mobile.connect.welcome.scanHint')}
         </p>
       </div>

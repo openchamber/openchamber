@@ -347,6 +347,7 @@ export class ChildStoreManager {
   private readonly lifecycle = new Map<string, DirState>()
   private readonly pins = new Map<string, number>()
   private evictionScheduled = false
+  private bootstrapNotificationScheduled = false
   private readonly disposers = new Map<string, () => void>()
   private readonly registrySubscribers = new Set<() => void>()
   private readonly bootstrapSubscribers = new Set<() => void>()
@@ -389,8 +390,19 @@ export class ChildStoreManager {
     }
   }
 
+  /**
+   * Bootstrap listeners make React read again, and a render requests a
+   * bootstrap (`useDirectorySync` through `ensureChild`). Notifying them there
+   * updates another component mid-render, so they hear one coalesced
+   * microtask later; they read the scheduler's state then, never a payload.
+   */
   private notifyBootstrapSubscribers() {
-    for (const subscriber of this.bootstrapSubscribers) subscriber()
+    if (this.bootstrapNotificationScheduled) return
+    this.bootstrapNotificationScheduled = true
+    queueMicrotask(() => {
+      this.bootstrapNotificationScheduled = false
+      for (const subscriber of this.bootstrapSubscribers) subscriber()
+    })
   }
 
   configure(callbacks: {
@@ -1013,6 +1025,32 @@ export class ChildStoreManager {
     }
   }
 
+  /**
+   * The registry half of `subscribeAll*`, whose listeners make React read
+   * again. A sidebar row creates its directory's store during render
+   * (`ensureChild`), and calling such a listener there updates another
+   * component in the middle of that render. The store subscriptions follow
+   * the registry at once, so no store update is missed; only the read waits
+   * one microtask, once for a render that creates many stores.
+   */
+  private subscribeRegistryForReaders(syncStoreSubscriptions: () => void, listener: () => void): () => void {
+    let queued = false
+    let active = true
+    const unsubscribe = this.subscribeRegistry(() => {
+      syncStoreSubscriptions()
+      if (queued) return
+      queued = true
+      queueMicrotask(() => {
+        queued = false
+        if (active) listener()
+      })
+    })
+    return () => {
+      active = false
+      unsubscribe()
+    }
+  }
+
   subscribeAll(listener: () => void): () => void {
     const storeUnsubscribers = new Map<string, () => void>()
 
@@ -1036,10 +1074,7 @@ export class ChildStoreManager {
     }
 
     syncStoreSubscriptions()
-    const unsubscribeRegistry = this.subscribeRegistry(() => {
-      syncStoreSubscriptions()
-      listener()
-    })
+    const unsubscribeRegistry = this.subscribeRegistryForReaders(syncStoreSubscriptions, listener)
 
     return () => {
       unsubscribeRegistry()
@@ -1073,10 +1108,7 @@ export class ChildStoreManager {
     }
 
     syncStoreSubscriptions()
-    const unsubscribeRegistry = this.subscribeRegistry(() => {
-      syncStoreSubscriptions()
-      listener()
-    })
+    const unsubscribeRegistry = this.subscribeRegistryForReaders(syncStoreSubscriptions, listener)
 
     return () => {
       unsubscribeRegistry()

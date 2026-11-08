@@ -79,6 +79,20 @@ describe('Gitea mappers', () => {
     }
   });
 
+  it('resolves a relative Actions target_url against the instance, keeping only an http(s) one', () => {
+    const status = fixtures.combinedStatus.statuses[0];
+    const run = (target_url) => mapGiteaCI({ statuses: [{ ...status, target_url }] }, identity).runs[0];
+    expect(run('/alice/app/actions/runs/1').detailsUrl).toBe(`${ORIGIN}/alice/app/actions/runs/1`);
+    expect(run(`${ORIGIN}/alice/app/actions/runs/1`).detailsUrl).toBe(`${ORIGIN}/alice/app/actions/runs/1`);
+    expect(run('https://ci.example.com/job/1').detailsUrl).toBe('https://ci.example.com/job/1');
+    expect(run('http://ci.example.com/job/1').detailsUrl).toBe('http://ci.example.com/job/1');
+    expect(run('javascript:alert(1)').detailsUrl).toBeUndefined();
+    expect(run('https://[').detailsUrl).toBeUndefined();
+    expect(run('').detailsUrl).toBeUndefined();
+    expect(run(undefined)).toMatchObject({ id: String(status.id), name: status.context, conclusion: 'success' });
+    expect(run(undefined).detailsUrl).toBeUndefined();
+  });
+
   it('splits a pull request diff per file, a rename by its new path', () => {
     const parts = splitUnifiedDiff(fixtures.mixedDiff);
     expect([...parts.keys()]).toEqual(['README.md', 'old.txt', 'src/main.js']);

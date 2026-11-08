@@ -4,13 +4,19 @@ import path from 'path';
 import {
   AGENT_SCOPE,
   OPENCODE_CONFIG_DIR,
+  getFolderConfigPaths,
+  getLayerError,
+  getProjectConfigCandidates,
   readConfigFile,
   readConfigLayer,
+  readConfigLayers,
   writeConfig,
 } from './shared.js';
-import { parsedKindForSpec } from './plugin-spec.js';
+import { isPluginControlSpec, parsedKindForSpec } from './plugin-spec.js';
+import { isPluginDenialOverridden, pluginPolicyResource, pluginSwitchState } from './plugin-switches.js';
 import { PLUGIN_SECTION, toPluginEntity, fromPluginEntity, readPluginList } from './config-v2.js';
 import { toLoadablePluginSpec } from './loadable-plugin-spec.js';
+import { canonicalPluginPath, resolveLocalPluginPath } from './plugin-paths.js';
 
 // OpenCode 2 reads `plugins` (bare string or `{package, options}`) and still
 // decodes the v1 `plugin` array with its `[spec, options]` tuples. OpenChamber
@@ -20,7 +26,7 @@ const PLUGIN_FILE_NAME_PATTERN = /^[a-z0-9][a-z0-9-_.]*\.(js|ts|mjs|cjs)$/;
 
 /**
  * @typedef {'user' | 'project'} PluginScope
- * @typedef {'npm' | 'path' | 'git'} PluginParsedKind
+ * @typedef {'control' | 'npm' | 'path' | 'git'} PluginParsedKind
  * @typedef {Object} PluginEntry
  * @property {string} id base64url encoded "config:scope:spec"
  * @property {string} spec
@@ -29,12 +35,14 @@ const PLUGIN_FILE_NAME_PATTERN = /^[a-z0-9][a-z0-9-_.]*\.(js|ts|mjs|cjs)$/;
  * @property {'config'} kind
  * @property {PluginParsedKind} parsedKind
  * @property {string} sourcePath absolute path to the config file
+ * @property {string} [resolvedPath] canonical local target for display deduplication
  * @typedef {Object} PluginFile
  * @property {string} id base64url encoded "file:scope:fileName"
  * @property {string} fileName
  * @property {PluginScope} scope
  * @property {'file'} kind
  * @property {string} absolutePath
+ * @property {string} [resolvedPath] canonical local target for display deduplication
  */
 
 function codedError(message, code) {
@@ -72,69 +80,24 @@ function hasOptions(options) {
 }
 
 
-function getActiveOpencodeConfigDir() {
-  const customConfigPath = process.env.OPENCODE_CONFIG;
-  if (customConfigPath) {
-    return path.dirname(path.resolve(customConfigPath));
-  }
-  return OPENCODE_CONFIG_DIR;
+/**
+ * The configs OpenCode loads ahead of the layer that carries the switch denials,
+ * earliest first. OpenCode lets the earliest-loaded policy win, so a matching
+ * statement in one of them beats the denial. The managed file is
+ * `OPENCODE_CONFIG`, right after the global files; when the user owns that
+ * variable the denials go to `OPENCODE_CONFIG_CONTENT`, which loads after every
+ * file.
+ */
+function configsAheadOfManagedLayer(layers, workingDirectory) {
+  return layers.paths.customPath
+    ? configSources(layers, workingDirectory).map((source) => source.config)
+    : [layers.userConfig, layers.userOverrideConfig];
 }
 
-function getActiveUserConfigPaths() {
-  const configDir = getActiveOpencodeConfigDir();
-  return [
-    path.join(configDir, 'opencode.json'),
-    path.join(configDir, 'opencode.jsonc'),
-  ];
-}
-
-function getActiveCustomConfigPath() {
-  return process.env.OPENCODE_CONFIG ? path.resolve(process.env.OPENCODE_CONFIG) : null;
-}
-
-function getPrimaryUserConfigPath() {
-  const [defaultPath, ...fallbackPaths] = getActiveUserConfigPaths();
-  for (const userPath of [defaultPath, ...fallbackPaths]) {
-    if (fs.existsSync(userPath)) {
-      return userPath;
-    }
-  }
-  return defaultPath;
-}
-
-function getProjectConfigPath(workingDirectory) {
-  if (!workingDirectory) return null;
-  const candidates = [
-    path.join(workingDirectory, 'opencode.json'),
-    path.join(workingDirectory, 'opencode.jsonc'),
-    path.join(workingDirectory, '.opencode', 'opencode.json'),
-    path.join(workingDirectory, '.opencode', 'opencode.jsonc'),
-  ];
-  return candidates.find((candidate) => fs.existsSync(candidate)) || candidates[0];
-}
-
-function readPluginConfigLayers(workingDirectory) {
-  const customPath = getActiveCustomConfigPath();
-  const userPath = getPrimaryUserConfigPath();
-  const projectPath = getProjectConfigPath(workingDirectory);
-  const userLayer = readConfigLayer(userPath);
-  const projectLayer = readConfigLayer(projectPath);
-  const customLayer = readConfigLayer(customPath);
-  return {
-    userConfig: userLayer.config,
-    projectConfig: projectLayer.config,
-    customConfig: customLayer.config,
-    paths: {
-      userPath,
-      projectPath,
-      customPath,
-    },
-    layerErrors: [
-      userLayer.error && { path: userPath, code: userLayer.error.code, message: userLayer.error.message },
-      projectLayer.error && projectPath && { path: projectPath, code: projectLayer.error.code, message: projectLayer.error.message },
-      customLayer.error && customPath && { path: customPath, code: customLayer.error.code, message: customLayer.error.message },
-    ].filter(Boolean),
-  };
+/** What a listing needs to report switches; null when this runtime has none. */
+function readSwitchContext(switchStore, layers, workingDirectory) {
+  if (!switchStore) return null;
+  return { read: switchStore.read(), configsAhead: configsAheadOfManagedLayer(layers, workingDirectory) };
 }
 
 function validateFileName(fileName) {
@@ -156,15 +119,33 @@ function ensureProjectConfigPath(workingDirectory) {
   return path.join(configDir, 'opencode.json');
 }
 
-function configSources(layers) {
-  const sources = [];
-  if (layers.paths.customPath) {
-    sources.push({ config: layers.customConfig, filePath: layers.paths.customPath, scope: AGENT_SCOPE.USER });
-  } else {
-    sources.push({ config: layers.userConfig, filePath: layers.paths.userPath, scope: AGENT_SCOPE.USER });
+/**
+ * Every config file OpenCode 2 takes plugins from, in its load order: the
+ * global `opencode.json` and `opencode.jsonc`, then `OPENCODE_CONFIG`, then the
+ * files found walking up from the project folder. Each file adds its own
+ * entries; none replaces another's. A parent folder's file reaches every
+ * project below it, so it counts as user scope, like the global file.
+ */
+function configSources(layers, workingDirectory) {
+  const { userPath, userOverridePath, customPath } = layers.paths;
+  const projectFiles = getProjectConfigCandidates(workingDirectory);
+  const sources = [{ config: layers.userConfig, filePath: userPath, scope: AGENT_SCOPE.USER }];
+  if (userOverridePath) {
+    sources.push({ config: layers.userOverrideConfig, filePath: userOverridePath, scope: AGENT_SCOPE.USER });
   }
-  if (layers.paths.projectPath) {
-    sources.push({ config: layers.projectConfig, filePath: layers.paths.projectPath, scope: AGENT_SCOPE.PROJECT });
+  if (customPath) {
+    sources.push({ config: layers.customConfig, filePath: customPath, scope: AGENT_SCOPE.USER });
+  }
+  // A folder file that is also `OPENCODE_CONFIG` stays the user entry, so the
+  // list, edits and duplicate checks all see one declaration.
+  const seenFiles = new Set(sources.map((source) => canonicalPluginPath(source.filePath)));
+  for (const filePath of getFolderConfigPaths(workingDirectory)) {
+    if (seenFiles.has(canonicalPluginPath(filePath))) continue;
+    sources.push({
+      config: readConfigLayer(filePath).config,
+      filePath,
+      scope: projectFiles.includes(filePath) ? AGENT_SCOPE.PROJECT : AGENT_SCOPE.USER,
+    });
   }
   return sources;
 }
@@ -187,8 +168,12 @@ function getPluginTarget(id, workingDirectory) {
   }
   const { scope, value: spec } = splitScopedValue(decoded.value);
   validateScope(scope);
-  const layers = readPluginConfigLayers(workingDirectory);
-  const source = configSources(layers).find((candidate) => candidate.scope === scope);
+  // Two files can both declare the spec; the later one is the entry the list
+  // shows, so it is the one edited.
+  const source = configSources(readConfigLayers(workingDirectory), workingDirectory).reverse().find((candidate) => (
+    candidate.scope === scope
+    && readPluginList(candidate.config).some((item) => item.entry.package === spec)
+  ));
   if (!source) {
     return null;
   }
@@ -208,7 +193,7 @@ function pluginDirForScope(scope, workingDirectory) {
     }
     return path.join(workingDirectory, '.opencode', 'plugins');
   }
-  return path.join(getActiveOpencodeConfigDir(), 'plugins');
+  return path.join(OPENCODE_CONFIG_DIR, 'plugins');
 }
 
 /**
@@ -216,9 +201,20 @@ function pluginDirForScope(scope, workingDirectory) {
  * (where OpenChamber writes) and the v1 `plugin/`. Each holds `.ts`/`.js`
  * files and plugin package directories.
  */
+const PLUGIN_DIR_KINDS = { v2: 'plugins', v1: 'plugin' };
+
+/** One of the two plugin directories, by kind. An id names its kind, so a name
+ * that exists in both directories still resolves to the row the user picked. */
+function pluginDirForKind(scope, workingDirectory, kind) {
+  const v2Dir = pluginDirForScope(scope, workingDirectory);
+  return kind === 'v1' ? path.join(path.dirname(v2Dir), PLUGIN_DIR_KINDS.v1) : v2Dir;
+}
+
 function pluginDirsForScope(scope, workingDirectory) {
-  const preferred = pluginDirForScope(scope, workingDirectory);
-  return [preferred, path.join(path.dirname(preferred), 'plugin')];
+  return [
+    pluginDirForKind(scope, workingDirectory, 'v2'),
+    pluginDirForKind(scope, workingDirectory, 'v1'),
+  ];
 }
 
 function fileTargetFromId(id, workingDirectory) {
@@ -265,6 +261,11 @@ export function parsePluginRaw(raw) {
 /** @public Exposed to tests that dynamically import the plugins module. */
 export function serializePluginEntry(entry) {
   const spec = validatePluginSpec(entry?.spec);
+  // OpenCode reads only a bare `-name` string as a control entry; written as
+  // `{package, options}` it becomes a package to install.
+  if (isPluginControlSpec(spec) && hasOptions(entry?.options)) {
+    throw codedError(`Plugin control entry "${spec}" takes no options`, 'INVALID_SPEC');
+  }
   const serialized = fromPluginEntity({ package: spec, options: hasOptions(entry?.options) ? entry.options : undefined });
   if (serialized === null) {
     throw codedError('Plugin spec must be a non-empty string', 'INVALID_SPEC');
@@ -301,10 +302,12 @@ function pluginArrayForWrite(config) {
   return config[PLUGIN_SECTION.v2];
 }
 
-function listPluginEntries(workingDirectory) {
-  const layers = readPluginConfigLayers(workingDirectory);
-  return configSources(layers).flatMap((source) => {
-    return readPluginList(source.config).map((item) => {
+function listPluginEntries(workingDirectory, switchStore) {
+  const layers = readConfigLayers(workingDirectory);
+  const switches = readSwitchContext(switchStore, layers, workingDirectory);
+  const sources = configSources(layers, workingDirectory);
+  const entries = sources.flatMap((source) => (
+    readPluginList(source.config).map((item) => {
       const entry = {
         id: encodePluginId('config', `${source.scope}:${item.entry.package}`),
         spec: item.entry.package,
@@ -312,16 +315,63 @@ function listPluginEntries(workingDirectory) {
         kind: 'config',
         parsedKind: parsedKindForSpec(item.entry.package),
         sourcePath: source.filePath,
+        resolvedPath: resolveLocalPluginPath(item.entry.package, source.filePath),
         legacy: item.legacy,
       };
       if (item.entry.options !== undefined) entry.options = item.entry.options;
+      const policyResource = pluginPolicyResource(item.entry.package, source.filePath);
+      if (policyResource) {
+        entry.policyResource = policyResource;
+        if (switches) entry.switchState = pluginSwitchState(switches.read, policyResource, switches.configsAhead);
+      }
       return entry;
-    });
-  });
+    })
+  ));
+  // A spec in two files of one scope shares one id; the later file's entry is
+  // listed, matching `getPluginTarget`.
+  return [...new Map(entries.map((entry) => [entry.id, entry])).values()];
 }
 
-function getPluginEntry(id, workingDirectory) {
-  return listPluginEntries(workingDirectory).find((entry) => entry.id === id) || null;
+function getPluginEntry(id, workingDirectory, switchStore) {
+  return listPluginEntries(workingDirectory, switchStore).find((entry) => entry.id === id) || null;
+}
+
+/**
+ * The plugin entries of the user's global config files (`opencode.json`, and
+ * `opencode.jsonc` beside it), as the file new entries go to and the canonical
+ * folder each local entry names. `OPENCODE_CONFIG` is left out: that file is
+ * not the global config, whatever the plugins page's user scope treats it as.
+ *
+ * @returns {{ path: string, targets: string[] }}
+ */
+function readGlobalPluginEntries(layers = readConfigLayers(null)) {
+  const sources = [{ config: layers.userConfig, filePath: layers.paths.userPath }];
+  if (layers.paths.userOverridePath) sources.push({ config: layers.userOverrideConfig, filePath: layers.paths.userOverridePath });
+  const targets = sources.flatMap((source) => readPluginList(source.config)
+    .map((item) => resolveLocalPluginPath(item.entry.package, source.filePath))
+    .filter((target) => typeof target === 'string'));
+  return { path: layers.paths.userPath, targets };
+}
+
+/**
+ * Write a local plugin folder into the user's global config, the file every
+ * OpenCode on this machine reads and watches, whatever `OPENCODE_CONFIG` names.
+ * The entry is the user's from then on: nothing here removes it. Idempotent:
+ * a folder already listed in a global file is left as it is.
+ *
+ * @param {string} directory absolute plugin folder
+ * @returns {{ path: string, added: boolean }}
+ */
+function addGlobalPluginEntry(directory) {
+  const spec = requireLoadablePluginSpec(validatePluginSpec(directory));
+  const layers = readConfigLayers(null);
+  const targetPath = layers.paths.userPath;
+  const failed = getLayerError(layers, targetPath);
+  if (failed) throw codedError(failed.message, 'CONFIG_INVALID');
+  if (readGlobalPluginEntries(layers).targets.includes(canonicalPluginPath(spec))) return { path: targetPath, added: false };
+  pluginArrayForWrite(layers.userConfig).push(serializePluginEntry({ spec }));
+  writeConfig(layers.userConfig, targetPath);
+  return { path: targetPath, added: true };
 }
 
 function createPluginEntry(entry, workingDirectory) {
@@ -329,8 +379,8 @@ function createPluginEntry(entry, workingDirectory) {
   const scope = entry?.scope || AGENT_SCOPE.USER;
   validateScope(scope);
 
-  const layers = readPluginConfigLayers(workingDirectory);
-  const existing = configSources(layers).find((source) => (
+  const layers = readConfigLayers(workingDirectory);
+  const existing = configSources(layers, workingDirectory).find((source) => (
     source.scope === scope
     && readPluginList(source.config).some((item) => item.entry.package === spec)
   ));
@@ -338,8 +388,8 @@ function createPluginEntry(entry, workingDirectory) {
     throw codedError(`Plugin "${spec}" already exists`, 'ENTRY_EXISTS');
   }
 
-  let targetPath = getPrimaryUserConfigPath();
-  let config = {};
+  let targetPath;
+  let config;
   if (scope === AGENT_SCOPE.PROJECT) {
     targetPath = ensureProjectConfigPath(workingDirectory);
     config = fs.existsSync(targetPath) ? readConfigFile(targetPath) : {};
@@ -379,7 +429,76 @@ function deletePluginEntry(id, workingDirectory) {
   writeConfig(target.source.config, target.source.filePath);
 }
 
-function listPluginDirFiles(workingDirectory) {
+/**
+ * Record one switch in OpenChamber's own store. The managed config layer of the
+ * OpenCode OpenChamber starts carries the deny; the user's config is not
+ * written. A rule of theirs that would beat the deny refuses the change, so the
+ * page never reports a plugin as off while OpenCode keeps loading it.
+ */
+function recordPluginSwitch(switchStore, resource, enabled, workingDirectory) {
+  if (!enabled) {
+    const configsAhead = configsAheadOfManagedLayer(readConfigLayers(workingDirectory), workingDirectory);
+    if (isPluginDenialOverridden(resource, configsAhead)) {
+      throw codedError('A rule in the OpenCode config allows this plugin, so OpenChamber cannot switch it off', 'SWITCH_OVERRIDDEN');
+    }
+  }
+  return { enabled, resource, ...switchStore.set(resource, enabled) };
+}
+
+function setPluginEntryEnabled(id, enabled, workingDirectory, switchStore) {
+  if (!switchStore) {
+    throw codedError('Plugin switches are only available for the OpenCode OpenChamber starts', 'SWITCH_UNAVAILABLE');
+  }
+  const target = getPluginTarget(id, workingDirectory);
+  if (!target) {
+    throw codedError('Plugin entry not found', 'NOT_FOUND');
+  }
+  const entry = parsePluginRaw(target.plugin[target.index]);
+  const resource = pluginPolicyResource(entry.spec, target.source.filePath);
+  if (!resource) {
+    throw codedError(`Plugin "${entry.spec}" has no policy target`, 'INVALID_SPEC');
+  }
+  return recordPluginSwitch(switchStore, resource, enabled, workingDirectory);
+}
+
+/**
+ * A local plugin is switched off by its absolute path: OpenCode matches
+ * `plugin:<absolute path>` for a plugin file or package directory.
+ */
+function pluginPathTargetFromId(id, workingDirectory) {
+  const decoded = decodePluginId(id);
+  const isLegacy = decoded.prefix === 'legacy' || decoded.prefix === 'legacyPackage';
+  const isPackage = decoded.prefix === 'package' || decoded.prefix === 'legacyPackage';
+  const isFile = decoded.prefix === 'file' || decoded.prefix === 'legacy';
+  if (!isFile && !isPackage) {
+    throw codedError('Plugin file id must use a file, package or legacy prefix', 'INVALID_FILENAME');
+  }
+  const { scope, value: name } = splitScopedValue(decoded.value);
+  validateScope(scope);
+  if (isFile) {
+    validateFileName(name);
+  } else if (!name || name.includes('..') || /[\\/]/.test(name)) {
+    throw codedError('Plugin package name is invalid', 'INVALID_FILENAME');
+  }
+  // The prefix names the directory the row came from. Searching both would let
+  // a name that exists in `plugins/` and `plugin/` deny the wrong one.
+  const candidate = path.join(pluginDirForKind(scope, workingDirectory, isLegacy ? 'v1' : 'v2'), name);
+  if (isPackage && !fs.existsSync(candidate)) {
+    throw codedError(`Plugin file "${name}" not found`, 'NOT_FOUND');
+  }
+  return { scope, absolutePath: candidate };
+}
+
+function setPluginFileEnabled(id, enabled, workingDirectory, switchStore) {
+  if (!switchStore) {
+    throw codedError('Plugin switches are only available for the OpenCode OpenChamber starts', 'SWITCH_UNAVAILABLE');
+  }
+  const target = pluginPathTargetFromId(id, workingDirectory);
+  return recordPluginSwitch(switchStore, `plugin:${target.absolutePath}`, enabled, workingDirectory);
+}
+
+function listPluginDirFiles(workingDirectory, switchStore) {
+  const switches = readSwitchContext(switchStore, readConfigLayers(workingDirectory), workingDirectory);
   const scopes = [AGENT_SCOPE.USER];
   if (workingDirectory) {
     scopes.push(AGENT_SCOPE.PROJECT);
@@ -392,21 +511,27 @@ function listPluginDirFiles(workingDirectory) {
     return fs.readdirSync(dir, { withFileTypes: true })
       .filter((entry) => !entry.name.includes('..') && !entry.name.startsWith('.'))
       .flatMap((entry) => {
+        const absolutePath = path.join(dir, entry.name);
         if (entry.isFile() && PLUGIN_FILE_NAME_PATTERN.test(entry.name)) {
           // Only files in the v2 `plugins/` directory are editable through
           // the file id; a v1 `plugin/` file is listed for what it is.
           return editable
-            ? [{ id: encodePluginId('file', `${scope}:${entry.name}`), fileName: entry.name, scope, kind: 'file', absolutePath: path.join(dir, entry.name) }]
-            : [{ id: encodePluginId('legacy', `${scope}:${entry.name}`), fileName: entry.name, scope, kind: 'package', absolutePath: path.join(dir, entry.name) }];
+            ? [{ id: encodePluginId('file', `${scope}:${entry.name}`), fileName: entry.name, scope, kind: 'file', absolutePath, resolvedPath: canonicalPluginPath(absolutePath) }]
+            : [{ id: encodePluginId('legacy', `${scope}:${entry.name}`), fileName: entry.name, scope, kind: 'package', absolutePath, resolvedPath: canonicalPluginPath(absolutePath) }];
         }
         if (entry.isDirectory()) {
           // A plugin package (a directory with its own entry point): OpenCode
           // loads it, OpenChamber only lists it.
-          return [{ id: encodePluginId('package', `${scope}:${entry.name}`), fileName: entry.name, scope, kind: 'package', absolutePath: path.join(dir, entry.name) }];
+          return [{ id: encodePluginId(editable ? 'package' : 'legacyPackage', `${scope}:${entry.name}`), fileName: entry.name, scope, kind: 'package', absolutePath, resolvedPath: canonicalPluginPath(absolutePath) }];
         }
         return [];
       });
-  }));
+  })).map((item) => {
+    const policyResource = `plugin:${item.absolutePath}`;
+    return switches
+      ? { ...item, policyResource, switchState: pluginSwitchState(switches.read, policyResource, switches.configsAhead) }
+      : { ...item, policyResource };
+  });
 }
 
 function readPluginDirFile(id, workingDirectory) {
@@ -445,9 +570,13 @@ function deletePluginDirFile(id, workingDirectory) {
 export {
   listPluginEntries,
   getPluginEntry,
+  readGlobalPluginEntries,
+  addGlobalPluginEntry,
   createPluginEntry,
   updatePluginEntry,
   deletePluginEntry,
+  setPluginEntryEnabled,
+  setPluginFileEnabled,
   listPluginDirFiles,
   readPluginDirFile,
   writePluginDirFile,

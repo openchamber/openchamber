@@ -3,6 +3,7 @@ import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { findRuntimeMatches, pluginFileRuntimeTarget, resolveLoadState } from '../../ui/src/components/sections/plugins/pluginLoadState.ts';
 
 mock.module('vscode', () => ({
   workspace: {
@@ -28,9 +29,14 @@ const createCtx = (workingDirectory, restartImpl = async () => undefined) => {
   const restart = mock(restartImpl);
   return {
     restart,
+    context: {
+      globalStorageUri: { fsPath: path.join(scratchConfigRoot, 'storage') },
+    },
     manager: {
       getWorkingDirectory: () => workingDirectory,
       restart,
+      getDebugInfo: () => ({ mode: 'managed', status: 'connected', workingDirectory }),
+      refreshPluginSwitches: async () => ({ updated: true, requiresManualRestart: false }),
     },
   };
 };
@@ -58,6 +64,67 @@ afterEach(() => {
 const readJson = (filePath) => JSON.parse(fs.readFileSync(filePath, 'utf8'));
 
 describe('VS Code config bridge plugin parity', () => {
+  test('lists a config once and exposes paths for existing file discovery', async () => {
+    const root = path.join(scratchConfigRoot, 'xdg', 'opencode');
+    fs.mkdirSync(root, { recursive: true });
+    tempRoots.push(root);
+    process.env.OPENCODE_CONFIG = path.join(root, 'opencode.jsonc');
+    fs.writeFileSync(process.env.OPENCODE_CONFIG, JSON.stringify({ plugins: [{ package: './plugins/memory.ts', options: { enabled: true } }] }));
+    fs.mkdirSync(path.join(root, 'plugins'));
+    fs.writeFileSync(path.join(root, 'plugins', 'memory.ts'), 'export default {}');
+    const listed = await handleConfigBridgeMessage({ id: 'list', type: 'api:config/plugins', payload: { target: 'list', directory: root } }, createCtx(root), deps);
+    expect(listed.success).toBe(true);
+    expect(listed.data.entries).toHaveLength(1);
+    expect(listed.data.entries[0]).toMatchObject({ scope: 'user', options: { enabled: true } });
+    expect(listed.data.files).toHaveLength(1);
+    expect(listed.data.files[0]).toMatchObject({ kind: 'file', absolutePath: path.join(root, 'plugins', 'memory.ts'), resolvedPath: listed.data.entries[0].resolvedPath });
+  });
+
+  test('preserves runtime status through a symlinked config directory', async () => {
+    const physicalDir = fs.mkdtempSync(path.join(scratchConfigRoot, 'physical-'));
+    const globalDir = path.join(process.env.XDG_CONFIG_HOME, 'opencode');
+    tempRoots.push(globalDir, physicalDir);
+    fs.mkdirSync(path.dirname(globalDir), { recursive: true });
+    fs.mkdirSync(path.join(physicalDir, 'plugins'));
+    fs.symlinkSync(physicalDir, globalDir, 'dir');
+    const originalPath = path.join(globalDir, 'plugins', 'memory.ts');
+    fs.writeFileSync(originalPath, 'export default {}');
+    const listed = await handleConfigBridgeMessage({ id: 'list-link', type: 'api:config/plugins', payload: { target: 'list', directory: physicalDir } }, createCtx(physicalDir), deps);
+    expect(listed.success).toBe(true);
+    const file = listed.data.files.find((file) => file.scope === 'user');
+    expect(file).toMatchObject({ absolutePath: originalPath, resolvedPath: fs.realpathSync(originalPath) });
+    const target = pluginFileRuntimeTarget(file.absolutePath);
+    for (const state of [{ kind: 'active' }, { kind: 'failed', error: 'load failed', ref: 'err_local' }]) {
+      const result = resolveLoadState(findRuntimeMatches(target, [{ source: { kind: 'local', path: originalPath }, state }]));
+      expect(result).toEqual(state.kind === 'active' ? { kind: 'active', version: null } : state);
+    }
+  });
+
+  test('keeps custom relative targets when the global config is a symlink alias', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-vscode-plugin-alias-'));
+    const globalDir = path.join(process.env.XDG_CONFIG_HOME, 'opencode');
+    tempRoots.push(root, globalDir);
+    const configPath = path.join(root, 'opencode.json');
+    const spec = './plugins/memory';
+    fs.writeFileSync(configPath, JSON.stringify({ plugins: [{ package: spec, options: { owner: 'custom' } }] }));
+    const customPluginPath = path.join(root, 'plugins', 'memory');
+    fs.mkdirSync(customPluginPath, { recursive: true });
+    fs.mkdirSync(path.join(globalDir, 'plugins', 'memory'), { recursive: true });
+    fs.symlinkSync(configPath, path.join(globalDir, 'opencode.json'));
+    process.env.OPENCODE_CONFIG = configPath;
+
+    const listed = await handleConfigBridgeMessage({
+      id: 'list-alias', type: 'api:config/plugins', payload: { target: 'list', directory: globalDir },
+    }, createCtx(globalDir), deps);
+    expect(listed.success).toBe(true);
+    expect(listed.data.entries).toEqual([
+      expect.objectContaining({
+        id: Buffer.from(`config:user:${spec}`).toString('base64url'),
+        spec, scope: 'user', resolvedPath: fs.realpathSync(customPluginPath), options: { owner: 'custom' },
+      }),
+    ]);
+  });
+
   test('explicit config reload restarts OpenCode', async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-vscode-reload-'));
     tempRoots.push(root);
@@ -264,7 +331,33 @@ describe('VS Code config bridge plugin parity', () => {
     expect(readJson(configPath).plugins).toBeUndefined();
   });
 
-  test('writes user plugin files next to OPENCODE_CONFIG', async () => {
+  test('lists the global config and plugins folder when OPENCODE_CONFIG names a missing file', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-vscode-missing-custom-'));
+    tempRoots.push(root);
+    const globalDir = path.join(process.env.XDG_CONFIG_HOME, 'opencode');
+    const globalConfigPath = path.join(globalDir, 'opencode.json');
+    const globalFilePath = path.join(globalDir, 'plugins', 'global-file.js');
+    fs.mkdirSync(path.dirname(globalFilePath), { recursive: true });
+    fs.writeFileSync(globalConfigPath, JSON.stringify({ plugins: ['global-plugin'] }), 'utf8');
+    fs.writeFileSync(globalFilePath, '', 'utf8');
+    process.env.OPENCODE_CONFIG = path.join(root, 'missing', 'opencode.json');
+
+    try {
+      const listed = await handleConfigBridgeMessage({
+        id: 'list-missing-custom',
+        type: 'api:config/plugins',
+        payload: { method: 'GET', target: 'list', directory: root },
+      }, createCtx(root), deps);
+
+      expect((listed?.data?.entries || []).map((entry) => [entry.spec, entry.scope])).toEqual([['global-plugin', 'user']]);
+      expect((listed?.data?.files || []).map((file) => [file.fileName, file.scope])).toEqual([['global-file.js', 'user']]);
+    } finally {
+      fs.rmSync(globalConfigPath, { force: true });
+      fs.rmSync(globalFilePath, { force: true });
+    }
+  });
+
+  test('writes user plugin files to the global plugins folder when OPENCODE_CONFIG is set', async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-vscode-custom-files-'));
     tempRoots.push(root);
     const configDir = path.join(root, 'custom-config');
@@ -286,7 +379,11 @@ describe('VS Code config bridge plugin parity', () => {
     }, ctx, deps);
 
     expect(created?.success).toBe(true);
-    expect(fs.readFileSync(path.join(configDir, 'plugins', 'demo-plugin.ts'), 'utf8')).toBe('export default {}');
+    // OpenCode scans only the global `plugins/` folder for user plugin files.
+    const globalFilePath = path.join(process.env.XDG_CONFIG_HOME, 'opencode', 'plugins', 'demo-plugin.ts');
+    expect(fs.readFileSync(globalFilePath, 'utf8')).toBe('export default {}');
+    expect(fs.existsSync(path.join(configDir, 'plugins'))).toBe(false);
+    fs.rmSync(globalFilePath, { force: true });
   });
 
   // OpenCode 2 watches its config sources, so a write is live as soon as it
@@ -422,6 +519,136 @@ describe('skills catalog bridge', () => {
     }, createCtx(os.tmpdir()), deps);
 
     expect(response?.data).toEqual({ ok: false, error: { kind: 'invalidSource', message: 'Unknown source' } });
+  });
+});
+
+describe('VS Code plugin switches', () => {
+  test('switches an entry off in its own store and reports it in the list', async () => {
+    const root = path.join(scratchConfigRoot, 'xdg', 'opencode');
+    fs.mkdirSync(root, { recursive: true });
+    tempRoots.push(root);
+    process.env.OPENCODE_CONFIG = path.join(root, 'opencode.json');
+    fs.writeFileSync(process.env.OPENCODE_CONFIG, JSON.stringify({ plugins: ['leakshield'] }));
+    const storage = fs.mkdtempSync(path.join(scratchConfigRoot, 'storage-'));
+    tempRoots.push(storage);
+    const ctx = createCtx(root);
+    ctx.context.globalStorageUri.fsPath = storage;
+
+    const listed = await handleConfigBridgeMessage(
+      { id: 'l', type: 'api:config/plugins', payload: { target: 'list', directory: root } },
+      ctx,
+      deps,
+    );
+    const entry = listed.data.entries.find((candidate) => candidate.spec === 'leakshield');
+    expect(entry.switchState).toBe('on');
+
+    const off = await handleConfigBridgeMessage({
+      id: 'off',
+      type: 'api:config/plugins',
+      payload: { method: 'PUT', target: 'entry', action: 'enabled', pluginId: entry.id, body: { enabled: false }, directory: root },
+    }, ctx, deps);
+    expect(off.success).toBe(true);
+    expect(off.data).toMatchObject({ enabled: false, resource: 'plugin:leakshield', changed: true, requiresManualRestart: false });
+    expect(readJson(path.join(storage, 'plugin-switches.json'))).toEqual({ version: 1, disabled: ['plugin:leakshield'] });
+
+    const after = await handleConfigBridgeMessage(
+      { id: 'l2', type: 'api:config/plugins', payload: { target: 'list', directory: root } },
+      ctx,
+      deps,
+    );
+    expect(after.data.entries.find((candidate) => candidate.spec === 'leakshield').switchState).toBe('off');
+  });
+
+  test('keeps the saved switch and asks for a restart when the managed layer cannot be rewritten', async () => {
+    const root = path.join(scratchConfigRoot, 'xdg', 'opencode');
+    fs.mkdirSync(root, { recursive: true });
+    tempRoots.push(root);
+    process.env.OPENCODE_CONFIG = path.join(root, 'opencode.json');
+    fs.writeFileSync(process.env.OPENCODE_CONFIG, JSON.stringify({ plugins: ['leakshield'] }));
+    const storage = fs.mkdtempSync(path.join(scratchConfigRoot, 'storage-'));
+    tempRoots.push(storage);
+    const base = createCtx(root);
+    base.context.globalStorageUri.fsPath = storage;
+    const ctx = {
+      ...base,
+      manager: { ...base.manager, refreshPluginSwitches: async () => { throw new Error('disk full'); } },
+    };
+
+    const listed = await handleConfigBridgeMessage(
+      { id: 'l', type: 'api:config/plugins', payload: { target: 'list', directory: root } },
+      ctx,
+      deps,
+    );
+    const entry = listed.data.entries.find((candidate) => candidate.spec === 'leakshield');
+    const off = await handleConfigBridgeMessage({
+      id: 'off',
+      type: 'api:config/plugins',
+      payload: { method: 'PUT', target: 'entry', action: 'enabled', pluginId: entry.id, body: { enabled: false }, directory: root },
+    }, ctx, deps);
+
+    expect(off.success).toBe(true);
+    expect(off.data).toMatchObject({ enabled: false, changed: true, requiresReload: false, requiresManualRestart: true });
+    expect(readJson(path.join(storage, 'plugin-switches.json'))).toEqual({ version: 1, disabled: ['plugin:leakshield'] });
+  });
+
+  test('reports a plugin a config allow keeps loading and refuses to switch it off', async () => {
+    const root = path.join(scratchConfigRoot, 'xdg', 'opencode');
+    fs.mkdirSync(root, { recursive: true });
+    tempRoots.push(root);
+    process.env.OPENCODE_CONFIG = path.join(root, 'opencode.json');
+    fs.writeFileSync(process.env.OPENCODE_CONFIG, JSON.stringify({
+      plugins: ['leakshield'],
+      policies: [{ action: 'plugin.use', resource: '*', effect: 'allow' }],
+    }));
+    const storage = fs.mkdtempSync(path.join(scratchConfigRoot, 'storage-'));
+    tempRoots.push(storage);
+    const ctx = createCtx(root);
+    ctx.context.globalStorageUri.fsPath = storage;
+
+    const listed = await handleConfigBridgeMessage(
+      { id: 'l', type: 'api:config/plugins', payload: { target: 'list', directory: root } },
+      ctx,
+      deps,
+    );
+    const entry = listed.data.entries.find((candidate) => candidate.spec === 'leakshield');
+    expect(entry.switchState).toBe('overridden');
+
+    let thrown;
+    try {
+      await handleConfigBridgeMessage({
+        id: 'off',
+        type: 'api:config/plugins',
+        payload: { method: 'PUT', target: 'entry', action: 'enabled', pluginId: entry.id, body: { enabled: false }, directory: root },
+      }, ctx, deps);
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown?.code).toBe('SWITCH_OVERRIDDEN');
+    expect(fs.existsSync(path.join(storage, 'plugin-switches.json'))).toBe(false);
+  });
+
+  test('refuses a switch when the extension connects to an external OpenCode', async () => {
+    const base = createCtx(os.tmpdir());
+    const ctx = {
+      ...base,
+      manager: {
+        ...base.manager,
+        getDebugInfo: () => ({ mode: 'external' }),
+      },
+    };
+    let thrown;
+    try {
+      await handleConfigBridgeMessage({
+        id: 'x',
+        type: 'api:config/plugins',
+        payload: { method: 'PUT', target: 'entry', action: 'enabled', pluginId: 'id', body: { enabled: false } },
+      }, ctx, deps);
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(Error);
+    expect(thrown?.code).toBe('SWITCH_UNAVAILABLE');
   });
 });
 

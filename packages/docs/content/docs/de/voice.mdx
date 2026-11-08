@@ -22,9 +22,20 @@ Sobald es aktiviert ist, erscheint bei Nachrichten eine Abspieltaste, mit der du
 
 Wähle aus, wie deine Sprache transkribiert wird:
 
-- **Browser** — die integrierte Spracherkennung deines Browsers, keine Einrichtung nötig
-- **Server** — ein OpenAI-kompatibler Transkriptionsdienst; gib seine URL und, falls nötig, einen API-Schlüssel an
-- **Gerätebasiert** — ein Sprachmodell, das in deinem Browser läuft und beim ersten Verwenden heruntergeladen wird
+- **Lokal** führt ein Sprachmodell auf dem Computer aus, auf dem OpenChamber läuft. Das Modell wird beim ersten Diktieren heruntergeladen, und deine Audioaufnahmen bleiben auf diesem Computer.
+- **Server** schickt deine Audioaufnahme an einen OpenAI-kompatiblen Transkriptionsdienst. Gib seine URL und, falls nötig, einen API-Schlüssel an.
+
+Lokale Modelle:
+
+- **Parakeet v3** ist voreingestellt. Es kennt 25 europäische Sprachen, darunter Englisch und Ukrainisch, und ist am schnellsten. Wenn du schon mit Parakeet v2 diktiert hast, bevor v3 voreingestellt wurde, bleibst du bei v2, bis du ein anderes Modell wählst.
+- **Parakeet v2** kennt nur Englisch.
+- **Whisper large-v3 turbo** kennt 99 Sprachen. Es ist etwa neunmal langsamer als Parakeet, daher erscheinen lange Diktate erst nach ein paar Sekunden.
+- **Qwen3-ASR 0.6B** kennt 30 Sprachen, darunter Chinesisch, Japanisch, Koreanisch und Arabisch. Ukrainisch ist nicht dabei.
+- **Whisper tiny** ist der kleinste Download, für langsame Computer.
+
+Die Whisper- und Qwen3-ASR-Modelle erkennen die Sprache selbst und können bei einem kurzen Satz die falsche erwischen. Gib unter der Modellliste bei **Sprache** deinen Sprachcode ein, zum Beispiel `uk` oder `en`, dann raten sie nicht mehr.
+
+Schalte **Falsch verstandene Wörter korrigieren** ein, damit dein Small Model (Einstellungen → Sessions → Small Model) den Text überarbeitet, nachdem du aufhörst. Es ersetzt Wörter, die das Sprachmodell falsch verstanden hat, und entfernt Füllwörter wie "äh". Der Text geht dann an den Anbieter des Small Model und erscheint ein bis zwei Sekunden später. Ohne Small Model wird der Text so eingefügt, wie er erkannt wurde.
 
 API-Schlüssel für diese Dienste speichert der OpenChamber-Server, nicht dein Browser. Gib einen Schlüssel ein und drücke Enter, um ihn zu speichern; danach zeigt das Feld, dass ein Schlüssel gespeichert ist, und das Kreuz entfernt ihn.
 

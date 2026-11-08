@@ -18,6 +18,7 @@ const errorSchema = z.object({
     'id-taken',
     'already-installed',
     'missing-build',
+    'invalid-opencode-plugin',
     'host-too-old',
     'bundled',
     'reserved-id',
@@ -39,6 +40,8 @@ export type InstallGuestErrorCode =
   | 'id-taken'
   | 'already-installed'
   | 'missing-build'
+  /** `contributes.opencodePlugin` names a folder that is missing or holds no entry file OpenCode finds. */
+  | 'invalid-opencode-plugin'
   | 'host-too-old'
   | 'bundled'
   | 'reserved-id'

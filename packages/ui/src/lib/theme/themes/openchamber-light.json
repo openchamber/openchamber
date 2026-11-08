@@ -68,8 +68,8 @@
       "highlights": {
         "diffAdded": "#2c751e",
         "diffRemoved": "#ab5959",
-        "diffModified": "#2c751e",
-        "diffModifiedBackground": "#5f8d3d20"
+        "diffModified": "#2d7d8c",
+        "diffModifiedBackground": "#2d7d8c20"
       }
     },
     "pr": {
@@ -82,7 +82,7 @@
       "background": "#fdfcfa"
     },
     "markdown": {
-      "link": "#2e808f",
+      "link": "#2d7d8c",
       "linkHover": "#296aa3",
       "inlineCode": "#006A2C",
       "inlineCodeBackground": "#faf9f7",

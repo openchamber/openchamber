@@ -5,6 +5,7 @@ import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, Command
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { dropdownTriggerVariants } from '@/components/ui/dropdown-trigger';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
+import { HoverTooltip } from '@/components/ui/row-tooltip';
 import { useI18n, type I18nKey } from '@/lib/i18n';
 import { changeRequestCopy } from '@/lib/source-control/changeRequestCopy';
 import { formatChangeRequestReference } from '@/lib/source-control/providers/terminology';
@@ -40,7 +41,7 @@ export function PullRequestComparisonSelector({ comparison, mobile = false }: {
     data-mobile-comparison-trigger={mobile || undefined}
     onClick={sheet ? () => changeOpen(true) : undefined}
     aria-haspopup={sheet ? 'dialog' : undefined} aria-expanded={sheet ? open : undefined}
-    aria-label={label} title={selected?.sourceRepo ? `${joinProjectPath(selected.sourceRepo.owner, selected.sourceRepo.repo)} ${selectedLabel}` : selectedLabel}>
+    aria-label={label}>
     <span className="truncate">{selectedLabel}</span>
     <Icon name="arrow-down-s" className="size-3.5" />
   </Button>;
@@ -80,7 +81,9 @@ export function PullRequestComparisonSelector({ comparison, mobile = false }: {
   </Command>;
   if (sheet) return <>{trigger}<MobileOverlayPanel open={open} title={label} onClose={() => changeOpen(false)}>{picker}</MobileOverlayPanel></>;
   return <DropdownMenu open={open} onOpenChange={changeOpen}>
-    <DropdownMenuTrigger asChild>{trigger}</DropdownMenuTrigger>
+    <HoverTooltip label={selected?.sourceRepo ? `${joinProjectPath(selected.sourceRepo.owner, selected.sourceRepo.repo)} ${selectedLabel}` : label} side="bottom">
+      <DropdownMenuTrigger asChild>{trigger}</DropdownMenuTrigger>
+    </HoverTooltip>
     {/* Kept to the room the popup has: the list scrolls inside it instead of running past its edge. */}
     <DropdownMenuContent align="start" className="flex max-h-[min(var(--available-height),32rem)] w-[32rem] max-w-[calc(100vw-2rem)] flex-col overflow-hidden p-0">{picker}</DropdownMenuContent>
   </DropdownMenu>;

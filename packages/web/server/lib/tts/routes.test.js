@@ -1,6 +1,8 @@
 import { describe, expect, it, afterEach } from 'vitest';
 import express from 'express';
 import request from 'supertest';
+import { createServer } from 'node:http';
+import { once } from 'node:events';
 
 import { registerTtsRoutes, speechVoiceHeaderValue } from './routes.js';
 import { normalizeCustomOpenAIBaseURL } from './base-url.js';
@@ -115,6 +117,86 @@ describe('tts routes', () => {
       summarized: false,
       reason: 'Model summarization provider unavailable',
     });
+  });
+
+  it('rejects a custom speech endpoint path that is a URL', async () => {
+    const response = await request(createApp())
+      .post('/api/tts/speak')
+      .send({
+        text: 'Hello',
+        apiKey: 'sk-test',
+        baseURL: 'http://127.0.0.1:9/v1',
+        endpointPath: 'https://example.com/v1/audio/speech',
+      });
+
+    expect(response.status).toBe(400);
+    expect(response.body.error).toMatch(/path, not a URL/i);
+  });
+
+  it('forwards the custom speech endpoint path to the upstream server', async () => {
+    let seenUrl;
+    const upstream = createServer((upstreamRequest, upstreamResponse) => {
+      seenUrl = upstreamRequest.url;
+      upstreamResponse.writeHead(200, { 'Content-Type': 'audio/mpeg' });
+      upstreamResponse.end(Buffer.from('custom-path'));
+    });
+    upstream.listen(0, '127.0.0.1');
+    await once(upstream, 'listening');
+
+    try {
+      const baseURL = `http://127.0.0.1:${upstream.address().port}/v1`;
+      const response = await request(createApp())
+        .post('/api/tts/speak')
+        .send({ text: 'Hello', model: 'custom-tts', voice: 'coral', baseURL, endpointPath: '/custom/speech' });
+
+      expect(response.status).toBe(200);
+      expect(Buffer.from(response.body)).toEqual(Buffer.from('custom-path'));
+      expect(seenUrl).toBe('/v1/custom/speech');
+    } finally {
+      upstream.close();
+      upstream.closeAllConnections();
+    }
+  });
+
+  it('rejects a custom transcription endpoint path on the stt route', async () => {
+    const response = await request(createApp())
+      .post('/api/stt/transcribe')
+      .set('Content-Type', 'audio/wav')
+      .set('X-Base-URL', 'http://127.0.0.1:9/v1')
+      .set('X-Endpoint-Path', '/speech_to_text?trace=1')
+      .send(Buffer.from('audio'));
+
+    expect(response.status).toBe(400);
+    expect(response.body.error).toMatch(/query or fragment/i);
+  });
+
+  it('forwards the custom transcription endpoint path to the upstream server', async () => {
+    let seenUrl;
+    const upstream = createServer((upstreamRequest, upstreamResponse) => {
+      seenUrl = upstreamRequest.url;
+      upstreamResponse.writeHead(200, { 'Content-Type': 'application/json' });
+      upstreamResponse.end(JSON.stringify({ text: 'custom path transcript' }));
+    });
+    upstream.listen(0, '127.0.0.1');
+    await once(upstream, 'listening');
+
+    try {
+      const baseURL = `http://127.0.0.1:${upstream.address().port}/v1`;
+      const response = await request(createApp())
+        .post('/api/stt/transcribe')
+        .set('Content-Type', 'audio/wav')
+        .set('X-Base-URL', baseURL)
+        .set('X-Model', 'whisper-1')
+        .set('X-Endpoint-Path', '/speech_to_text')
+        .send(Buffer.from('audio'));
+
+      expect(response.status).toBe(200);
+      expect(response.body).toEqual({ transcript: 'custom path transcript' });
+      expect(seenUrl).toBe('/v1/speech_to_text');
+    } finally {
+      upstream.close();
+      upstream.closeAllConnections();
+    }
   });
 });
 

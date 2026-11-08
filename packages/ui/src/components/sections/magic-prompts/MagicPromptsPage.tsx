@@ -62,6 +62,13 @@ const PROMPT_PAGE_MAP: Record<string, PromptPageConfig> = {
       { id: 'git.pr.generate.instructions', titleKey: 'settings.magicPrompts.page.block.instructions' },
     ],
   },
+  'walkthrough': {
+    titleKey: 'settings.magicPrompts.page.group.walkthrough.title',
+    descriptionKey: 'settings.magicPrompts.page.group.walkthrough.description',
+    blocks: [
+      { id: 'walkthrough.instructions', titleKey: 'settings.magicPrompts.page.block.instructions' },
+    ],
+  },
   'git.conflict.resolve': {
     titleKey: 'settings.magicPrompts.page.group.gitConflictResolve.title',
     descriptionKey: 'settings.magicPrompts.page.group.gitConflictResolve.description',

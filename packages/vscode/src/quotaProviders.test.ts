@@ -54,7 +54,7 @@ const baseCredentialList = (): CredentialEntry[] => [
 ];
 configureOpenCodeCredentials({ list: async () => baseCredentialList() });
 
-import { activateQuotaGiftReset, fetchClinePassQuota, fetchHyperQuota, fetchKiloQuota, fetchKimiQuota, fetchOllamaCloudQuota, fetchQuotaForProvider, fetchXaiQuota, fetchZenmuxQuota } from './quotaProviders';
+import { activateQuotaGiftReset, fetchClinePassQuota, fetchHyperQuota, fetchKiloQuota, fetchKimiQuota, fetchOllamaCloudQuota, fetchQuotaForProvider, fetchXaiQuota, fetchZenmuxQuota, listConfiguredQuotaProviders } from './quotaProviders';
 
 type MockResponseInit = { ok?: boolean; status?: number };
 
@@ -147,10 +147,6 @@ describe('OpenCode Go quota provider (VS Code parity)', () => {
   describe('with an API key on the Console integration only', () => {
     beforeEach(() => {
       configureOpenCodeCredentials({ list: async () => [key('opencode')] });
-    });
-
-    afterEach(() => {
-      configureOpenCodeCredentials({ list: async () => baseCredentialList() });
     });
 
     test('reads the usage with that key', async () => {
@@ -341,6 +337,20 @@ describe('OpenCode Go quota provider — Console OAuth (VS Code parity)', () => 
     assert.equal(result.usage!.windows.weekly!.usedPercent, 25);
   });
 
+  test('supports Go Teams', async () => {
+    globalThis.fetch = async () => Response.json({
+      product: 'go-teams',
+      access: { meters: {
+        month: { resetsAt: '2026-09-01T00:00:00.000Z', limitMicroCents: '1000', usedMicroCents: '250' },
+      } },
+    });
+
+    const result = await fetchQuotaForProvider('opencode-go');
+
+    assert.equal(result.ok, true);
+    assert.equal(result.usage!.windows.monthly!.usedPercent, 25);
+  });
+
   test('distinguishes an absent subscription from a temporary failure', async () => {
     globalThis.fetch = (async () => mockResponse({ product: 'free', access: { meters: {} } })) as typeof fetch;
     const absent = await fetchQuotaForProvider('opencode-go');
@@ -415,6 +425,227 @@ describe('OpenCode Go quota provider — Console OAuth (VS Code parity)', () => 
 
     assert.equal(result.ok, false);
     assert.equal(result.error, 'No active OpenCode Go subscription on the selected Console account');
+  });
+});
+
+describe('OpenCode Zen quota provider (VS Code parity)', () => {
+  const CONSOLE_API_BASE = 'https://opencode.ai/console/api';
+
+  afterEach(() => {
+    configureOpenCodeCredentials({ list: async () => baseCredentialList() });
+  });
+
+  const summaryPayload = (requests: number) => ({
+    totalRequests: String(requests),
+    totalInputTokens: '100',
+    totalOutputTokens: '50',
+    totalCostMicroCents: '0',
+    services: [],
+  });
+
+  const budgetPayload = [{
+    scope: 'service-account',
+    serviceAccountId: 'svcacct_01TEST',
+    name: 'Test service account',
+    limitMicroCents: null,
+    spentMicroCents: '0',
+    exceeded: false,
+    resetsAt: '2026-11-01T00:00:00.000Z',
+  }];
+
+  const modelsPayload = {
+    items: [
+      { model: 'big-pickle', provider: 'opencode', totalRequests: '6979', totalCostMicroCents: '0' },
+      { model: 'minimax-m3.1-flash-free', provider: 'opencode', totalRequests: '6108', totalCostMicroCents: '0' },
+    ],
+    pageInfo: { page: 1, pageSize: 50, total: 2, pageCount: 1 },
+  };
+
+  const stubConsole = () => {
+    const requests: string[] = [];
+    stubFetchReturning(async (url, _init) => {
+      requests.push(url);
+      if (url === `${CONSOLE_API_BASE}/usage/summary?range=24h`) return mockResponse(summaryPayload(292));
+      if (url === `${CONSOLE_API_BASE}/usage/summary?range=7d`) return mockResponse(summaryPayload(3155));
+      if (url === `${CONSOLE_API_BASE}/usage/summary?range=30d`) return mockResponse(summaryPayload(10802));
+      if (url.startsWith(`${CONSOLE_API_BASE}/usage/models`)) return mockResponse(modelsPayload);
+      if (url === `${CONSOLE_API_BASE}/budgets/service-accounts/status`) return mockResponse(budgetPayload);
+      return mockResponse({}, { ok: false, status: 404 });
+    });
+    return requests;
+  };
+
+  describe('with an API key on the Console integration', () => {
+    beforeEach(() => {
+      configureOpenCodeCredentials({ list: async () => [key('opencode')] });
+    });
+
+    test('reports the request counters, the spend and the models', async () => {
+      stubConsole();
+
+      const result = await fetchQuotaForProvider('opencode');
+
+      assert.equal(result.ok, true);
+      assert.equal(result.providerName, 'OpenCode Zen');
+      assert.deepEqual(result.usage!.windows.daily!.value, { kind: 'requests', count: 292 });
+      assert.deepEqual(result.usage!.windows.weekly!.value, { kind: 'requests', count: 3155 });
+      assert.deepEqual(result.usage!.windows.monthly!.value, { kind: 'requests', count: 10802 });
+      assert.deepEqual(result.usage!.windows['Test service account (svcacct_01TEST)']!.value, { kind: 'spend', spent: 0, limit: null });
+      assert.equal(result.usage!.windows['Test service account (svcacct_01TEST)']!.resetAt, Date.parse('2026-11-01T00:00:00.000Z'));
+      assert.deepEqual(result.usage!.models!['big-pickle']!.windows.monthly!.value, { kind: 'requests', count: 6979 });
+    });
+
+    test('keeps all account budgets separate from workspace counters and reads every model page', async () => {
+      const pages: number[] = [];
+      let failSecondPage = false;
+      stubFetchReturning(async (url) => {
+        if (url.includes('/budgets/')) return mockResponse([
+          { serviceAccountId: 'svcacct_A', name: 'Build', spentMicroCents: '100000000', limitMicroCents: '1000000000' },
+          { serviceAccountId: 'svcacct_B', name: 'Review', spentMicroCents: '900000000', limitMicroCents: null },
+        ]);
+        if (url.includes('/usage/models')) {
+          const page = Number(new URL(url).searchParams.get('page'));
+          pages.push(page);
+          if (page === 2 && failSecondPage) return mockResponse({}, { ok: false, status: 500 });
+          return mockResponse({ items: [{ model: `model-${page}`, totalRequests: String(page) }], pageInfo: { page, pageCount: 2 } });
+        }
+        return mockResponse(summaryPayload(10802));
+      });
+      const result = await fetchQuotaForProvider('opencode');
+      assert.equal(result.ok, true);
+      assert.deepEqual(result.usage!.windows.monthly!.value, { kind: 'requests', count: 10802 });
+      assert.deepEqual(result.usage!.windows['Build (svcacct_A)']!.value, { kind: 'spend', spent: 1, limit: 10 });
+      assert.deepEqual(result.usage!.windows['Review (svcacct_B)']!.value, { kind: 'spend', spent: 9, limit: null });
+      assert.deepEqual(Object.keys(result.usage!.models!), ['model-1', 'model-2']);
+      assert.deepEqual(result.usage!.models!['model-2']!.windows.monthly!.value, { kind: 'requests', count: 2 });
+      assert.deepEqual(pages, [1, 2]);
+      failSecondPage = true;
+      const failed = await fetchQuotaForProvider('opencode');
+      assert.equal(failed.ok, false);
+      assert.equal(failed.error, 'OpenCode Zen usage API returned HTTP 500');
+    });
+
+    for (const body of ['null', '"invalid"', '', '{']) {
+      test(`keeps valid windows after an unusable successful response ${JSON.stringify(body)}`, async () => {
+        stubFetchReturning(async (url) => url.includes('range=24h')
+          ? new Response(body)
+          : Response.json(url.includes('/usage/summary') ? summaryPayload(20) : null));
+        const result = await fetchQuotaForProvider('opencode');
+        assert.equal(result.ok, true);
+        assert.equal(result.usage!.windows.daily, undefined);
+        assert.deepEqual(result.usage!.windows.weekly!.value, { kind: 'requests', count: 20 });
+        assert.deepEqual(result.usage!.windows.monthly!.value, { kind: 'requests', count: 20 });
+      });
+
+      test(`fails when every successful response is unusable ${JSON.stringify(body)}`, async () => {
+        stubFetchReturning(async () => new Response(body));
+        const result = await fetchQuotaForProvider('opencode');
+        assert.equal(result.ok, false);
+        assert.equal(result.error, 'OpenCode Zen usage data could not be parsed');
+      });
+    }
+
+    for (const value of ['', ' ', '\t', '-1', 'not-a-number']) {
+      test(`rejects invalid numeric data ${JSON.stringify(value)} while preserving real zero`, async () => {
+        stubFetchReturning(async (url) => {
+          if (url.includes('/budgets/')) return Response.json([{ spentMicroCents: value }]);
+          if (url.includes('/usage/models')) return Response.json({ items: [
+            { model: 'invalid', totalRequests: value },
+            { model: 'valid', totalRequests: '0' },
+          ] });
+          return Response.json({ totalRequests: value });
+        });
+        const result = await fetchQuotaForProvider('opencode');
+        assert.equal(result.ok, true);
+        assert.deepEqual(result.usage!.windows, {});
+        assert.deepEqual(Object.keys(result.usage!.models!), ['valid']);
+        assert.deepEqual(result.usage!.models!.valid!.windows.monthly!.value, { kind: 'requests', count: 0 });
+      });
+    }
+
+    test('tolerates malformed rows in budgets and models without failing the whole list', async () => {
+      stubFetchReturning(async (url) => {
+        if (url === `${CONSOLE_API_BASE}/usage/summary?range=24h`) return mockResponse(summaryPayload(10));
+        if (url === `${CONSOLE_API_BASE}/usage/summary?range=7d`) return mockResponse(summaryPayload(20));
+        if (url === `${CONSOLE_API_BASE}/usage/summary?range=30d`) return mockResponse(summaryPayload(30));
+        if (url.startsWith(`${CONSOLE_API_BASE}/usage/models`)) {
+          return mockResponse({
+            items: [
+              'corrupted-entry',
+              { model: null, totalRequests: '10' },
+              { model: 'valid-model', totalRequests: '42' },
+            ],
+          });
+        }
+        if (url === `${CONSOLE_API_BASE}/budgets/service-accounts/status`) {
+          return mockResponse([
+            null,
+            'not-an-object',
+            { serviceAccountId: 'svcacct_valid', spentMicroCents: '5000000', limitMicroCents: '20000000' },
+          ]);
+        }
+        return mockResponse({}, { ok: false, status: 404 });
+      });
+
+      const result = await fetchQuotaForProvider('opencode');
+
+      assert.equal(result.ok, true);
+      assert.deepEqual(result.usage!.windows.monthly!.value, { kind: 'requests', count: 30 });
+      assert.deepEqual(result.usage!.windows.svcacct_valid!.value, { kind: 'spend', spent: 0.05, limit: 0.2 });
+      assert.deepEqual(result.usage!.models!['valid-model']!.windows.monthly!.value, { kind: 'requests', count: 42 });
+      assert.equal(Object.keys(result.usage!.models!).length, 1);
+    });
+
+    test('sends the workspace key and never follows a redirect', async () => {
+      let request: RequestInit | undefined;
+      stubFetchReturning(async (_url, init) => {
+        request = init;
+        return mockResponse(summaryPayload(1));
+      });
+
+      await fetchQuotaForProvider('opencode');
+
+      assert.equal(new Headers(request?.headers).get('Authorization'), 'Bearer test-token');
+      assert.equal(request?.redirect, 'error');
+    });
+
+    test('reports a rejected credential as an authentication failure', async () => {
+      stubFetchReturning(async () => mockResponse({}, { ok: false, status: 401 }));
+
+      const result = await fetchQuotaForProvider('opencode');
+
+      assert.equal(result.configured, true);
+      assert.equal(result.error, 'OpenCode Zen authentication failed');
+    });
+  });
+
+  describe('with a Console sign-in', () => {
+    beforeEach(() => {
+      configureOpenCodeCredentials({ list: async () => [consoleOAuth()] });
+    });
+
+    test('uses the Console token and organization', async () => {
+      let request: RequestInit | undefined;
+      stubFetchReturning(async (_url, init) => {
+        request = init;
+        return mockResponse(summaryPayload(5));
+      });
+
+      const result = await fetchQuotaForProvider('opencode');
+
+      assert.equal(result.ok, true);
+      assert.equal(new Headers(request?.headers).get('Authorization'), 'Bearer console-token');
+      assert.equal(new Headers(request?.headers).get('x-org-id'), 'org_TESTORG123');
+    });
+  });
+
+  test('reports a workspace without a credential as not configured', async () => {
+    configureOpenCodeCredentials({ list: async () => [] });
+
+    const result = await fetchQuotaForProvider('opencode');
+
+    assert.equal(result.configured, false);
+    assert.equal(result.error, 'Not configured');
   });
 });
 
@@ -823,6 +1054,20 @@ describe('ClinePass quota provider (VS Code parity)', () => {
 });
 
 describe('Codex quota provider (VS Code parity)', () => {
+  // The refused path reads the Codex CLI's sign-in; point it at an empty folder so
+  // no test hands the developer's real `~/.codex/auth.json` token to a stub.
+  let codexHome: string;
+
+  beforeEach(() => {
+    codexHome = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-home-'));
+    process.env.CODEX_HOME = codexHome;
+  });
+
+  afterEach(() => {
+    delete process.env.CODEX_HOME;
+    fs.rmSync(codexHome, { recursive: true, force: true });
+  });
+
   for (const { balance, unlimited, expected } of [
     { balance: 62500, unlimited: false, expected: '62500' },
     { balance: '62500.00', unlimited: false, expected: '62500' },
@@ -858,6 +1103,51 @@ describe('Codex quota provider (VS Code parity)', () => {
     globalThis.fetch = async () => new Response('unauthorized', { status: 401 });
     const expired = await fetchQuotaForProvider('codex');
     assert.equal(expired.error, 'Session expired \u2014 please re-authenticate with OpenAI');
+  });
+
+  describe('through the Codex CLI sign-in', () => {
+    const REFUSED = { error: { type: 'rejected_by_access_enforcement', code: 'no_matching_rule' } };
+    const CLI_USAGE = { email: 'cli@example.com', rate_limit: { primary_window: { used_percent: 42, limit_window_seconds: 18000 } } };
+
+    const signInCli = () => fs.writeFileSync(
+      path.join(codexHome, 'auth.json'),
+      JSON.stringify({ auth_mode: 'chatgpt', tokens: { access_token: 'cli-token', refresh_token: 'cli-refresh', account_id: 'acct_cli' } }),
+    );
+
+    // The usage endpoint refuses OpenCode's token and accepts the CLI's.
+    const stubUsageEndpoint = () => {
+      const authorizations: string[] = [];
+      stubFetchReturning(async (_url, init) => {
+        const headers = new Headers(init?.headers);
+        authorizations.push(headers.get('authorization') ?? '');
+        if (headers.get('authorization') !== 'Bearer cli-token') return Response.json(REFUSED, { status: 401 });
+        assert.equal(headers.get('chatgpt-account-id'), 'acct_cli');
+        return Response.json(CLI_USAGE);
+      });
+      return authorizations;
+    };
+
+    test('reads the numbers with the CLI sign-in and names its account', async () => {
+      signInCli();
+      const authorizations = stubUsageEndpoint();
+
+      const result = await fetchQuotaForProvider('codex');
+
+      assert.equal(result.ok, true);
+      assert.equal(result.usage?.windows['5h'].usedPercent, 42);
+      assert.equal(result.accountLabel, 'cli@example.com');
+      assert.deepEqual(authorizations, ['Bearer test-token', 'Bearer cli-token']);
+    });
+
+    test('keeps the usage-page message without a CLI sign-in', async () => {
+      const authorizations = stubUsageEndpoint();
+
+      const result = await fetchQuotaForProvider('codex');
+
+      assert.equal(result.ok, false);
+      assert.equal(result.error, 'OpenAI shows usage for Sign in with ChatGPT only at chatgpt.com/settings/usage. The legacy Codex sign-ins show it here.');
+      assert.deepEqual(authorizations, ['Bearer test-token']);
+    });
   });
 
   test('omits the balance window when credits are absent', async () => {
@@ -1075,6 +1365,84 @@ describe('GitHub Copilot quota provider (VS Code parity)', () => {
     assert.equal(result.usage!.windows.premium_interactions!.valueLabel, 'Unlimited');
   });
 
+  test('reports credits used for unlimited plans with usage', async () => {
+    stubFetchReturning(() => Promise.resolve(mockResponse({
+      copilot_plan: 'business',
+      quota_reset_date: '2026-11-01T00:00:00Z',
+      quota_snapshots: {
+        premium_interactions: { unlimited: true, entitlement: -1, remaining: -1, credits_used: 3233 },
+      },
+    })));
+
+    const result = await fetchQuotaForProvider('github-copilot');
+
+    assert.equal(result.ok, true);
+    assert.equal(result.planLabel, 'Copilot Business');
+    assert.equal(result.usage!.windows.premium_interactions!.usedPercent, null);
+    assert.equal(result.usage!.windows.premium_interactions!.creditsUsed, 3233);
+    assert.equal(result.usage!.windows.premium_interactions!.valueLabel, undefined);
+  });
+
+  for (const creditsUsed of [0, '3233.27', -1, '', '  ', 'invalid', null, undefined, Infinity]) {
+    test(`handles unlimited credits_used ${String(creditsUsed)} in both providers`, async () => {
+      for (const provider of ['github-copilot', 'github-copilot-addon']) {
+        stubFetchReturning(() => Promise.resolve(mockResponse({
+          quota_snapshots: { premium_interactions: { unlimited: true, credits_used: creditsUsed } },
+        })));
+        const result = await fetchQuotaForProvider(provider);
+        const window = result.usage!.windows.premium_interactions!;
+        const expected = creditsUsed === 0 ? 0 : creditsUsed === '3233.27' ? 3233.27 : undefined;
+        assert.equal(window.creditsUsed, expected);
+        assert.equal(window.valueLabel, expected === undefined ? 'Unlimited' : undefined);
+        assert.equal(window.usedPercent, null);
+        assert.equal(window.remainingPercent, null);
+      }
+    });
+  }
+
+  test('returns null/omits plan label for unmapped plan/sku and handles can_signup_for_limited', async () => {
+    stubFetchReturning(() => Promise.resolve(mockResponse({
+      copilot_plan: 'unknown_plan',
+      access_type_sku: 'unknown_sku',
+      quota_snapshots: {
+        premium_interactions: { unlimited: true },
+      },
+    })));
+    const unmappedResult = await fetchQuotaForProvider('github-copilot');
+    assert.equal(unmappedResult.planLabel, undefined);
+
+    stubFetchReturning(() => Promise.resolve(mockResponse({
+      copilot_plan: 'business',
+      can_signup_for_limited: true,
+      quota_snapshots: {
+        premium_interactions: { unlimited: true },
+      },
+    })));
+    const paidWithSignupResult = await fetchQuotaForProvider('github-copilot');
+    assert.equal(paidWithSignupResult.planLabel, 'Copilot Business');
+
+    stubFetchReturning(() => Promise.resolve(mockResponse({
+      can_signup_for_limited: true,
+      quota_snapshots: {
+        premium_interactions: { unlimited: false, entitlement: 50, remaining: 50 },
+      },
+    })));
+    const freeSignupResult = await fetchQuotaForProvider('github-copilot');
+    assert.equal(freeSignupResult.planLabel, 'Copilot Free');
+  });
+
+  test('keeps Unlimited value label when has_quota is false despite credits_used', async () => {
+    stubFetchReturning(() => Promise.resolve(mockResponse({
+      copilot_plan: 'business',
+      quota_snapshots: {
+        premium_interactions: { unlimited: true, has_quota: false, credits_used: 1200 },
+      },
+    })));
+    const result = await fetchQuotaForProvider('github-copilot');
+    assert.equal(result.usage!.windows.premium_interactions!.valueLabel, 'Unlimited');
+    assert.equal(result.usage!.windows.premium_interactions!.creditsUsed, undefined);
+  });
+
   test('falls back to percent_remaining when entitlement is unusable', async () => {
     stubFetchReturning(() => Promise.resolve(mockResponse({
       quota_reset_date: '2026-09-01T00:00:00Z',
@@ -1247,7 +1615,7 @@ describe('Z.ai quota provider (VS Code parity)', () => {
             { recordId: 111111, expireTime: '2020-01-01 00:00:00', available: true },
             { recordId: 666002, expireTime: 'not-a-date', available: true },
             { recordId: 462029, expireTime: '2099-09-11 06:01:35', available: true },
-            { recordId: 555501, expireTime: '2099-06-15 12:30:00', available: true },
+            { recordId: 555501, expireTime: '2099-06-15 12:30:00', available: true, grantType: 'GLOBAL' },
           ],
           weekResets: [
             { recordId: 777003, expireTime: '2099-03-01 08:00:00', available: true },
@@ -1269,6 +1637,7 @@ describe('Z.ai quota provider (VS Code parity)', () => {
     assert.deepEqual(windows['5h']!.giftReset, {
       recordId: 555501,
       expireAt: Date.parse('2099-06-15T12:30:00+08:00'),
+      grantType: 'GLOBAL',
     });
     assert.deepEqual(windows.weekly!.giftReset, {
       recordId: 777003,
@@ -1392,6 +1761,7 @@ describe('Z.ai gift reset activation (VS Code parity)', () => {
       return mockResponse({ code: 200, msg: 'success', data: 462029, success: true });
     });
 
+    // No grantType on the input: the provider falls back to GLOBAL.
     await activateQuotaGiftReset('zai-coding-plan', { recordId: 462029, resetType: 'FIVE_HOUR' });
 
     assert.equal(fetchCalls.length, 1);
@@ -1407,11 +1777,45 @@ describe('Z.ai gift reset activation (VS Code parity)', () => {
       resetType?: unknown;
       recordId?: unknown;
       requestId?: unknown;
+      grantType?: unknown;
     };
     assert.equal(body.targetType, 'PERSONAL');
     assert.equal(body.resetType, 'FIVE_HOUR');
     assert.equal(body.recordId, 462029);
+    assert.equal(body.grantType, 'GLOBAL');
     assert.match(String(body.requestId), /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+  });
+
+  test('threads the record grantType into the activation request unchanged', async () => {
+    const fetchCalls: Array<[string, RequestInit | undefined]> = [];
+    stubFetchReturning(async (url: string, init?: RequestInit) => {
+      fetchCalls.push([url, init]);
+      return mockResponse({ code: 200, msg: 'success', data: 1, success: true });
+    });
+
+    await activateQuotaGiftReset('zai-coding-plan', { recordId: 462029, resetType: 'WEEK', grantType: 'ACTIVITY' });
+
+    // SAFETY: body is the JSON stringified by activateQuotaGiftReset itself;
+    // only grantType is read back.
+    const body = JSON.parse(String(fetchCalls[0]?.[1]?.body)) as { grantType?: unknown };
+    assert.equal(body.grantType, 'ACTIVITY');
+  });
+
+  test('rejects an explicitly invalid grantType before any request', async () => {
+    const fetchCalls: unknown[] = [];
+    stubFetchReturning(async (url: string) => {
+      fetchCalls.push(url);
+      return mockResponse({ code: 200, msg: 'success', data: 1, success: true });
+    });
+
+    for (const grantType of ['', '   ', null, 7]) {
+      await assert.rejects(
+        // SAFETY: bridge payloads are untrusted JSON, so the provider sees values its type rules out.
+        activateQuotaGiftReset('zai-coding-plan', { recordId: 1, resetType: 'WEEK', grantType: grantType as string }),
+        /Invalid gift reset request/,
+      );
+    }
+    assert.equal(fetchCalls.length, 0);
   });
 
   test('throws the API message when activation is rejected', async () => {
@@ -2367,6 +2771,164 @@ describe('Charm Hyper quota provider (VS Code parity)', () => {
 });
 
 describe('Kimi for Coding credential lookup (VS Code parity)', () => {
+  const twoKeys = () => ({ 'kimi-for-coding': { key: 'first' }, 'kimi-code-plan-global': { key: 'second' } });
+  const originalAny = Object.getOwnPropertyDescriptor(AbortSignal, 'any');
+
+  // VS Code 1.85 runs Node 18.15, which has timeout but no AbortSignal.any.
+  beforeEach(() => {
+    Object.defineProperty(AbortSignal, 'any', { configurable: true, value: undefined });
+  });
+
+  afterEach(() => {
+    if (originalAny) Object.defineProperty(AbortSignal, 'any', originalAny);
+    else Reflect.deleteProperty(AbortSignal, 'any');
+  });
+
+  for (const status of [401, 403]) {
+    test(`tries the next credential after HTTP ${status} and failed balance`, async () => {
+      const calls: { url: string; authorization: string | null }[] = [];
+      const result = await fetchKimiQuota({
+        readAuth: twoKeys,
+        fetchImpl: async (url, init) => {
+          const authorization = new Headers(init.headers).get('Authorization');
+          calls.push({ url, authorization });
+          return authorization === 'Bearer first'
+            ? new Response(null, { status })
+            : Response.json({ usage: { limit: 100, used: 25 } });
+        },
+      });
+      assert.equal(result.usage?.windows.weekly?.usedPercent, 25);
+      assert.deepEqual(calls, [
+        { url: 'https://api.kimi.com/coding/v1/usages', authorization: 'Bearer first' },
+        { url: 'https://api.moonshot.ai/v1/users/me/balance', authorization: 'Bearer first' },
+        { url: 'https://api.kimi.ai/coding/v1/usages', authorization: 'Bearer second' },
+      ]);
+    });
+  }
+
+  test('reports the preferred error after every key is rejected', async () => {
+    const result = await fetchKimiQuota({
+      readAuth: twoKeys,
+      fetchImpl: async (_url, init) => new Response(null, {
+        status: new Headers(init.headers).get('Authorization') === 'Bearer first' ? 401 : 403,
+      }),
+    });
+    assert.equal(result.ok, false);
+    assert.equal(result.configured, true);
+    assert.equal(result.error, 'API error: 401');
+    assert.equal(result.usage, null);
+  });
+
+  test('deduplicates keys at the same endpoint while preserving regional candidates', async () => {
+    const urls: string[] = [];
+    const result = await fetchKimiQuota({
+      readAuth: () => ({ 'kimi-code-plan-cn': { key: 'shared' }, kimi: { key: 'shared' }, 'kimi-code-plan-global': { key: 'shared' } }),
+      fetchImpl: async (url) => {
+        urls.push(url);
+        return url === 'https://api.kimi.ai/coding/v1/usages'
+          ? Response.json({ usages: { limit_5h: { used_ratio: 0.25 } } })
+          : new Response(null, { status: 401 });
+      },
+    });
+    assert.equal(result.usage?.windows['5h']?.usedPercent, 25);
+    assert.deepEqual(urls, ['https://api.kimi.com/coding/v1/usages', 'https://api.moonshot.ai/v1/users/me/balance', 'https://api.kimi.ai/coding/v1/usages']);
+  });
+
+  test('stays configured when only a later alias holds a usable key', async () => {
+    configureOpenCodeCredentials({ list: async () => [key('kimi-code-plan-global')] });
+    try {
+      assert.ok((await listConfiguredQuotaProviders()).includes('kimi-for-coding'));
+    } finally {
+      configureOpenCodeCredentials({ list: async () => baseCredentialList() });
+    }
+  });
+
+  for (const status of [429, 500]) {
+    test(`does not switch accounts after HTTP ${status}`, async () => {
+      let requests = 0;
+      const result = await fetchKimiQuota({
+        readAuth: twoKeys,
+        fetchImpl: async () => {
+          requests += 1;
+          return requests === 1 ? new Response(null, { status }) : Response.json({ usage: { limit: 100, used: 25 } });
+        },
+      });
+      assert.equal(requests, 1);
+      assert.equal(result.error, `API error: ${status}`);
+      assert.equal(result.usage, null);
+    });
+  }
+
+  for (const failure of ['transport', 'json']) {
+    test(`does not switch accounts after a ${failure} failure`, async () => {
+      let requests = 0;
+      const result = await fetchKimiQuota({
+        readAuth: twoKeys,
+        fetchImpl: async () => {
+          requests += 1;
+          if (failure === 'transport') throw new Error('Connection failed');
+          return new Response('{');
+        },
+      });
+      assert.equal(requests, 1);
+      assert.equal(result.ok, false);
+      assert.equal(result.usage, null);
+    });
+  }
+
+  test('returns a successful Moonshot balance before trying another credential', async () => {
+    const keys: (string | null)[] = [];
+    const result = await fetchKimiQuota({
+      readAuth: twoKeys,
+      fetchImpl: async (url, init) => {
+        keys.push(new Headers(init.headers).get('Authorization'));
+        return url === 'https://api.moonshot.ai/v1/users/me/balance'
+          ? Response.json({ data: { available_balance: 5 } })
+          : new Response(null, { status: 403 });
+      },
+    });
+    assert.equal(result.usage?.windows.credits_balance?.valueLabel, '$5.00');
+    assert.deepEqual(keys, ['Bearer first', 'Bearer first']);
+  });
+
+  for (const expired of ['probe', 'refresh', 'usage']) {
+    test(`honors the ${expired} deadline during body reads`, async () => {
+      const deadlines: { ms: number; controller: AbortController }[] = [];
+      const originalTimeout = AbortSignal.timeout;
+      AbortSignal.timeout = (ms) => {
+        const controller = new AbortController();
+        deadlines.push({ ms, controller });
+        return controller.signal;
+      };
+      try {
+        const result = await fetchKimiQuota({
+          readAuth: twoKeys,
+          fetchImpl: async (url, init) => {
+            if (expired === 'usage' || url === 'https://api.moonshot.ai/v1/users/me/balance') {
+              return new Response(new ReadableStream({ start(controller) {
+                init.signal!.addEventListener('abort', () => controller.error(init.signal!.reason), { once: true });
+                deadlines[expired === 'refresh' ? 0 : expired === 'usage' ? 1 : 2].controller.abort(new DOMException('Timed out', 'TimeoutError'));
+              } }));
+            }
+            return new Headers(init.headers).get('Authorization') === 'Bearer first'
+              ? new Response(null, { status: 401 })
+              : Response.json({ usage: { limit: 100, used: 25 } });
+          },
+        });
+        if (expired === 'probe') {
+          assert.equal(result.usage?.windows.weekly?.usedPercent, 25);
+          assert.deepEqual(deadlines.map(({ ms }) => ms), [25_000, 5_000, 5_000, 5_000]);
+        } else {
+          assert.equal(result.ok, false);
+          assert.equal(result.usage, null);
+          assert.deepEqual(deadlines.map(({ ms }) => ms), expired === 'usage' ? [25_000, 5_000] : [25_000, 5_000, 5_000]);
+        }
+      } finally {
+        AbortSignal.timeout = originalTimeout;
+      }
+    });
+  }
+
   const sentKey = async (auth: Record<string, { type?: string; key: string; token?: string }>) => {
     let authorization: string | undefined;
     const result = await fetchKimiQuota({

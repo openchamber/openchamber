@@ -137,6 +137,19 @@ describe('createUpstreamReadSignal', () => {
     expect(signal.aborted).toBe(false);
   });
 
+  it('keeps a deadline-free read (timeoutMs 0) abortable only by the client', async () => {
+    const res = createResponseDouble();
+    const signal = createUpstreamReadSignal({ res, timeoutMs: 0 });
+
+    await delay(20);
+    expect(signal.aborted).toBe(false);
+
+    res.emit('close');
+
+    expect(signal.aborted).toBe(true);
+    expect(signal.reason?.name).toBe('AbortError');
+  });
+
   it('ends the read when the response was already gone', () => {
     const res = createResponseDouble();
     res.destroyed = true;

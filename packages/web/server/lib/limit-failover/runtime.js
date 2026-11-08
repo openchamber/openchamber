@@ -25,7 +25,7 @@ const PLUGIN_PACKAGE_JSON = `${JSON.stringify({
 // No imports: OpenCode loads the entry from its own directory, where nothing
 // is installed. It reaches the server through the callback address and token
 // the agent tool runtime puts into the managed child's environment.
-const PLUGIN_SOURCE = `const LIMIT_ERROR_TYPES = new Set(["provider.quota", "provider.free-limit", "provider.rate-limit"])
+const PLUGIN_SOURCE = `const LIMIT_ERROR_TYPES = new Set(["provider.quota", "provider.free-limit", "provider.budget-limit", "provider.model-budget-limit", "provider.rate-limit"])
 const ROUTE = ${JSON.stringify(ROUTE)}
 
 const callback = () => {

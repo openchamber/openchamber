@@ -1,5 +1,6 @@
 import React from 'react';
 import { toast } from 'sonner';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/lib/i18n';
 import { Icon } from '@/components/icon/Icon';
 import { selectAvailableSkillsForDirectory, useSkillsStore } from '@/stores/useSkillsStore';
@@ -27,13 +28,16 @@ import { useProjectsStore } from '@/stores/useProjectsStore';
 import { resolveProjectForSessionDirectory } from '@/lib/projectResolution';
 import { resolveProjectContextId } from '@/lib/projectContextApi';
 import { useConfigStore } from '@/stores/useConfigStore';
+import { useOutsideRepository } from '@/components/sourceBoard/useOutsideRepository';
 import { useOpenTrackerItem } from '@/components/sourceBoard/openTrackerItem';
+import { useCopyReferenceLink } from '@/components/references/useCopyReferenceLink';
 import { WorkStatusCollapsibleSection, WorkStatusRow, WorkStatusValue } from './WorkStatusPrimitives';
 import { useReportWorkStatusPresence } from './presenceContext';
 import { resolveDraftPinnedKnowledge } from './draftKnowledge';
 import { changeRequestCopy } from '@/lib/source-control/changeRequestCopy';
 import { refTintStyle } from '@/lib/source-control/prVisualState';
 import { cn } from '@/lib/utils';
+import { useLeaveWorkStatus } from './leaveWorkStatus';
 
 
 type Props = {
@@ -50,6 +54,12 @@ type Props = {
  * `Agent.tools` is a per-agent override map, not a registry, so its size would
  * report something other than "tools available".
  */
+/** A linked item's number, its repository when that is not the project's, and its state. */
+const LinkedReference: React.FC<{ reference: string; status?: string | null; url: string; directory: string | null }> = ({ reference, status, url, directory }) => {
+  const repository = useOutsideRepository(url, directory);
+  return <>{[reference, repository, status].filter(Boolean).join(' · ')}</>;
+};
+
 export const WorkStatusContextSection: React.FC<Props> = ({ sessionId, directory }) => {
   const { t } = useI18n();
 
@@ -191,7 +201,7 @@ export const WorkStatusContextSection: React.FC<Props> = ({ sessionId, directory
     () => linkedSidebarIssues.flatMap((issue) => (issue.source === 'repository' ? [issue.ref] : [])),
     [linkedSidebarIssues],
   );
-  const repositoryIssueItems = React.useMemo(() => repositoryIssueRefs.map((ref) => repositoryThread('issue', ref)), [repositoryIssueRefs]);
+  const repositoryIssueItems = React.useMemo(() => repositoryIssueRefs.map((ref) => repositoryThread(ref.thread, ref)), [repositoryIssueRefs]);
   const linkedTrackerEntries = React.useMemo(
     () => linkedSidebarIssues.flatMap((issue) => (issue.source === 'tracker' ? [{ key: issue.key, identifier: issue.identifier, item: workItem(issue.provider, issue.identifier) }] : [])),
     [linkedSidebarIssues],
@@ -218,12 +228,12 @@ export const WorkStatusContextSection: React.FC<Props> = ({ sessionId, directory
   const branchPrSummary = useFreshestSourceControlVisualSummaryForBranch(gitDirectory, branch);
   // Repository thread key, or a tracker entry's id (`linear:ENG-12`) lowercased -> the coloured status line.
   const liveLookById = React.useMemo(() => {
-    const looks = new Map<string, { color: string; text: string }>();
+    const looks = new Map<string, { color: string; reference: string; status: string | null }>();
     const changeLook = (summary: PrVisualSummary, ref: RepositoryThreadRef) => {
       const descriptor = urlMatcher.descriptorOf(ref.provider);
       const reference = formatChangeRequestReference(descriptor, ref.number);
       const label = getPrStatusLabel(summary, descriptor.terminology.changeRequest, t);
-      return { color: `var(--pr-${summary.visualState})`, text: label ? `${reference} · ${label}` : reference };
+      return { color: `var(--pr-${summary.visualState})`, reference, status: label };
     };
     // A summary belongs to the link at its own index: the same owner/repo#number
     // can be linked from two instances in one session, and only the position
@@ -237,7 +247,7 @@ export const WorkStatusContextSection: React.FC<Props> = ({ sessionId, directory
       if (!state) return;
       const look = getIssueStateLook(state.state);
       const identifier = `${urlMatcher.descriptorOf(ref.provider).terminology.issuePrefix}${ref.number}`;
-      looks.set(ref.key, { color: look.color, text: `${identifier} · ${t(look.statusKey)}` });
+      looks.set(ref.key, { color: look.color, reference: identifier, status: t(look.statusKey) });
     });
     // A tracker shows its own state name; the colour comes from its category.
     linkedTrackerEntries.forEach(({ key, identifier }, index) => {
@@ -245,7 +255,8 @@ export const WorkStatusContextSection: React.FC<Props> = ({ sessionId, directory
       if (!state) return;
       looks.set(key.toLowerCase(), {
         color: getTrackerItemStateLook(state.state.category).color,
-        text: `${identifier} · ${state.state.name}`,
+        reference: identifier,
+        status: state.state.name,
       });
     });
     if (branchPrSummary?.repo) {
@@ -260,6 +271,8 @@ export const WorkStatusContextSection: React.FC<Props> = ({ sessionId, directory
     return looks;
   }, [branchPrSummary, changeSummaries, linkedTrackerEntries, linkedWorkItemStates, repositoryChanges, repositoryIssueRefs, repositoryIssueStates, t, urlMatcher]);
   const openTrackerItem = useOpenTrackerItem();
+  const copyLink = useCopyReferenceLink();
+  const leaveWorkStatus = useLeaveWorkStatus();
   const trackerDescriptors = useTrackerDescriptors();
   // Connected servers only. A disabled server contributes nothing to the
   // context, so counting it here contradicts the MCP section right above,
@@ -350,7 +363,7 @@ export const WorkStatusContextSection: React.FC<Props> = ({ sessionId, directory
   // The kind, never the author: an agent's link has no avatar, and a mix of
   // faces and icons hid which row was a PR. An issue reads as an issue
   // wherever it lives (GitHub, GitLab, an agent's or an extension's link) and
-  // wears its state's colour, muted, as on a sidebar row.
+  // wears its state's colour, as on a sidebar row.
   const renderLinkedIcon = (entry: (typeof linked)[number]) => {
     const color = liveLookOf(entry)?.color;
     return (
@@ -366,7 +379,9 @@ export const WorkStatusContextSection: React.FC<Props> = ({ sessionId, directory
     const identifier = renderedIdentifier(entry);
     return (
       <>
-        <span className={cn('tabular-nums', look && 'oc-ref-tint')} style={look ? refTintStyle(look.color) : undefined}>{look ? look.text : identifier}</span>
+        <span className={cn('tabular-nums', look && 'oc-ref-tint')} style={look ? refTintStyle(look.color) : undefined}>
+          <LinkedReference reference={look?.reference ?? identifier} status={look?.status} url={entry.url} directory={directory} />
+        </span>
         {entry.title ? <> · {entry.title}</> : null}
       </>
     );
@@ -391,23 +406,57 @@ export const WorkStatusContextSection: React.FC<Props> = ({ sessionId, directory
           muted
           // In the Tracker, read through this session's project; Cmd or Ctrl,
           // and anything the app cannot show, opens the link.
-          onClick={(event) => openTrackerItem(entry.url, directory, event)}
+          onClick={(event) => {
+            openTrackerItem(entry.url, directory, event);
+            leaveWorkStatus?.();
+          }}
+          className="group/linked"
           // The panel that shows what a session carries is the one that can
           // take an item back off; a pinned row's control is the precedent.
           // This sits in the trailing value slot, where row actions live.
+          // Copying the link appears on hover and takes no space at rest, so
+          // the title keeps the full width; focus inside the row shows it for
+          // the keyboard, and a touch screen, which has no hover, shows it always.
           value={(
-            <button
-              type="button"
-              disabled={!sessionId || !directory}
-              aria-label={t('chat.workStatus.linkedIssues.unlink')}
-              onClick={(event) => {
-                event.stopPropagation();
-                unlinkLinkedThread(entry);
-              }}
-              className="shrink-0 rounded p-0.5 text-muted-foreground/60 transition-colors hover:text-foreground disabled:opacity-40 disabled:hover:text-muted-foreground/60"
-            >
-              <Icon name="close" className="size-3.5" />
-            </button>
+            <>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    aria-label={t('references.link.copy')}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      copyLink(entry.url);
+                    }}
+                    className="hidden shrink-0 rounded p-0.5 text-muted-foreground transition-colors hover:text-foreground group-focus-within/linked:block group-hover/linked:block pointer-coarse:block pointer-coarse:p-2"
+                  >
+                    <Icon name="link" className="size-3.5" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="top" sideOffset={4}>{t('references.link.copy')}</TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  {/* A row turns off pointer events on all but buttons; the span keeps the tooltip on a disabled one. */}
+                  <span className="pointer-events-auto inline-flex shrink-0">
+                    <button
+                      type="button"
+                      disabled={!sessionId || !directory}
+                      aria-label={t('chat.workStatus.linkedIssues.unlink')}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        unlinkLinkedThread(entry);
+                      }}
+                      // A finger needs more than the icon, and a missed copy must not land on unlink.
+                      className="shrink-0 rounded p-0.5 text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40 disabled:hover:text-muted-foreground pointer-coarse:p-2"
+                    >
+                      <Icon name="close" className="size-3.5" />
+                    </button>
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent side="top" sideOffset={4}>{t('chat.workStatus.linkedIssues.unlink')}</TooltipContent>
+              </Tooltip>
+            </>
           )}
           ariaLabel={entry.kind === 'tracker'
             ? t('chat.workStatus.linkedIssues.openTrackerItem', { identifier: entry.identifier, provider: trackerNameOf(entry.provider) })
@@ -426,18 +475,26 @@ export const WorkStatusContextSection: React.FC<Props> = ({ sessionId, directory
           key={note.id}
           muted
           leading={(
-            <button
-              type="button"
-              disabled={!isDraft && (!sessionId || !directory)}
-              aria-label={t('chat.workStatus.breakdown.unpin')}
-              onClick={(event) => {
-                event.stopPropagation();
-                unpinNote(note.id);
-              }}
-              className="-m-0.5 shrink-0 rounded p-0.5 opacity-70 transition-opacity hover:opacity-100 disabled:opacity-40"
-            >
-              <Icon name="pushpin-2-fill" className="size-3.5" style={{ color: 'var(--primary)' }} />
-            </button>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                {/* A row turns off pointer events on all but buttons; the span keeps the tooltip on a disabled one. */}
+                <span className="pointer-events-auto inline-flex shrink-0">
+                  <button
+                    type="button"
+                    disabled={!isDraft && (!sessionId || !directory)}
+                    aria-label={t('chat.workStatus.breakdown.unpin')}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      unpinNote(note.id);
+                    }}
+                    className="-m-0.5 shrink-0 rounded p-0.5 opacity-70 transition-opacity hover:opacity-100 disabled:opacity-40"
+                  >
+                    <Icon name="pushpin-2-fill" className="size-3.5" style={{ color: 'var(--primary)' }} />
+                  </button>
+                </span>
+              </TooltipTrigger>
+              <TooltipContent side="top" sideOffset={4}>{t('chat.workStatus.breakdown.unpin')}</TooltipContent>
+            </Tooltip>
           )}
           label={note.body.trim().split('\n')[0] || note.body.trim()}
           value={<WorkStatusValue tone="muted">{t('chat.workStatus.breakdown.pinnedNote')}</WorkStatusValue>}
@@ -448,18 +505,26 @@ export const WorkStatusContextSection: React.FC<Props> = ({ sessionId, directory
           key={plan.id}
           muted
           leading={(
-            <button
-              type="button"
-              disabled={!isDraft && (!sessionId || !directory)}
-              aria-label={t('chat.workStatus.breakdown.unpin')}
-              onClick={(event) => {
-                event.stopPropagation();
-                unpinPlan(plan.id);
-              }}
-              className="-m-0.5 shrink-0 rounded p-0.5 opacity-70 transition-opacity hover:opacity-100 disabled:opacity-40"
-            >
-              <Icon name="pushpin-2-fill" className="size-3.5" style={{ color: 'var(--primary)' }} />
-            </button>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                {/* A row turns off pointer events on all but buttons; the span keeps the tooltip on a disabled one. */}
+                <span className="pointer-events-auto inline-flex shrink-0">
+                  <button
+                    type="button"
+                    disabled={!isDraft && (!sessionId || !directory)}
+                    aria-label={t('chat.workStatus.breakdown.unpin')}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      unpinPlan(plan.id);
+                    }}
+                    className="-m-0.5 shrink-0 rounded p-0.5 opacity-70 transition-opacity hover:opacity-100 disabled:opacity-40"
+                  >
+                    <Icon name="pushpin-2-fill" className="size-3.5" style={{ color: 'var(--primary)' }} />
+                  </button>
+                </span>
+              </TooltipTrigger>
+              <TooltipContent side="top" sideOffset={4}>{t('chat.workStatus.breakdown.unpin')}</TooltipContent>
+            </Tooltip>
           )}
           label={plan.title}
           value={<WorkStatusValue tone="muted">{t('chat.workStatus.breakdown.pinnedPlan')}</WorkStatusValue>}

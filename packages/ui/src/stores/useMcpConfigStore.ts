@@ -224,6 +224,17 @@ export const selectMcpServersForDirectory = (
   return state.serversByDirectory[cacheKey] ?? EMPTY_MCP_SERVERS;
 };
 
+/**
+ * Whether this directory's config catalog has been read at least once. A
+ * runtime-only MCP row (#5935) waits for that read: before it, every server
+ * the runtime reports would read as runtime-only, and a configured server
+ * would flash as one while its config entry was still loading.
+ */
+export const hasLoadedMcpConfigsForDirectory = (
+  state: Pick<McpConfigStore, 'serversByDirectory'>,
+  directory?: string | null,
+): boolean => state.serversByDirectory[getMcpCacheKey(resolveDirectory(directory))] !== undefined;
+
 export const useMcpConfigStore = create<McpConfigStore>()(
   devtools(
     persist(

@@ -65,6 +65,11 @@ The composer's parallel mode (`components/chat/composer/parallel/`) and the
 overview's "Ask another model" launch lanes; `useMultiRunStore.createMultiRun`
 creates them and `dispatchRunPrompt` sends each lane its prompt with the
 project's session knowledge. The Auto routing model is never a lane.
+With `goal` set, `dispatchRunPrompt` writes the lane's own goal before its
+prompt, the order of an ordinary send. A lane whose goal cannot be written is
+not sent and shows as not started. A rejected prompt clears the goal again: with
+no turn to audit the server would keep it active, and the lane would stay
+working and hold auto-fusion. "Ask another model" adds plain lanes.
 `runActions.askOtherModels` turns a chat into a run by writing membership onto
 it and adding lanes that re-send its first prompt; it refuses any turn but the
 first, because new lanes would start without the conversation that followed.
@@ -120,9 +125,27 @@ and no answer at all is `NoFusionOutputsError`.
 Fusion results keep the group identity with role `fusion`, so they join the run
 as its first card. `autoFusion.ts` starts the configured fusion exactly once, on
 the page that launched the run (`RUN_LAUNCHER_ID`), when every lane was seen
-running on this page and has since left the live busy set with an outcome.
+running on this page and has since left the live busy set with an outcome,
+with no running subagent below it and no active goal. An active goal idles
+between turns with an outcome already recorded, so only its settling (complete,
+blocked, paused, out of budget) ends the lane. The descendant check uses the same merged
+session map as run membership, so it covers nested children across directories.
+An idle lane with a running descendant must record a newer `time.idle` before
+it can finish, so a gap between the child settling and the parent resuming
+cannot start fusion with the earlier outcome. The completion timestamp also
+covers a parent resumption that starts and finishes within one UI update.
+The status reducer's synchronous transition subscription records a lane's wait
+before the next event in a batch can settle its child. A busy transition clears
+that wait for the resumed parent, even if its next completion shares the batch.
 Persisted history never counts as finished; another client, or the launcher
 after a reload, fuses from the overview instead.
+
+### Why automatic fusion waits for descendants
+
+A parent can report idle with an outcome while a background subagent still
+runs, then resume to incorporate its result. Checking the parent's status
+alone would send its preliminary answer to fusion. The shared live subagent
+check keeps automatic fusion pending through that pause.
 
 ## Overview
 
@@ -138,11 +161,13 @@ A run left with one active member stops being a run on its own.
 
 Each card's state comes from `laneStatus.resolveLaneStatus`, over live and
 recorded facts only: a pending permission or question (the global blocking
-index) wins over busy, then the live busy set, then OpenCode's recorded outcome
+index) wins over busy, then the live busy set or an active goal, then OpenCode's recorded outcome
 (`failed`, `interrupted` as stopped), a lane that never ended a turn, and a
 normal end with or without answer text. A normal end is grey, never green: it
 says the turn ended, not that the work is good; an unread dot marks replies
-the user has not opened. A failed card shows the error recorded on the newest
+the user has not opened. A lane with a goal shows the sidebar's goal mark beside
+its name, coloured by the goal's status, so a blocked goal reads as blocked on a
+card whose turn ended normally. A failed card shows the error recorded on the newest
 assistant message (`laneData.loadLaneLastTurn`) or says to open the chat. The
 header counts lanes per state, and the bottom bar names lanes waiting for the
 user, because they block the run and auto-fusion. Each variant's prompt is one

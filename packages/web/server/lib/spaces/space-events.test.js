@@ -242,6 +242,40 @@ describe('createSpaceEventSources: the queue connection', () => {
     expect(logs.join('\n')).not.toContain('/home/me/project');
   });
 
+  it('forwards an auto-review change only when the space speaks for both of its sessions', async () => {
+    start();
+    index.observeHostRecords([{ id: 'host-1' }]);
+    sources.sync([ID]);
+    expect(await until(() => Boolean(controlStream()))).toBe(true);
+    const directory = `/spaces/${ID}/repo`;
+    const run = (originalSessionID, reviewSessionID, extra = {}) => ({
+      originalSessionID, reviewSessionID, directory, status: 'running', step: 'review', round: 1, maxRounds: 15, startedAt: 1, updatedAt: 2, ...extra,
+    });
+    const update = (originalSessionID, value, at = directory) => ({
+      type: 'openchamber:auto-review.updated',
+      properties: { revision: 4, originalSessionID, directory: at, run: value },
+    });
+    const write = (payload) => controlStream().write(`data: ${JSON.stringify(payload)}\n\n`);
+    write(update('host-1', run('host-1', 's2')));
+    write(update('s1', run('s1', 'host-1')));
+    write(update('s1', run('other', 's2')));
+    write(update('s1', null, '/home/me/project'));
+    write(update('s1', run('s1', 's2', { injected: 'x' })));
+    expect(await until(() => broadcast.some((event) => event.type === 'openchamber:auto-review.updated'))).toBe(true);
+    await sleep(50);
+    const forwarded = broadcast.filter((event) => event.type === 'openchamber:auto-review.updated');
+    expect(forwarded).toEqual([{
+      type: 'openchamber:auto-review.updated',
+      properties: { revision: 4, originalSessionID: 's1', directory, run: run('s1', 's2'), spaceId: ID },
+    }]);
+    expect(logs.filter((line) => line.includes('dropped an auto-review update'))).toHaveLength(4);
+
+    // A failure with a whole provider body as its error still ends the run in the browsers.
+    write(update('s1', run('s1', 's2', { status: 'failed', error: 'x'.repeat(3_000) })));
+    expect(await until(() => broadcast.filter((event) => event.type === 'openchamber:auto-review.updated').length === 2)).toBe(true);
+    expect(broadcast.at(-1).properties.run).toMatchObject({ status: 'failed', error: 'x'.repeat(2_000) });
+  });
+
   it('keeps a quiet connection that hears the heartbeat, and remakes one that falls silent past its timeout', async () => {
     index = createSpaceSessionIndex({ logger });
     broadcast = [];

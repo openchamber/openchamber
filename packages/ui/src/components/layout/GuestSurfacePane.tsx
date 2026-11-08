@@ -3,6 +3,7 @@ import React from 'react';
 import type { SurfaceInputEvent, SurfaceModifiers } from '@openchamber/sdk';
 
 import { Button } from '@/components/ui/button';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { useI18n } from '@/lib/i18n';
 import { isGuestActive } from '@/lib/guests/capabilities';
@@ -45,6 +46,8 @@ export const GuestSurfacePane: React.FC<Props> = ({ mode }) => {
   const guestId = pluginIdFromMode(mode);
   const guest = useGuestsStore((state) => state.guests.find((entry) => entry.id === guestId) ?? null);
   const active = guest !== null && isGuestActive(guest) && guest.service?.surface === true;
+  // New package files stop the service, which ends the session; a new client attaches to the next one.
+  const packageKey = `${guest?.version ?? ''}:${guest?.revision ?? 0}`;
 
   const containerRef = React.useRef<HTMLDivElement | null>(null);
   const canvasRef = React.useRef<HTMLCanvasElement | null>(null);
@@ -120,7 +123,7 @@ export const GuestSurfacePane: React.FC<Props> = ({ mode }) => {
       frameSizeRef.current = null;
       setHasFrame(false);
     };
-  }, [active, drawFrame, guestId, setControl]);
+  }, [active, drawFrame, guestId, packageKey, setControl]);
 
   // Tell the extension how much room the panel has, so a browser or a
   // simulator can lay itself out at that size instead of being scaled.
@@ -221,7 +224,7 @@ export const GuestSurfacePane: React.FC<Props> = ({ mode }) => {
     event.preventDefault();
     event.stopPropagation();
     if (action === 'down' && isCopyChord(event)) clipboardAfterFlushRef.current = true;
-    queue({ type: 'key', action, key: event.key, code: event.code, modifiers: modifiersOf(event) });
+    queue({ type: 'key', action, key: event.key, code: event.code, keyCode: event.keyCode, modifiers: modifiersOf(event) });
   };
 
   const onPaste = (event: React.ClipboardEvent<HTMLDivElement>) => {
@@ -269,14 +272,24 @@ export const GuestSurfacePane: React.FC<Props> = ({ mode }) => {
           {t(statusKey)}
         </span>
         {control.controller === 'user' && control.mine ? (
-          <Button size="xs" variant="outline" onClick={release}>
-            {t('contextPanel.surface.handBack')}
-          </Button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button size="xs" variant="outline" onClick={release}>
+                {t('contextPanel.surface.handBack')}
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom" sideOffset={6}>{t('contextTooltips.panel.releaseSurface')}</TooltipContent>
+          </Tooltip>
         ) : null}
         {connection.status === 'ended' ? (
-          <Button size="xs" variant="outline" onClick={() => clientRef.current?.retry()}>
-            {t('contextPanel.surface.retry')}
-          </Button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button size="xs" variant="outline" onClick={() => clientRef.current?.retry()}>
+                {t('contextPanel.surface.retry')}
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom" sideOffset={6}>{t('contextTooltips.panel.reconnectSurface')}</TooltipContent>
+          </Tooltip>
         ) : null}
       </div>
       <div

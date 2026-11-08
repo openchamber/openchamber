@@ -154,6 +154,32 @@ function findSnippetByName(name, workingDirectory) {
   return registry.get(name.toLowerCase()) ?? null;
 }
 
+// A name or alias that already triggers a snippet is taken: a second file
+// under it would shadow or be shadowed by the first.
+function assertSnippetNameFree(name, registry, owner = null) {
+  const current = registry.get(name.toLowerCase());
+  if (current && current !== owner) throw new Error(`Snippet "${name}" already exists`);
+}
+
+function isSameFile(a, b) {
+  const first = fs.statSync(a);
+  const second = fs.statSync(b);
+  return first.dev === second.dev && first.ino === second.ino;
+}
+
+// Rename and scope moves keep the file's bytes; a move across volumes (a
+// project on another disk than the global config) cannot rename.
+function moveSnippetFile(from, to) {
+  fs.mkdirSync(path.dirname(to), { recursive: true });
+  try {
+    fs.renameSync(from, to);
+  } catch (error) {
+    if (error?.code !== 'EXDEV') throw error;
+    fs.copyFileSync(from, to);
+    fs.unlinkSync(from);
+  }
+}
+
 function parseSnippetBlocks(content) {
   const blocks = { prepend: [], append: [] };
   let inline = content;
@@ -213,6 +239,7 @@ export function getSnippet(name, workingDirectory) {
 
 export function createSnippet(name, config, workingDirectory, scope = 'global') {
   assertValidSnippetName(name);
+  assertSnippetNameFree(name, loadSnippetRegistry(workingDirectory));
   const dir = getWritableSnippetDir(scope, workingDirectory);
   const filePath = path.join(dir, `${name}${SNIPPET_EXTENSION}`);
   if (fs.existsSync(filePath)) throw new Error(`Snippet "${name}" already exists`);
@@ -220,11 +247,35 @@ export function createSnippet(name, config, workingDirectory, scope = 'global') 
   return getSnippet(name, workingDirectory);
 }
 
+/**
+ * Writes the snippet's fields; `updates.name` renames it and `updates.scope`
+ * moves it between the global and the project folder.
+ */
 export function updateSnippet(name, updates, workingDirectory) {
-  const existing = findSnippetByName(name, workingDirectory);
+  assertValidSnippetName(name);
+  const registry = loadSnippetRegistry(workingDirectory);
+  const existing = registry.get(name.toLowerCase());
   if (!existing) throw new Error(`Snippet "${name}" not found`);
-  writeMarkdownFile(existing.filePath, { ...existing, ...(updates || {}) });
-  return getSnippet(name, workingDirectory);
+  const { name: nextNameInput, scope: nextScopeInput, ...fields } = updates || {};
+  const nextName = String(nextNameInput ?? '').trim() || existing.name;
+  const nextScope = nextScopeInput === 'project' || nextScopeInput === 'global' ? nextScopeInput : existing.source;
+  assertValidSnippetName(nextName);
+
+  const targetPath = nextName === existing.name && nextScope === existing.source
+    ? existing.filePath
+    : path.join(getWritableSnippetDir(nextScope, workingDirectory), `${nextName}${SNIPPET_EXTENSION}`);
+  if (targetPath !== existing.filePath) {
+    assertSnippetNameFree(nextName, registry, existing);
+    // A case-only rename finds its own file on a case-insensitive disk; any
+    // other file there is a snippet the registry shadows, never overwritten.
+    if (fs.existsSync(targetPath) && !isSameFile(targetPath, existing.filePath)) {
+      throw new Error(`Snippet "${nextName}" already exists`);
+    }
+  }
+
+  writeMarkdownFile(existing.filePath, { ...existing, ...fields });
+  if (targetPath !== existing.filePath) moveSnippetFile(existing.filePath, targetPath);
+  return getSnippet(nextName, workingDirectory);
 }
 
 export function deleteSnippet(name, workingDirectory) {
@@ -238,4 +289,20 @@ export function expandSnippets(text, workingDirectory) {
   const collector = { prepend: [], append: [] };
   const expanded = expandText(text || '', registry, new Map(), collector).trim();
   return [...collector.prepend, expanded, ...collector.append].filter(Boolean).join('\n\n');
+}
+
+/**
+ * What a snippet body, saved or not, sends once used: its own prepend and
+ * append blocks placed, and the snippets it names expanded.
+ */
+export function previewSnippet(content, workingDirectory) {
+  const registry = loadSnippetRegistry(workingDirectory);
+  const collector = { prepend: [], append: [] };
+  const counts = new Map();
+  const parsed = parseSnippetBlocks(content || '');
+  // The order `expandText` gives a used snippet: its blocks, then its text.
+  for (const block of parsed.prepend) collector.prepend.push(expandText(block, registry, counts, collector));
+  for (const block of parsed.append) collector.append.push(expandText(block, registry, counts, collector));
+  const inline = expandText(parsed.inline, registry, counts, collector).trim();
+  return [...collector.prepend, inline, ...collector.append].filter(Boolean).join('\n\n');
 }

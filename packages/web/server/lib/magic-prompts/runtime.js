@@ -1,6 +1,6 @@
 const FILE_VERSION = 1;
 const MAX_PROMPT_TEXT_LENGTH = 200_000;
-const PROMPT_ID_PATTERN = /^[a-z0-9._-]{1,160}$/;
+const PROMPT_ID_PATTERN = /^[A-Za-z0-9._-]{1,160}$/;
 const isVisiblePromptID = (id) => typeof id === 'string' && id.endsWith('.visible');
 
 const hasOwn = (input, key) => Object.prototype.hasOwnProperty.call(input, key);

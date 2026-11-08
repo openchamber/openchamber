@@ -332,7 +332,7 @@ export const AgentPermissionsEditor: React.FC<AgentPermissionsEditorProps> = ({
     const isExpanded = expandedKeys[key] === true;
 
     return (
-      <div key={key} className="border-t border-border/40 py-2">
+      <div key={key} className="border-t border-edge-muted py-2">
         <div className="flex flex-col gap-2 @xl:flex-row @xl:items-center @xl:justify-between">
           <button
             type="button"
@@ -345,7 +345,7 @@ export const AgentPermissionsEditor: React.FC<AgentPermissionsEditorProps> = ({
               className={cn('h-3.5 w-3.5 shrink-0 text-muted-foreground', !supportsPatterns && 'opacity-0')}
             />
             <span className={SETTINGS_FIELD_LABEL_CLASS}>{label}</span>
-            <span className="typography-micro font-mono text-muted-foreground/70">{key}</span>
+            <span className="typography-micro font-mono text-muted-foreground">{key}</span>
             {statusLabel && (
               <span className="typography-micro rounded bg-muted px-1 text-muted-foreground">{statusLabel}</span>
             )}
@@ -436,7 +436,7 @@ export const AgentPermissionsEditor: React.FC<AgentPermissionsEditorProps> = ({
 
       {mcpKeys.length > 0 && (
         <div>
-          <div className="flex items-center gap-1.5 border-t border-border/40 pt-3 pb-1">
+          <div className="flex items-center gap-1.5 border-t border-edge-muted pt-3 pb-1">
             <span className={SETTINGS_FIELD_LABEL_CLASS}>{t('settings.agents.page.permissionsEditor.mcpTitle')}</span>
             <SettingsInfoHint>{t('settings.agents.page.permissionsEditor.mcpInfo')}</SettingsInfoHint>
           </div>
@@ -444,7 +444,7 @@ export const AgentPermissionsEditor: React.FC<AgentPermissionsEditorProps> = ({
         </div>
       )}
       {/* A tool the list does not know yet (an MCP or plugin tool). */}
-      <div className="flex flex-wrap items-center gap-2 border-t border-border/40 pt-3">
+      <div className="flex flex-wrap items-center gap-2 border-t border-edge-muted pt-3">
         <Input
           value={customKeyDraft}
           onChange={(event) => setCustomKeyDraft(event.target.value)}

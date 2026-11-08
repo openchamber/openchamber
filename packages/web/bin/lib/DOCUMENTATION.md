@@ -28,6 +28,7 @@ Command modules implement user-facing commands and preserve output contracts acr
 - `commands-session.js`
   - Implements `openchamber session create`, `send`, `fork`, `list`, `status`, and `messages`.
   - Maps CLI options to shared control-service inputs and owns only human, quiet, and JSON presentation.
+  - A `--wait` that ends because the session waits for the user exits non-zero, with a line on stderr outside `--json`.
   - Message projection matches Export Markdown semantics: only ordered `text` parts are exposed; tool, reasoning, file, and other parts are omitted.
   - The server control service owns create/worktree/prompt orchestration, official OpenCode reads, Goal Mode, wait semantics, and partial failures.
 
@@ -60,6 +61,9 @@ Command modules implement user-facing commands and preserve output contracts acr
   - Implements `openchamber update`.
   - Loads the package-manager helper, performs update flow, and coordinates restart behavior after updates.
   - Installs the exact version returned by the update check and verifies the globally installed version after the package manager exits; a zero exit status without the target version is a loud failure, not a success report (#3083).
+  - An instance that is the startup service is not stopped before the install: its process manager would start the old release again while the package manager replaces its files. The service keeps running through the install, then the manager restarts it: `systemctl --user restart` on Linux, `launchctl kickstart -k` on macOS, a stop of the task and its server with a detached helper issuing `schtasks /Run` on Windows (#2542). The command then waits for `/health` to report the target version and fails with a pointer to `openchamber startup enable` when it does not, which is what a unit written by an older release looks like (#5793).
+  - Which instance is the service comes from `findStartupServiceInstance` in `cli-startup.js`: the pid the manager reports (systemd's `MainPID`, launchd's job `PID`) settles it on Linux and macOS, and a missing pid there means the service is not running, so a foreground server on those platforms is a plain CLI copy. On Windows an instance is the service only when its pid is a child of the wrapper the running task started. A task that is missing, stopped or disabled owns nothing, so a manual foreground server stays a plain CLI copy, and a running task is found beside other foreground servers. Without this, an update on macOS or Windows stopped the service and started a detached copy beside it while launchd or the task brought the old one back (#5793's Linux fix never reached those platforms).
+  - The Windows lookup can fail: PowerShell errors, or the task runs and no instance matches it, an empty discovery included, since discovery skips a server that does not answer its probe. The update then stops before it stops any instance or installs anything, and points at `openchamber startup disable`, because a wrong guess either kills the service or leaves it on the old release.
 
 - `commands-tunnel.js`
   - Implements `openchamber tunnel` and its subcommands: `profile`, `providers`, `ready`, `doctor`, `status`, `start`, `stop`, and `completion`.
@@ -102,10 +106,15 @@ These modules hold reusable, non-presentational logic for commands.
 - `cli-http.js`
   - HTTP helpers for health checks, shutdown requests, JSON API calls, tunnel provider fetches, and system info fetches.
   - Owns local desktop bearer auth and managed CLI-instance UI password retry for control-plane requests.
+  - `requestJson` passes only `method`, `headers` and `body` to `fetch`. Control commands hand it their parsed CLI options, and Bun, which runs the CLI in the Docker image, reads `session` as its own fetch option and rejects `--session`.
 
 - `cli-control.js`
   - Sends one typed action request to the authenticated OpenChamber control endpoint and maps HTTP failures to CLI exit behavior.
   - Must not reproduce session, scheduled-task, project-resolution, or wait orchestration.
+  - Every session create reserves the provisioning HTTP window, including a retry in an existing checkout, because it can still await checkout setup before selection. An explicit HTTP timeout remains authoritative.
+
+- `cli-shell.js`
+  - Quotes replay arguments for PowerShell on Windows and POSIX shells elsewhere. Session recovery and tunnel replay commands share this formatter.
 
 - `cli-api-target.js`
   - Resolves the target OpenChamber runtime for control-plane commands, preferring desktop unless a port is explicit.
@@ -128,6 +137,9 @@ These modules hold reusable, non-presentational logic for commands.
 - `cli-startup.js`
   - Native startup service detection, install/uninstall/status helpers, and platform-specific startup command execution.
   - The service runs the CLI by its resolved path. A pnpm global install resolves into a versioned `.pnpm` store directory that an update leaves behind, so the entrypoint is mapped back to the stable `node_modules/@openchamber/web` link when it exists.
+  - pnpm 11 and later install every global update into a new `global/v11/<dir>` and delete the old one; the link `global/v11/<hash>` beside it moves to each new directory, and pnpm's shim starts the CLI through it. When the CLI was started through that link, the service keeps the unresolved path, so a pnpm upgrade does not leave the unit pointing at a deleted directory (#5727).
+  - The Windows restart in `restartWindowsStartupTask` starts a detached hidden PowerShell helper, runs `schtasks /End`, asks the server to shut down, waits up to about 10 seconds for the server to exit and stops it by pid if it stays. The helper issues `/Run` once the server is gone and the task has stopped, and gives up after 30 seconds. `/End` covers the program the task started, which is the PowerShell wrapper, so the server can outlive it and keep the port. The helper owns `/Run` because an update run from a terminal of this server dies with the shutdown, and nothing else would start the task; `/End` runs first because after the server exits it would end the new run. A failed `/End` with the server still up, or a server that does not exit, ends the update with the commands to finish by hand. A `/Run` that fails shows up as the version wait in `commands-update.js` failing.
+  - On Linux, `startup enable` restarts the unit after rewriting it. `enable --now` leaves a running service alone, so it kept the old unit and release while reporting `service active` (#5793). macOS already reloads the agent with `kickstart -k`.
   - The macOS LaunchAgent leaves `ProcessType` unset so launchd does not force the managed OpenCode child into background-tier scheduling. Re-running `startup enable` replaces an existing plist.
   - The environment snapshot drops the variables a running OpenChamber put into the enabling shell, read from the `OPENCHAMBER_INJECTED_ENV` record (`server/lib/injected-env.js`), so a service enabled from the desktop app's terminal or an agent's shell does not inherit that instance's runtime flags, UI password, or managed OpenCode password (#4604). The user's own exports, `OPENCODE_HOST` included, still carry over. `cli-args.js` applies the same record to the `OPENCHAMBER_UI_PASSWORD` default.
 
@@ -145,11 +157,7 @@ These modules hold reusable, non-presentational logic for commands.
 - Add new CLI commands as `commands-*.js` modules and wire them from `cli.js`.
 - Add reusable logic to the narrow helper module that owns the domain. Create a new helper module before mixing unrelated domains into an existing one.
 - Keep command modules responsible for user-visible behavior and mode-specific output. Keep helper modules mostly output-free unless the helper exists specifically for CLI rendering.
-- Preserve output contracts when moving code:
-  - `--json` emits JSON only.
-  - `--quiet` emits concise essential output.
-  - Prompts are gated by `canPrompt(options)`.
-  - Validation and policy run in every mode.
+- Preserve the mode output contract when moving code (`clack-cli-patterns`, *Mode Contract*).
 - Prefer dependency injection from `cli.js` for cross-command behavior, especially when one command needs another command's implementation.
 - Do not import `cli.js` from modules in this directory. The dependency direction is `cli.js` -> command modules -> helper modules.
 
@@ -159,11 +167,4 @@ For CLI behavior changes, run the focused CLI suite from `packages/web`:
 
 ```sh
 bun run test -- bin/cli.test.js
-```
-
-Before finalizing source changes that affect CLI behavior, also run:
-
-```sh
-bun run type-check
-bun run lint
 ```

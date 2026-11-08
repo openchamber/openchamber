@@ -65,12 +65,15 @@ export const githubDescriptor = Object.freeze({
     reviewers: true,
     // GitHub opens a review thread only on a diff line, which the board does not offer.
     reviewThreads: Object.freeze({ start: false, reply: true, resolve: true }),
+    reviewDrafts: Object.freeze({ fileComments: true }),
     uploads: false,
     stacks: true,
     changeRequestPatch: true,
     liveSummaries: true,
     referencePicker: true,
     multipleAccounts: true,
+    // A repository's discussions: listed, previewed, attached and answered beside issues.
+    discussions: true,
   }),
   authMethods: Object.freeze({ device: true, pat: true, cli: Object.freeze({ tool: 'gh' }) }),
   transport: Object.freeze({
@@ -83,7 +86,7 @@ export const githubDescriptor = Object.freeze({
   urls: Object.freeze({
     thread: Object.freeze({
       hosts: Object.freeze(['github.com']),
-      pattern: /^\/([^/]+)\/([^/]+)\/(pull|issues)\/(\d+)(?:\/|$)/,
+      pattern: /^\/([^/]+)\/([^/]+)\/(pull|issues|discussions)\/(\d+)(?:\/|$)/,
     }),
   }),
   trackedItems: Object.freeze({ nestedOwners: false, defaultInstance: 'github.com', batchLimit: 100 }),
@@ -130,10 +133,14 @@ export const githubDescriptor = Object.freeze({
     urls: Object.freeze({
       changeRequest: Object.freeze(['/{owner}/{repo}/pull/{number}']),
       issue: Object.freeze(['/{owner}/{repo}/issues/{number}']),
+      discussion: Object.freeze(['/{owner}/{repo}/discussions/{number}']),
+      commit: Object.freeze(['/{owner}/{repo}/commit/{sha}']),
+      user: Object.freeze(['/{user}']),
     }),
     features: Object.freeze({
       referenceSearch: true, referenceDetail: true, listStatuses: true, referencesAcross: true,
       startThread: false, authorCanReview: false, projectUploads: false, issueCloseReason: true,
+      reviewDrafts: true, reviewDraftFileComments: true,
       changeRequestTemplates: Object.freeze([]),
     }),
   }),

@@ -29,6 +29,7 @@ export const surfaceInputEventSchema = z.discriminatedUnion('type', [
     action: z.enum(['down', 'up']),
     key: z.string().min(1).max(64),
     code: z.string().max(64),
+    keyCode: z.number().int().min(0).max(255).optional(),
     modifiers: modifiersSchema,
   }),
   z.object({ type: z.literal('text'), text: z.string().min(1).max(SURFACE_TEXT_MAX) }),

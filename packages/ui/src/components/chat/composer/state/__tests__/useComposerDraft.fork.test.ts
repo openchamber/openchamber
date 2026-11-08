@@ -12,7 +12,7 @@ const source: ChatDraftIdentity = { runtimeKey: 'runtime-a', directory: '/repo',
 const fork: ChatDraftIdentity = { ...source, sessionId: 'fork' };
 const replayFile = { url: 'data:text/plain;base64,aGVsbG8=', mimeType: 'text/plain', filename: 'replay.txt' };
 
-function renderComposer(persistEnabled: boolean) {
+function renderComposer() {
     const dom = installHookTestDom();
     const originalRaf = globalThis.requestAnimationFrame;
     const originalCancelRaf = globalThis.cancelAnimationFrame;
@@ -33,7 +33,7 @@ function renderComposer(persistEnabled: boolean) {
         const confirmedMentionsRef = React.useRef(new Set(['source.ts']));
         React.useEffect(() => { messageRef.current = message; }, [message]);
         useComposerDraft({
-            message, messageRef, setMessage, confirmedMentionsRef, identity, persistEnabled,
+            message, messageRef, setMessage, confirmedMentionsRef, identity,
             initialDraft: { text: '', identity: source },
             onDraftRestored: (reason) => { result.restored.push(reason); },
         });
@@ -70,12 +70,12 @@ beforeEach(() => {
 });
 
 describe('fork composer restoration', () => {
-    for (const persistEnabled of [true, false]) {
-        test(`waits for the rendered fork and preserves the source, persistence=${persistEnabled}`, () => {
+    {
+        test('waits for the rendered fork and preserves the source', () => {
             writeChatDraft(fork, 'previous fork draft @old.ts', ['old.ts']);
             useInputStore.getState().addRestoredAttachment({ ...replayFile, filename: 'source.txt' });
             const sourceFiles = useInputStore.getState().attachedFiles;
-            const composer = renderComposer(persistEnabled);
+            const composer = renderComposer();
             try {
                 // Selection already changed, but the deferred chat column still renders source.
                 act(() => {
@@ -92,12 +92,12 @@ describe('fork composer restoration', () => {
                 expect(useInputStore.getState().pendingComposerRestore).toBeNull();
                 composer.flushFrames();
                 expect(composer.result.restored).toContain('fork');
-                expect(readChatDraft(source).text).toBe(persistEnabled ? 'source draft @source.ts' : '');
+                expect(readChatDraft(source).text).toBe('source draft @source.ts');
 
                 composer.render(source);
                 expect(composer.result.text).toBe('source draft @source.ts');
                 expect(useInputStore.getState().attachedFiles).toBe(sourceFiles);
-                expect(readChatDraft(fork).text).toBe(persistEnabled ? 'replay prompt' : '');
+                expect(readChatDraft(fork).text).toBe('replay prompt');
             } finally {
                 composer.teardown();
             }
@@ -105,7 +105,7 @@ describe('fork composer restoration', () => {
     }
 
     test('waits through unrelated session, directory, and runtime renders', () => {
-        const composer = renderComposer(true);
+        const composer = renderComposer();
         try {
             act(() => {
                 useInputStore.setState({ pendingComposerRestore: { target: fork, text: 'replay', files: [] } });
@@ -128,7 +128,7 @@ describe('fork composer restoration', () => {
     });
 
     test('persists a replay even when its text equals the outgoing source draft', async () => {
-        const composer = renderComposer(true);
+        const composer = renderComposer();
         try {
             const text = composer.result.text;
             act(() => {
@@ -144,7 +144,7 @@ describe('fork composer restoration', () => {
     });
 
     test('restores file-only and empty prompts without keeping destination text or files', () => {
-        const composer = renderComposer(true);
+        const composer = renderComposer();
         try {
             writeChatDraft(fork, 'stale destination text', []);
             act(() => {
@@ -165,9 +165,9 @@ describe('fork composer restoration', () => {
 });
 
 describe('attachment draft ownership', () => {
-    for (const persistEnabled of [true, false]) {
-        test(`keeps images and files with their draft, persistence=${persistEnabled}`, () => {
-            const composer = renderComposer(persistEnabled);
+    {
+        test('keeps images and files with their draft', () => {
+            const composer = renderComposer();
             const input = useInputStore.getState();
             try {
                 input.addRestoredAttachment({ ...replayFile, filename: 'source.txt' });
@@ -208,11 +208,11 @@ describe('attachment draft ownership', () => {
     }
 
     test('retains attachments across composer remounts', () => {
-        const first = renderComposer(false);
+        const first = renderComposer();
         useInputStore.getState().addRestoredAttachment(replayFile);
         const files = useInputStore.getState().attachedFiles;
         first.teardown();
-        const second = renderComposer(false);
+        const second = renderComposer();
         try {
             second.render(fork);
             expect(useInputStore.getState().attachedFiles).toEqual([]);
@@ -224,7 +224,7 @@ describe('attachment draft ownership', () => {
     });
 
     test('restores a failed send to its source and clears deleted drafts', () => {
-        const composer = renderComposer(false);
+        const composer = renderComposer();
         const input = useInputStore.getState();
         try {
             input.addRestoredAttachment({ ...replayFile, filename: 'source.txt' });

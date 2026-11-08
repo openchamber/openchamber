@@ -74,6 +74,15 @@
         ],
         "issue": [
           "/{owner}/{repo}/issues/{number}"
+        ],
+        "discussion": [
+          "/{owner}/{repo}/discussions/{number}"
+        ],
+        "commit": [
+          "/{owner}/{repo}/commit/{sha}"
+        ],
+        "user": [
+          "/{user}"
         ]
       },
       "features": {
@@ -81,12 +90,15 @@
         "referenceDetail": true,
         "listStatuses": true,
         "referencesAcross": true,
+        "reviewDraftFileComments": true,
+        "reviewDrafts": true,
         "startThread": false,
         "authorCanReview": false,
         "projectUploads": false,
         "issueCloseReason": true,
         "changeRequestTemplates": [],
-        "changeRequestPatch": true
+        "changeRequestPatch": true,
+        "discussions": true
       }
     },
     {
@@ -153,6 +165,12 @@
         "issue": [
           "/{namespace+}/{repo}/-/issues/{number}",
           "/{namespace+}/{repo}/-/work_items/{number}"
+        ],
+        "commit": [
+          "/{namespace+}/{repo}/-/commit/{sha}"
+        ],
+        "user": [
+          "/{user}"
         ]
       },
       "features": {
@@ -160,6 +178,8 @@
         "referenceDetail": false,
         "listStatuses": false,
         "referencesAcross": false,
+        "reviewDraftFileComments": true,
+        "reviewDrafts": true,
         "startThread": true,
         "authorCanReview": true,
         "projectUploads": true,
@@ -200,9 +220,11 @@
       },
       "auth": {
         "methods": [
-          "pat"
+          "pat",
+          "cli"
         ],
         "cliTransport": false,
+        "cliName": "gt",
         "token": {
           "scopes": [
             "write:repository",
@@ -220,6 +242,11 @@
             "secret": false
           },
           {
+            "id": "sshUrl",
+            "kind": "instance-url",
+            "secret": false
+          },
+          {
             "id": "token",
             "kind": "personal-access-token",
             "secret": true
@@ -232,6 +259,12 @@
         ],
         "issue": [
           "/{owner}/{repo}/issues/{number}"
+        ],
+        "commit": [
+          "/{owner}/{repo}/commit/{sha}"
+        ],
+        "user": [
+          "/{user}"
         ]
       },
       "features": {
@@ -239,6 +272,8 @@
         "referenceDetail": false,
         "listStatuses": false,
         "referencesAcross": false,
+        "reviewDraftFileComments": false,
+        "reviewDrafts": true,
         "startThread": false,
         "authorCanReview": false,
         "projectUploads": false,
@@ -395,6 +430,8 @@
         "referenceDetail": false,
         "listStatuses": false,
         "referencesAcross": false,
+        "reviewDraftFileComments": true,
+        "reviewDrafts": true,
         "startThread": false,
         "authorCanReview": true,
         "projectUploads": false,

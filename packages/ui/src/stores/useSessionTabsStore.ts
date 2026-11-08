@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import { create } from 'zustand';
 import { devtools, persist } from 'zustand/middleware';
 
@@ -16,11 +17,21 @@ import { createDeferredSafeJSONStorage } from '@/stores/utils/safeStorage';
  * A session opened by browsing lands in the one preview tab, which the next
  * opened session replaces in place. Double-clicking the tab, dragging it, or
  * sending a message in the session pins it: a pinned tab stays until closed.
+ *
+ * There is one working set per scope (`lib/sessionTabScope.ts`): one for the
+ * whole app by default, or with separate tabs per workspace on, one for each
+ * project root, worktree and space of each instance. The shown scope's set
+ * lives in `tabIds` and `previewTabId`, so every action works on what the strip
+ * shows; the other scopes' sets wait in `sets`.
  */
 interface SessionTabsStore {
   tabIds: string[];
   /** The replaceable preview tab; null when every tab is pinned. */
   previewTabId: string | null;
+  /** The scope whose working set `tabIds` holds. */
+  scope: string;
+  /** The working sets of the other scopes, least recently shown first. */
+  sets: Record<string, SessionTabSet>;
   /**
    * Sessions pinned before their tab exists (a draft's first message creates
    * the session ahead of its tab). Their tab opens pinned. Not persisted.
@@ -40,13 +51,33 @@ interface SessionTabsStore {
   closeOtherTabs: (sessionId: string) => void;
   /** Moves a tab and pins it: arranging a tab means keeping it. */
   reorderTabs: (activeId: string, overId: string) => void;
-  /** Drop ids the caller has authoritatively confirmed no longer exist. */
+  /** Drop ids the caller has authoritatively confirmed no longer exist, from every scope. */
   removeTabs: (sessionIds: readonly string[]) => void;
+  /**
+   * Shows the working set of `scope`. A scope shown for the first time opens
+   * with `seed()`'s sessions as pinned tabs (none for most scopes).
+   */
+  enterScope: (scope: string, seed: () => readonly string[]) => void;
 }
 
-const MAX_PINNED_SESSION_TABS = 10;
+type SessionTabSet = { tabIds: string[]; previewTabId: string | null };
 
-type PersistedSessionTabs = { tabIds: string[]; previewTabId: string | null };
+export const GLOBAL_SESSION_TAB_SCOPE = 'global';
+
+const MAX_PINNED_SESSION_TABS = 10;
+// Scopes kept besides the shown one; the least recently shown goes first, so
+// worktrees long gone do not pile up in storage.
+const MAX_STORED_SCOPES = 40;
+
+type PersistedSessionTabs = { tabIds: string[]; previewTabId: string | null; scope: string; sets: Record<string, SessionTabSet> };
+
+const tabSetSchema = z.object({ tabIds: z.array(z.string()), previewTabId: z.string().nullable() });
+const persistedSchema = z.object({
+  tabIds: z.array(z.string()).catch([]),
+  previewTabId: z.string().nullable().catch(null),
+  scope: z.string().catch(GLOBAL_SESSION_TAB_SCOPE),
+  sets: z.record(z.string(), tabSetSchema).catch({}),
+});
 
 /**
  * Soft cap on pinned tabs: past it the oldest pinned tab leaves the working
@@ -68,6 +99,8 @@ export const useSessionTabsStore = create<SessionTabsStore>()(
       (set, get) => ({
         tabIds: [],
         previewTabId: null,
+        scope: GLOBAL_SESSION_TAB_SCOPE,
+        sets: {},
         pinOnOpenIds: [],
 
         ensureTab: (sessionId, slotIds) => {
@@ -149,16 +182,46 @@ export const useSessionTabsStore = create<SessionTabsStore>()(
         removeTabs: (sessionIds) => {
           if (sessionIds.length === 0) return;
           const gone = new Set(sessionIds);
-          const { tabIds, previewTabId } = get();
-          const next = tabIds.filter((id) => !gone.has(id));
-          if (next.length === tabIds.length) return;
-          set({ tabIds: next, previewTabId: previewTabId && gone.has(previewTabId) ? null : previewTabId });
+          const without = (tabSet: SessionTabSet): SessionTabSet | null => {
+            const next = tabSet.tabIds.filter((id) => !gone.has(id));
+            if (next.length === tabSet.tabIds.length) return null;
+            return { tabIds: next, previewTabId: tabSet.previewTabId && gone.has(tabSet.previewTabId) ? null : tabSet.previewTabId };
+          };
+          const { tabIds, previewTabId, sets } = get();
+          const shown = without({ tabIds, previewTabId });
+          let nextSets: Record<string, SessionTabSet> | null = null;
+          for (const [scope, tabSet] of Object.entries(sets)) {
+            const next = without(tabSet);
+            if (!next) continue;
+            nextSets ??= { ...sets };
+            nextSets[scope] = next;
+          }
+          if (!shown && !nextSets) return;
+          set({
+            tabIds: shown?.tabIds ?? tabIds,
+            previewTabId: shown ? shown.previewTabId : previewTabId,
+            sets: nextSets ?? sets,
+          });
+        },
+
+        enterScope: (scope, seed) => {
+          const { scope: shownScope, tabIds, previewTabId, sets } = get();
+          if (scope === shownScope) return;
+          const { [scope]: stored, ...others } = sets;
+          // The scope left joins the stored sets as the most recently shown.
+          const kept = Object.entries({ ...others, [shownScope]: { tabIds, previewTabId } });
+          const nextSets = Object.fromEntries(kept.slice(Math.max(0, kept.length - MAX_STORED_SCOPES)));
+          const next = stored ?? { tabIds: [...new Set(seed())].slice(0, MAX_PINNED_SESSION_TABS), previewTabId: null };
+          set({ scope, tabIds: next.tabIds, previewTabId: next.previewTabId, sets: nextSets });
         },
       }),
       {
         name: 'session-tabs-store',
+        version: 1,
         storage: createDeferredSafeJSONStorage<PersistedSessionTabs>(),
-        partialize: (state) => ({ tabIds: state.tabIds, previewTabId: state.previewTabId }),
+        partialize: (state) => ({ tabIds: state.tabIds, previewTabId: state.previewTabId, scope: state.scope, sets: state.sets }),
+        // Version 0 had the one global set only; it becomes the global scope's.
+        migrate: (persisted): PersistedSessionTabs => persistedSchema.parse(persisted ?? {}),
       },
     ),
   ),

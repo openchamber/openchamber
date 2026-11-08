@@ -1,5 +1,7 @@
 import type { Session } from '@/lib/opencode/model';
+import { matchesRankQuery, SIDEBAR_SEARCH } from '@/lib/search/fuzzySearch';
 import type { SessionNode } from '../types';
+import { listedChildren } from '../listedChildren';
 import type { SidebarSessionLocation } from './sessionLocation';
 
 type SidebarActivityItem = {
@@ -10,14 +12,13 @@ type SidebarActivityItem = {
   getSecondaryMeta?: (sessionId: string) => SidebarActivityItem['secondaryMeta'];
 };
 
-// The timeline and In work filter their own lists with the sidebar's rule:
-// an exact `ses_` id, otherwise a case-insensitive title match.
+// The zones filter their own lists with the sidebar's rule: an exact `ses_`
+// id, otherwise every word of the query at the start of a word of the title.
 const matchesSidebarSessionQuery = (session: Session, query: string): boolean => {
   const normalizedQuery = query.trim().toLowerCase();
   if (!normalizedQuery) return true;
   if (normalizedQuery.startsWith('ses_')) return session.id.toLowerCase() === normalizedQuery;
-  const title = typeof session.title === 'string' ? session.title.toLowerCase() : '';
-  return title.includes(query);
+  return matchesRankQuery([typeof session.title === 'string' ? session.title : ''], normalizedQuery, SIDEBAR_SEARCH);
 };
 
 /**
@@ -27,7 +28,7 @@ const matchesSidebarSessionQuery = (session: Session, query: string): boolean =>
  */
 export const pruneSessionTreeForSidebarQuery = (node: SessionNode, query: string): SessionNode | null => {
   if (matchesSidebarSessionQuery(node.session, query)) return node;
-  const children = node.children.flatMap((child) => {
+  const children = listedChildren(node).flatMap((child) => {
     const pruned = pruneSessionTreeForSidebarQuery(child, query);
     return pruned ? [pruned] : [];
   });
@@ -37,16 +38,14 @@ export const pruneSessionTreeForSidebarQuery = (node: SessionNode, query: string
 /** Sessions in a tree that answer the query themselves, ancestors kept only as context excluded. */
 export const countSessionTreeQueryMatches = (node: SessionNode, query: string): number => (
   (matchesSidebarSessionQuery(node.session, query) ? 1 : 0)
-  + node.children.reduce((total, child) => total + countSessionTreeQueryMatches(child, query), 0)
+  + listedChildren(node).reduce((total, child) => total + countSessionTreeQueryMatches(child, query), 0)
 );
 
 /**
  * The Pinned or In work sessions a search lists, with the matches each one
- * counts. Tree (`'tree'`) looks through the whole session tree, since its
- * one-line rows open to the match and search lists these sessions nowhere
- * else. List (`'session'`) matches the session
- * itself, as its project lists do, since its flat rows cannot show the
- * subsession that matched.
+ * counts. `'tree'` looks through the whole session tree, since one-line zone
+ * rows open to the match and search lists these sessions nowhere else.
+ * `'session'` matches the session itself only.
  */
 export const matchZoneSessionsForSidebarQuery = (
   zone: readonly Session[],
@@ -66,9 +65,9 @@ export const matchZoneSessionsForSidebarQuery = (
   return { sessions, matchCountById };
 };
 
-// Timeline lists every non-archived root project session as one flat zone.
-// Ordering, membership, and branch/project metadata are resolved by the
-// caller; this projection only applies the search filter and shapes rows.
+// The rows of a zone's sessions. Ordering, membership, and branch/project
+// metadata are resolved by the caller; this projection only applies the
+// search filter and shapes rows.
 export const deriveTimelineActivityItems = ({
   sessions,
   getSessionLocation,

@@ -25,7 +25,7 @@
       "background": "#1E1F22",
       "foreground": "#e5e7eb",
       "muted": "#18191b",
-      "mutedForeground": "#999ca4",
+      "mutedForeground": "#90939a",
       "elevated": "#27282b",
       "overlay": "#00000080",
       "subtle": "#28292c"
@@ -120,7 +120,7 @@
       "linkHover": "#6796f5",
       "inlineCode": "#6AAB73",
       "inlineCodeBackground": "#1b1c1f",
-      "blockquote": "#7A7E85",
+      "blockquote": "#84888e",
       "blockquoteBorder": "#303238",
       "listMarker": "#B3AE6099",
       "bold": "#e8eaed",

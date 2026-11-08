@@ -15,10 +15,13 @@ export interface DictationStartOptions {
     provider?: 'local' | 'openai-compatible';
     language?: string;
     localModel?: string;
+    /** Fix misheard words with the Small Model before the final text. */
+    correct?: boolean;
     openaiCompatible?: {
         baseUrl?: string;
         model?: string;
         apiKey?: string;
+        endpointPath?: string;
     };
 }
 

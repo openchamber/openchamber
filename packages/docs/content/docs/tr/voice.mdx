@@ -22,9 +22,20 @@ Açtıktan sonra, mesajların üzerinde onları sesli dinlemek için bir oynat d
 
 Konuşmanızın nasıl metne dönüştürüleceğini seçin:
 
-- **browser** — tarayıcınızın yerleşik tanıma özelliği, kurulum gerekmez
-- **server** — OpenAI uyumlu bir transkripsiyon servisi; URL'sini ve gerekirse API anahtarını girin
-- **on-device** — tarayıcınızda çalışan ve ilk kullanımda indirilen bir konuşma modeli
+- **Yerel**, OpenChamber'ın çalıştığı bilgisayarda bir konuşma modeli çalıştırır. Model ilk dikte ettiğinizde indirilir ve sesiniz o bilgisayarda kalır.
+- **Sunucu**, sesinizi OpenAI uyumlu bir transkripsiyon servisine gönderir. URL'sini ve gerekiyorsa API anahtarını girin.
+
+Yerel modeller:
+
+- **Parakeet v3** varsayılandır. İngilizce ve Ukraynaca dahil 25 Avrupa dilini tanır ve en hızlısıdır. v3 varsayılan olmadan önce Parakeet v2 ile dikte ettiyseniz, başka bir model seçene kadar v2'de kalırsınız.
+- **Parakeet v2** yalnızca İngilizceyi tanır.
+- **Whisper large-v3 turbo** 99 dili tanır. Parakeet'ten yaklaşık dokuz kat yavaştır, bu yüzden uzun dikteler birkaç saniye sonra görünür.
+- **Qwen3-ASR 0.6B**, Çince, Japonca, Korece ve Arapça dahil 30 dili tanır. Ukraynacayı tanımaz.
+- **Whisper tiny** en küçük indirmedir ve yavaş bilgisayarlar içindir.
+
+Whisper ve Qwen3-ASR modelleri dili kendileri algılar ve kısa bir ifadede yanlış dili seçebilir. Model listesinin altındaki **Dil** alanına dil kodunuzu girin, örneğin `uk` veya `en`, böylece tahmin etmeyi bırakırlar.
+
+**Yanlış duyulan kelimeleri düzelt** seçeneğini açarsanız, dikteyi durdurduktan sonra Small Model'iniz (Ayarlar → Oturumlar → Small Model) metni gözden geçirir. Konuşma modelinin yanlış duyduğu kelimeleri değiştirir ve "ee" gibi dolgu seslerini çıkarır. Metin bu sırada Small Model'in sağlayıcısına gider ve bir iki saniye sonra görünür. Small Model yoksa metin duyulduğu gibi eklenir.
 
 Bu servisler için girdiğiniz API anahtarlarını tarayıcınız değil OpenChamber sunucusu saklar. Bir anahtar yazıp Enter'a basarak kaydedin; ardından alan bir anahtarın kayıtlı olduğunu gösterir, çarpı işareti onu kaldırır.
 

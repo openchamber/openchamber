@@ -12,12 +12,19 @@ afterAll(() => {
 });
 
 describe('useSessionDisplayStore worktree sorting', () => {
-  test('defaults to manual ordering', () => {
-    expect(useSessionDisplayStore.getState().worktreeSortOrder).toBe('manual');
+  test('v11 drops the worktree sort, which worktrees no longer have', () => {
+    expect(migrateSessionDisplayState({ worktreeSortOrder: 'a-z' }, 10)).not.toHaveProperty('worktreeSortOrder');
+  });
+});
+
+describe('useSessionDisplayStore detailed rows', () => {
+  test('v12 keeps two lines for a phone that was on List', () => {
+    expect(migrateSessionDisplayState({ sidebarViewMode: 'timeline', detailedZoneRows: false }, 11, 'mobile').detailedZoneRows).toBe(true);
   });
 
-  test('v8→v9 starts existing users on manual ordering', () => {
-    expect(migrateSessionDisplayState({}, 8).worktreeSortOrder).toBe('manual');
+  test('v12 keeps a phone on Tree and every computer as they were', () => {
+    expect(migrateSessionDisplayState({ sidebarViewMode: 'projects', detailedZoneRows: false }, 11, 'mobile').detailedZoneRows).toBe(false);
+    expect(migrateSessionDisplayState({ sidebarViewMode: 'timeline', detailedZoneRows: false }, 11, 'desktop').detailedZoneRows).toBe(false);
   });
 });
 
@@ -114,7 +121,7 @@ describe('useSessionDisplayStore animated activity', () => {
       await useSessionDisplayStore.persist.rehydrate();
       expect(useSessionDisplayStore.getState().animatedActivityIndicators).toBe(false);
       expect(useSessionDisplayStore.getState().sidebarViewMode).toBe('timeline');
-      expect(useSessionDisplayStore.persist.getOptions().version).toBe(10);
+      expect(useSessionDisplayStore.persist.getOptions().version).toBe(12);
       useSessionDisplayStore.getState().setAnimatedActivityIndicators(true);
       const enabledSnapshot = stored;
       useSessionDisplayStore.setState({ animatedActivityIndicators: false });
@@ -122,6 +129,30 @@ describe('useSessionDisplayStore animated activity', () => {
       await useSessionDisplayStore.persist.rehydrate();
       expect(useSessionDisplayStore.getState().animatedActivityIndicators).toBe(true);
       expect('showRecentSection' in useSessionDisplayStore.getState()).toBe(false);
+    } finally {
+      useSessionDisplayStore.persist.setOptions({ storage: originalStorage });
+      useSessionDisplayStore.setState(initialState);
+    }
+  });
+});
+
+describe('useSessionDisplayStore cached sections', () => {
+  test('sections cached by an older build are read through the stored rules', async () => {
+    const initialState = useSessionDisplayStore.getState();
+    const originalStorage = useSessionDisplayStore.persist.getOptions().storage;
+    const older = { kind: 'custom', id: 's1', name: 'Old', grouping: 'time', filter: { states: ['running'] }, claims: false, hideWhenEmpty: true };
+    const stored = JSON.stringify({ version: 12, state: { sections: [older] } });
+    const storage = createJSONStorage<Partial<ReturnType<typeof useSessionDisplayStore.getState>>>(() => ({
+      getItem: () => stored,
+      setItem: () => undefined,
+      removeItem: () => undefined,
+    }));
+    useSessionDisplayStore.persist.setOptions({ storage });
+    try {
+      await useSessionDisplayStore.persist.rehydrate();
+      const section = useSessionDisplayStore.getState().sections.find((entry) => entry.id === 's1');
+      expect(section?.kind === 'custom' ? section.filter.text : null).toEqual([]);
+      expect(useSessionDisplayStore.getState().sections.some((entry) => entry.id === 'projects')).toBe(true);
     } finally {
       useSessionDisplayStore.persist.setOptions({ storage: originalStorage });
       useSessionDisplayStore.setState(initialState);

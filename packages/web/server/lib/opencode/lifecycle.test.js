@@ -203,7 +203,7 @@ describe('OpenCode lifecycle', () => {
   it('records an authoritative ready terminal event for external startup', async () => {
     globalThis.fetch = vi.fn(async () => ({
       ok: true,
-      json: async () => ({ version: '2.1.2', pid: 1, urls: [], paths: { tmp: '/tmp' } }),
+      json: async () => ({ version: '2.2.5', pid: 1, urls: [], paths: { tmp: '/tmp' } }),
     }));
     const runtime = createRuntime({
       env: {
@@ -235,7 +235,7 @@ describe('OpenCode lifecycle', () => {
   it('recovers an external OPENCODE_HOST connection using its configured endpoint', async () => {
     const fetchMock = vi.fn(async () => ({
       ok: true,
-      json: async () => ({ version: '2.1.2', pid: 1, urls: [], paths: { tmp: '/tmp' } }),
+      json: async () => ({ version: '2.2.5', pid: 1, urls: [], paths: { tmp: '/tmp' } }),
     }));
     globalThis.fetch = fetchMock;
     const runtime = createRuntime({}, {
@@ -318,7 +318,7 @@ describe('OpenCode lifecycle', () => {
     await fs.mkdir(otherProject);
     const fetchMock = vi.fn(async () => ({
       ok: true,
-      json: async () => ({ version: '2.1.2', pid: 1, urls: [], paths: { tmp: '/tmp' } }),
+      json: async () => ({ version: '2.2.5', pid: 1, urls: [], paths: { tmp: '/tmp' } }),
     }));
     globalThis.fetch = fetchMock;
     const runtime = createRuntime({
@@ -356,7 +356,7 @@ describe('OpenCode lifecycle', () => {
     await fs.mkdir(stale);
     globalThis.fetch = vi.fn(async () => ({
       ok: true,
-      json: async () => ({ version: '2.1.2', pid: 1, urls: [], paths: { tmp: '/tmp' } }),
+      json: async () => ({ version: '2.2.5', pid: 1, urls: [], paths: { tmp: '/tmp' } }),
     }));
     const runtime = createRuntime({
       env: {
@@ -397,7 +397,7 @@ describe('OpenCode lifecycle', () => {
     let warmup = [];
     globalThis.fetch = vi.fn(async () => ({
       ok: true,
-      json: async () => ({ version: '2.1.2', pid: 1, urls: [], paths: { tmp: '/tmp' } }),
+      json: async () => ({ version: '2.2.5', pid: 1, urls: [], paths: { tmp: '/tmp' } }),
     }));
     const runtime = createRuntime({
       env: {
@@ -437,7 +437,7 @@ describe('OpenCode lifecycle', () => {
     await fs.mkdir(current);
     globalThis.fetch = vi.fn(async () => ({
       ok: true,
-      json: async () => ({ version: '2.1.2', pid: 1, urls: [], paths: { tmp: '/tmp' } }),
+      json: async () => ({ version: '2.2.5', pid: 1, urls: [], paths: { tmp: '/tmp' } }),
     }));
     const runtime = createRuntime({
       env: {
@@ -472,7 +472,7 @@ describe('OpenCode lifecycle', () => {
     await fs.mkdir(surviving);
     globalThis.fetch = vi.fn(async () => ({
       ok: true,
-      json: async () => ({ version: '2.1.2', pid: 1, urls: [], paths: { tmp: '/tmp' } }),
+      json: async () => ({ version: '2.2.5', pid: 1, urls: [], paths: { tmp: '/tmp' } }),
     }));
     // The warm pass offered both; only the first was cached as the default.
     const runtime = createRuntime({
@@ -507,7 +507,7 @@ describe('OpenCode lifecycle', () => {
     let current = stale;
     globalThis.fetch = vi.fn(async () => ({
       ok: true,
-      json: async () => ({ version: '2.1.2', pid: 1, urls: [], paths: { tmp: '/tmp' } }),
+      json: async () => ({ version: '2.2.5', pid: 1, urls: [], paths: { tmp: '/tmp' } }),
     }));
     const runtime = createRuntime({
       env: {
@@ -546,7 +546,7 @@ describe('OpenCode lifecycle', () => {
     await fs.mkdir(locked);
     globalThis.fetch = vi.fn(async () => ({
       ok: true,
-      json: async () => ({ version: '2.1.2', pid: 1, urls: [], paths: { tmp: '/tmp' } }),
+      json: async () => ({ version: '2.2.5', pid: 1, urls: [], paths: { tmp: '/tmp' } }),
     }));
     const runtime = createRuntime({
       env: {
@@ -583,7 +583,7 @@ describe('OpenCode lifecycle', () => {
     globalThis.fetch = vi.fn(async (url, init) => {
       requested.push([String(url), init?.headers?.['x-opencode-directory'] ?? null]);
       if (String(url).endsWith('/api/info')) {
-        return { ok: true, json: async () => ({ version: '2.1.2', pid: 1, urls: [], paths: { tmp: '/tmp' } }) };
+        return { ok: true, json: async () => ({ version: '2.2.5', pid: 1, urls: [], paths: { tmp: '/tmp' } }) };
       }
       return { ok: true, json: async () => ({ data: [{ id: 'build' }] }) };
     });
@@ -633,6 +633,135 @@ describe('OpenCode lifecycle', () => {
       phase === 'opencode.bootstrap.ready' || phase === 'opencode.bootstrap.error'
     ));
     expect(terminalEvents).toHaveLength(1);
+  });
+
+  describe('bootstrap retry', () => {
+    const failingBootstrapRuntime = (error, stateOverrides) => createRuntime({
+      syncFromHmrState: vi.fn(() => {
+        throw error;
+      }),
+      reapManagedOrphanedProcesses: vi.fn(async () => ({ reaped: 0 })),
+    }, stateOverrides);
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('keeps retrying a failed managed start at growing intervals', async () => {
+      vi.useFakeTimers();
+      const runtime = failingBootstrapRuntime(new Error('listener unavailable'));
+      const bootstrap = vi.fn(async () => {
+        await runtime.bootstrapOpenCodeAtStartup();
+        runtime.scheduleBootstrapRetry(bootstrap);
+      });
+
+      await runtime.bootstrapOpenCodeAtStartup();
+      expect(runtime.scheduleBootstrapRetry(bootstrap)).toBe(true);
+
+      await vi.advanceTimersByTimeAsync(4_999);
+      expect(bootstrap).toHaveBeenCalledTimes(0);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(bootstrap).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(15_000);
+      expect(bootstrap).toHaveBeenCalledTimes(2);
+      await vi.advanceTimersByTimeAsync(30_000 + 60_000 + 60_000);
+      expect(bootstrap).toHaveBeenCalledTimes(5);
+    });
+
+    it('makes a restart asked for during a retry wait for it and then really restart', async () => {
+      vi.useFakeTimers();
+      const runtime = failingBootstrapRuntime(new Error('listener unavailable'));
+      const retryRun = Promise.withResolvers();
+      await runtime.bootstrapOpenCodeAtStartup();
+      runtime.scheduleBootstrapRetry(() => retryRun.promise, vi.fn());
+      await vi.advanceTimersByTimeAsync(5_000);
+
+      const child = createMockChild();
+      spawnMock.mockImplementationOnce(() => {
+        queueMicrotask(() => child.stdout.emit('data', 'opencode server listening on http://127.0.0.1:45678\n'));
+        return child;
+      });
+      const restart = runtime.restartOpenCode();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(spawnMock).not.toHaveBeenCalled();
+
+      retryRun.resolve();
+      await vi.advanceTimersByTimeAsync(10_000);
+      await restart;
+      expect(spawnMock).toHaveBeenCalledTimes(1);
+      await runtime.testState.openCodeProcess.close();
+    });
+
+    it('waits for a restart in flight before retrying', async () => {
+      vi.useFakeTimers();
+      const runtime = failingBootstrapRuntime(new Error('listener unavailable'));
+      const bootstrap = vi.fn(async () => {});
+      await runtime.bootstrapOpenCodeAtStartup();
+      runtime.scheduleBootstrapRetry(bootstrap, vi.fn());
+
+      const restart = Promise.withResolvers();
+      runtime.testState.currentRestartPromise = restart.promise;
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(bootstrap).not.toHaveBeenCalled();
+
+      runtime.testState.currentRestartPromise = null;
+      restart.resolve();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(bootstrap).toHaveBeenCalledTimes(1);
+    });
+
+    it('starts nothing when a restart has started OpenCode before the retry fires', async () => {
+      vi.useFakeTimers();
+      const runtime = failingBootstrapRuntime(new Error('listener unavailable'));
+      const bootstrap = vi.fn(async () => {});
+      const onAlreadyRunning = vi.fn();
+      await runtime.bootstrapOpenCodeAtStartup();
+      runtime.scheduleBootstrapRetry(bootstrap, onAlreadyRunning);
+
+      runtime.testState.openCodeProcess = { close: vi.fn() };
+      await vi.advanceTimersByTimeAsync(5_000);
+
+      expect(bootstrap).not.toHaveBeenCalled();
+      expect(onAlreadyRunning).toHaveBeenCalledTimes(1);
+    });
+
+    it('keeps the last error readable while a retry runs', async () => {
+      const startFailure = new Error('spawn opencode ENOENT');
+      const applyOpencodeBinaryFromSettings = vi.fn(async () => {
+        expect(runtime.testState.lastOpenCodeError).toBe('earlier failure');
+        throw startFailure;
+      });
+      const runtime = createRuntime({
+        applyOpencodeBinaryFromSettings,
+        reapManagedOrphanedProcesses: vi.fn(async () => ({ reaped: 0 })),
+      }, { lastOpenCodeError: 'earlier failure' }, { ENV_CONFIGURED_OPENCODE_PORT: null, ENV_EFFECTIVE_PORT: null });
+
+      await runtime.bootstrapOpenCodeAtStartup();
+
+      expect(applyOpencodeBinaryFromSettings).toHaveBeenCalled();
+      expect(runtime.testState.lastOpenCodeError).toBe(startFailure.message);
+    });
+
+    it('schedules nothing after a successful start', async () => {
+      const runtime = createRuntime({
+        reapManagedOrphanedProcesses: vi.fn(async () => ({ reaped: 0 })),
+      }, { openCodeProcess: { close: vi.fn() }, openCodePort: 45678 });
+      await runtime.bootstrapOpenCodeAtStartup();
+      expect(runtime.scheduleBootstrapRetry(vi.fn())).toBe(false);
+    });
+
+    it('does not retry a binary the user has to change, an external server or a shutdown', async () => {
+      const rejected = Object.assign(new Error('binary not found'), { code: 'OPENCODE_BINARY_INVALID' });
+      const cases = [
+        failingBootstrapRuntime(rejected),
+        failingBootstrapRuntime(new Error('down'), { isExternalOpenCode: true }),
+        failingBootstrapRuntime(new Error('down'), { isShuttingDown: true }),
+      ];
+      for (const runtime of cases) {
+        await runtime.bootstrapOpenCodeAtStartup();
+        expect(runtime.scheduleBootstrapRetry(vi.fn())).toBe(false);
+      }
+    });
   });
 
   it('does not count rapid transport-triggered checks as independent health failures', async () => {
@@ -957,6 +1086,49 @@ describe('OpenCode lifecycle', () => {
     await expect(runtime.restartOpenCode()).rejects.toThrow();
 
     expect(onOpenCodeRestarted).not.toHaveBeenCalled();
+  });
+
+  it('runs a whileStopped task between stopping and starting managed OpenCode', async () => {
+    const order = [];
+    const close = vi.fn(async () => { order.push('close'); });
+    globalThis.fetch = vi.fn(async () => ({ ok: false, json: async () => null }));
+    spawnMock.mockImplementationOnce(() => {
+      order.push('spawn');
+      const child = createMockChild();
+      queueMicrotask(() => child.stdout.emit('data', 'opencode server listening on http://127.0.0.1:45678\n'));
+      return child;
+    });
+    const runtime = createRuntime({}, {
+      openCodePort: 45678,
+      openCodeProcess: { pid: null, exitCode: null, signalCode: null, close },
+    });
+
+    await runtime.restartOpenCode('opencode-upgrade', { whileStopped: async () => { order.push('task'); } });
+
+    expect(order).toEqual(['close', 'task', 'spawn']);
+    await runtime.testState.openCodeProcess.close();
+  });
+
+  it('starts managed OpenCode again when the whileStopped task fails, then reports the failure', async () => {
+    globalThis.fetch = vi.fn(async () => ({ ok: false, json: async () => null }));
+    spawnMock.mockImplementationOnce(() => {
+      const child = createMockChild();
+      queueMicrotask(() => child.stdout.emit('data', 'opencode server listening on http://127.0.0.1:45678\n'));
+      return child;
+    });
+    const runtime = createRuntime({}, {
+      openCodePort: 45678,
+      openCodeProcess: { pid: null, exitCode: null, signalCode: null, close: vi.fn(async () => {}) },
+    });
+
+    await expect(runtime.restartOpenCode('opencode-upgrade', {
+      whileStopped: async () => { throw new Error('upgrade failed'); },
+    })).rejects.toThrow('upgrade failed');
+
+    expect(spawnMock).toHaveBeenCalledTimes(1);
+    expect(runtime.testState.isOpenCodeReady).toBe(true);
+    expect(runtime.testState.lastOpenCodeError).toBeNull();
+    await runtime.testState.openCodeProcess.close();
   });
 
   it('launches managed OpenCode with the managed PATH', async () => {
@@ -1303,10 +1475,13 @@ describe('OpenCode lifecycle', () => {
     });
     globalThis.fetch = vi.fn(async () => ({ ok: false }));
 
-    const runtime = createRuntime({ topUpV1SessionMigration });
+    const getUserEnvironment = vi.fn(() => ({ XDG_DATA_HOME: '/custom/data' }));
+    const runtime = createRuntime({ topUpV1SessionMigration, getUserEnvironment });
     await runtime.startOpenCode();
 
     expect(topUpV1SessionMigration).toHaveBeenCalledTimes(1);
+    expect(topUpV1SessionMigration.mock.calls[0][0].env.XDG_DATA_HOME).toBe('/custom/data');
+    expect(spawnMock.mock.calls[0][2].env.XDG_DATA_HOME).toBe('/custom/data');
     expect(calls).toEqual(['top-up', 'spawn']);
   });
 
@@ -1399,7 +1574,7 @@ it('shares the managed CLI preflight with desktop while startup is pending', asy
   await checking;
   const desktopVerdict = runtime.getManagedOpenCodePreflight();
   expect(runtime.testState.isOpenCodeReady).toBe(false);
-  finish('2.1.2');
+  finish('2.2.5');
   expect(await desktopVerdict).toBe(true);
   expect(checks).toBe(1);
   const server = await starting;

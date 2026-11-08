@@ -39,6 +39,7 @@ export const registerConfigEntityRoutes = (app, dependencies) => {
     updateSnippet,
     deleteSnippet,
     expandSnippets,
+    previewSnippet,
   } = dependencies;
 
   // Persist to disk immediately; OpenCode restart is deferred to an explicit
@@ -413,7 +414,9 @@ export const registerConfigEntityRoutes = (app, dependencies) => {
       if (error) {
         return res.status(400).json({ error });
       }
-      res.json({ text: expandSnippets(req.body?.text ?? '', directory) });
+      // `content` asks for a snippet body's preview, `text` for a prompt's expansion.
+      const content = req.body?.content;
+      res.json({ text: content !== undefined ? previewSnippet(String(content), directory) : expandSnippets(req.body?.text ?? '', directory) });
     } catch (error) {
       console.error('[API:POST /api/config/snippets/expand] Failed:', error);
       res.status(500).json({ error: error.message || 'Failed to expand snippets' });
@@ -475,7 +478,10 @@ export const registerConfigEntityRoutes = (app, dependencies) => {
       if (error.message?.includes('not found')) {
         return res.status(404).json({ error: error.message });
       }
-      if (error.message?.includes('Snippet name')) {
+      if (error.message?.includes('already exists')) {
+        return res.status(409).json({ error: error.message });
+      }
+      if (error.message?.includes('Snippet name') || error.message?.includes('Project directory')) {
         return res.status(400).json({ error: error.message });
       }
       res.status(500).json({ error: error.message || 'Failed to update snippet' });

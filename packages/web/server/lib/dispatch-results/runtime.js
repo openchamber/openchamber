@@ -112,14 +112,14 @@ const httpError = (message, status) => Object.assign(new Error(message), { statu
  * refuses a second admission of the same id, so a retry after a crash or a
  * lost response can never deliver the answer twice.
  */
-const createMessageId = (now) => {
+export const createMessageId = (now) => {
   const time = (BigInt(now) * 0x1000n + BigInt(Math.floor(Math.random() * 0x1000))).toString(16).padStart(12, '0').slice(-12);
   let random = '';
   for (let index = 0; index < 14; index += 1) random += ID_CHARS[Math.floor(Math.random() * ID_CHARS.length)];
   return `msg_${time}${random}`;
 };
 
-const escapeAttribute = (value) => value
+export const escapeAttribute = (value) => value
   .replace(/&/g, '&amp;')
   .replace(/"/g, '&quot;')
   .replace(/</g, '&lt;')
@@ -145,8 +145,12 @@ const OUTCOME_STATES = { succeeded: 'completed', failed: 'error', interrupted: '
  * meets OpenCode's: a remote OpenCode whose clock lags would otherwise make a
  * finished turn look older than its own dispatch. Only an entry stored
  * without that baseline (`afterIdleId` undefined) falls back to `dispatchedAt`.
+ *
+ * `withText` takes the text from the newest reply of the turn that has any,
+ * for a caller that forwards the answer: a turn can end on a step that only
+ * ran tools. The error still comes from the newest reply.
  */
-export const readDispatchOutcome = (records, dispatchedAt, afterIdleId) => {
+export const readDispatchOutcome = (records, dispatchedAt, afterIdleId, { withText = false } = {}) => {
   const idleIndex = records.findIndex((record) => parse(recordTypeSchema, record)?.type === 'idle');
   if (idleIndex === -1) return null;
   // A malformed idle record proves nothing about the turn: keep waiting.
@@ -159,12 +163,14 @@ export const readDispatchOutcome = (records, dispatchedAt, afterIdleId) => {
     ? records.findIndex((record) => parse(recordIdSchema, record)?.id === afterIdleId)
     : -1;
   const turnRecords = records.slice(idleIndex + 1, baselineIndex === -1 ? undefined : baselineIndex);
-  const reply = turnRecords
+  const replies = turnRecords
     .map((record) => parse(assistantRecordSchema, record))
-    .find((assistant) => assistant !== null && (byOrder || assistant.time.created >= dispatchedAt));
+    .filter((assistant) => assistant !== null && (byOrder || assistant.time.created >= dispatchedAt));
+  const reply = replies[0];
+  const textReply = withText ? replies.find((assistant) => assistantText(assistant)) : reply;
   return {
     state: OUTCOME_STATES[idle.outcome],
-    text: reply ? assistantText(reply) : '',
+    text: textReply ? assistantText(textReply) : '',
     errorMessage: reply?.error?.message?.trim() ?? '',
   };
 };
@@ -235,19 +241,23 @@ export function createDispatchResultsRuntime({
       if (parse(errorCodeSchema, error)?.code === 'ENOENT') return [];
       throw error;
     }
-    let parsed;
+    let stored = null;
+    let reason = 'not a dispatch results file';
     try {
-      parsed = JSON.parse(raw);
+      stored = parse(storedFileSchema, JSON.parse(raw));
     } catch (error) {
+      reason = error?.message ?? String(error);
+    }
+    if (!stored) {
       // Malformed is a failure, not "nothing pending": keep the bytes and
       // start over rather than overwrite them on the next write.
       const backup = `${filePath}.corrupt-${now()}`;
       await fs.promises.rename(filePath, backup).catch(() => undefined);
-      console.warn(`[dispatch-results] file was unreadable and moved to ${backup}: ${error?.message ?? error}`);
+      console.warn(`[dispatch-results] file was unreadable and moved to ${backup}: ${reason}`);
       return [];
     }
     // One unreadable entry is dropped alone; the rest still deliver.
-    return (parse(storedFileSchema, parsed)?.entries ?? []).map((entry) => parse(entrySchema, entry)).filter(Boolean);
+    return stored.entries.map((entry) => parse(entrySchema, entry)).filter(Boolean);
   };
 
   const load = () => {
@@ -268,17 +278,18 @@ export function createDispatchResultsRuntime({
 
   const persist = () => {
     const payload = JSON.stringify({ version: FILE_VERSION, entries: Array.from(entries.values()) });
-    writePromise = writePromise
-      .then(async () => {
-        await fs.promises.mkdir(dataDir, { recursive: true });
-        const tmpPath = `${filePath}.${process.pid}.tmp`;
-        await fs.promises.writeFile(tmpPath, payload, { encoding: 'utf8', mode: 0o600 });
-        await fs.promises.rename(tmpPath, filePath);
-      })
-      .catch((error) => {
-        console.warn('[dispatch-results] failed to persist pending results:', error?.message ?? error);
-      });
-    return writePromise;
+    const write = writePromise.then(async () => {
+      await fs.promises.mkdir(dataDir, { recursive: true });
+      const tmpPath = `${filePath}.${process.pid}.tmp`;
+      await fs.promises.writeFile(tmpPath, payload, { encoding: 'utf8', mode: 0o600 });
+      await fs.promises.rename(tmpPath, filePath);
+    });
+    // The chain survives a failed write so later writes still run; the caller
+    // still sees this one fail, since "on disk" is what it waits for.
+    writePromise = write.catch((error) => {
+      console.warn('[dispatch-results] failed to persist pending results:', error?.message ?? error);
+    });
+    return write;
   };
 
   // --- OpenCode access -----------------------------------------------------
@@ -401,26 +412,49 @@ export function createDispatchResultsRuntime({
       if (watched.kind === 'subagents') return arm(sessionId, subagentRecheckMs);
 
       let waiting = false;
+      const ready = [];
       for (const entry of pendingFor(sessionId)) {
         const outcome = watched.kind === 'deleted'
           ? DELETED_OUTCOME
           : readDispatchOutcome(watched.records, entry.dispatchedAt, entry.afterIdleId);
-        if (!outcome) {
-          waiting = true;
-          continue;
+        if (outcome) ready.push({ entry, outcome });
+        else waiting = true;
+      }
+
+      // Every ready entry reports the session's newest run, so prompts a
+      // parent steered into one run share one message id and one result. An
+      // entry that already holds an id keeps it: that id may have landed with
+      // an earlier run, and sharing it would swallow this one.
+      const unsent = ready.filter(({ entry }) => !entry.messageId);
+      if (unsent.length > 0) {
+        const minted = new Map(); // parentSessionId → message id
+        for (const { entry } of unsent) {
+          if (!minted.has(entry.parentSessionId)) minted.set(entry.parentSessionId, createMessageId(now()));
+          entry.messageId = minted.get(entry.parentSessionId);
         }
-        if (!entry.messageId) {
-          // Persisted before the first attempt, so a retry reuses it.
-          entry.messageId = createMessageId(now());
+        // Persisted before the first attempt, so a retry reuses it.
+        try {
           await persist();
+        } catch (error) {
+          // Unsaved, it could be minted again after a crash and deliver twice.
+          for (const { entry } of unsent) delete entry.messageId;
+          throw error;
         }
+      }
+
+      const deliveries = new Map(); // message id → ready entries
+      for (const item of ready) deliveries.set(item.entry.messageId, [...(deliveries.get(item.entry.messageId) ?? []), item]);
+      for (const group of deliveries.values()) {
+        // An entry without a baseline compares clocks and can miss a reply
+        // that began before its send; another entry of the run may have it.
+        const { entry, outcome } = group.find((item) => item.outcome.text) ?? group[0];
         const message = buildDispatchResultMessage({
           sessionId,
           title: watched.kind === 'ended' ? watched.title : '',
           outcome,
         });
         await deliver(entry, message);
-        entries.delete(entry.id);
+        for (const item of group) entries.delete(item.entry.id);
         await persist();
         console.log(`[dispatch-results] delivered the ${outcome.state} result of ${sessionId} to ${entry.parentSessionId}`);
       }
@@ -482,7 +516,14 @@ export function createDispatchResultsRuntime({
         console.warn(`[dispatch-results] too many pending results; no longer waiting on ${stale.sessionId} for ${stale.parentSessionId}`);
       }
     }
-    await persist();
+    try {
+      await persist();
+    } catch (error) {
+      // The caller tells the agent no result is coming; delivering one anyway
+      // would contradict it.
+      entries.delete(entry.id);
+      throw error;
+    }
     // The session may already be done: a short turn can end before this
     // entry existed, and its idle event would then have found nothing to arm.
     arm(watched);
@@ -504,7 +545,8 @@ export function createDispatchResultsRuntime({
           changed = true;
         }
       }
-      if (changed) void persist();
+      // Logged by persist; the next write saves the same state again.
+      if (changed) persist().catch(() => undefined);
       arm(deletedSessionId);
       return;
     }

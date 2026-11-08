@@ -27,7 +27,7 @@ import { useSettingsDirectory } from '@/hooks/useSettingsDirectory';
 import { useI18n } from '@/lib/i18n';
 import { rankByQuery } from '@/lib/search/fuzzySearch';
 import { cn } from '@/lib/utils';
-import { selectMcpServersForDirectory, useMcpConfigStore, type McpDraft } from '@/stores/useMcpConfigStore';
+import { hasLoadedMcpConfigsForDirectory, selectMcpServersForDirectory, useMcpConfigStore, type McpDraft } from '@/stores/useMcpConfigStore';
 import { useMcpStore } from '@/stores/useMcpStore';
 import type { McpServerStatus } from '@/lib/opencode/model';
 import { useIntegrationPolicyBlock } from '@/components/sections/shared/useIntegrationPolicyBlock';
@@ -79,6 +79,10 @@ export const McpGrid: React.FC = () => {
   const [isDeleting, setIsDeleting] = React.useState(false);
   const servers = useMcpConfigStore((state) => selectMcpServersForDirectory(state, settingsDirectory));
   const mcpStatus = useMcpStore((state) => state.getStatusForDirectory(settingsDirectory));
+  // Runtime-only rows wait for the config catalog: before it is read, every
+  // server the runtime reports would read as runtime-only, and a configured
+  // server would flash as one while its config entry was still loading.
+  const configsLoaded = useMcpConfigStore((state) => hasLoadedMcpConfigsForDirectory(state, settingsDirectory));
   const isBlocked = useIntegrationPolicyBlock(settingsDirectory);
   const refreshStatus = useMcpStore((state) => state.refresh);
   const getErrorForDirectory = useMcpStore((state) => state.getErrorForDirectory);
@@ -145,9 +149,22 @@ export const McpGrid: React.FC = () => {
     setIsDeleting(false);
   };
 
-  const filtered = rankByQuery([...servers], query, (server) => [
-    server.name,
-    server.type === 'local' ? server.command?.join(' ') ?? '' : server.url ?? '',
+  // OpenCode adds servers at runtime that live in no config file — the Console
+  // MCP of a signed-in workspace. They still run, so the grid shows them as
+  // read-only rows beside the configured ones (#5935).
+  const configNames = new Set(servers.map((server) => server.name));
+  const runtimeServers = configsLoaded
+    ? Object.values(mcpStatus).filter((server) => !configNames.has(server.name))
+    : [];
+  const rows = [
+    ...servers.map((server) => ({ kind: 'config' as const, server })),
+    ...runtimeServers.map((server) => ({ kind: 'runtime' as const, server })),
+  ];
+  const filtered = rankByQuery(rows, query, (row) => [
+    row.server.name,
+    row.kind === 'config'
+      ? row.server.type === 'local' ? row.server.command?.join(' ') ?? '' : row.server.url ?? ''
+      : '',
   ]);
   const hasQuery = query.trim().length > 0;
 
@@ -172,11 +189,11 @@ export const McpGrid: React.FC = () => {
         </div>
       )}
     >
-      {servers.length > 0 ? (
+      {rows.length > 0 ? (
         <SettingsCardSearch value={query} onChange={setQuery} placeholder={t('settings.mcp.grid.searchPlaceholder')} />
       ) : null}
 
-      {servers.length === 0 ? (
+      {rows.length === 0 ? (
         <p className="py-6 typography-meta text-muted-foreground">{t('settings.mcp.grid.empty')}</p>
       ) : filtered.length === 0 ? (
         <p className="py-6 typography-meta text-muted-foreground">{t('settings.mcp.grid.noMatches', { query: query.trim() })}</p>
@@ -191,7 +208,29 @@ export const McpGrid: React.FC = () => {
             settingsItem="mcp.create"
           />
         )}
-        {filtered.map((server) => {
+        {filtered.map((row) => {
+          if (row.kind === 'runtime') {
+            const blocked = isBlocked(`mcp:${row.server.name}`);
+            // No config entry backs this server, so it opens nothing and offers
+            // no delete: the row is what the runtime reports, read-only.
+            return (
+              <SettingsCard
+                key={row.server.name}
+                icon={<SettingsCardIcon name="server" />}
+                title={row.server.name}
+                badges={(
+                  <StatusPill
+                    status={row.server.status.status}
+                    enabled={row.server.status.status !== 'disabled'}
+                    blocked={blocked}
+                  />
+                )}
+                muted={row.server.status.status === 'disabled' || blocked}
+                footer={<SettingsCardChip>{t('settings.mcp.grid.runtimeProvided')}</SettingsCardChip>}
+              />
+            );
+          }
+          const server = row.server;
           const enabled = server.disabled !== true;
           const blocked = isBlocked(`mcp:${server.name}`);
           const target = server.type === 'local' ? server.command?.join(' ') : server.url;

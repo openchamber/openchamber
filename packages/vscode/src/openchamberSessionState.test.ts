@@ -82,67 +82,30 @@ describe('openchamber session state store', () => {
     assert.equal(memory.files.get(dataFile('sessions-unread.json')), '{ broken');
   });
 
-  /**
-   * OpenCode's archive route; ids in `gone` answer LocationNotFoundError, in
-   * `refused` another error. Ids in `movable` move to their project folder.
-   */
-  const fakeArchive = ({ gone = [] as string[], refused = [] as string[], movable = [] as string[], readEntry = async (_id: string): Promise<JsonValue | undefined> => undefined } = {}) => {
+  /** OpenCode's archive route; ids in `refused` answer an error. */
+  const fakeArchive = ({ refused = [] as string[] } = {}) => {
     const calls: Array<[string, boolean]> = [];
-    const relocated: Array<[string, boolean]> = [];
-    let entryWhenRelocated: JsonValue | undefined;
     const openCode: SessionArchiveOnOpenCode = {
       setArchived: async (sessionID, archived) => {
         calls.push([sessionID, archived]);
-        if (gone.includes(sessionID)) throw Object.assign(new Error('gone'), { name: 'LocationNotFoundError' });
         if (refused.includes(sessionID)) throw Object.assign(new Error('missing'), { name: 'SessionNotFoundError' });
       },
-      relocate: async (sessionID, archived) => {
-        if (!movable.includes(sessionID)) return false;
-        relocated.push([sessionID, archived]);
-        entryWhenRelocated = await readEntry(sessionID);
-        return true;
-      },
     };
-    return { openCode, calls, relocated, entryWhenRelocated: () => entryWhenRelocated };
+    return { openCode, calls };
   };
 
-  it('moves a session of a removed worktree to its project, archived on file before the move', async () => {
+  it('archives and restores on OpenCode, reports what it refused, and writes no file', async () => {
     const memory = createMemoryFs();
     const store = createSessionStateStore({ dataDir: '/data', fsPromises: memory.fsPromises, now: () => 1000 });
-    const fake = fakeArchive({ gone: ['ses_wt', 'ses_orphan'], movable: ['ses_wt'], readEntry: async (id) => (await store.readArchived())?.[id] });
+    const { openCode, calls } = fakeArchive({ refused: ['ses_missing'] });
 
-    assert.deepEqual(await store.archive(['ses_wt', 'ses_orphan'], null, fake.openCode), {
-      archived: [{ id: 'ses_wt', archivedAt: 1000 }, { id: 'ses_orphan', archivedAt: 1000 }],
-      failedIds: [],
-    });
-    assert.equal(fake.entryWhenRelocated(), 1000);
-    assert.deepEqual(fake.relocated, [['ses_wt', true]]);
-    // Only the session with no folder to move to stays on file.
-    assert.deepEqual(await store.readArchived(), { ses_orphan: 1000 });
-
-    const restoring = fakeArchive({ gone: ['ses_orphan'], movable: [] });
-    assert.deepEqual(await store.unarchive(['ses_orphan'], restoring.openCode), { restored: [{ id: 'ses_orphan', archivedAt: null }], failedIds: [] });
-    assert.deepEqual(await store.readArchived(), { ses_orphan: null });
-  });
-
-  it('archives on OpenCode and writes the file only for a session whose directory is gone', async () => {
-    const memory = createMemoryFs();
-    const store = createSessionStateStore({ dataDir: '/data', fsPromises: memory.fsPromises, now: () => 1000 });
-    const { openCode, calls } = fakeArchive({ gone: ['ses_gone'], refused: ['ses_missing'] });
-    // ses_gone has no project folder to move to, so it stays on file.
-
-    assert.deepEqual(await store.archive(['ses_a', 'ses_gone', 'ses_missing', 'ses_a'], null, openCode), {
-      archived: [{ id: 'ses_a', archivedAt: 1000 }, { id: 'ses_gone', archivedAt: 1000 }],
+    assert.deepEqual(await store.archive(['ses_a', 'ses_missing', 'ses_a'], null, openCode), {
+      archived: [{ id: 'ses_a', archivedAt: 1000 }],
       failedIds: ['ses_missing'],
     });
-    assert.deepEqual(calls, [['ses_a', true], ['ses_gone', true], ['ses_missing', true]]);
-    assert.deepEqual(await store.readArchived(), { ses_gone: 1000 });
-    // Every write went through a temp file that was renamed into place.
-    assert.equal(memory.writes.every((filePath) => filePath.endsWith('.tmp')), true);
-
-    assert.deepEqual(await store.unarchive(['ses_gone'], openCode), { restored: [{ id: 'ses_gone', archivedAt: null }], failedIds: [] });
-    // The unarchive stays on file: it overrides an archived stamp OpenCode may carry.
-    assert.deepEqual(await store.readArchived(), { ses_gone: null });
+    assert.deepEqual(await store.unarchive(['ses_a'], openCode), { restored: [{ id: 'ses_a', archivedAt: null }], failedIds: [] });
+    assert.deepEqual(calls, [['ses_a', true], ['ses_missing', true], ['ses_a', false]]);
+    assert.deepEqual(memory.writes, []);
   });
 
   it('drops the entry of a session OpenCode now holds, and writes nothing when there is none', async () => {
@@ -157,17 +120,17 @@ describe('openchamber session state store', () => {
     assert.equal(memory.writes.length, writes);
   });
 
-  it('keeps OpenCode changes when the archive file cannot be read, and fails only the file\'s sessions', async () => {
+  it('keeps OpenCode changes when the archive file cannot be read', async () => {
     const memory = createMemoryFs();
     memory.fsPromises.readFile = async () => { throw new Error('EACCES'); };
     const store = createSessionStateStore({ dataDir: '/data', fsPromises: memory.fsPromises, now: () => 1000 });
-    const { openCode } = fakeArchive({ gone: ['ses_gone'] });
+    const { openCode } = fakeArchive({ refused: ['ses_down'] });
     const warn = console.warn;
     console.warn = () => undefined;
     try {
-      assert.deepEqual(await store.archive(['ses_a', 'ses_gone'], null, openCode), {
+      assert.deepEqual(await store.archive(['ses_a', 'ses_down'], null, openCode), {
         archived: [{ id: 'ses_a', archivedAt: 1000 }],
-        failedIds: ['ses_gone'],
+        failedIds: ['ses_down'],
       });
     } finally {
       console.warn = warn;

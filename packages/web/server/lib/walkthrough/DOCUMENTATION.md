@@ -33,6 +33,55 @@ has to ask for it.
 - `index.js` — orchestration.
 - `routes.js` — `/api/walkthrough*`.
 
+## What a walkthrough says
+
+A walkthrough does three things, in the prompt's words: a reading order (stops
+grouped across files and ordered so each builds on the last), an explanation
+of what each stop's code now does differently, and rare **observations**. An
+observation is a fact the reader agrees to by accepting the change, of one of
+five kinds: `decision` (a product or architecture call that could have gone
+another way), `cost` (code in another language, a dependency or pinned
+version, a second implementation), `limitation` (what users still cannot do),
+`asymmetry` (two paths of the same thing behaving differently for the user),
+and `unproven` (the main promise has no test). Each stop carries an
+`observations` array, empty on most; the normalizer drops unknown kinds and
+empty notes and keeps at most two per stop and `MAX_OBSERVATIONS` in all.
+Entries written before observations existed have no array, and the client
+treats that as none.
+
+The focus line says what changes for the people using the software, worked out
+from the code: strings, docs, tests and what the new code connects to.
+`critical` is meant for the stop or two the change rests on; the size guidance
+gives the model a ceiling for both critical stops and observations.
+
+The reader's own preferences come from the Walkthrough Magic Prompt
+(`walkthrough.instructions`), read on the server for the directory through
+`readWalkthroughInstructions` (project override over global; no built-in
+text, so no override means none). They go into the system prompt inside
+`<preferences>`, at most 4,000 characters, after a line saying they shape tone
+and emphasis and cannot change the format, the anchoring or the factual nature
+of observations. A generation that cannot read them fails with
+`instructions-unreadable` instead of sending none; the panel read only measures
+readiness with them and does not fail. They are not part of the cache key, like
+the thinking level: changing them keeps the review on screen until the user
+regenerates.
+
+### Why observations and not "what a reviewer should check"
+
+The earlier prompt asked every stop for what a reviewer should check or be
+suspicious about. Models answered every stop, on every model tried, with the
+invariant they had just described rephrased as "check that…": it read like a
+review and checked nothing. Finding bugs is the Review action's job. The five
+kinds are facts rather than verdicts, so a model can say "this pins OkHttp
+5.3.2" without calling the code wrong, and empty is the expected answer for
+most stops.
+
+### Why the user need comes from the code and not the PR description
+
+The description is not sent. It can be stale, wrong, or written for a reviewer
+rather than about the change, and a local scope has none at all. The code, its
+strings, docs and tests are the same evidence for every scope.
+
 ## Hunk identity
 
 `hunks.js` is the only place that decides what a hunk is or what its id is. The
@@ -117,7 +166,7 @@ stay apart. Number-only sources keep `pr:<number>` and read the repository behin
 the bound primary remote. A named repository is honoured only inside the bound
 repository's network, the repository and the upstream it was forked from, which
 is what the bound pull request list reads with the same account. A name outside
-that network fails with `409 PULL_REQUEST_REPOSITORY_MISMATCH` before any GitHub
+that network, in a source without `linked: true`, fails with `409 PULL_REQUEST_REPOSITORY_MISMATCH` before any GitHub
 request. The PR panel forwards the project of the pull request it shows.
 
 `GET /api/walkthrough/pr-diff` accepts `directory`, a JSON `source` restricted
@@ -359,6 +408,12 @@ against the current digest. Splicing partially-regenerated chapters into an old
 narrative was considered and rejected — the seams produce stops that contradict
 each other, and the failure is invisible.
 
+The previous narrative goes only to the same model writing in the same
+language. A review asked of another model or in another language is a fresh
+one: handing it the last entry, under a prompt that says the code has moved on,
+got a near-copy of the first model's review back on an unchanged diff, which is
+the opposite of the second opinion that switching models asks for.
+
 ## Hygiene
 
 - Entries are bounded by count and total size (200 / 50 MB) and evicted
@@ -385,6 +440,12 @@ The model is told it may leave mechanical changes out. Whatever it does not
 anchor is computed as `uncoveredHunkIds` and rendered as a collapsed tail, so
 the reader can always answer "have I seen everything that changed". No hunk
 disappears from the view.
+
+For each file it left out the model writes one `routine` note ("Translations
+for the two new strings"), shown under that file in the tail, so the reader can
+trust a left-out file without opening it. The normalizer keeps a note only for
+a digest file a stop left at least partly uncovered, one per path. Generated
+files never reach the model and carry none.
 
 ## Cost of reading
 

@@ -1,4 +1,5 @@
 import React from 'react';
+import { isWorkflowAgentSession } from '@/lib/sessionWorkflowMetadata';
 import { useGlobalSessionStatusStore } from '@/sync/global-session-status';
 import { Icon } from '@/components/icon/Icon';
 import type { IconName } from '@/components/icon/icons';
@@ -6,18 +7,19 @@ import { SessionActivityDuration } from '@/components/session/SessionActivityDur
 import { useHasSessionActivityDuration } from '@/sync/session-activity-timing';
 import { useI18n } from '@/lib/i18n';
 import { useAllLiveSessions, useAllSessionStatuses, useDirectorySync } from '@/sync/sync-context';
+import { useSessionWorkflowRuns } from '@/lib/workflows/store';
 import { useUIStore } from '@/stores/useUIStore';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { getProviderModelDisplayName } from '@/lib/modelDisplay';
-import { useSessionUIStore } from '@/sync/session-ui-store';
-import { isVSCodeRuntime } from '@/lib/desktop';
 import { normalizePath } from '@/lib/pathNormalization';
 import { spaceIdOfDirectory } from '@/lib/spaces/space-route';
 import { WorkStatusCollapsibleSection, WorkStatusRow, WorkStatusValue } from './WorkStatusPrimitives';
 import { useReportWorkStatusPresence } from './presenceContext';
+import { useOpenChildSession } from './useOpenChildSession';
 import { formatCost } from './subagentCost';
 import { computeRollup } from './useSubagentCostRollup';
 import type { State } from '@/sync/types';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 
 type Props = {
   sessionId: string | null;
@@ -38,14 +40,23 @@ const SubagentDuration: React.FC<{ sessionId: string }> = ({ sessionId }) => {
  */
 export const WorkStatusSubagentsSection: React.FC<Props> = ({ sessionId, directory }) => {
   const { t } = useI18n();
-  const isMobile = useUIStore((state) => state.isMobile);
   const providers = useConfigStore((state) => state.providers);
 
   const liveSessions = useAllLiveSessions();
   const statuses = useAllSessionStatuses();
+  // A workflow's agents are child sessions too; the Workflows section lists
+  // them under their run, so they stay out of this list: by their mark, and
+  // by the runs for agents started before sessions carried one.
+  const workflowRuns = useSessionWorkflowRuns(sessionId);
+  const workflowAgentIds = React.useMemo(
+    () => new Set(workflowRuns.flatMap((run) => run.agents.flatMap((agent) => (agent.sessionId ? [agent.sessionId] : [])))),
+    [workflowRuns],
+  );
   const children = React.useMemo(
-    () => (sessionId ? liveSessions.filter((candidate) => candidate.parentID === sessionId) : []),
-    [liveSessions, sessionId],
+    () => (sessionId ? liveSessions.filter((candidate) => (
+      candidate.parentID === sessionId && !workflowAgentIds.has(candidate.id) && !isWorkflowAgentSession(candidate)
+    )) : []),
+    [liveSessions, sessionId, workflowAgentIds],
   );
 
   // Each child's own subtree total (its cost plus every descendant of its
@@ -80,8 +91,6 @@ export const WorkStatusSubagentsSection: React.FC<Props> = ({ sessionId, directo
     })
     .join('\n'), [children]));
 
-  const openContextPanelTab = useUIStore((state) => state.openContextPanelTab);
-  const setCurrentSession = useSessionUIStore((state) => state.setCurrentSession);
   const setSectionExpanded = useUIStore((state) => state.setWorkStatusSectionExpanded);
 
   // Subagents appearing where there were none is the one moment this section
@@ -95,21 +104,7 @@ export const WorkStatusSubagentsSection: React.FC<Props> = ({ sessionId, directo
     hadChildren.current = present;
   }, [children.length, setSectionExpanded]);
 
-  // Same branch the transcript's Task tool takes: surfaces that cannot host an
-  // side panel navigate to the child session instead of opening a tab.
-  const openChildSession = React.useCallback((childId: string, label: string) => {
-    if (!directory) return;
-    if (isMobile || isVSCodeRuntime()) {
-      setCurrentSession(childId, directory);
-      return;
-    }
-    openContextPanelTab(directory, {
-      mode: 'chat',
-      dedupeKey: `session:${childId}`,
-      label,
-      readOnly: true,
-    });
-  }, [directory, isMobile, openContextPanelTab, setCurrentSession]);
+  const openChildSession = useOpenChildSession(directory);
 
   useReportWorkStatusPresence('subagents', children.length > 0);
 
@@ -157,7 +152,7 @@ export const WorkStatusSubagentsSection: React.FC<Props> = ({ sessionId, directo
       defaultExpanded
       summary={busyChildren > 0 ? `${busyChildren}/${children.length}` : children.length}
     >
-      <div className="max-h-56 overflow-y-auto">
+      <ScrollableOverlay outerClassName="max-h-56" disableHorizontal>
         {rows.map(({ child, blocked, asked, busy, failed, done }) => {
           const label = child.title?.trim() || t('chat.workStatus.subagent.untitled');
           let icon: IconName = 'time';
@@ -213,7 +208,7 @@ export const WorkStatusSubagentsSection: React.FC<Props> = ({ sessionId, directo
             />
           );
         })}
-      </div>
+      </ScrollableOverlay>
     </WorkStatusCollapsibleSection>
   );
 };

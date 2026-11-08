@@ -19,7 +19,11 @@ Uma sessão de worktree roda em sua própria cópia do seu repositório, em seu 
 
 O OpenChamber cria o branch, configura a pasta e abre uma nova sessão ali, pronta para sua primeira mensagem. Você também pode iniciar uma direto de uma [tarefa](/pt-br/notes-todos-plans/) ou de uma [issue ou pull request](/pt-br/github/).
 
-Para pular as perguntas, escolha **Worktree rápido** no mesmo menu de branches: o OpenChamber dá nome ao branch e aponta a nova sessão para ele.
+Para pular as perguntas, escolha **Worktree rápido** no mesmo menu de branches: o OpenChamber dá ao branch um nome provisório e aponta a nova sessão para ele. Quando o agente dá um nome à tarefa, ele também renomeia o branch de acordo com ela, como `fix/login-timeout`, desde que o branch ainda não tenha sido enviado com push.
+
+## Na barra lateral
+
+Um worktree é uma linha na barra lateral, com todas as sessões dele embaixo. Dentro do projeto, ele aparece entre as outras sessões do projeto pela atividade mais recente, então um worktree em que você acabou de trabalhar fica perto do topo. A linha mostra o nome da tarefa assim que o agente o define (até lá, o título da sessão em que você trabalhou por último ali), o pull request ou issue que ele acompanha como uma marca colorida, e se alguma sessão ali está rodando ou tem novidades para você. Um worktree criado para um pull request ou uma issue começa com o título desse item até o agente escolher um nome mais curto. Passe o cursor sobre ela para ver o branch. Clique para abrir a sessão em que você trabalhou por último ali; para abrir a lista, passe o cursor sobre o ícone de branch à esquerda e clique na seta que aparece no lugar dele. O menu dele renomeia a tarefa, move o worktree para uma pasta do projeto, o arquiva ou o exclui. No celular, toque na seta da linha para abrir a lista e deslize a linha para o lado para marcá-la como concluída, renomear a tarefa, arquivar o worktree ou excluí-lo. Veja [Sessões em andamento](/pt-br/sessions-in-work/) para saber como os trabalhos entram e saem do bloco Em andamento.
 
 ## Projetos abertos em uma pasta do repositório
 
@@ -31,7 +35,13 @@ Quando o trabalho estiver bom, use **Integrate** na visão de Git para trazer os
 
 ## Limpeza
 
-Excluir ou arquivar a sessão pode remover o worktree. Você escolhe se também deve excluir o branch — local, e remoto se houver um. Nada é excluído sem você pedir.
+Quando a tarefa terminar, escolha **Arquivar o worktree** no menu da linha, ou segure Shift e clique no botão de arquivar que aparece na linha no lugar do botão de nova sessão. O OpenChamber arquiva o worktree: a pasta some, e as sessões, as mudanças sem commit e o branch dele ficam esperando na página Arquivo. Se uma sessão ainda estiver rodando ali, o worktree fica.
+
+Marcar a linha como concluída só a tira de Em andamento. Para arquivar um worktree sempre que você o marcar como concluído, ou quando o PR dele for mesclado, ative isso em **Configurações → Sessões → Worktrees concluídos**.
+
+Na página Arquivo, os worktrees arquivados aparecem sob o projeto deles. **Restaurar** traz um de volta com o branch, roda os comandos de setup do projeto e devolve as mudanças e as sessões dele; restaurar uma das sessões dele faz o mesmo. Arquivos que o git ignora, como `node_modules` ou `.env`, não são guardados, então são os comandos de setup que os trazem de volta. A página Worktrees do projeto também lista os worktrees arquivados.
+
+Para se livrar de um worktree de vez, exclua-o pelo menu dele, ou exclua um arquivado na página Arquivo. Ao excluir pelo menu, você escolhe se também deve excluir o branch — local, e remoto se houver um.
 
 ## Se algo parecer errado
 

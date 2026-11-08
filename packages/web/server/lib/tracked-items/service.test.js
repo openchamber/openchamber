@@ -4,6 +4,7 @@ import { createTrackedItemsService } from './service.js';
 
 const githubPull = (number) => ({ provider: 'github', kind: 'pull', owner: 'acme', repo: 'app', number });
 const githubIssue = (number) => ({ provider: 'github', kind: 'issue', owner: 'acme', repo: 'app', number });
+const githubDiscussion = (number) => ({ provider: 'github', kind: 'discussion', owner: 'acme', repo: 'app', number });
 const gitlabPull = (number) => ({ provider: 'gitlab', instance: 'https://gitlab.com', kind: 'pull', owner: 'group/sub', repo: 'app', number });
 const linearIssue = (identifier) => ({ provider: 'linear', identifier });
 const itemsOf = (...items) => parseTrackedItems(items, 100);
@@ -17,7 +18,12 @@ function setup({ readers = {}, persistence = null } = {}) {
   const sent = [];
   const calls = { github: [], gitlab: [], linear: [] };
   const answers = {
-    github: async (input) => ({ status: 'ok', pulls: input.pulls.map((ref) => pullSummary(ref)), issues: input.issues.map((ref) => ({ ...ref, title: 'Issue', state: 'open' })) }),
+    github: async (input) => ({
+      status: 'ok',
+      pulls: input.pulls.map((ref) => pullSummary(ref)),
+      issues: input.issues.map((ref) => ({ ...ref, title: 'Issue', state: 'open' })),
+      discussions: input.discussions.map((ref) => ({ ...ref, title: 'Discussion', state: 'open', answered: null })),
+    }),
     gitlab: async (input) => ({ status: 'ok', pulls: input.pulls.map((ref) => pullSummary(ref)), issues: [] }),
     linear: async (input) => ({ status: 'ok', items: input.identifiers.map((identifier) => ({ identifier, title: identifier, state: { name: 'Todo', category: 'todo' } })) }),
     ...readers,
@@ -38,13 +44,20 @@ function setup({ readers = {}, persistence = null } = {}) {
   return { service, sent, calls, open };
 }
 
+describe('tracked items', () => {
+  it('follows a discussion only where its provider keeps them', () => {
+    const items = parseTrackedItems([githubDiscussion(4), { ...gitlabPull(3), kind: 'discussion' }], 100);
+    expect([...items.values()]).toEqual([{ ...githubDiscussion(4), instance: undefined }]);
+  });
+});
+
 describe('tracked items service', () => {
   beforeEach(() => vi.useFakeTimers());
   afterEach(() => vi.useRealTimers());
 
   it('asks each provider once per batch for a visible client and pushes only to the clients that show the item', async () => {
     const { service, sent, calls } = setup();
-    service.setInterest('c1', itemsOf(githubPull(1), githubIssue(2), gitlabPull(3), linearIssue('ope-7')));
+    service.setInterest('c1', itemsOf(githubPull(1), githubIssue(2), githubDiscussion(4), gitlabPull(3), linearIssue('ope-7')));
     service.setInterest('c2', itemsOf(githubPull(9)));
     await vi.advanceTimersByTimeAsync(0);
 
@@ -54,12 +67,13 @@ describe('tracked items service', () => {
       accountId: null,
       pulls: [{ owner: 'acme', repo: 'app', number: 1 }, { owner: 'acme', repo: 'app', number: 9 }],
       issues: [{ owner: 'acme', repo: 'app', number: 2 }],
+      discussions: [{ owner: 'acme', repo: 'app', number: 4 }],
     });
     expect(calls.gitlab[0]).toMatchObject({ instance: 'https://gitlab.com', pulls: [{ owner: 'group/sub', repo: 'app', number: 3 }] });
     expect(calls.linear[0]).toEqual({ identifiers: ['OPE-7'] });
     expect(calls.gitlab[0]).toMatchObject({ accountId: null });
     const keysFor = (id) => sent.filter((entry) => entry.id === id).flatMap((entry) => entry.event.properties.states.map((state) => state.key)).sort();
-    expect(keysFor('c1')).toEqual([githubPull(1), githubIssue(2), gitlabPull(3), { provider: 'linear', kind: 'work-item', identifier: 'OPE-7' }].map(trackedItemKey).sort());
+    expect(keysFor('c1')).toEqual([githubPull(1), githubIssue(2), githubDiscussion(4), gitlabPull(3), { provider: 'linear', kind: 'work-item', identifier: 'OPE-7' }].map(trackedItemKey).sort());
     expect(keysFor('c2')).toEqual([trackedItemKey(githubPull(9))]);
   });
 
@@ -69,8 +83,8 @@ describe('tracked items service', () => {
     await vi.advanceTimersByTimeAsync(0);
 
     expect(calls.github).toHaveLength(2);
-    expect(calls.github[0]).toEqual({ instance: 'github.com', accountId: null, pulls: [{ owner: 'acme', repo: 'app', number: 1 }], issues: [] });
-    expect(calls.github[1]).toEqual({ instance: 'github.acme.com', accountId: null, pulls: [{ owner: 'acme', repo: 'app', number: 2 }], issues: [] });
+    expect(calls.github[0]).toEqual({ instance: 'github.com', accountId: null, pulls: [{ owner: 'acme', repo: 'app', number: 1 }], issues: [], discussions: [] });
+    expect(calls.github[1]).toEqual({ instance: 'github.acme.com', accountId: null, pulls: [{ owner: 'acme', repo: 'app', number: 2 }], issues: [], discussions: [] });
   });
 
   it('stays quiet while nothing changed and while the client is hidden, and catches up when it returns', async () => {
@@ -90,6 +104,28 @@ describe('tracked items service', () => {
     service.setPresence('c1', true);
     await vi.advanceTimersByTimeAsync(0);
     expect(calls.github).toHaveLength(3);
+  });
+
+  it('refreshes what a server module follows with no window open, and tells it what moved', async () => {
+    let checks = { state: 'pending', total: 1, success: 0, failure: 0, pending: 1 };
+    const { service, sent, calls } = setup({
+      readers: { github: async (input) => ({ status: 'ok', pulls: input.pulls.map((ref) => pullSummary(ref, 'open', { checks })), issues: [], discussions: [] }) },
+    });
+    const heard = [];
+    service.subscribe((states) => heard.push(...states.map((state) => state.state.checks.state)));
+    service.setServerInterest('pr-watch', itemsOf(githubPull(5)));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(calls.github).toHaveLength(1);
+    expect(heard).toEqual(['pending']);
+
+    checks = { state: 'success', total: 1, success: 1, failure: 0, pending: 0 };
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(heard).toEqual(['pending', 'success']);
+    expect(sent).toEqual([]);
+
+    service.setServerInterest('pr-watch', new Map());
+    await vi.advanceTimersByTimeAsync(10 * 60_000);
+    expect(calls.github).toHaveLength(2);
   });
 
   it('keeps the last known state through a failed read and backs off before asking again', async () => {

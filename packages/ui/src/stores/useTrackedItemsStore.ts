@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { useShallow } from 'zustand/react/shallow';
-import type { IssueLiveSummary, TrackerLiveSummary } from '@/lib/api/types';
+import type { DiscussionLiveSummary, IssueLiveSummary, TrackerLiveSummary } from '@/lib/api/types';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { z } from 'zod';
 import { trackedItemKey, trackedItemRecordSchema, type TrackedItem, type TrackedItemState, type TrackedThread, type TrackedWorkItem } from '@/lib/trackedItems/model';
@@ -86,9 +86,32 @@ export const useTrackedRecords = (items: ReadonlyArray<TrackedItem | null>): Arr
 
 type TrackedRecords = TrackedItemsStore['records'];
 
-/** Live state of a repository issue; null until known. */
-export const readTrackedIssueState = (records: TrackedRecords, item: TrackedThread<'issue'>): IssueLiveSummary | null => {
+const DISCUSSION_ISSUE_STATES = {
+  open: 'open',
+  resolved: 'completed',
+  outdated: 'not_planned',
+  duplicate: 'not_planned',
+} as const satisfies Record<DiscussionLiveSummary['state'], IssueLiveSummary['state']>;
+
+// One issue reading per discussion state the store holds: selectors compare
+// what they read by identity, so a new object on every read would re-render forever.
+const discussionIssueStates = new WeakMap<DiscussionLiveSummary, IssueLiveSummary>();
+const discussionAsIssue = (summary: DiscussionLiveSummary): IssueLiveSummary => {
+  const known = discussionIssueStates.get(summary);
+  if (known) return known;
+  const issue: IssueLiveSummary = { owner: summary.owner, repo: summary.repo, number: summary.number, title: summary.title, state: DISCUSSION_ISSUE_STATES[summary.state] };
+  discussionIssueStates.set(summary, issue);
+  return issue;
+};
+
+/**
+ * Live state of a repository issue, or of a discussion read the way an
+ * issue's badge shows it (resolved is done, outdated and duplicate are
+ * dropped); null until known.
+ */
+export const readTrackedIssueState = (records: TrackedRecords, item: TrackedThread<'issue' | 'discussion'>): IssueLiveSummary | null => {
   const record = records[storeKey(getRuntimeKey(), trackedItemKey(item))];
+  if (record?.type === 'discussion') return record.state ? discussionAsIssue(record.state) : null;
   return record?.type === 'issue' ? record.state : null;
 };
 
@@ -117,8 +140,8 @@ export const readTrackedPullVisualSummary = (
   );
 };
 
-/** Live state of each repository issue, in order; null until known. */
-export const useTrackedIssueStates = (items: ReadonlyArray<TrackedThread<'issue'>>): Array<IssueLiveSummary | null> => (
+/** Live state of each repository issue or discussion, in order, as an issue's badge reads it; null until known. */
+export const useTrackedIssueStates = (items: ReadonlyArray<TrackedThread<'issue' | 'discussion'>>): Array<IssueLiveSummary | null> => (
   useTrackedItemsStore(useShallow((state) => items.map((item) => readTrackedIssueState(state.records, item))))
 );
 

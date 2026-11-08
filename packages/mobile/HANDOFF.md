@@ -20,9 +20,10 @@ extensions.
     blocked as mixed content even with cleartext allowed in the manifest. LAN transport is a core
     feature; iOS (`capacitor://`) has no such issue, and relay and tunnel traffic is TLS anyway.
   - Keyboard `resize: 'none'`: the WebView keeps its full height and the UI follows the keyboard
-    through the `--oc-keyboard-inset` CSS variable driven by `keyboardWillShow`
-    (`useNativeMobileChrome`). The built-in `native` resize lands only after the keyboard
-    animation ends, which looked like a ~1.5s lag.
+    itself from `keyboardWillShow` (`apps/mobileNativeChrome.ts`): layouts take the keyboard once,
+    where the change is invisible, and what sits above it rides it on a compositor transform
+    (performance-engineering skill, `references/ios-webkit.md`). The built-in `native` resize
+    lands only after the keyboard animation ends, which looked like a ~1.5s lag.
   - StatusBar `overlaysWebView: true`.
   - PushNotifications `presentationOptions: []`: iOS never shows an alert while the app is in
     the foreground. The server always sends (no racy visibility gate); background pushes show as
@@ -143,10 +144,10 @@ iOS Simulator helpers: `mobile:sim:{boot,install,launch,run,serve,list,kill}` (s
 - Manifest: permissions `INTERNET`, `CAMERA` (+ optional camera feature), `POST_NOTIFICATIONS`
   (Android 13+; older versions allow notifications by default). `windowSoftInputMode=adjustResize`.
   FCM `default_notification_icon=@drawable/ic_stat_notify`.
-- Adaptive and themed launcher icon: full-bleed color background + `ic_launcher_foreground` (sources under
-  `packages/mobile/assets/`, regenerable with `@capacitor/assets`). The `<monochrome>` layer
-  (`ic_launcher_monochrome.png`) is hand-maintained: regeneration rewrites `ic_launcher.xml`
-  without it, so re-add the layer afterwards.
+- Adaptive and themed launcher icon: full-bleed color background + `ic_launcher_foreground`, plus the
+  `<monochrome>` layer (`ic_launcher_monochrome.png`). All of them, and `assets/icon-*.png`, are written
+  by `bun run brand:generate` (`scripts/brand`); `@capacitor/assets` would rewrite `ic_launcher.xml`
+  without the monochrome layer, so do not use it for icons.
 
 ## Quirks / gotchas
 
@@ -189,8 +190,9 @@ iOS Simulator helpers: `mobile:sim:{boot,install,launch,run,serve,list,kill}` (s
   an inline `minHeight: 0`.
 - **A custom Control Center icon** must be a custom SF Symbol (`swiftdraw --format sfsymbol`, default
   Small variants) built from an SVG that keeps its `transform` attributes, drawn with bold strokes,
-  referenced as `Label("…", image: "OCLogoSymbol")`. Control Center caches icons system-wide: after
-  changing one, reboot the device.
+  referenced as `Label("…", image: "OCLogoSymbol")`. `bun run brand:generate` builds `OCLogoSymbol` this
+  way on a Mac with `swiftdraw` (`brew install swiftdraw`). Control Center caches icons system-wide:
+  after changing one, reboot the device.
 
 ## Validation
 

@@ -278,7 +278,7 @@ function SelectContent({
             color: 'var(--surface-elevated-foreground)',
           }}
           className={cn(
-            "oc-glass-popover oc-glass-floating pointer-events-auto transition-all duration-150 ease-out data-[starting-style]:opacity-0 data-[starting-style]:scale-95 data-[ending-style]:opacity-0 data-[ending-style]:scale-95 relative z-[120] max-h-[var(--available-height)] min-w-[8rem] origin-[var(--transform-origin)] overflow-x-hidden rounded-xl",
+            "oc-glass-popover oc-glass-floating pointer-events-auto oc-popup-motion data-[starting-style]:opacity-0 data-[starting-style]:scale-95 data-[ending-style]:opacity-0 data-[ending-style]:scale-95 relative z-[120] max-h-[var(--available-height)] min-w-[8rem] origin-[var(--transform-origin)] overflow-x-hidden rounded-xl",
             !alignItemWithTrigger &&
               "data-[side=bottom]:translate-y-1 data-[side=left]:-translate-x-1 data-[side=right]:translate-x-1 data-[side=top]:-translate-y-1",
             fitContent && "w-max min-w-0",

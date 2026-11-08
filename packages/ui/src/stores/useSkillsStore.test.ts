@@ -61,7 +61,7 @@ mock.module('./utils/safeStorage', () => ({
   }),
 }));
 
-const { invalidateSkillsLoadCache, selectAvailableSkillsForDirectory, useSkillsStore } = await import('./useSkillsStore');
+const { invalidateSkillsLoadCache, selectAvailableSkillsForDirectory, selectSkillsLoadedForDirectory, useSkillsStore } = await import('./useSkillsStore');
 
 describe('useSkillsStore directory resolution', () => {
   beforeEach(() => {
@@ -90,6 +90,20 @@ describe('useSkillsStore directory resolution', () => {
       isLoading: false,
       skillDraft: null,
     });
+  });
+
+  test('a project counts as loaded once its skills are read, even when it has none or the read fails', async () => {
+    const loaded = (directory: string) => selectSkillsLoadedForDirectory(useSkillsStore.getState(), directory);
+    expect(loaded(activeProjectPath)).toBe(false);
+
+    runtimeFetchImpl = async () => new Response(JSON.stringify({ skills: [] }), { headers: { 'Content-Type': 'application/json' } });
+    await useSkillsStore.getState().loadSkills(activeProjectPath);
+    expect(selectAvailableSkillsForDirectory(useSkillsStore.getState(), activeProjectPath)).toEqual([]);
+    expect(loaded(activeProjectPath)).toBe(true);
+
+    runtimeFetchImpl = async () => new Response('{}', { status: 500 });
+    expect(await useSkillsStore.getState().loadSkills('/workspace/other-project')).toBe(false);
+    expect(loaded('/workspace/other-project')).toBe(true);
   });
 
   test('loading another project leaves the active project\'s skills alone', async () => {
@@ -322,6 +336,18 @@ describe('useSkillsStore directory resolution', () => {
     expect(useSkillsStore.getState().policiesByDirectory[activeProjectPath]).toEqual([
       { resource: 'skill:repo-local-skill', effect: 'deny', path: `${activeProjectPath}/.opencode/opencode.json` },
     ]);
+  });
+
+  test('a switch from a project with a non-Latin path reaches the server', async () => {
+    const directory = '/workspace/мій-проєкт';
+    expect(await useSkillsStore.getState().loadSkills(directory)).toBe(true);
+    const [skill] = useSkillsStore.getState().skillsByDirectory[directory];
+
+    runtimeFetchImpl = async () => new Response(JSON.stringify({ changed: [`${directory}/.opencode/opencode.json`] }), { headers: { 'Content-Type': 'application/json' } });
+    expect(await useSkillsStore.getState().setSkillEnabled(skill, false, directory)).toBe(true);
+    const switchCall = runtimeFetchCalls.at(-1);
+    expect(switchCall?.url).toContain(`/api/config/skill-switch?directory=${encodeURIComponent(directory)}`);
+    expect(switchCall?.headers).toEqual({ 'Content-Type': 'application/json', 'x-opencode-directory': directory });
   });
 
   test('statements never read are unknown, not empty, and the next load asks again', async () => {

@@ -18,9 +18,11 @@ import {
 
 type OverviewIssueState = OverviewSessionFacts['issues'][number];
 import { useWorktreeChangeRequests } from './useWorktreeChangeRequests';
-import { readOverviewWorktreeGit, sessionsInWorktree, type OverviewWorktreeGit, type OverviewWorktreeTarget } from './overviewActions';
+import { sessionsInWorktree } from '@/lib/worktrees/worktreeUse';
+import { readOverviewWorktreeGit, type OverviewWorktreeGit, type OverviewWorktreeTarget } from './overviewActions';
 import { normalizePath } from '@/lib/pathNormalization';
 import { resolveProjectForSessionDirectory } from '@/lib/projectResolution';
+import { spaceProjectDirectoryIn, useSpacesStore } from '@/lib/spaces/spaces-store';
 import { resolveProjectColor } from '@/lib/projectMeta';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { repositoryThread, workItem } from '@/lib/trackedItems/fromLinks';
@@ -43,6 +45,8 @@ import { useUIStore } from '@/stores/useUIStore';
 import type { IssueLiveSummary, ProjectEntry, RepositoryReferenceFilter, TrackerLiveSummary } from '@/lib/api/types';
 import { useRepositoryAcrossReferenceList } from '@/components/references/referenceSources';
 import { useBackgroundShellsStore } from '@/sync/background-shells';
+import { useBackgroundImagesStore } from '@/sync/background-images';
+import { usePrWatchStore } from '@/sync/pr-watch';
 import { useGlobalBlockingRequestsStore } from '@/sync/global-blocking-requests';
 import { useGlobalSessionStatusStore } from '@/sync/global-session-status';
 import { useSessionUIStore } from '@/sync/session-ui-store';
@@ -238,6 +242,8 @@ export function useOverviewData(): OverviewData {
   const hasLoaded = useGlobalSessionsStore((state) => state.hasLoaded);
   const activeSessionIds = useGlobalSessionStatusStore((state) => state.activeSessionIds);
   const shellSessionIds = useBackgroundShellsStore((state) => state.sessionIds);
+  const imageSessionIds = useBackgroundImagesStore((state) => state.sessionIds);
+  const prWatches = usePrWatchStore((state) => state.bySession);
   const blockingBySession = useGlobalBlockingRequestsStore((state) => state.bySession);
   const worktreesByProject = useSessionUIStore((state) => state.availableWorktreesByProject);
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
@@ -307,8 +313,16 @@ export function useOverviewData(): OverviewData {
       const root = rootOf(id, entityById);
       if (!map.has(root)) map.set(root, 'shell');
     }
+    for (const id of imageSessionIds) {
+      const root = rootOf(id, entityById);
+      if (!map.has(root)) map.set(root, 'image');
+    }
+    for (const id of prWatches.keys()) {
+      const root = rootOf(id, entityById);
+      if (!map.has(root)) map.set(root, 'pullRequest');
+    }
     return map;
-  }, [activeSessionIds, entityById, shellSessionIds]);
+  }, [activeSessionIds, entityById, imageSessionIds, prWatches, shellSessionIds]);
 
   const blockingByRoot = React.useMemo(() => {
     const map = new Map<string, OverviewBlocking>();
@@ -341,7 +355,7 @@ export function useOverviewData(): OverviewData {
     for (const session of followed) {
       for (const change of getLinkedSidebarChanges(session, urlMatcher)) if (change.repository) items.push(repositoryThread('pull', change.repository));
       for (const issue of getLinkedSidebarIssues(session, urlMatcher)) {
-        if (issue.source === 'repository') items.push(repositoryThread('issue', issue.ref));
+        if (issue.source === 'repository') items.push(repositoryThread(issue.ref.thread, issue.ref));
         else if (issue.source === 'tracker') items.push(workItem(issue.provider, issue.identifier));
       }
     }
@@ -377,7 +391,7 @@ export function useOverviewData(): OverviewData {
       add(readTrackedPullVisualSummary(trackedRecords, { item: repositoryThread('pull', change.repository), url: change.url, title: change.title }));
     }
     const issues = getLinkedSidebarIssues(session, urlMatcher).map((issue) => {
-      if (issue.source === 'repository') return issueStateOf(readTrackedIssueState(trackedRecords, repositoryThread('issue', issue.ref)));
+      if (issue.source === 'repository') return issueStateOf(readTrackedIssueState(trackedRecords, repositoryThread(issue.ref.thread, issue.ref)));
       if (issue.source === 'tracker') {
         return trackerStateOf(readTrackedWorkItemState(trackedRecords, workItem(issue.provider, issue.identifier)));
       }
@@ -420,11 +434,15 @@ export function useOverviewData(): OverviewData {
     return rows;
   }, [gitOf, isWorktreeInUse, now, sessionsIn, workEnabled, worktrees]);
 
+  // A space's session belongs to the project the space was made from, once the space list names it.
+  const spaceMarks = useSpacesStore((state) => state.spaces);
+  const spacesJourney = useSpacesStore((state) => state.journey);
   const projectOf = React.useCallback((session: Session) => {
     const directory = resolveGlobalSessionDirectory(session) ?? session.directory;
-    const project = resolveProjectForSessionDirectory(projects, worktreesByProject, directory);
+    const spaceProject = spaceProjectDirectoryIn({ spaces: spaceMarks, journey: spacesJourney }, directory);
+    const project = resolveProjectForSessionDirectory(projects, worktreesByProject, directory, spaceProject);
     return { label: projectLabel(project, directory), color: resolveProjectColor(project?.color) };
-  }, [projects, worktreesByProject]);
+  }, [projects, spaceMarks, spacesJourney, worktreesByProject]);
 
   return {
     ready: hasLoaded || sessionsStatus === 'ready',

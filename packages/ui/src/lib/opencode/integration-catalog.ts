@@ -15,7 +15,7 @@
 
 import type { IntegrationInfo } from "@opencode/client"
 import { getRuntimeKey } from "../runtime-switch"
-import { normalizeOpencodeError, opencodeClient } from "./client"
+import { normalizeOpencodeError, opencodeClient, type OpenCodeClient } from "./client"
 import { listWebSearchProviders } from "./websearch"
 
 export interface IntegrationCatalog {
@@ -57,12 +57,26 @@ export function peekIntegrationCatalog(): IntegrationCatalog | null {
  * bring back the state from before it. Throws when the integration list
  * cannot be read; a failed read is never an empty list.
  */
+// Scoped like every location read: without a directory OpenCode answers for
+// its own working directory, the home, and starts a location there.
+const clientFor = (directory: string | null): OpenCodeClient =>
+  directory ? opencodeClient.getScopedSdkClient(directory) : opencodeClient.getSdkClient()
+
+/**
+ * The client for the location the list is read from; credential writes
+ * (`integration.connect.*`, `integration.oauth.*`) go there too. OpenCode
+ * registers integrations per location once its plugins activate, and only the
+ * list waits for that. A write sent to a location nobody read yet boots it and
+ * is rejected with "Integration not found" until the plugins are up, so the
+ * first try failed and the second worked.
+ */
+export function getIntegrationClient(): OpenCodeClient {
+  return clientFor(opencodeClient.getDirectory() || null)
+}
+
 async function readIntegrations(directory: string | null): Promise<IntegrationInfo[]> {
   try {
-    // Scoped like every location read: without a directory OpenCode answers
-    // for its own working directory, the home, and starts a location there.
-    const client = directory ? opencodeClient.getScopedSdkClient(directory) : opencodeClient.getSdkClient()
-    const response = await client.integration.list()
+    const response = await clientFor(directory).integration.list()
     return response.data
   } catch (error) {
     throw normalizeOpencodeError("integration.list", error)
