@@ -2278,6 +2278,7 @@ export const settingsDict = {
   "settings.voice.page.tooltip.ttsChunked": "Divide textos longos em frases e reproduz cada uma assim que é sintetizada, então a reprodução começa muito mais rápido. Desative para sintetizar todo o texto em uma única solicitação.",
   "settings.openchamber.visual.section.colorMode": "Modo de cor",
   "settings.openchamber.visual.section.themes": "Temas",
+  "settings.openchamber.visual.field.noThemesMatch": "Nenhum tema corresponde a \"{query}\".",
   "settings.openchamber.visual.section.localization": "Localização",
   "settings.openchamber.visual.section.spacingAndLayout": "Espaçamento e layout",
   "settings.openchamber.visual.section.densityAndType": "Densidade e tipografia",

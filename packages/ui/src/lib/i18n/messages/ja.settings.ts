@@ -2311,6 +2311,7 @@ export const settingsDict = {
   'settings.voice.page.tooltip.ttsChunked': '長いテキストを文に分割し、合成が終わった順に再生します。再生開始が大幅に早くなります。オフにすると、テキスト全体を 1 回のリクエストで合成します。',
   'settings.openchamber.visual.section.colorMode': 'カラーモード',
   'settings.openchamber.visual.section.themes': 'テーマ',
+  'settings.openchamber.visual.field.noThemesMatch': '「{query}」に一致するテーマはありません。',
   'settings.openchamber.visual.section.localization': 'ローカライゼーション',
   'settings.openchamber.visual.section.spacingAndLayout': '間隔とレイアウト',
   'settings.openchamber.visual.section.densityAndType': '密度と書体',

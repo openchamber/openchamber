@@ -2323,6 +2323,7 @@ export const settingsDict = {
   'settings.voice.page.tooltip.ttsChunked': 'Split long text into sentences and play each one as soon as it is synthesized, so playback starts much sooner. Turn off to synthesize the whole text in a single request.',
   'settings.openchamber.visual.section.colorMode': 'Color mode',
   'settings.openchamber.visual.section.themes': 'Themes',
+  'settings.openchamber.visual.field.noThemesMatch': 'No themes match "{query}".',
   'settings.openchamber.visual.section.localization': 'Localization',
   'settings.openchamber.visual.section.spacingAndLayout': 'Spacing & layout',
   'settings.openchamber.visual.section.densityAndType': 'Density & type',

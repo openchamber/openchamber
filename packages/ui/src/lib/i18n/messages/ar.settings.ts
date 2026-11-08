@@ -2299,6 +2299,7 @@ export const settingsDict = {
   'settings.voice.page.tooltip.ttsChunked': 'يقسّم النص الطويل إلى جمل ويشغّل كل جملة بمجرد توليدها، فيبدأ التشغيل أسرع بكثير. عطّله لتوليد النص كاملًا في طلب واحد.',
   'settings.openchamber.visual.section.colorMode': 'وضع الألوان',
   'settings.openchamber.visual.section.themes': 'السمات',
+  'settings.openchamber.visual.field.noThemesMatch': 'لا توجد سمات تطابق "{query}".',
   'settings.openchamber.visual.section.localization': 'الترجمة والتنسيق المحلي',
   'settings.openchamber.visual.section.spacingAndLayout': 'التباعد والتخطيط',
   'settings.openchamber.visual.section.densityAndType': 'الكثافة والخط',

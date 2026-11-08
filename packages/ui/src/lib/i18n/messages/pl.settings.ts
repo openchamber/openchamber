@@ -1489,6 +1489,7 @@ export const settingsDict = {
   'settings.openchamber.visual.section.chatFeatures': 'Funkcje',
   'settings.openchamber.visual.section.colorMode': 'Tryb kolorów',
   'settings.openchamber.visual.section.themes': 'Motywy',
+  'settings.openchamber.visual.field.noThemesMatch': 'Brak motywów pasujących do „{query}”.',
   'settings.openchamber.visual.section.diffLayout': 'Układ diffa',
   'settings.openchamber.visual.section.diffLayoutAria': 'Układ diffa',
   'settings.openchamber.visual.section.localization': 'Lokalizacja',

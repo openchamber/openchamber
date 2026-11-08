@@ -2174,6 +2174,7 @@ export const settingsDict = {
   'settings.voice.page.preview.customServerLine': 'Bonjour! Ceci est un aperçu du serveur TTS personnalisé.',
   'settings.openchamber.visual.section.colorMode': 'Mode couleur',
   'settings.openchamber.visual.section.themes': 'Thèmes',
+  'settings.openchamber.visual.field.noThemesMatch': 'Aucun thème ne correspond à « {query} ».',
   'settings.openchamber.visual.section.localization': 'Localisation',
   'settings.openchamber.visual.section.spacingAndLayout': 'Espacement et disposition',
   'settings.openchamber.visual.section.densityAndType': 'Densité et typographie',

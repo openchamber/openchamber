@@ -2248,6 +2248,7 @@ export const settingsDict = {
   'settings.voice.page.tooltip.ttsChunked': 'Lange Texte werden in Sätze aufgeteilt und jeder Satz wird abgespielt, sobald er synthetisiert ist — die Wiedergabe startet dadurch viel früher. Deaktivieren, um den gesamten Text in einer einzelnen Anfrage zu synthetisieren.',
   'settings.openchamber.visual.section.colorMode': 'Farbmodus',
   'settings.openchamber.visual.section.themes': 'Designs',
+  'settings.openchamber.visual.field.noThemesMatch': 'Keine Designs passen zu „{query}“.',
   'settings.openchamber.visual.section.localization': 'Lokalisierung',
   'settings.openchamber.visual.section.spacingAndLayout': 'Abstand & Layout',
   'settings.openchamber.visual.section.messageStreamTransport': 'Nachrichtenstrom-Transport',

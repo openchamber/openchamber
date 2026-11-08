@@ -2278,6 +2278,7 @@ export const settingsDict = {
   'settings.voice.page.tooltip.ttsChunked': '将长文本拆分为句子，每句合成完毕后立即播放，大幅提前开始播放的时间。关闭后则将整段文本在一次请求中合成。',
   'settings.openchamber.visual.section.colorMode': '颜色模式',
   'settings.openchamber.visual.section.themes': '主题',
+  'settings.openchamber.visual.field.noThemesMatch': '没有与“{query}”匹配的主题。',
   'settings.openchamber.visual.section.localization': '本地化',
   'settings.openchamber.visual.section.spacingAndLayout': '间距与布局',
   'settings.openchamber.visual.section.densityAndType': '密度与字体',

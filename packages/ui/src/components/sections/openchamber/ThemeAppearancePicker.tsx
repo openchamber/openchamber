@@ -16,6 +16,7 @@ import { ThemeImportButton } from './ThemeImportButton';
 import { ThemeSchematic, type ThemeSchematicLayout } from './ThemeSchematic';
 import { useThemeVariantTabStore, type ThemeVariant } from './themeVariantTab';
 import { handleDropdownNavigationKey } from '@/components/ui/dropdown-navigation';
+import { SettingsCardSearch } from '../shared/SettingsCards';
 
 
 const MODE_OPTIONS: Array<{ value: ThemeMode; labelKey: 'settings.openchamber.visual.option.themeMode.system' | 'settings.openchamber.visual.option.themeMode.light' | 'settings.openchamber.visual.option.themeMode.dark' }> = [
@@ -29,6 +30,26 @@ const themeLabel = (theme: Theme): string => {
   const suffix = theme.metadata.variant === 'dark' ? ' Dark' : ' Light';
   const name = theme.metadata.name;
   return name.endsWith(suffix) ? name.slice(0, -suffix.length) : name;
+};
+
+/**
+ * Names that contain the query, the way a short list of names is searched:
+ * those starting with it first, then those with a word starting with it, then
+ * the rest, each group in list order. A fuzzy match let "ves" find Everforest.
+ */
+const filterThemes = (themes: Theme[], query: string): Theme[] => {
+  const needle = query.trim().toLowerCase();
+  if (!needle) return themes;
+  const rank = (name: string) => {
+    if (name.startsWith(needle)) return 0;
+    if (name.split(/[\s()\-_]+/).some((word) => word.startsWith(needle))) return 1;
+    return name.includes(needle) ? 2 : -1;
+  };
+  return themes
+    .map((theme) => ({ theme, rank: rank(themeLabel(theme).toLowerCase()) }))
+    .filter((entry) => entry.rank >= 0)
+    .sort((a, b) => a.rank - b.rank)
+    .map((entry) => entry.theme);
 };
 
 interface ThemeAppearancePickerProps {
@@ -61,6 +82,7 @@ export function ThemeAppearancePicker({ children }: ThemeAppearancePickerProps) 
   const setVariant = useThemeVariantTabStore((state) => state.setVariant);
   const variant: ThemeVariant = chosenVariant ?? (themeMode === 'system' ? currentTheme.metadata.variant : themeMode);
   const [previewId, setPreviewId] = React.useState<string | null>(null);
+  const [query, setQuery] = React.useState('');
 
   const themesByVariant = React.useMemo(() => {
     const sorted = [...availableThemes].sort((a, b) => themeLabel(a).localeCompare(themeLabel(b)));
@@ -165,6 +187,7 @@ export function ThemeAppearancePicker({ children }: ThemeAppearancePickerProps) 
         headerAction={<ThemeImportButton />}
       >
         <div className="space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
           <SettingsChipGroup<ThemeVariant>
             value={variant}
             onChange={setVariant}
@@ -191,9 +214,19 @@ export function ThemeAppearancePicker({ children }: ThemeAppearancePickerProps) 
               },
             ]}
           />
+          {/* Filters the tab's list by name; the query stays when the tab changes. */}
+          <SettingsCardSearch
+            value={query}
+            onChange={setQuery}
+            placeholder={t('settings.themeImport.search')}
+            compact
+            className={cn('mb-0', isMobile ? 'w-full max-w-none' : 'w-56')}
+          />
+          </div>
           <ThemeList
             key={variant}
-            themes={themesByVariant[variant]}
+            themes={filterThemes(themesByVariant[variant], query)}
+            emptyText={query.trim() ? t('settings.openchamber.visual.field.noThemesMatch', { query: query.trim() }) : null}
             selectedId={(variant === 'light' ? selectedLight : selectedDark)?.metadata.id}
             ariaLabel={t(variant === 'light' ? 'settings.openchamber.visual.field.lightTheme' : 'settings.openchamber.visual.field.darkTheme')}
             touch={isMobile}
@@ -209,6 +242,8 @@ export function ThemeAppearancePicker({ children }: ThemeAppearancePickerProps) 
 
 interface ThemeListProps {
   themes: Theme[];
+  /** Shown in place of the list when a search matches nothing. */
+  emptyText: string | null;
   selectedId: string | undefined;
   ariaLabel: string;
   touch: boolean;
@@ -225,7 +260,7 @@ interface ThemeListProps {
  * the themes and preview each on the cards, Enter or Space picks, Delete
  * removes an imported theme and focus moves to its neighbour.
  */
-function ThemeList({ themes, selectedId, ariaLabel, touch, onSelect, onPreview }: ThemeListProps) {
+function ThemeList({ themes, emptyText, selectedId, ariaLabel, touch, onSelect, onPreview }: ThemeListProps) {
   const { t } = useI18n();
   const { deleteImportedTheme, customThemeIds } = useThemeSystem();
   const [deletingId, setDeletingId] = React.useState<string | null>(null);
@@ -344,6 +379,9 @@ function ThemeList({ themes, selectedId, ariaLabel, touch, onSelect, onPreview }
         !fade.top && fade.bottom && '[mask-image:linear-gradient(#000_calc(100%-1.5rem),transparent)]',
       )}
     >
+      {themes.length === 0 && emptyText ? (
+        <p role="status" className="px-2 py-6 text-center typography-ui-label text-muted-foreground">{emptyText}</p>
+      ) : null}
       <div ref={listRef} role="listbox" aria-label={ariaLabel} className="grid grid-cols-1 gap-x-1 @xl:grid-cols-2">
         {themes.map((theme, index) => {
           const id = theme.metadata.id;

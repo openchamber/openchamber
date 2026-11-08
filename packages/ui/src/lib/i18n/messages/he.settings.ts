@@ -2299,6 +2299,7 @@ export const settingsDict = {
   'settings.voice.page.tooltip.ttsChunked': 'פיצול טקסט ארוך למשפטים והשמעת כל משפט ברגע שהוא מסונתז, כך שההשמעה מתחילה הרבה יותר מהר. כשהאפשרות כבויה, כל הטקסט מסונתז בבקשה אחת.',
   'settings.openchamber.visual.section.colorMode': 'מצב צבע',
   'settings.openchamber.visual.section.themes': 'ערכות נושא',
+  'settings.openchamber.visual.field.noThemesMatch': 'אין ערכות נושא שתואמות ל-"{query}".',
   'settings.openchamber.visual.section.localization': 'לוקליזציה',
   'settings.openchamber.visual.section.spacingAndLayout': 'ריווח ופריסה',
   'settings.openchamber.visual.section.densityAndType': 'צפיפות וגופן',

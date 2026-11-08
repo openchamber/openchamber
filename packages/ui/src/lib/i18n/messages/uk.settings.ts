@@ -2278,6 +2278,7 @@ export const settingsDict = {
   "settings.voice.page.tooltip.ttsChunked": "Розділяє довгий текст на речення та відтворює кожне щойно воно синтезоване, тому відтворення починається значно раніше. Вимкніть, щоб синтезувати весь текст одним запитом.",
   "settings.openchamber.visual.section.colorMode": "Режим теми",
   "settings.openchamber.visual.section.themes": "Теми",
+  "settings.openchamber.visual.field.noThemesMatch": "Немає тем, що відповідають «{query}».",
   "settings.openchamber.visual.section.localization": "Локалізація",
   "settings.openchamber.visual.section.spacingAndLayout": "Відступи й компонування",
   "settings.openchamber.visual.section.densityAndType": "Щільність і шрифти",

@@ -2278,6 +2278,7 @@ export const settingsDict = {
   'settings.voice.page.tooltip.ttsChunked': '긴 텍스트를 문장 단위로 나눠 합성이 끝나는 대로 재생해 재생 시작이 훨씬 빨라집니다. 끄면 전체 텍스트를 한 번의 요청으로 합성합니다.',
   'settings.openchamber.visual.section.colorMode': '색상 모드',
   'settings.openchamber.visual.section.themes': '테마',
+  'settings.openchamber.visual.field.noThemesMatch': '"{query}"와 일치하는 테마가 없습니다.',
   'settings.openchamber.visual.section.localization': '지역화',
   'settings.openchamber.visual.section.spacingAndLayout': '간격 및 레이아웃',
   'settings.openchamber.visual.section.densityAndType': '밀도 및 서체',

@@ -2165,6 +2165,7 @@ export const settingsDict = {
   'settings.voice.page.tooltip.ttsChunked': 'Uzun metni cümlelere böler ve her cümle sentezlenir sentezlenmez oynatır; böylece oynatma çok daha erken başlar. Metnin tamamını tek istekte sentezlemek için kapatın.',
   'settings.openchamber.visual.section.colorMode': 'Renk Modu',
   'settings.openchamber.visual.section.themes': 'Temalar',
+  'settings.openchamber.visual.field.noThemesMatch': '"{query}" ile eşleşen tema yok.',
   'settings.openchamber.visual.section.localization': 'Yerelleştirme',
   'settings.openchamber.visual.section.spacingAndLayout': 'Aralık & Yerleşim',
   'settings.openchamber.visual.section.densityAndType': 'Yoğunluk & tipografi',

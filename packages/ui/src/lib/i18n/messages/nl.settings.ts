@@ -2301,6 +2301,7 @@ export const settingsDict = {
   'settings.voice.page.tooltip.ttsChunked': 'Split lange tekst in zinnen en speelt elke zin af zodra deze is gesynthetiseerd, zodat het afspelen veel eerder begint. Zet uit om de hele tekst in één verzoek te synthetiseren.',
   'settings.openchamber.visual.section.colorMode': 'Kleurmodus',
   'settings.openchamber.visual.section.themes': 'Thema\'s',
+  'settings.openchamber.visual.field.noThemesMatch': 'Geen thema\'s komen overeen met "{query}".',
   'settings.openchamber.visual.section.localization': 'Lokalisatie',
   'settings.openchamber.visual.section.spacingAndLayout': 'Afstand en indeling',
   'settings.openchamber.visual.section.densityAndType': 'Dichtheid en typografie',
