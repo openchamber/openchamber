@@ -1244,6 +1244,13 @@ describe('getStatus', () => {
     // formatted elsewhere looks on Windows.
     const previous = process.env.GIT_TEST_ASSUME_DIFFERENT_OWNER;
     process.env.GIT_TEST_ASSUME_DIFFERENT_OWNER = '1';
+    // The protected config is neutralised for the call: Git consults
+    // safe.directory before refusing, and an ambient `safe.directory = *`
+    // would make it accept the repository instead.
+    const configGlobal = process.env.GIT_CONFIG_GLOBAL;
+    const configSystem = process.env.GIT_CONFIG_SYSTEM;
+    process.env.GIT_CONFIG_GLOBAL = '/dev/null';
+    process.env.GIT_CONFIG_SYSTEM = '/dev/null';
     try {
       await expect(isGitRepository(repo, { failOnGitError: true })).rejects.toMatchObject({
         code: 'GIT_REPOSITORY_UNREADABLE',
@@ -1256,6 +1263,10 @@ describe('getStatus', () => {
     } finally {
       if (previous === undefined) delete process.env.GIT_TEST_ASSUME_DIFFERENT_OWNER;
       else process.env.GIT_TEST_ASSUME_DIFFERENT_OWNER = previous;
+      if (configGlobal === undefined) delete process.env.GIT_CONFIG_GLOBAL;
+      else process.env.GIT_CONFIG_GLOBAL = configGlobal;
+      if (configSystem === undefined) delete process.env.GIT_CONFIG_SYSTEM;
+      else process.env.GIT_CONFIG_SYSTEM = configSystem;
     }
     await expect(isGitRepository(repo, { failOnGitError: true })).resolves.toBe(true);
   });
