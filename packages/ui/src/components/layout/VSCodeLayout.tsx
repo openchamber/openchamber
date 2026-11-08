@@ -21,6 +21,7 @@ import { SessionsTabTitle } from '@/components/session/SessionsTabTitle';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { getVSCodeBootstrapConfig, getVSCodeBootstrapWorkspaceFolder } from '@/lib/vscodeBootstrap';
+import { SIDEBAR_MAX_WIDTH } from './Sidebar';
 import { cn } from '@/lib/utils';
 import { normalizePath } from '@/lib/pathNormalization';
 import {
@@ -60,12 +61,11 @@ const formatTime = (timestamp: number | null, timeFormatPreference: TimeFormatPr
   }
 };
 
-// Sessions sidebar width in expanded layout
+// The breakpoint assumes the default 280px sidebar and a usable chat column.
 const SESSIONS_SIDEBAR_WIDTH = 280;
-// Keep enough room for the chat after adding the persistent sessions sidebar.
 const EXPANDED_LAYOUT_THRESHOLD = SESSIONS_SIDEBAR_WIDTH + 520;
+// VS Code has less horizontal space than the desktop layout.
 const SESSIONS_SIDEBAR_MIN_WIDTH = Math.round(SESSIONS_SIDEBAR_WIDTH * 0.7);
-const SESSIONS_SIDEBAR_MAX_WIDTH = 520;
 
 type VSCodeView = 'sessions' | 'chat';
 
@@ -113,11 +113,21 @@ export const VSCodeLayout: React.FC = () => {
 
   const [currentView, setCurrentView] = React.useState<VSCodeView>(() => (bootDraftOpen ? 'chat' : 'sessions'));
   const [containerWidth, setContainerWidth] = React.useState<number>(0);
-  const [expandedSidebarWidth, setExpandedSidebarWidth] = React.useState<number>(SESSIONS_SIDEBAR_WIDTH);
   const [isResizingExpandedSidebar, setIsResizingExpandedSidebar] = React.useState(false);
+  // The sessions sidebar is the app's sidebar, not a VS Code copy: one open
+  // flag and one width, persisted with the rest of `useUIStore`.
+  const sessionsSidebarOpen = useUIStore((state) => state.isSidebarOpen);
+  const toggleSessionsSidebar = useUIStore((state) => state.toggleSidebar);
+  const sessionsSidebarWidth = useUIStore((state) => state.sidebarWidth);
+  const setSessionsSidebarWidth = useUIStore((state) => state.setSidebarWidth);
+  // A drag previews here and writes the store once, on release. The store is
+  // persisted, so writing it per pointermove would serialize on every frame.
+  const [sidebarWidthDraft, setSidebarWidthDraft] = React.useState<number | null>(null);
+  const appliedSidebarWidth = sidebarWidthDraft ?? sessionsSidebarWidth;
   const containerRef = React.useRef<HTMLDivElement>(null);
   const expandedSidebarResizeStartXRef = React.useRef(0);
-  const expandedSidebarResizeStartWidthRef = React.useRef(SESSIONS_SIDEBAR_WIDTH);
+  const expandedSidebarResizeStartWidthRef = React.useRef(0);
+  const expandedSidebarResizeWidthRef = React.useRef<number | null>(null);
   const expandedSidebarResizePointerIdRef = React.useRef<number | null>(null);
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
   const sessions = useSessions();
@@ -488,7 +498,7 @@ export const VSCodeLayout: React.FC = () => {
   const usesExpandedLayout = containerWidth >= EXPANDED_LAYOUT_THRESHOLD;
 
   const clampExpandedSidebarWidth = React.useCallback((value: number) => {
-    return Math.min(SESSIONS_SIDEBAR_MAX_WIDTH, Math.max(SESSIONS_SIDEBAR_MIN_WIDTH, value));
+    return Math.min(SIDEBAR_MAX_WIDTH, Math.max(SESSIONS_SIDEBAR_MIN_WIDTH, value));
   }, []);
 
   const handleExpandedSidebarResizeStart = React.useCallback((event: React.PointerEvent<HTMLDivElement>) => {
@@ -499,10 +509,11 @@ export const VSCodeLayout: React.FC = () => {
     }
     expandedSidebarResizePointerIdRef.current = event.pointerId;
     expandedSidebarResizeStartXRef.current = event.clientX;
-    expandedSidebarResizeStartWidthRef.current = expandedSidebarWidth;
+    expandedSidebarResizeStartWidthRef.current = appliedSidebarWidth;
+    expandedSidebarResizeWidthRef.current = appliedSidebarWidth;
     setIsResizingExpandedSidebar(true);
     event.preventDefault();
-  }, [expandedSidebarWidth]);
+  }, [appliedSidebarWidth]);
 
   const handleExpandedSidebarResizeMove = React.useCallback((event: React.PointerEvent<HTMLDivElement>) => {
     if (expandedSidebarResizePointerIdRef.current !== event.pointerId) {
@@ -512,7 +523,11 @@ export const VSCodeLayout: React.FC = () => {
     const sign = isRightToLeft(event.currentTarget) ? -1 : 1;
     const delta = (event.clientX - expandedSidebarResizeStartXRef.current) * sign;
     const nextWidth = clampExpandedSidebarWidth(expandedSidebarResizeStartWidthRef.current + delta);
-    setExpandedSidebarWidth((current) => (current === nextWidth ? current : nextWidth));
+    if (expandedSidebarResizeWidthRef.current === nextWidth) {
+      return;
+    }
+    expandedSidebarResizeWidthRef.current = nextWidth;
+    setSidebarWidthDraft(nextWidth);
   }, [clampExpandedSidebarWidth]);
 
   const handleExpandedSidebarResizeEnd = React.useCallback((event: React.PointerEvent<HTMLDivElement>) => {
@@ -524,9 +539,17 @@ export const VSCodeLayout: React.FC = () => {
     } catch {
       // ignore
     }
+    const finalWidth = clampExpandedSidebarWidth(expandedSidebarResizeWidthRef.current ?? sessionsSidebarWidth);
     expandedSidebarResizePointerIdRef.current = null;
+    expandedSidebarResizeWidthRef.current = null;
     setIsResizingExpandedSidebar(false);
-  }, []);
+    // Commit before clearing the preview so the sidebar never renders at the
+    // stored width for a frame between the two updates.
+    if (finalWidth !== sessionsSidebarWidth) {
+      setSessionsSidebarWidth(finalWidth);
+    }
+    setSidebarWidthDraft(null);
+  }, [clampExpandedSidebarWidth, sessionsSidebarWidth, setSessionsSidebarWidth]);
 
   // In expanded layout, always show chat (with sidebar alongside)
   // Navigate to chat automatically when expanded layout is enabled and we're on sessions view
@@ -564,29 +587,31 @@ export const VSCodeLayout: React.FC = () => {
         // Expanded layout: sessions sidebar + chat side by side
         <div className="flex h-full">
           {/* Sessions sidebar */}
-          <div
-            className={cn('relative h-full border-e border-border overflow-hidden flex-shrink-0', isResizingExpandedSidebar && 'select-none')}
-            style={{ width: expandedSidebarWidth, minWidth: expandedSidebarWidth, maxWidth: expandedSidebarWidth }}
-          >
-            <SessionSidebar
-              mobileVariant
-              allowReselect
-              hideDirectoryControls
-            />
+          {sessionsSidebarOpen && (
             <div
-              className={cn(
-                'absolute inset-e-0 top-0 z-20 h-full w-[3px] cursor-col-resize transition-colors hover:bg-[var(--interactive-border)]/80',
-                isResizingExpandedSidebar && 'bg-[var(--interactive-border)]'
-              )}
-              onPointerDown={handleExpandedSidebarResizeStart}
-              onPointerMove={handleExpandedSidebarResizeMove}
-              onPointerUp={handleExpandedSidebarResizeEnd}
-              onPointerCancel={handleExpandedSidebarResizeEnd}
-              role="separator"
-              aria-orientation="vertical"
-              aria-label={t('vscodeLayout.actions.resizeSessionsSidebarAria')}
-            />
-          </div>
+              className={cn('relative h-full border-e border-border overflow-hidden flex-shrink-0', isResizingExpandedSidebar && 'select-none')}
+              style={{ width: appliedSidebarWidth, minWidth: appliedSidebarWidth, maxWidth: appliedSidebarWidth }}
+            >
+              <SessionSidebar
+                mobileVariant
+                allowReselect
+                hideDirectoryControls
+              />
+              <div
+                className={cn(
+                  'absolute inset-e-0 top-0 z-20 h-full w-[3px] cursor-col-resize transition-colors hover:bg-[var(--interactive-border)]/80',
+                  isResizingExpandedSidebar && 'bg-[var(--interactive-border)]'
+                )}
+                onPointerDown={handleExpandedSidebarResizeStart}
+                onPointerMove={handleExpandedSidebarResizeMove}
+                onPointerUp={handleExpandedSidebarResizeEnd}
+                onPointerCancel={handleExpandedSidebarResizeEnd}
+                role="separator"
+                aria-orientation="vertical"
+                aria-label={t('vscodeLayout.actions.resizeSessionsSidebarAria')}
+              />
+            </div>
+          )}
           {/* Chat content */}
           <div className="flex-1 flex flex-col min-w-0">
             <VSCodeHeader
@@ -596,6 +621,9 @@ export const VSCodeLayout: React.FC = () => {
               showContextUsage
               showRateLimits
               enableSessionSwitcher
+              showSessionsSidebarToggle
+              sessionsSidebarOpen={sessionsSidebarOpen}
+              onToggleSessionsSidebar={toggleSessionsSidebar}
             />
             <div className="relative flex-1 overflow-hidden">
               <ErrorBoundary>
@@ -664,10 +692,13 @@ interface VSCodeHeaderProps {
   showContextUsage?: boolean;
   showRateLimits?: boolean;
   enableSessionSwitcher?: boolean;
+  showSessionsSidebarToggle?: boolean;
+  sessionsSidebarOpen?: boolean;
+  onToggleSessionsSidebar?: () => void;
 }
 
 
-const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, onArchiveAll, showArchiveToggle = Boolean(onArchiveAll), onNewSession, onSettings, showMcp, showContextUsage, showRateLimits, enableSessionSwitcher }) => {
+const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, onArchiveAll, showArchiveToggle = Boolean(onArchiveAll), onNewSession, onSettings, showMcp, showContextUsage, showRateLimits, enableSessionSwitcher, showSessionsSidebarToggle, sessionsSidebarOpen, onToggleSessionsSidebar }) => {
   const { t } = useI18n();
   const showArchivedSessions = useSessionDisplayStore((state) => state.showArchivedSessions);
   const toggleArchivedSessions = useSessionDisplayStore((state) => state.toggleArchivedSessions);
@@ -755,6 +786,18 @@ const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, on
 
   return (
     <div className="flex items-center gap-1.5 ps-3 pe-2 py-1 border-b border-border bg-background shrink-0">
+      {showSessionsSidebarToggle && onToggleSessionsSidebar && (
+        <button
+          type="button"
+          onClick={onToggleSessionsSidebar}
+          className="inline-flex h-7 w-7 items-center justify-center text-muted-foreground hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          aria-label={t('header.actions.openSessionsAria')}
+          aria-pressed={sessionsSidebarOpen}
+          title={t('header.actions.openSessionsAria')}
+        >
+          <Icon name="layout-left" className="h-5 w-5" />
+        </button>
+      )}
       {showBack && onBack && (
         <button
           onClick={onBack}

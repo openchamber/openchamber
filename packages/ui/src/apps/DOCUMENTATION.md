@@ -26,6 +26,7 @@
 - Every route entry written while a layer is open goes through `pushRouteEntry` or `updateBrowserURL`, so it lands under the back guard. A direct `pushState` would bury the guard between two routes. A replacement keeps the guard and changes its URL; the route under it normalizes to the same place when Back reaches it.
 - Inside the mobile shell the Settings stages write no history. A `SettingsView` given `registerBackHandler` steps through its stages in state only.
 - Settings uses the existing persistence and broadcast protocol. Moving its host changes no stored format, registry key or runtime availability.
+- The VS Code chat root's sessions sidebar reads and writes the shared `useUIStore` sidebar state (`isSidebarOpen`, `sidebarWidth`); the layout keeps no collapse flag or width of its own, so the choice persists like the desktop sidebar's.
 - Notification commands and initial session tabs in VS Code use the shared session opener, so a `/btw` fork opens its parent and expands the panel mounted in the shared composer. Notification commands also reveal the chat view.
 
 ## Decisions
@@ -41,6 +42,10 @@ The secure store and localStorage cannot commit together. A new reference lets a
 ### Why navigation carries intent and not the source's stores
 
 Each webview owns its own stores. A small parsed request preserves the originating Settings directory, page links, provider-connect action and new-snippet action without transferring chat state or overwriting the tab's independently edited settings.
+
+### Why the VS Code sessions sidebar shares the app's sidebar state
+
+The expanded VS Code layout reads `useUIStore.isSidebarOpen` and `sidebarWidth`, so collapse and width choices persist through the existing store. VS Code allows resizing down to 196px because its webview has less horizontal space. The desktop layout clamps the shared width to at least 264px when rendering, keeping room for its toolbar.
 
 ### Why mobile web holds one back guard and not one history entry per layer
 
