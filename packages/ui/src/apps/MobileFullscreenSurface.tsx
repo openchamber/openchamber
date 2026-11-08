@@ -180,7 +180,7 @@ export const MobileFullscreenSurface: React.FC<MobileFullscreenSurfaceProps> = (
         'flex flex-col bg-background text-foreground',
         isDialog
           ? 'h-[min(88dvh,860px)] w-full max-w-[720px] overflow-hidden rounded-2xl border border-edge shadow-[0_24px_64px_rgb(0_0_0_/_0.32)]'
-          : 'oc-keyboard-inset-surface oc-bottom-safe-surface fixed inset-0 z-50',
+          : 'oc-keyboard-inset-surface oc-bottom-safe-surface oc-side-safe-area fixed inset-0 z-50',
       )}
       style={isDialog ? {
         // Scale/fade instead of the push slide: the card is not a navigation
@@ -261,8 +261,10 @@ export const MobileFullscreenSurface: React.FC<MobileFullscreenSurfaceProps> = (
         opacity: entered ? 1 : 0,
         // 'chat' matches every other mobile overlay (the sessions sidebar keeps
         // its width); 'app' ignores the panels and centers on the window.
-        paddingLeft: dialogAlign === 'chat' ? `max(1rem, ${chatInsets.left}px)` : '1rem',
-        paddingRight: dialogAlign === 'chat' ? `max(1rem, ${chatInsets.right}px)` : '1rem',
+        // Plus the screen's own side insets: a landscape notch, the status bar
+        // column of iPhone Duo.
+        paddingLeft: `calc(${dialogAlign === 'chat' ? `max(1rem, ${chatInsets.left}px)` : '1rem'} + var(--oc-safe-area-left, 0px))`,
+        paddingRight: `calc(${dialogAlign === 'chat' ? `max(1rem, ${chatInsets.right}px)` : '1rem'} + var(--oc-safe-area-right, 0px))`,
         paddingTop: 'max(1rem, var(--oc-safe-area-top, 0px))',
       }}
       onClick={onClose}

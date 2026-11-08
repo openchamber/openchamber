@@ -217,21 +217,33 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
   //
   // A SIZE class, not a device check: an unfolded book foldable is a tablet
   // until it is folded shut, and the shell keeps running across that change.
-  const { enabled: isTabletLayout, roomyForPanels } = useTabletLayout();
+  const { enabled: isTabletLayout, roomyForPanels, roomyForOnePanel } = useTabletLayout();
+  // Where the sidebar has its own room it stays put: picking a session or
+  // opening a page does not put it away. Elsewhere on a tablet it is a guest.
+  const persistentSidebar = roomyForPanels || roomyForOnePanel;
   const orientation = useOrientation();
   const isPortrait = orientation === 'portrait';
   const hasHardwareKeyboard = useHardwareKeyboard();
-  const [sidebarOpen, setSidebarOpen] = React.useState(() => readTabletLayout().roomyForPanels);
+  const [sidebarOpen, setSidebarOpen] = React.useState(() => {
+    const layout = readTabletLayout();
+    return layout.roomyForPanels || layout.roomyForOnePanel;
+  });
 
   const toggleSidebar = React.useCallback(() => {
     setSidebarOpen((current: boolean) => !current);
   }, []);
 
   // Folding shut (or losing the room for a side-by-side layout) must not leave
-  // a sidebar open over a phone-width screen.
+  // a sidebar open over a phone-width screen. Unfolding opens it: the room is
+  // what the user unfolded for, and a closed sidebar left the screen looking
+  // like the same phone, only wider. A workspace open across the unfold keeps
+  // its place where only one panel fits.
+  const wasTabletLayoutRef = React.useRef(isTabletLayout);
   React.useEffect(() => {
     if (!isTabletLayout) setSidebarOpen(false);
-  }, [isTabletLayout]);
+    else if (!wasTabletLayoutRef.current && !workspaceOpen) setSidebarOpen(true);
+    wasTabletLayoutRef.current = isTabletLayout;
+  }, [isTabletLayout, workspaceOpen]);
 
   const openFilesSurface = React.useCallback(() => {
     setPendingChangesDiff(null);
@@ -313,18 +325,61 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
     IPAD_RIGHT_SIDEBAR_WIDTH,
     IPAD_WORKSPACE_SIDEBAR_MAX_WIDTH,
   );
-  // The workspace becomes a real side panel only where the screen can host the
-  // sidebar, the panel AND a readable chat at once. Everywhere else — a tablet
-  // in portrait, and an unfolded foldable in EITHER orientation, since its long
-  // side is barely wider than a tablet's short one — it stays the full-cover
-  // drawer, which is the layout that actually works at that width.
-  const workspaceAsPanel = roomyForPanels;
+  // The workspace becomes a real side panel where a readable chat is left
+  // beside it: with the sidebar at once where both fit, one at a time where
+  // only one does (below). Narrower tablets and near-square foldables keep the
+  // full-cover drawer, the layout that works at that width.
+  const workspaceAsPanel = roomyForPanels || roomyForOnePanel;
+
+  // One panel at a time: opening one puts the other away, and closing it
+  // brings back the one it displaced. Runs before paint, so the two never
+  // share a frame.
+  const displacedPanelRef = React.useRef<'sidebar' | 'workspace' | null>(null);
+  const previousPanelsRef = React.useRef({ sidebarOpen, workspaceOpen });
+  React.useLayoutEffect(() => {
+    const previous = previousPanelsRef.current;
+    previousPanelsRef.current = { sidebarOpen, workspaceOpen };
+    if (!roomyForOnePanel) {
+      // Room for both now (a 13-inch iPad turned to landscape): the panel the
+      // rule put away comes back. A phone drops it.
+      const displaced = displacedPanelRef.current;
+      displacedPanelRef.current = null;
+      if (roomyForPanels && displaced === 'sidebar') setSidebarOpen(true);
+      else if (roomyForPanels && displaced === 'workspace') setWorkspaceOpen(true);
+      return;
+    }
+    const sidebarOpened = sidebarOpen && !previous.sidebarOpen;
+    const workspaceOpened = workspaceOpen && !previous.workspaceOpen;
+    if (sidebarOpen && workspaceOpen) {
+      // The newer one stays. Both at once with neither just opened is a
+      // layout that just gained the rule (a wider one shrank): the chat wins.
+      if (sidebarOpened && !workspaceOpened) {
+        displacedPanelRef.current = 'workspace';
+        setWorkspaceOpen(false);
+      } else {
+        displacedPanelRef.current = 'sidebar';
+        setSidebarOpen(false);
+      }
+      return;
+    }
+    if (!workspaceOpen && previous.workspaceOpen && displacedPanelRef.current === 'sidebar') {
+      displacedPanelRef.current = null;
+      setSidebarOpen(true);
+    } else if (!sidebarOpen && previous.sidebarOpen && displacedPanelRef.current === 'workspace') {
+      displacedPanelRef.current = null;
+      setWorkspaceOpen(true);
+    }
+  }, [roomyForOnePanel, roomyForPanels, sidebarOpen, workspaceOpen]);
   const leftSlide = useIpadPanelSlide(isTabletLayout && sidebarOpen);
   const workspaceSlide = useIpadPanelSlide(workspaceAsPanel && workspaceOpen);
   // A layout that loses the panel (a tablet folded to a phone, a panel turned
-  // into the drawer) drops its width at once; only a close slides it out.
-  const workspacePanelWidth = workspaceAsPanel && workspaceSlide.placed ? rightResize.width : 0;
-  const sidebarWidth = isTabletLayout && leftSlide.placed ? leftResize.width : 0;
+  // into the drawer) drops its width at once; only a close slides it out. So
+  // does a panel the other one displaced where only one fits: holding its
+  // width through its slide squeezed the chat between both for that time.
+  const workspaceDisplaced = roomyForOnePanel && sidebarOpen;
+  const sidebarDisplaced = roomyForOnePanel && workspaceOpen;
+  const workspacePanelWidth = workspaceAsPanel && workspaceSlide.placed && !workspaceDisplaced ? rightResize.width : 0;
+  const sidebarWidth = isTabletLayout && leftSlide.placed && !sidebarDisplaced ? leftResize.width : 0;
   // Where a side panel waits while it is off its edge: the start one beyond
   // the start edge, the end one beyond the end edge.
   const offStart = direction === 'rtl' ? '100%' : '-100%';
@@ -513,22 +568,22 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
   const leaveOverview = React.useCallback(() => {
     closeSurface();
     setSessionsSheetOpen(false);
-    if (isTabletLayout && !roomyForPanels) setSidebarOpen(false);
-  }, [closeSurface, isTabletLayout, roomyForPanels]);
+    if (isTabletLayout && !persistentSidebar) setSidebarOpen(false);
+  }, [closeSurface, isTabletLayout, persistentSidebar]);
 
   // An opened archived session replaces the page: back to the chat, the same
   // way picking a session from the list gives the space back.
   const leaveArchive = React.useCallback(() => {
     closeSurface();
     setSessionsSheetOpen(false);
-    if (isTabletLayout && !roomyForPanels) setSidebarOpen(false);
-  }, [closeSurface, isTabletLayout, roomyForPanels]);
+    if (isTabletLayout && !persistentSidebar) setSidebarOpen(false);
+  }, [closeSurface, isTabletLayout, persistentSidebar]);
 
 
   return (
     <DedicatedMobileAppProvider actions={mobileActions}>
       <div
-        className="oc-mobile-app-shell main-content-safe-area flex h-[100dvh] flex-row bg-background text-foreground"
+        className="oc-mobile-app-shell main-content-safe-area oc-side-safe-area flex h-[100dvh] flex-row bg-background text-foreground"
         data-page-scroll-lock="true"
       >
         {/* iPad: persistent full-height sessions sidebar; the chat column and
@@ -574,7 +629,7 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
                   // or creating a worktree: give the space back to the chat
                   // where the sidebar is a guest, keep it put where it is not.
                   onOpenChange={(value) => {
-                    if (!value && !roomyForPanels) setSidebarOpen(false);
+                    if (!value && !persistentSidebar) setSidebarOpen(false);
                   }}
                   footer={sessionsFooter}
                 />
