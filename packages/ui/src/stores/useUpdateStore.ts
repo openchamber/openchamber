@@ -14,6 +14,7 @@ import {
 } from '@/lib/desktop';
 import { formatMessage, useI18nStore } from '@/lib/i18n/store';
 import { getUpdateInstallErrorMessage } from '@/lib/updateInstallError';
+import { getUpdateCheckErrorMessage } from '@/lib/updateCheckError';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { getClientPlatform, isCapacitorApp } from '@/lib/platform';
 
@@ -322,7 +323,7 @@ export const useUpdateStore = create<UpdateStore>()((set, get) => ({
     } catch (error) {
       set({
         checking: false,
-        error: error instanceof Error ? error.message : 'Failed to check for updates',
+        error: error instanceof Error ? getUpdateCheckErrorMessage(error) : 'Failed to check for updates',
       });
       return null;
     }

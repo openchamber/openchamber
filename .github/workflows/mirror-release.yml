@@ -1,0 +1,94 @@
+# Copies a published Stable release's desktop files and update manifests to
+# the Cloudflare R2 bucket behind downloads.openchamber.dev, where the desktop
+# app reads its updates first. A release mirrors itself in release.yml before
+# it is published; this is for mirroring a published release again by hand
+# (Actions > Mirror release > Run workflow). The script refuses a version
+# older than the one the mirror serves.
+name: Mirror release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Published release to mirror (e.g., 2.7.0)'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mirror-release
+  cancel-in-progress: false
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # A draft is a release still being built or one that failed; apps must
+      # not be offered it.
+      - name: Check the release is published
+        id: published
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ inputs.version }}
+          REPOSITORY: ${{ github.repository }}
+        # The by-tag endpoint answers 404 for a draft and a missing tag. Any
+        # other failure fails the job, so an outage cannot pass for "nothing
+        # to mirror" while apps keep reading the previous manifests.
+        run: |
+          if ! release=$(gh api "repos/$REPOSITORY/releases/tags/v$VERSION" 2>"$RUNNER_TEMP/lookup.err"); then
+            cat "$RUNNER_TEMP/lookup.err"
+            grep -q 'HTTP 404' "$RUNNER_TEMP/lookup.err" || exit 1
+            release='{"draft":true}'
+          fi
+          skip=$(jq -r 'if .draft or .prerelease then "yes" else "no" end' <<<"$release")
+          echo "skip=$skip" >> "$GITHUB_OUTPUT"
+          if [ "$skip" = yes ]; then echo "v$VERSION is not a published Stable release; nothing to mirror."; fi
+
+      # gh reads assets through the API, which keeps working when
+      # github.com/.../releases/download does not.
+      - name: Download the release's desktop files
+        if: ${{ steps.published.outputs.skip == 'no' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ inputs.version }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          gh release download "v$VERSION" -R "$REPOSITORY" -D "$RUNNER_TEMP/release" \
+            -p "OpenChamber-$VERSION-*" -p 'latest*.yml'
+          ls -la "$RUNNER_TEMP/release"
+
+      - name: Mirror to R2
+        if: ${{ steps.published.outputs.skip == 'no' }}
+        env:
+          VERSION: ${{ inputs.version }}
+          R2_ACCOUNT_ID: ${{ vars.R2_ACCOUNT_ID }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          # R2 rejects the checksums newer AWS CLI versions send by default.
+          AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+          AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
+        run: node scripts/release-mirror/mirror-to-r2.mjs --channel stable --dir "$RUNNER_TEMP/release" --version "$VERSION"
+
+      # The site's download buttons point at the mirror only for the release
+      # it serves; rebuilt now, they follow it.
+      - name: Rebuild the website's download links
+        if: ${{ steps.published.outputs.skip == 'no' }}
+        env:
+          WEBSITE_TOKEN: ${{ secrets.OPENCHAMBER_WEBSITE_REPO_TOKEN }}
+          VERSION: ${{ inputs.version }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          if [ -z "$WEBSITE_TOKEN" ]; then
+            echo "OPENCHAMBER_WEBSITE_REPO_TOKEN not set; skip site refresh dispatch."
+            exit 0
+          fi
+          curl --fail-with-body -sS -X POST \
+            -H "Authorization: Bearer $WEBSITE_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            https://api.github.com/repos/openchamber/openchamber-website/dispatches \
+            -d "{\"event_type\":\"site_refresh_requested\",\"client_payload\":{\"source_repo\":\"$REPOSITORY\",\"release_tag\":\"v$VERSION\"}}"

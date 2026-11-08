@@ -309,6 +309,28 @@ describe('checkForUpdates', () => {
     expect(upToDate.downloadUrl).toBeUndefined();
   });
 
+  it('offers the Canary APK from the R2 mirror once the mirror has it', async () => {
+    fetchMock
+      .when('api.openchamber.dev', {
+        ok: true,
+        json: async () => ({ latestVersion: '2.5.3', updateAvailable: false }),
+      })
+      .when('api.github.com/repos/openchamber/openchamber/releases/tags/canary', {
+        ok: true,
+        json: async () => ({
+          assets: [{ name: 'OpenChamber-2.5.4-canary.20261031.5-29858440-android.apk', browser_download_url: 'https://downloads.example/new.apk' }],
+        }),
+      })
+      .when('downloads.openchamber.dev/desktop/canary/OpenChamber-2.5.4-canary.20261031.5-29858440-android.apk', { ok: true });
+
+    const result = await checkForUpdates({
+      appType: 'mobile-capacitor',
+      platform: 'android',
+      currentVersion: '2.5.4-canary.20261030.4',
+    });
+    expect(result.downloadUrl).toBe('https://downloads.openchamber.dev/desktop/canary/OpenChamber-2.5.4-canary.20261031.5-29858440-android.apk');
+  });
+
   it('reports an unreadable canary pre-release as an error for a Canary Android app', async () => {
     fetchMock
       .when('api.openchamber.dev', {

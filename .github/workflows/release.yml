@@ -653,6 +653,53 @@ jobs:
           });
           NODE
 
+      # Everything that announces the release (publishing it, the Discord post,
+      # the website rebuild) waits until its files are on the R2 mirror, where
+      # the desktop app and the website download them. A failed upload stops
+      # here with the release still a draft; re-running the job finishes it.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: ${{ github.event.inputs.dry_run != 'true' }}
+
+      # The draft's files through the API by release id: a draft has no
+      # public download address, and the API keeps working when
+      # github.com/.../releases/download does not.
+      - name: Download the release's desktop files
+        if: ${{ github.event.inputs.dry_run != 'true' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPOSITORY: ${{ github.repository }}
+          VERSION: ${{ needs.create-release.outputs.version }}
+          RELEASE_ID: ${{ needs.create-release.outputs.release_id }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/release"
+          gh api --paginate "repos/$REPOSITORY/releases/$RELEASE_ID/assets" \
+            -q ".[] | select(.name | startswith(\"OpenChamber-$VERSION-\") or test(\"^latest.*\\\\.yml$\")) | \"\\(.id) \\(.name)\"" |
+            while read -r id name; do
+              gh api -H 'Accept: application/octet-stream' "repos/$REPOSITORY/releases/assets/$id" > "$RUNNER_TEMP/release/$name"
+            done
+          ls -la "$RUNNER_TEMP/release"
+
+      - name: Mirror to R2
+        if: ${{ github.event.inputs.dry_run != 'true' }}
+        env:
+          VERSION: ${{ needs.create-release.outputs.version }}
+          R2_ACCOUNT_ID: ${{ vars.R2_ACCOUNT_ID }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          # R2 rejects the checksums newer AWS CLI versions send by default.
+          AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+          AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPOSITORY: ${{ github.repository }}
+        # The latest published release is what the website links until it is
+        # rebuilt; its files stay even if a release in between never got out.
+        run: |
+          set -euo pipefail
+          LIVE=$(gh release view -R "$REPOSITORY" --json tagName -q .tagName | sed 's/^v//')
+          node scripts/release-mirror/mirror-to-r2.mjs --channel stable --dir "$RUNNER_TEMP/release" --version "$VERSION" --keep "$LIVE"
+
       - name: Publish release
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
