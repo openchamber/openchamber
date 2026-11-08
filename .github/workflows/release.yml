@@ -246,7 +246,19 @@ jobs:
           fi
 
           # Require notary ticket stapled
-          xcrun stapler validate "$APP_PATH"
+          # stapler validate looks the ticket up in Apple CloudKit, which drops
+          # connections now and then (error 68); retry before failing the build.
+          for attempt in 1 2 3 4 5; do
+            if xcrun stapler validate "$APP_PATH"; then
+              break
+            fi
+            if [ "$attempt" -eq 5 ]; then
+              echo "Error: stapler validate failed after $attempt attempts"
+              exit 1
+            fi
+            echo "stapler validate failed (attempt $attempt), retrying in 30s"
+            sleep 30
+          done
 
           ENTITLEMENTS=$(codesign -d --entitlements :- "$APP_PATH" 2>&1 || true)
           if echo "$ENTITLEMENTS" | grep -q "com.apple.security.app-sandbox"; then
