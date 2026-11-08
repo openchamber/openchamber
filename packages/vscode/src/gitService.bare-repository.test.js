@@ -95,14 +95,24 @@ describe('VS Code git service with a bare repository', () => {
 
     const repo = createSourceRepository();
     expect(await checkIsGitRepository(path.join(createTempDir(), 'missing'))).toBe(false);
-    // Git's own switch for a repository owned by someone else.
+    // Git's own switch for a repository owned by someone else. The protected
+    // config (system and global) is neutralised for the call, so an ambient
+    // `safe.directory = *` cannot make Git accept the repository instead.
     process.env.GIT_TEST_ASSUME_DIFFERENT_OWNER = '1';
+    const configGlobal = process.env.GIT_CONFIG_GLOBAL;
+    const configSystem = process.env.GIT_CONFIG_SYSTEM;
+    process.env.GIT_CONFIG_GLOBAL = '/dev/null';
+    process.env.GIT_CONFIG_SYSTEM = '/dev/null';
     try {
       const error = await checkIsGitRepository(repo).catch((caught) => caught);
       expect(error).toMatchObject({ code: 'GIT_REPOSITORY_UNREADABLE' });
       expect(error.message).toContain('safe.directory');
     } finally {
       delete process.env.GIT_TEST_ASSUME_DIFFERENT_OWNER;
+      if (configGlobal === undefined) delete process.env.GIT_CONFIG_GLOBAL;
+      else process.env.GIT_CONFIG_GLOBAL = configGlobal;
+      if (configSystem === undefined) delete process.env.GIT_CONFIG_SYSTEM;
+      else process.env.GIT_CONFIG_SYSTEM = configSystem;
     }
   });
 });
