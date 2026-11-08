@@ -1,6 +1,7 @@
 import React from 'react';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { getRuntimeApiBaseUrl } from '@/lib/runtime-switch';
+import { toDataUrl } from '@/lib/guests/relay-document';
 
 /**
  * Object URLs for small images an OpenChamber route serves (project icons,
@@ -9,6 +10,11 @@ import { getRuntimeApiBaseUrl } from '@/lib/runtime-switch';
  * a versioned query (`v=<updatedAt>`) is fetched once per runtime.
  */
 const CACHE_LIMIT = 200;
+
+// A blob: URL carries the app's origin, so an SVG opened in its own tab would
+// run its scripts with the user's session, past the route's sandbox CSP. Only
+// raster types get one; anything else becomes a data: URL, whose origin is opaque.
+const RASTER_IMAGE = /^image\/(?:png|jpeg|webp|gif)\b/;
 
 type CacheEntry = {
   url?: string;
@@ -45,7 +51,7 @@ const loadObjectUrl = (key: string, path: string, query: string): Promise<string
       if (!response.ok) return null;
       if (typeof URL === 'undefined' || typeof URL.createObjectURL !== 'function') return null;
       const blob = await response.blob();
-      const url = URL.createObjectURL(blob);
+      const url = RASTER_IMAGE.test(blob.type) ? URL.createObjectURL(blob) : await toDataUrl(blob);
       cache.set(key, { url });
       trimCache();
       return url;

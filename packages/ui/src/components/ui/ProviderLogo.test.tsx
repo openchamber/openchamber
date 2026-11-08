@@ -110,6 +110,14 @@ describe('ProviderLogo precedence', () => {
     expect(requests).toEqual([`/api/provider/campus-llm/logo?v=${version}&theme=dark`]);
   });
 
+  test('an SVG arrives as a data: URL, so opening it in its own tab runs nothing on the app origin', async () => {
+    answer = () => new Response(new Blob(['<svg/>']), { status: 200, headers: { 'Content-Type': 'image/svg+xml' } });
+    useUIStore.setState({ customProviderLogos: { acme: { mime: 'image/svg+xml', updatedAt: version } } });
+    const view = await render(<ProviderLogo providerId="acme" />);
+
+    expect(view.querySelector('img')?.getAttribute('src')?.startsWith('data:image/svg+xml;base64,')).toBe(true);
+  });
+
   test('falls back to the chosen icon when the browser cannot draw the upload', async () => {
     useUIStore.setState({
       customProviderIcons: { acme: 'server' },
