@@ -742,7 +742,7 @@ Core model:
 
 - active runtime owns one `directories` map keyed by directory
 - each directory entry contains:
-  - repo detection
+  - repo detection, and `repoUnreadable`: Git's message when Git could not tell whether the directory is a repository (`GIT_REPOSITORY_UNREADABLE`; a refused `safe.directory`, a Git that cannot start, a timeout). `isGitRepo` stays `null` then and every git surface shows `GitRepositoryUnreadableState` for the project root (Git's words, a retry, no "Initialize Git"), never a "not a repository" answer. A nested repository selected under the root that Git cannot read is dropped like a stale selection instead, so the picker stays reachable. A directory whose status is already on screen keeps it through one such failed read and shows the state on the next one in a row; one known only from a cache, with no status yet, shows it at once instead of waiting forever. Any answer from Git clears it.
   - status
   - branches
   - log

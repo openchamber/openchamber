@@ -23,6 +23,7 @@ import {
 import { useNestedGitDirectory } from '@/hooks/useNestedGitDirectory';
 import { useWorktreeBootstrapPending } from '@/hooks/useWorktreeBootstrapPending';
 import { NestedRepoResolutionStates } from './git/NestedRepoResolutionStates';
+import { GitRepositoryUnreadableState } from './git/GitRepositoryUnreadableState';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { ScrollShadow } from '@/components/ui/ScrollShadow';
 import { toast } from '@/components/ui';
@@ -299,7 +300,7 @@ export const GitView: React.FC<GitViewProps> = ({ isActive }) => {
   // repository all git data and actions operate on. The hook owns probing,
   // discovery, auto-select, and stale-selection recovery; data fetching below
   // keys off its result.
-  const { rootIsGitRepo, gitDirectory, nestedRepos, repositoryOptions } = useNestedGitDirectory(
+  const { rootIsGitRepo, gitDirectory, nestedRepos, repositoryOptions, unreadable } = useNestedGitDirectory(
     currentDirectory ?? null,
     { enabled: isActive, recheckOnOpen: true },
   );
@@ -2416,6 +2417,10 @@ export const GitView: React.FC<GitViewProps> = ({ isActive }) => {
         )}
       </div>
     );
+  }
+
+  if (unreadable) {
+    return <GitRepositoryUnreadableState directory={unreadable.directory} message={unreadable.message} />;
   }
 
   if (isGitRepo === null || (isGitRepo === true && !status)) {
