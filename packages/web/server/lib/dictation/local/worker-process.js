@@ -23,8 +23,15 @@ import { SherpaTtsEngine } from './sherpa-tts.js';
 import { getLocalSttModelDir, getLocalSttModelSpec } from './model-catalog.js';
 import { resolveModelLanguage } from './model-language.js';
 import { pcm16ToWav } from '../audio.js';
+import { availableParallelism } from 'os';
 
 process.title = 'OpenChamber Dictation';
+
+// ONNX Runtime threads for the sherpa engines. A dictation decode is a short
+// burst of CPU work in this dedicated process, so it can use the host's cores
+// without competing with the server's event loop, and the worker exits after
+// its idle TTL. Capped at 8 so a many-core server does not oversubscribe.
+const ENGINE_THREADS = Math.max(1, Math.min(8, availableParallelism()));
 
 const engines = new Map();
 const ttsEngines = new Map();
@@ -75,7 +82,7 @@ function getEngine(modelsDir, modelId, language) {
     modelDir: getLocalSttModelDir(modelsDir, modelId),
     files: spec.files,
     language,
-    numThreads: 2,
+    numThreads: ENGINE_THREADS,
   });
   engines.set(key, created);
   return created;
@@ -116,7 +123,7 @@ function getTtsEngine(modelsDir, modelId) {
     type: spec.type,
     files: spec.files,
     lexicon: spec.lexicon,
-    numThreads: 2,
+    numThreads: ENGINE_THREADS,
   });
   ttsEngines.set(key, created);
   return created;
