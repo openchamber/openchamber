@@ -48,6 +48,8 @@ import { ProviderAccounts } from './ProviderAccounts';
 import { ProviderAccountSwitchToggle } from './ProviderAccountSwitchToggle';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { CustomProviderForm } from './CustomProviderForm';
+import { ProviderLogoImageControl } from './ProviderLogoImageControl';
+import { providerLogoUploadSupported, removeProviderLogo, uploadProviderLogo } from '@/lib/customProviderLogos';
 
 import { ProviderAuthMethodCards } from './ProviderAuthMethodCards';
 import type { IntegrationKeyRequest } from './ProviderApiKeyForm';
@@ -61,6 +63,7 @@ import {
   resolveProviderConfigScope,
   storedProviderEntrySchema,
   type CustomProviderFormState,
+  type CustomProviderLogoPlan,
   type CustomProviderPersistPlan,
   type ProviderConfigScope,
   type StoredProviderEntry,
@@ -137,6 +140,8 @@ export const ProvidersPage: React.FC = () => {
   const hiddenModels = useUIStore((state) => state.hiddenModels);
   const customProviderIcons = useUIStore((state) => state.customProviderIcons);
   const setCustomProviderIcon = useUIStore((state) => state.setCustomProviderIcon);
+  const customProviderLogos = useUIStore((state) => state.customProviderLogos);
+  const setCustomProviderLogo = useUIStore((state) => state.setCustomProviderLogo);
   const toggleHiddenModel = useUIStore((state) => state.toggleHiddenModel);
   const hideAllModels = useUIStore((state) => state.hideAllModels);
   const showAllModels = useUIStore((state) => state.showAllModels);
@@ -388,6 +393,29 @@ export const ProvidersPage: React.FC = () => {
   const selectedProvider = providers.find((provider) => provider.id === selectedProviderId);
   const selectedSources = selectedProviderId ? providerSources[selectedProviderId] : undefined;
 
+  const [logoBusyId, setLogoBusyId] = React.useState<string | null>(null);
+  /** Uploads or removes the provider's logo image; a failure is a toast and leaves the stored logo as it was. */
+  const applyLogoPlan = async (providerId: string, logoPlan: CustomProviderLogoPlan) => {
+    if (logoPlan.kind === 'keep' || !providerLogoUploadSupported()) return;
+    if (logoPlan.kind === 'remove' && !useUIStore.getState().customProviderLogos[providerId]) return;
+    setLogoBusyId(providerId);
+    try {
+      if (logoPlan.kind === 'upload') {
+        setCustomProviderLogo(providerId, await uploadProviderLogo(providerId, logoPlan.file));
+      } else {
+        await removeProviderLogo(providerId);
+        setCustomProviderLogo(providerId, null);
+      }
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      toast.error(logoPlan.kind === 'upload'
+        ? t('settings.providers.page.logo.toast.uploadFailed', { reason })
+        : t('settings.providers.page.logo.toast.removeFailed', { reason }));
+    } finally {
+      setLogoBusyId(null);
+    }
+  };
+
   const handleSaveCustomProvider = async (plan: CustomProviderPersistPlan) => {
     const busyKey = `custom:${plan.providerID}`;
     setAuthBusyKey(busyKey);
@@ -434,6 +462,9 @@ export const ProvidersPage: React.FC = () => {
       else delete nextCustomProviderIcons[plan.providerID];
       await updateDesktopSettings({ customProviderIcons: nextCustomProviderIcons });
       setCustomProviderIcon(plan.providerID, plan.icon);
+      // The provider is saved by now; a failed image write is reported on its own
+      // and does not reopen the form, whose next Save would store the key again.
+      await applyLogoPlan(plan.providerID, plan.logo);
 
       toast.success(t('settings.providers.page.toast.customProviderSaved', { provider: plan.name }));
       setCandidateProviderId('');
@@ -893,6 +924,23 @@ export const ProvidersPage: React.FC = () => {
           <p className="typography-meta text-muted-foreground">{t('settings.providers.enterpriseMode')}</p>
         ) : null}
       </SettingsSection>
+
+      {/* A custom provider sets its logo in the edit form, unless enterprise mode hides the form. */}
+      {providerLogoUploadSupported() && sourcesLoaded && (!isEditableCustomProvider || enterpriseLocked) ? (
+        <SettingsSection
+          title={t('settings.providers.page.logo.title')}
+          info={t('settings.providers.page.logo.info')}
+        >
+          <ProviderLogoImageControl
+            preview={customProviderLogos[selectedProvider.id]
+              ? <ProviderLogo providerId={selectedProvider.id} alt="" className="size-5" />
+              : null}
+            busy={logoBusyId === selectedProvider.id}
+            onPick={(file) => void applyLogoPlan(selectedProvider.id, { kind: 'upload', file })}
+            onRemove={() => void applyLogoPlan(selectedProvider.id, { kind: 'remove' })}
+          />
+        </SettingsSection>
+      ) : null}
 
       {providerModels.length === 0 ? (
         <SettingsSection

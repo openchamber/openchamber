@@ -44,6 +44,7 @@ import {
   parseActivityRenderMode,
   parseBoolean,
   parseCustomProviderIcons,
+  parseCustomProviderLogos,
   parseDesktopWindowControlsPosition,
   parseFiniteNumber,
   parseFollowUpBehavior,
@@ -593,6 +594,8 @@ export const SETTINGS_REGISTRY = {
   hiddenModels: field<ModelRef[]>({ scope: 'profile', parse: parseModelRefs(1024), ui: uiStore('hiddenModels', setUi('hiddenModels'), { autoSave: false }) }),
   collapsedModelProviders: field({ scope: 'profile', parse: parseStringSet, ui: uiStore('collapsedModelProviders', setUi('collapsedModelProviders'), { autoSave: false }) }),
   customProviderIcons: field({ scope: 'profile', parse: parseCustomProviderIcons, ui: uiStore('customProviderIcons', setUi('customProviderIcons'), { autoSave: false }) }),
+  // Written by the server's provider logo routes along with the image file.
+  customProviderLogos: field({ scope: 'profile', parse: parseCustomProviderLogos, ui: uiStore('customProviderLogos', setUi('customProviderLogos'), { autoSave: false }) }),
   recentModels: field<ModelRef[]>({ scope: 'profile', parse: parseModelRefs(16), ui: uiStore('recentModels', setUi('recentModels'), { autoSave: false }) }),
   lastSelectedModel: field({ scope: 'profile', parse: parseNonEmptyString, ui: uiStore('lastSelectedModel', setUi('lastSelectedModel')) }),
   recentAgents: field({ scope: 'profile', parse: parseStringSet, ui: uiStore('recentAgents', setUi('recentAgents'), { autoSave: false }) }),
