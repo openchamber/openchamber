@@ -1,6 +1,6 @@
 import React from 'react';
 
-import { isCapacitorApp } from '@/lib/platform';
+import { isCapacitorApp, getClientPlatform } from '@/lib/platform';
 import { subscribeToNativeShortcutRequests } from '@/lib/nativeShortcutRequests';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useInputStore } from '@/sync/input-store';
@@ -198,6 +198,14 @@ export const useDeepLinkSource = (options: { ready: boolean }): void => {
           return;
         }
         cleanup.push(() => void handle.remove());
+        // A launcher shortcut that cold-starts the app arrives as the launch intent, which
+        // Capacitor reports only through getLaunchUrl; `appUrlOpen` covers the running case.
+        // iOS delivers a cold launch through appUrlOpen instead, so draining it there would
+        // apply the same link twice.
+        if (getClientPlatform() === 'android') {
+          const launched = await App.getLaunchUrl();
+          if (!disposed && launched?.url) applyDeepLinkUrl(launched.url);
+        }
       })
       .catch(() => undefined);
 

@@ -21,6 +21,21 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <!-- The openchamber:// scheme is how the launcher quick actions, widgets and
+                 notifications reach the app. Capacitor's App plugin turns these VIEW intents into
+                 appUrlOpen; without this filter the app receives no deep link at all. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="openchamber" />
+            </intent-filter>
+
+            <!-- The shortcut service reads this from the launcher activity, not from the
+                 application: an application-level copy is ignored and the menu stays empty. -->
+            <meta-data
+                android:name="android.app.shortcuts"
+                android:resource="@xml/shortcuts" />
         </activity>
 
         <provider
