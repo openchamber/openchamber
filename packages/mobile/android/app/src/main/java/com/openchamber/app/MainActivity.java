@@ -19,6 +19,19 @@ public class MainActivity extends BridgeActivity {
     }
 
     @Override
+    public void onResume() {
+        super.onResume();
+        // Same trigger as the iOS scene activation: store what the page shows and repaint widgets.
+        WidgetBridge.capture(this);
+    }
+
+    @Override
+    public void onPause() {
+        WidgetBridge.capture(this);
+        super.onPause();
+    }
+
+    @Override
     protected void load() {
         // Capacitor inflates a plain CapacitorWebView, which tells the IME it accepts no
         // content. Swap in ours before the bridge resolves the WebView by id.

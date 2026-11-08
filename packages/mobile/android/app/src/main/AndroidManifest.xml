@@ -23,6 +23,64 @@
             </intent-filter>
         </activity>
 
+        <!-- Not a toggle: the tile starts a session, like the iOS Control Center control. -->
+        <service
+            android:name=".NewSessionTileService"
+            android:exported="true"
+            android:icon="@drawable/ic_tile_new_session"
+            android:label="@string/tile_new_session"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
+        <!-- One receiver per widget so the launcher's picker can offer each size on its own. -->
+        <receiver
+            android:name=".OverviewWidgetProvider"
+            android:exported="false"
+            android:label="@string/widget_overview_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/overview_widget_info" />
+        </receiver>
+        <receiver
+            android:name=".SessionsWidgetProvider"
+            android:exported="false"
+            android:label="@string/widget_sessions_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/sessions_widget_info" />
+        </receiver>
+        <receiver
+            android:name=".QuickActionsWidgetProvider"
+            android:exported="false"
+            android:label="@string/widget_quick_actions_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/quick_actions_widget_info" />
+        </receiver>
+        <receiver
+            android:name=".NewSessionWidgetProvider"
+            android:exported="false"
+            android:label="@string/widget_new_session_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/new_session_widget_info" />
+        </receiver>
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"
