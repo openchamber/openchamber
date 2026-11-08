@@ -1,3 +1,5 @@
+import { z } from 'zod';
+
 const MAX_PAIRING_PAYLOAD_LENGTH = 16_384;
 
 // A pairing candidate is one way to reach the host's HTTP API. `type`
@@ -36,6 +38,38 @@ export type PairingConnectionPayload = {
   fingerprint?: string;
   expiresAt?: string;
   candidates: PairingEndpointCandidate[];
+  // Extra request headers the instance sits behind (auth proxy). Sent with the
+  // redeem call and stored as the host's `requestHeaders`. A base64url link is
+  // readable by anyone holding it, so these are as sensitive as the secret.
+  headers?: Record<string, string>;
+};
+
+// Mirrors what a stored host accepts (see desktopHosts sanitizeRequestHeaders):
+// `authorization` stays reserved for the runtime's own bearer token.
+const MAX_PAIRING_HEADERS = 16;
+const MAX_PAIRING_HEADER_NAME_LENGTH = 128;
+const MAX_PAIRING_HEADER_VALUE_LENGTH = 1024;
+const HEADER_NAME_PATTERN = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
+const HEADER_VALUE_PATTERN = /^[\t\x20-\x7e]+$/;
+
+// The map comes out of an untrusted link, so it is decoded whole: one bad name,
+// value or an oversized map drops the map instead of half-applying a proxy
+// setup that could not work anyway.
+const pairingHeadersSchema = z
+  .record(
+    z.string()
+      .trim()
+      .min(1)
+      .max(MAX_PAIRING_HEADER_NAME_LENGTH)
+      .regex(HEADER_NAME_PATTERN)
+      .refine((name) => name.toLowerCase() !== 'authorization'),
+    z.string().trim().min(1).max(MAX_PAIRING_HEADER_VALUE_LENGTH).regex(HEADER_VALUE_PATTERN),
+  )
+  .refine((headers) => Object.keys(headers).length <= MAX_PAIRING_HEADERS);
+
+const normalizePairingHeaders = (value: Record<string, string> | undefined): Record<string, string> | undefined => {
+  const parsed = pairingHeadersSchema.safeParse(value);
+  return parsed.success && Object.keys(parsed.data).length > 0 ? parsed.data : undefined;
 };
 
 const globalWithBuffer = globalThis as typeof globalThis & {
@@ -166,26 +200,29 @@ const normalizePairingPayload = (value: unknown): PairingConnectionPayload | nul
   }
   const label = typeof record.label === 'string' && record.label.trim() ? record.label.trim() : undefined;
   const fingerprint = typeof record.fingerprint === 'string' && record.fingerprint.trim() ? record.fingerprint.trim() : undefined;
-  return {
-    v: 2,
-    pairingId,
-    secret,
-    ...(label ? { label } : {}),
-    ...(fingerprint ? { fingerprint } : {}),
-    ...(expiresAt ? { expiresAt } : {}),
-    candidates,
-  };
+  const headersField = pairingHeadersSchema.safeParse(record.headers);
+  const payload: PairingConnectionPayload = { v: 2, pairingId, secret, candidates };
+  if (label) payload.label = label;
+  if (fingerprint) payload.fingerprint = fingerprint;
+  if (expiresAt) payload.expiresAt = expiresAt;
+  if (headersField.success && Object.keys(headersField.data).length > 0) payload.headers = headersField.data;
+  return payload;
 };
 
-export const buildPairingConnectionPayload = (input: Omit<PairingConnectionPayload, 'v'>): PairingConnectionPayload => ({
-  v: 2,
-  pairingId: input.pairingId.trim(),
-  secret: input.secret.trim(),
-  ...(input.label?.trim() ? { label: input.label.trim() } : {}),
-  ...(input.fingerprint?.trim() ? { fingerprint: input.fingerprint.trim() } : {}),
-  ...(input.expiresAt?.trim() ? { expiresAt: input.expiresAt.trim() } : {}),
-  candidates: input.candidates,
-});
+export const buildPairingConnectionPayload = (input: Omit<PairingConnectionPayload, 'v'>): PairingConnectionPayload => {
+  const payload: PairingConnectionPayload = {
+    v: 2,
+    pairingId: input.pairingId.trim(),
+    secret: input.secret.trim(),
+    candidates: input.candidates,
+  };
+  if (input.label?.trim()) payload.label = input.label.trim();
+  if (input.fingerprint?.trim()) payload.fingerprint = input.fingerprint.trim();
+  if (input.expiresAt?.trim()) payload.expiresAt = input.expiresAt.trim();
+  const headers = normalizePairingHeaders(input.headers);
+  if (headers) payload.headers = headers;
+  return payload;
+};
 
 export const encodePairingConnectionPayload = (payload: PairingConnectionPayload): string => {
   const normalized = normalizePairingPayload(payload);

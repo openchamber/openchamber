@@ -40,6 +40,21 @@ const relayCandidateServerId = (candidate) => {
   }
 };
 
+// The confirmation prompt names the headers the link would add, never their
+// values: a base64url payload is readable by anyone holding the link.
+const MAX_PROMPT_HEADERS = 16;
+const headerNames = (value) => {
+  if (Object.prototype.toString.call(value) !== '[object Object]') return [];
+  const names = [];
+  for (const key of Object.keys(value)) {
+    if (names.length >= MAX_PROMPT_HEADERS) break;
+    const name = readText(key);
+    if (!name || name.toLowerCase() === 'authorization' || !readText(value[key])) continue;
+    names.push(name);
+  }
+  return names;
+};
+
 const candidatePreview = (candidate) => {
   if (!candidate || typeof candidate !== 'object') return null;
   const priority = Number.isFinite(candidate.priority) ? candidate.priority : 100;
@@ -55,9 +70,10 @@ const candidatePreview = (candidate) => {
 };
 
 /**
- * @returns {{ label: string, fingerprint: string, target: string } | null}
+ * @returns {{ label: string, fingerprint: string, target: string, headerNames: string[] } | null}
  * `target` is the first direct address by priority, else the relay display
  * address (`relay://<serverId>`, the form stored for relay-only hosts).
+ * `headerNames` are the request headers the link carries, names only.
  */
 export const parsePairingDeepLink = (raw, { protocol = 'openchamber', now = Date.now() } = {}) => {
   let url;
@@ -85,5 +101,6 @@ export const parsePairingDeepLink = (raw, { protocol = 'openchamber', now = Date
     label: readText(payload.label) || 'OpenChamber',
     fingerprint: readText(payload.fingerprint),
     target: preferred.target,
+    headerNames: headerNames(payload.headers),
   };
 };

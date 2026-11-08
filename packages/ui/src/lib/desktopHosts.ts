@@ -106,7 +106,9 @@ export const importDesktopHostPairing = async (
   const installId = await desktopInstallIdGet().catch(() => '');
   const redeemInit: RequestInit = {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    // Link headers ride along so an instance behind an auth proxy can answer at
+    // all; the redeem's own headers win where the two collide.
+    headers: { ...payload.headers, 'Content-Type': 'application/json', Accept: 'application/json' },
     body: JSON.stringify({
       pairingId: payload.pairingId,
       secret: payload.secret,
@@ -194,6 +196,8 @@ export const importDesktopHostPairing = async (
     apiUrl: directUrl,
     clientToken: redeemed.token,
     ...(relay ? { relay } : {}),
+    // A headerless link keeps whatever headers the host already had.
+    ...(payload.headers ? { requestHeaders: payload.headers } : {}),
   };
   return {
     hostId,

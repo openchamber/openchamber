@@ -146,3 +146,51 @@ describe('parsePairingConnectionPayloadString (Android WebView fallback)', () =>
     expect(parsePairingConnectionPayloadString('openchamber://connect?v=2&p=not-json')).toBeNull();
   });
 });
+
+describe('pairing payload headers', () => {
+  const encodeRaw = (extra: { headers?: Record<string, string> }) => `openchamber://connect?v=2&p=${Buffer.from(JSON.stringify({
+    v: 2,
+    pairingId: 'pair_1',
+    secret: 's',
+    candidates: [{ type: 'lan', url: 'http://192.168.1.20:4096' }],
+    ...extra,
+  })).toString('base64url')}`;
+
+  test('round-trips a headers map and keeps it out of the secret bearing fields', () => {
+    const payload = buildPairingConnectionPayload({
+      pairingId: 'pair_1',
+      secret: 'one-time-secret',
+      headers: { 'CF-Access-Client-Id': 'id.access', 'CF-Access-Client-Secret': 'value' },
+      candidates: [{ type: 'lan', url: 'http://192.168.1.20:4096' }],
+    });
+
+    expect(payload.headers).toEqual({ 'CF-Access-Client-Id': 'id.access', 'CF-Access-Client-Secret': 'value' });
+    expect(parsePairingConnectionPayload(encodePairingConnectionPayload(payload))?.headers).toEqual(payload.headers);
+  });
+
+  test('trims names and values of a valid map', () => {
+    expect(parsePairingConnectionPayload(encodeRaw({
+      headers: { '  X-Ok  ': '  spaced  ' },
+    }))?.headers).toEqual({ 'X-Ok': 'spaced' });
+  });
+
+  test('drops a map with a reserved, malformed or empty header', () => {
+    const badMaps: Record<string, string>[] = [
+      { Authorization: 'Bearer nope' },
+      { 'Bad Name': 'x' },
+      { 'X-Empty': '   ' },
+      { 'X-CRLF': 'a\r\nb' },
+      { '': 'x' },
+    ];
+    for (const headers of badMaps) {
+      expect(parsePairingConnectionPayload(encodeRaw({ headers }))?.headers).toBeUndefined();
+    }
+  });
+
+  test('keeps at most 16 headers and omits the field when empty', () => {
+    const headers = (count: number) => Object.fromEntries(Array.from({ length: count }, (_, i) => [`X-H${i}`, 'v']));
+    expect(Object.keys(parsePairingConnectionPayload(encodeRaw({ headers: headers(16) }))?.headers ?? {})).toHaveLength(16);
+    expect(parsePairingConnectionPayload(encodeRaw({ headers: headers(17) }))?.headers).toBeUndefined();
+    expect(parsePairingConnectionPayload(encodeRaw({ headers: {} }))?.headers).toBeUndefined();
+  });
+});

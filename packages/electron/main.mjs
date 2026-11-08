@@ -2126,7 +2126,10 @@ const confirmConnectDeepLink = async (payload) => {
     message: `Connect to "${payload.label}"?`,
     detail:
       `This will add ${payload.serverUrl} as a remote instance and route this app's activity ` +
-      'through it. Only continue if you trust this server and started the connection yourself.',
+      'through it. Only continue if you trust this server and started the connection yourself.' +
+      (payload.headerNames?.length
+        ? ` It also sends these request headers: ${payload.headerNames.join(', ')}.`
+        : ''),
     buttons: ['Connect', 'Cancel'],
     defaultId: 1,
     cancelId: 1,

@@ -14,7 +14,16 @@ test('keeps a relay candidate, which carries no url', () => {
     label: 'Studio Mac',
     fingerprint: '',
     target: 'relay://srv_abc',
+    headerNames: [],
   });
+});
+
+test('names the link-carried headers, never their values', () => {
+  const parsed = parsePairingDeepLink(pairing([relayCandidate], {
+    headers: { 'CF-Access-Client-Id': 'id.access', 'cf-access-client-secret': 'shh', Authorization: 'Bearer nope' },
+  }));
+  assert.deepEqual(parsed?.headerNames, ['CF-Access-Client-Id', 'cf-access-client-secret']);
+  assert.ok(!JSON.stringify(parsed).includes('id.access'));
 });
 
 test('names the first direct address by priority when the link has one', () => {

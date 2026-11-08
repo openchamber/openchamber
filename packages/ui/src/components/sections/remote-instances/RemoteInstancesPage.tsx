@@ -646,7 +646,9 @@ export const RemoteInstancesPage: React.FC = () => {
     });
     const redeemInit: RequestInit = {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      // Link headers ride along so an instance behind an auth proxy can answer
+      // at all; the redeem's own headers win where the two collide.
+      headers: { ...payload.headers, 'Content-Type': 'application/json', Accept: 'application/json' },
       body: redeemBody,
     };
     let pairingError: string | null = null;
@@ -762,6 +764,8 @@ export const RemoteInstancesPage: React.FC = () => {
       apiUrl: directUrl || undefined,
       clientToken: token,
       ...(relay ? { relay } : {}),
+      // A headerless link keeps whatever headers the host already had.
+      ...(payload.headers ? { requestHeaders: payload.headers } : {}),
     };
     // One host per server: match by relay serverId when the link has a relay
     // leg, else by direct URL — re-importing updates the record in place.
