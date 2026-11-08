@@ -205,6 +205,7 @@ which requests only providers enabled for this panel.
 | Subagent blockers | directory `permission` / `question` maps | one subscription covers every child |
 | Workflows | `useSessionWorkflowRuns` (`lib/workflows/store.ts`): the session's runs read once from the server, then kept current by `openchamber:workflow-run` events | only while workflows are shown: not in VS Code, and only with the workflow tool on (`selectWorkflowsShown`) |
 | Usage | `components/usage/usageGroups.ts` over `useQuotaStore` | grouping shared with the mobile popover; presentation is not |
+| Linked plans | `useProjectContextStore` plans of the session's project whose `session.sessionId` is this session | refreshed through `observeProjectContext` |
 | Linked threads | `lib/linkedIssues.ts` over session metadata; state from tracked items | written by the flows that attach an issue or PR, and removable from the row; a linked PR that is also the checked-out branch's PR shows the branch summary, as its sidebar row does |
 | Turn stats | `telemetry.ts` over `useSessionMessageRecords` | computed while authoritatively idle, including when collapsed; active mounts read warm records once for the previous turn; either rate above 5,000 tok/s is reported as unknown (see the two-rate description below) |
 | Keep-warm switch | `useSessionWarmingStore`, mirrored from the server's `lib/session-warming` | on the Context row, shown only while Settings chose per-session warming and for a root session outside an isolated space; the tooltip's countdown ticks only while it is open |
@@ -758,7 +759,22 @@ a tab.
 
 ## Context sources
 
-Linked issues and change requests first, then skills and MCP counts.
+The plan the session works on and linked issues and change requests first,
+then pinned knowledge, memory, skills and MCP counts.
+
+### The plan the session works on
+
+A plan records the session it was sent to (Implement or Improve in the plan,
+or an agent's `knowledge.save` with a `sessionId`), and its card in Project
+knowledge opens that session. The row here is the way back: it lists every
+plan of the session's project whose link names this session, with the plan's
+step progress, and opens the plan in place in Project knowledge on desktop and
+web (`openProjectKnowledgePlan`, the same request an agent's `knowledge.show`
+makes) and full screen on the phone (`MobileAppActions.openPlan`). The plans
+come from the project's knowledge store, refreshed through
+`observeProjectContext` behind the background gate. A plan both linked and
+pinned shows once, as the linked row with the pin as its leading control.
+There is no unlink control: the plan's own card owns its link.
 
 Agents are deliberately absent: an agent is who does the work, not material
 loaded into the context. Tools are absent too — `Agent.tools` is a per-agent

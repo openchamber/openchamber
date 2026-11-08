@@ -424,6 +424,7 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
       },
       openFiles: () => openFilesSurface(),
       openSourceBoard: () => openSurface('board'),
+      openPlan: setOpenPlan,
     }),
     [openChangesSurface, openFilesSurface, openSurface],
   );
