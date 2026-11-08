@@ -441,7 +441,7 @@ export const ProviderOAuthMethods: React.FC<ProviderOAuthMethodsProps> = ({
                   onChange={(key, value) => setFieldValues((prev) => ({ ...prev, [key]: value }))}
                 />
                 {flow.error && (
-                  <p className="typography-meta text-[var(--status-error)]">{flow.error}</p>
+                  <p dir="auto" className="typography-meta text-[var(--status-error)]">{flow.error}</p>
                 )}
                 <div className="flex items-center gap-2">
                   <Button size="xs" className="!font-normal" onClick={() => submitFields(method)}>
@@ -552,7 +552,7 @@ export const ProviderOAuthMethods: React.FC<ProviderOAuthMethodsProps> = ({
 
             {isActive && flow.phase === 'failed' && (
               <div className="space-y-2">
-                <p className="typography-meta text-[var(--status-error)]">{flow.message}</p>
+                <p dir="auto" className="typography-meta text-[var(--status-error)]">{flow.message}</p>
                 {showStartButton ? (
                   <Button
                     variant="outline"

@@ -52,7 +52,7 @@ export function OutdatedServerNotice({ version }: { version: string }) {
           {!manual.info?.available && (
             <p className="typography-meta text-[var(--status-error)]">{t('startup.serverOutdated.noUpdate')}</p>
           )}
-          {manual.error && <p className="typography-meta text-muted-foreground">{manual.error}</p>}
+          {manual.error && <p dir="auto" className="typography-meta text-muted-foreground">{manual.error}</p>}
           {manual.info?.installBlocked === 'desktop-host' ? (
             <p className="typography-meta text-muted-foreground">
               {t('updateDialog.desktopHostInstall', { version: manual.info.version || '' })}
@@ -60,7 +60,7 @@ export function OutdatedServerNotice({ version }: { version: string }) {
           ) : (
             <>
               <p className="typography-meta text-muted-foreground">{t('onboarding.desktopRecovery.remoteIncompatible.manualUpdate')}</p>
-              <code className="block select-text rounded-md bg-[var(--surface-muted)] px-3 py-2 font-mono text-sm text-foreground">{manualCommand}</code>
+              <code dir="ltr" className="block select-text rounded-md bg-[var(--surface-muted)] px-3 py-2 font-mono text-sm text-foreground">{manualCommand}</code>
             </>
           )}
         </div>

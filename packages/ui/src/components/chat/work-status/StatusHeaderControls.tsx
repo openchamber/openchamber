@@ -40,7 +40,7 @@ export const StatusHeaderControls: React.FC<Props> = ({ controls, onActivate, la
                     onClick={() => onActivate(control.id)}
                     className="max-w-[5rem]"
                   >
-                    <span className="truncate">{control.label}</span>
+                    <span dir="auto" className="truncate">{control.label}</span>
                   </Button>
                 </span>
               </TooltipTrigger>
@@ -65,7 +65,7 @@ export const StatusHeaderControls: React.FC<Props> = ({ controls, onActivate, la
                       disabled={control.disabled}
                       className="max-w-[5rem] gap-1"
                     >
-                      <span className="min-w-0 truncate">{selectedOption?.label ?? control.value}</span>
+                      <span dir="auto" className="min-w-0 truncate">{selectedOption?.label ?? control.value}</span>
                       <Icon name="arrow-down-s" className="size-3 shrink-0" />
                     </Button>
                   </DropdownMenuTrigger>
@@ -77,7 +77,7 @@ export const StatusHeaderControls: React.FC<Props> = ({ controls, onActivate, la
               <DropdownMenuRadioGroup value={control.value} onValueChange={(value) => onActivate(control.id, value)}>
                 {control.options.map((option) => (
                   <DropdownMenuRadioItem key={option.value} value={option.value}>
-                    <span className="truncate">{option.label}</span>
+                    <span dir="auto" className="truncate">{option.label}</span>
                   </DropdownMenuRadioItem>
                 ))}
               </DropdownMenuRadioGroup>

@@ -1391,7 +1391,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
                             {parsedQA.map((qa, index) => (
                                 <div key={index} className="space-y-0.5">
                                     <FormMarkdown content={qa.question} size="micro" className="text-muted-foreground" />
-                                    <div className="typography-meta text-foreground whitespace-pre-wrap">{qa.answer}</div>
+                                    <div dir="auto" className="typography-meta text-foreground whitespace-pre-wrap">{qa.answer}</div>
                                 </div>
                             ))}
                         </div>,
@@ -1424,13 +1424,13 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
                         {questionInput.questions.map((q, index) => (
                             <div key={index} className="space-y-0.5">
                                 {q.header ? (
-                                    <div className="typography-micro text-muted-foreground">{coerceToText(q.header)}</div>
+                                    <div dir="auto" className="typography-micro text-muted-foreground">{coerceToText(q.header)}</div>
                                 ) : null}
                                 <FormMarkdown content={coerceToText(q.question)} size="meta" className="text-foreground" />
                                 {Array.isArray(q.options) && q.options.length > 0 ? (
                                     <div className="flex flex-wrap gap-1 mt-0.5">
                                         {q.options.map((opt) => (
-                                            <span key={coerceToText(opt.label)} className="typography-micro px-1.5 py-0.5 rounded oc-tile-inset text-muted-foreground">
+                                            <span key={coerceToText(opt.label)} dir="auto" className="typography-micro px-1.5 py-0.5 rounded oc-tile-inset text-muted-foreground">
                                                 {coerceToText(opt.label)}
                                             </span>
                                         ))}

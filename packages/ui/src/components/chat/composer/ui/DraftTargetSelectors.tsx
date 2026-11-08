@@ -145,7 +145,7 @@ export function ProjectLabel({ project, theme }: { project: DraftTargetProject; 
                     />
                 </span>
             ) : fallbackIcon}
-            <span className="truncate">{getProjectDisplayLabel(project)}</span>
+            <span dir="auto" className="truncate">{getProjectDisplayLabel(project)}</span>
         </span>
     );
 }

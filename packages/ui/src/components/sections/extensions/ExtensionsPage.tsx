@@ -478,7 +478,7 @@ const ExtensionDetail: React.FC<ExtensionHandlers & { guest: InstalledGuest; onB
             </SettingsFieldRow>
           ) : null}
           <SettingsFieldRow label={t('settings.extensions.detail.field.location')} alignEnd={false} controlClassName="min-w-0 @xl:flex-1">
-            <span className="typography-meta min-w-0 truncate font-mono text-muted-foreground" title={location}>{location}</span>
+            <span dir="ltr" className="typography-meta min-w-0 truncate font-mono text-muted-foreground" title={location}>{location}</span>
           </SettingsFieldRow>
         </div>
         {state.builtIn ? <p className={SETTINGS_HELPER_CLASS}>{t('settings.extensions.builtIn.info')}</p> : null}

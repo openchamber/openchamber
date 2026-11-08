@@ -594,7 +594,7 @@ const RepositoryPreview: React.FC<{
                             <TooltipContent side="bottom" sideOffset={6}>{t('contextTooltips.tracker.openOnHost', { host: descriptor.label })}</TooltipContent>
                         </Tooltip>
                     </div>
-                    <h3 className="typography-ui-header font-semibold break-words text-foreground">{reference.title}</h3>
+                    <h3 dir="auto" className="typography-ui-header font-semibold break-words text-foreground">{reference.title}</h3>
                     <ChangeFlags reference={reference} />
                 </>
             }
@@ -732,7 +732,7 @@ const RelatedTrackerItem: React.FC<{
         <>
             <Icon name={look.icon} className="size-3.5 shrink-0" style={{ color: look.color }} />
             <span className={cn('shrink-0 font-mono', REFERENCE_META_TEXT)}>{issue.identifier}</span>
-            <span className="min-w-0 truncate">{issue.title}</span>
+            <span dir="auto" className="min-w-0 truncate">{issue.title}</span>
             {showAssignee && assignee ? (
                 <span className={cn('ms-auto shrink-0 ps-2', REFERENCE_META_TEXT)}>{assignee}</span>
             ) : null}
@@ -859,7 +859,7 @@ const TrackerPreview: React.FC<{
                             <TooltipContent side="bottom" sideOffset={6}>{t('contextTooltips.tracker.openOnHost', { host: descriptor.name })}</TooltipContent>
                         </Tooltip>
                     </div>
-                    <h3 className="typography-ui-header font-semibold break-words text-foreground">{issue.title}</h3>
+                    <h3 dir="auto" className="typography-ui-header font-semibold break-words text-foreground">{issue.title}</h3>
                 </>
             }
             meta={

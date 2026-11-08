@@ -318,7 +318,7 @@ const CommitGroup: React.FC<{ group: ReferenceCommitGroup; now: number }> = ({ g
                             ) : (
                                 <span className={cn('shrink-0 font-mono typography-micro', REFERENCE_META_TEXT)}>{sha}</span>
                             )}
-                            <span className="min-w-0 flex-1 truncate text-foreground" title={commit.headline}>{commit.headline}</span>
+                            <span dir="auto" className="oc-ui-start-align min-w-0 flex-1 truncate text-foreground" title={commit.headline}>{commit.headline}</span>
                             {commit.author ? (
                                 <span className={cn('inline-flex min-w-0 max-w-[40%] shrink-0 items-center gap-1 self-center typography-micro', REFERENCE_META_TEXT)}>
                                     {commit.avatarUrl ? (

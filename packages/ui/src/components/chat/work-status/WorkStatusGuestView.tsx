@@ -236,7 +236,7 @@ const Chip: React.FC<{ chip: GuestStatusChip }> = ({ chip }) => {
           {chip.label}
         </button>
       </TooltipTrigger>
-      <TooltipContent side="top" sideOffset={6}>{url}</TooltipContent>
+      <TooltipContent side="top" sideOffset={6} dir="ltr">{url}</TooltipContent>
     </Tooltip>
   );
 };
@@ -254,6 +254,7 @@ const Segmented: React.FC<Extract<GuestStatusContent, { kind: 'segmented' }>> = 
           aria-pressed={option.value === current}
           disabled={disabled || busy.has(id)}
           onClick={() => { if (option.value !== current) act({ id, value: option.value }); }}
+          dir="auto"
         >
           {option.label}
         </Button>
@@ -308,11 +309,11 @@ const ActionButton: React.FC<Extract<GuestStatusAction, { kind: 'button' }>> = (
             }}
             className="max-w-[8rem]"
           >
-            <span className="truncate">{armed && confirm ? confirm : label}</span>
+            <span dir="auto" className="truncate">{armed && confirm ? confirm : label}</span>
           </Button>
         </span>
       </TooltipTrigger>
-      <TooltipContent side="top" sideOffset={6}>{armed && confirm ? confirm : label}</TooltipContent>
+      <TooltipContent side="top" sideOffset={6} dir="auto">{armed && confirm ? confirm : label}</TooltipContent>
     </Tooltip>
   );
 };
@@ -350,7 +351,7 @@ const ActionSelect: React.FC<Extract<GuestStatusAction, { kind: 'select' }>> = (
           <span className="inline-flex">
             <DropdownMenuTrigger asChild>
               <Button variant="ghost" size="xs" aria-label={`${label}: ${selected?.label ?? current}`} disabled={disabled || busy.has(id)} className="max-w-[8rem] gap-1">
-                <span className="min-w-0 truncate">{selected?.label ?? current}</span>
+                <span dir="auto" className="min-w-0 truncate">{selected?.label ?? current}</span>
                 <Icon name="arrow-down-s" className="size-3 shrink-0" />
               </Button>
             </DropdownMenuTrigger>
@@ -362,7 +363,7 @@ const ActionSelect: React.FC<Extract<GuestStatusAction, { kind: 'select' }>> = (
         <DropdownMenuRadioGroup value={current} onValueChange={(next) => { if (next !== current) act({ id, value: next }); }}>
           {options.map((option) => (
             <DropdownMenuRadioItem key={option.value} value={option.value}>
-              <span className="truncate">{option.label}</span>
+              <span dir="auto" className="truncate">{option.label}</span>
             </DropdownMenuRadioItem>
           ))}
         </DropdownMenuRadioGroup>
@@ -401,7 +402,7 @@ const RowTooltip: React.FC<{ text: string; children: React.ReactElement }> = ({ 
   // Above the row, as on every dense row, so it never covers the rows under it.
   <Tooltip delayDuration={300}>
     <TooltipTrigger asChild>{children}</TooltipTrigger>
-    <TooltipContent side="top" sideOffset={4} className="max-w-[min(320px,calc(100vw-24px))] whitespace-normal break-words text-start">
+    <TooltipContent side="top" sideOffset={4} dir="auto" className="max-w-[min(320px,calc(100vw-24px))] whitespace-normal break-words text-start">
       {text}
     </TooltipContent>
   </Tooltip>

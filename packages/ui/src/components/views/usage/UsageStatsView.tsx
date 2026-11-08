@@ -498,7 +498,7 @@ function ToolsSection({ state, formats }: { state: ToolsState; formats: Formats 
         {error && !loading ? (
           <div className="flex flex-col items-start gap-2" role="alert">
             <p className="typography-micro text-foreground">{t('usageStats.tools.loadFailed')}</p>
-            <p className="max-w-md break-words typography-micro text-muted-foreground">{error}</p>
+            <p dir="auto" className="max-w-md break-words typography-micro text-muted-foreground">{error}</p>
             <Button type="button" variant="outline" size="sm" onClick={state.load}>
               {t('usageStats.error.retry')}
             </Button>

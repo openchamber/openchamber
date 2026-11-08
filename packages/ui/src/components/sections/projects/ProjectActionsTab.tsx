@@ -88,8 +88,8 @@ const ActionsGrid: React.FC<{ setup: ProjectSetup; setupState: ProjectSetupState
               >
                 <Icon name={projectActionIconName(entry.action.icon)} className={cn('size-4 shrink-0 text-muted-foreground', entry.hidden && 'opacity-60')} />
                 <span className={cn('min-w-0 flex-1', entry.hidden && 'opacity-60')}>
-                  <span className="block truncate typography-ui-label text-foreground">{entry.action.name}</span>
-                  <span className="block truncate font-mono typography-micro text-muted-foreground" title={entry.action.command}>{entry.action.command}</span>
+                  <span dir="auto" className="oc-ui-start-align block truncate typography-ui-label text-foreground">{entry.action.name}</span>
+                  <span dir="ltr" className="oc-ui-start-align block truncate font-mono typography-micro text-muted-foreground" title={entry.action.command}>{entry.action.command}</span>
                 </span>
                 {platforms.length > 0 ? (
                   <span className="hidden shrink-0 typography-micro text-muted-foreground @xl:inline">
