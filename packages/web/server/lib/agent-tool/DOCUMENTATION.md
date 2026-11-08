@@ -77,9 +77,21 @@ the user can want independently:
   the control service refuses the action when it is not. Never behind Code
   Mode, like render: the chat draws the images in place of the call's row from
   its stored result, which an `execute` script would hide.
-- `openchamber_secret` — `secret.request`, a card in the chat where the user
-  types a secret the agent asked for (`label`, `reason`, optional
-  `placeholder`). Every call waits, with the same plugin machinery as a page
+- `openchamber_secret` — `secret.run`, `secret.request` and `secret.forget`.
+  `secret.run` asks OpenCode's shell permission for its command line in the
+  plugin, before the call reaches the server: `ctx.permission.assert` with
+  action `shell`, the line `secretRunCommandLine` draws as the resource and
+  `<program> *` as the pattern to save, so the session's shell rules apply as
+  to any command and a deny never shows a card. The plugin embeds the server's
+  `secretRunCommand` and `secretRunCommandLine` with `toString()`, so the line
+  the user approves is the one the card shows; a malformed call fails before
+  anything is asked. The refusal `assert` throws is rethrown, since a plain
+  rejection ends the agent's step. Only a call from this tool reaches the
+  server as `secretRunAuthorized`, and secret actions use the session OpenCode
+  reported, so no payload field can reach another session's remembered values.
+  `secret.request` is a
+  card where the user types one secret the agent asked for (`label`, `reason`,
+  optional `placeholder`). Both wait, with the same plugin machinery as a page
   with `awaitAnswer` (call id, `timeout: false`, the `session.prompt` hook
   that ends the wait when the user writes in the chat, and the inbox check
   for a message sent before the card appeared). The value never

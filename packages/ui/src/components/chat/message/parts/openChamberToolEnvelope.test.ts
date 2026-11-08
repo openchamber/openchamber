@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import type { JsonValue } from '@/lib/opencode/model';
-import { hasOpenChamberView, parseOpenChamberEnvelope, tightestWindow } from './openChamberToolEnvelope';
+import { hasOpenChamberView, parseOpenChamberEnvelope, secretRowView, tightestWindow } from './openChamberToolEnvelope';
 
 const envelope = (body: { [key: string]: JsonValue }) => JSON.stringify({ schemaVersion: 1, ...body });
 
@@ -54,5 +54,35 @@ describe('tightestWindow', () => {
     expect(tightestWindow(provider)?.key).toBe('weekly');
     expect(tightestWindow({ providerId: 'x', ok: true, usage: { windows: { credits: window(null) } } })).toBeNull();
     expect(tightestWindow({ providerId: 'x', ok: false, usage: null })).toBeNull();
+  });
+});
+
+describe('secretRowView', () => {
+  type RunData = { answer: { status: string; outcome?: string; exitCode?: number | null } | { answered: false; reason: string }; stdout?: string; stderr?: string; error?: string };
+  const run = (data: RunData) => secretRowView({ ok: true, action: 'secret.run', data });
+  test('says how the run ended and joins what it printed', () => {
+    expect(run({ answer: { status: 'ran', outcome: 'exited', exitCode: 0 }, stdout: 'token is [secret:T]\n', stderr: 'warn\n' }))
+      .toEqual({ key: 'chat.toolPart.openchamber.action.secretRun', output: 'token is [secret:T]\nwarn' });
+    expect(run({ answer: { status: 'ran', outcome: 'exited', exitCode: 2 }, stdout: '' }))
+      .toEqual({ key: 'chat.toolPart.openchamber.action.secretRunFailed', code: 2, output: '' });
+    expect(run({ answer: { status: 'ran', outcome: 'timeout', exitCode: null }, error: 'did not finish' })?.key).toBe('chat.toolPart.openchamber.action.secretRunTimedOut');
+    expect(run({ answer: { status: 'ran', outcome: 'not-started', exitCode: null } })?.key).toBe('chat.toolPart.openchamber.action.secretRunNotStarted');
+    expect(run({ answer: { status: 'declined' } })?.key).toBe('chat.toolPart.openchamber.action.secretRunDeclined');
+    expect(run({ answer: { answered: false, reason: 'chat' } })?.key).toBe('chat.toolPart.openchamber.action.secretRunNotRun');
+  });
+
+  test('leaves other answers alone', () => {
+    expect(secretRowView({ ok: true, action: 'memory.save', data: { answer: { status: 'saved' } } })).toBeNull();
+    expect(secretRowView({ ok: false, action: 'secret.run' })).toBeNull();
+    expect(secretRowView(null)).toBeNull();
+  });
+});
+
+describe('secretRowView for secret.request', () => {
+  const request = (answer: { status: string; file?: string } | { answered: false; reason: string }) => secretRowView({ ok: true, action: 'secret.request', data: { answer } });
+  test('says how the request ended and names the saved file', () => {
+    expect(request({ status: 'saved', file: '/data/secrets/abc' })).toEqual({ key: 'chat.toolPart.openchamber.action.secretRequestSaved', file: '/data/secrets/abc' });
+    expect(request({ status: 'declined' })?.key).toBe('chat.toolPart.openchamber.action.secretRequestDeclined');
+    expect(request({ answered: false, reason: 'chat' })?.key).toBe('chat.toolPart.openchamber.action.secretRequestNotGiven');
   });
 });

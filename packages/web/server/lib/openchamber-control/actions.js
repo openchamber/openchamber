@@ -162,11 +162,14 @@ export const OPENCHAMBER_IMAGE_ACTIONS = Object.freeze(
 
 /**
  * Asking for a secret is its own tool: it is the one action that takes a
- * credential from the user, so it can be switched off alone. The value goes
+ * credential from the user, so it can be switched off alone. `secret.run`
+ * hands the values to one command's environment; `secret.request` writes one
  * to a private file and only its path reaches the agent.
  */
 export const OPENCHAMBER_SECRET_ACTION_DEFINITIONS = Object.freeze([
+  { action: 'secret.run', title: 'Run with secrets', description: 'Requires program, reason and inputs; optional args and timeoutMs' },
   { action: 'secret.request', title: 'Ask for a secret', description: 'Requires label and reason' },
+  { action: 'secret.forget', title: 'Forget remembered secrets', description: 'No inputs' },
 ]);
 
 export const OPENCHAMBER_SECRET_ACTIONS = Object.freeze(
