@@ -39,7 +39,7 @@ const createRuntime = (overrides = {}) => {
   },
   };
   for (const key of [
-    'readSessionMetadata', 'persistSessionMetadata', 'isAgentMemoryEnabled', 'isSessionLinkingAvailable',
+    'readSessionMetadata', 'persistSessionMetadata', 'isAgentMemoryEnabled', 'isMemoryToolAvailable', 'isSessionLinkingAvailable',
     'isPageRenderingAvailable', 'isSecretRequestAvailable', 'isWorkflowAvailable', 'readCheckoutBranch', 'readPlaceholderBranch', 'instructionEntries', 'isWorkNamingAvailable',
   ]) {
     if (key in overrides) dependencies[key] = overrides[key];
@@ -109,7 +109,7 @@ describe('writing the knowledge into a session', () => {
   test('an unpinned note takes its entry away', async () => {
     const instructionEntries = createEntriesStub();
     const store = pinnedStore();
-    const runtime = createRuntime({ ...store, instructionEntries, isAgentMemoryEnabled: async () => false });
+    const runtime = createRuntime({ ...store, instructionEntries, isMemoryToolAvailable: async () => false });
     await runtime.sync('ses_a', DIRECTORY);
     expect(instructionEntries.held.has(PINNED)).toBe(true);
 
@@ -198,7 +198,7 @@ describe('when to link', () => {
   test('is told in a session whose agent has the tool, even with nothing else to tell', async () => {
     const runtime = createRuntime({
       isSessionLinkingAvailable: async () => true,
-      isAgentMemoryEnabled: async () => false,
+      isMemoryToolAvailable: async () => false,
       projectContextRuntime: { readContext: async () => ({ notes: [], todos: [], plans: [] }) },
     });
     const entries = await entriesFor(runtime, NO_PINS);
@@ -237,7 +237,7 @@ describe('when to link', () => {
 
 describe('when to draw a page', () => {
   const bare = {
-    isAgentMemoryEnabled: async () => false,
+    isMemoryToolAvailable: async () => false,
     projectContextRuntime: { readContext: async () => ({ notes: [], todos: [], plans: [] }) },
   };
 
@@ -259,7 +259,7 @@ describe('when to draw a page', () => {
 
 describe('when to ask for a secret', () => {
   const bare = {
-    isAgentMemoryEnabled: async () => false,
+    isMemoryToolAvailable: async () => false,
     projectContextRuntime: { readContext: async () => ({ notes: [], todos: [], plans: [] }) },
   };
 
@@ -274,7 +274,7 @@ describe('when to ask for a secret', () => {
 
 describe('when to offer a workflow', () => {
   const bare = {
-    isAgentMemoryEnabled: async () => false,
+    isMemoryToolAvailable: async () => false,
     projectContextRuntime: { readContext: async () => ({ notes: [], todos: [], plans: [] }) },
   };
 
@@ -308,7 +308,7 @@ describe('the worktree move', () => {
 describe('which branch the session works on', () => {
   const runtimeOn = (branch, overrides = {}) => createRuntime({
     isSessionLinkingAvailable: async () => true,
-    isAgentMemoryEnabled: async () => false,
+    isMemoryToolAvailable: async () => false,
     readCheckoutBranch: async () => {
       if (branch instanceof Error) throw branch;
       return branch;
@@ -437,7 +437,7 @@ describe('what the session carries', () => {
   test('nothing pinned with memory off carries nothing', async () => {
     const runtime = createRuntime({
       projectContextRuntime: { readContext: async () => ({ notes: [], todos: [], plans: [] }) },
-      isAgentMemoryEnabled: async () => false,
+      isMemoryToolAvailable: async () => false,
     });
     const entries = await entriesFor(runtime, NO_PINS);
     expect(Object.values(entries).every((text) => text === '')).toBe(true);
@@ -517,15 +517,24 @@ describe('when a source will not load', () => {
 });
 
 describe('the memory switch', () => {
-  test('memory is left out entirely while the feature is off', async () => {
-    const entries = await entriesFor(createRuntime({ isAgentMemoryEnabled: async () => false }));
+  test('memory is left out entirely while the session has no memory tool', async () => {
+    const entries = await entriesFor(createRuntime({ isMemoryToolAvailable: async () => false }));
     expect(entries[MEMORY]).toBe('');
     expect(entries[PINNED]).toContain('Pinned note body.');
   });
 
+  test('the panel still counts memory while the session has no tool to save with', async () => {
+    const runtime = createRuntime({
+      isAgentMemoryEnabled: async () => true,
+      isMemoryToolAvailable: async () => false,
+    });
+    expect((await entriesFor(runtime))[MEMORY]).toBe('');
+    expect((await runtime.collectSummary(DIRECTORY)).memory).toEqual({ global: 1, project: 0 });
+  });
+
   test('an unreadable setting keeps memory out rather than guessing', async () => {
     const runtime = createRuntime({
-      isAgentMemoryEnabled: async () => { throw new Error('settings unreadable'); },
+      isMemoryToolAvailable: async () => { throw new Error('settings unreadable'); },
     });
     expect((await entriesFor(runtime))[MEMORY]).toBe('');
   });

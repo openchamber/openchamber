@@ -751,7 +751,8 @@ const agentMemoryRuntime = createAgentMemoryRuntime({
 /**
  * One switch for everything memory-related. It gates the tool, these routes,
  * and the session index alike, so turning memory off leaves nothing behind
- * that still reads or writes the store.
+ * that still reads or writes the store. The session index also needs the
+ * tool, which only an OpenCode we launched has.
  */
 const isAgentMemoryEnabled = async () => {
   const settings = await readSettingsFromDiskMigrated().catch(() => null);
@@ -1174,6 +1175,10 @@ const sessionKnowledgeRuntime = createSessionKnowledgeRuntime({
   resolveProjectId: (directory) => resolveMemoryProjectId(directory),
   isAgentMemoryEnabled,
   // The plugin carrying the tool exists only in an OpenCode we launched.
+  isMemoryToolAvailable: async () => {
+    if (isExternalOpenCode || ENV_SKIP_OPENCODE_START) return false;
+    return isAgentMemoryEnabled();
+  },
   isSessionLinkingAvailable: async () => {
     if (isExternalOpenCode || ENV_SKIP_OPENCODE_START) return false;
     const settings = await readSettingsFromDiskMigrated().catch(() => null);
