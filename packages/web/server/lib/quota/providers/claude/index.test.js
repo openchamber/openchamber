@@ -165,6 +165,17 @@ describe('Claude quota provider', () => {
     expect(result.error).toContain('Claude Code');
   });
 
+  it('tells a token without usage access apart from an expired session', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(errorResponse(403)));
+
+    const result = await fetchQuota();
+
+    expect(result.ok).toBe(false);
+    expect(result.configured).toBe(true);
+    expect(result.error).not.toContain('expired');
+    expect(result.error).toContain('claude setup-token');
+  });
+
   it('surfaces a network failure instead of an empty successful result', async () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('socket hang up')));
 

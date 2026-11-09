@@ -23,6 +23,9 @@ const OAUTH_BETA_HEADER = 'oauth-2025-04-20';
 const DEFAULT_COOLDOWN_MS = 5 * 60 * 1000;
 const MAX_COOLDOWN_MS = 60 * 60 * 1000;
 const SESSION_EXPIRED_ERROR = 'Claude session expired. Open Claude Code to sign in again.';
+// Anthropic answers 403 for a valid token without the `user:profile` scope,
+// which a `claude setup-token` token never has; signing in again would not help.
+const USAGE_DENIED_ERROR = 'Anthropic does not let this Claude token read usage. A token from `claude setup-token` cannot; a Claude Code sign-in (`/login`) can.';
 
 /**
  * Last good payload, kept only to survive Anthropic's aggressive rate limiting.
@@ -111,8 +114,12 @@ const fetchQuotaUncoalesced = async () => {
       ?? failure('Rate limited. Retrying soon.');
   }
 
-  if (response.status === 401 || response.status === 403) {
+  if (response.status === 401) {
     return failure(SESSION_EXPIRED_ERROR);
+  }
+
+  if (response.status === 403) {
+    return failure(USAGE_DENIED_ERROR);
   }
 
   if (!response.ok) {
