@@ -161,6 +161,22 @@ provider logos, so Settings, every model picker, the agent status chip, and
 the message footer agree. The status chip and footer used to draw the logo
 URL themselves, which skipped a chosen icon.
 
+Any provider can also carry an uploaded logo image (`lib/customProviderLogos.ts`,
+routes in `packages/web/server/lib/opencode/provider-logo-routes.js`).
+`ProviderLogo` draws it first, then a chosen icon, then the bundled or
+models.dev logo; an upload keeps its colours, so it gets no `dark:invert`. While
+it loads the slot stays empty at its size, and a failed load falls through to
+the icon. A custom provider sets the image in its edit form, beside the icon
+picker, and Save applies what the user did there after the provider itself is
+saved: a picked file is uploaded, Remove deletes the stored image, and an
+untouched field keeps whatever is stored (a logo kept from when the provider
+was last configured, or one another client just uploaded). A failed image write
+is its own toast and does not reopen the form, whose next Save would store the
+key again. Every other provider, and a custom one while
+enterprise mode hides its form, sets it in a Logo section on its page, applied
+at once. The chosen icon stays the fallback. VS Code runs no OpenChamber server,
+so it neither offers the upload nor draws an uploaded logo; it shows the icon.
+
 The "Connect provider" page lists `GET /api/integration` minus the
 integrations that already have a connection, MCP OAuth registrations
 (`mcp_*`), web search providers (the ones `websearch` lists, and integrations

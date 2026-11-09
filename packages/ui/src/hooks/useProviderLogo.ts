@@ -1,4 +1,6 @@
 import { useState, useCallback, useEffect } from 'react';
+import { providerLogoUploadSupported } from '@/lib/customProviderLogos';
+import { useUIStore } from '@/stores/useUIStore';
 
 type LogoSource = 'local' | 'remote' | 'none';
 
@@ -80,6 +82,8 @@ const resolveProviderLogoSrc = (providerId: string | null | undefined): string |
 
 const preloadProviderLogo = (providerId: string | null | undefined): void => {
     if (typeof Image === 'undefined') return;
+    // An uploaded logo replaces this one and comes from the OpenChamber server when drawn.
+    if (providerId && providerLogoUploadSupported() && useUIStore.getState().customProviderLogos[providerId]) return;
     const src = resolveProviderLogoSrc(providerId);
     if (!src || PRELOADED_LOGO_SRCS.has(src)) return;
 

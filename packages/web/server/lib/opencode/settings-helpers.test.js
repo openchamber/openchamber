@@ -689,6 +689,26 @@ describe('settings helpers', () => {
       })).toEqual({ customProviderIcons: { 'campus-llm': 'cloud', local: 'ai' } });
     });
 
+    it('keeps uploaded logo metadata it can serve and drops the rest entry by entry', () => {
+      const helpers = createTestHelpersWithRealSanitizers();
+      expect(helpers.sanitizeSettingsUpdate({
+        customProviderLogos: {
+          acme: { mime: 'image/png', updatedAt: 1794114747809 },
+          'campus-llm': { mime: 'image/svg+xml', updatedAt: 2 },
+          gif: { mime: 'image/gif', updatedAt: 3 },
+          fractional: { mime: 'image/webp', updatedAt: 1.5 },
+          '': { mime: 'image/png', updatedAt: 4 },
+          bare: 'image/png',
+        },
+      })).toEqual({
+        customProviderLogos: {
+          acme: { mime: 'image/png', updatedAt: 1794114747809 },
+          'campus-llm': { mime: 'image/svg+xml', updatedAt: 2 },
+        },
+      });
+      expect(helpers.sanitizeSettingsUpdate({ customProviderLogos: ['acme'] })).toEqual({});
+    });
+
     it('round-trips collapsedModelProviders and recentAgents as string arrays', () => {
       const helpers = createTestHelpersWithRealSanitizers();
 
@@ -940,6 +960,7 @@ describe('settings registry gate', () => {
     pwaAppName: 'OpenChamber', pwaOrientation: 'portrait', mobileKeyboardMode: 'native', desktopWindowControlsPosition: 'left', desktopWindowControlsStyle: 'classic',
     inputBarOffset: 10,
     customProviderIcons: { 'campus-llm': 'cloud' },
+    customProviderLogos: { acme: { mime: 'image/png', updatedAt: 1 } },
   };
 
   it('accepts a valid value for every persistable registry key (no server-side drift)', () => {
