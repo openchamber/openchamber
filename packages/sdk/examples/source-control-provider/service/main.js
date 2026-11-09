@@ -154,6 +154,7 @@ var SOURCE_CONTROL_PROVIDER_WIRE_VERSION = 1;
 var SOURCE_CONTROL_PROVIDER_METHODS = [
   "auth.verify",
   "auth.probe",
+  "auth.status",
   "changeRequestStatus",
   "listChangeRequests",
   "changeRequestContext",
@@ -185,9 +186,12 @@ var readSessionUser = (user) => {
   if (Object(user) !== user || user === undefined)
     return;
   const { id, login } = user;
-  if (!Number.isSafeInteger(id) || String(login) !== login || login.length === 0)
+  const isPositiveSafeIntegerId = typeof id === "number" && Number.isSafeInteger(id) && id > 0;
+  const isBoundedStringId = typeof id === "string" && id.length > 0 && id.length <= 256;
+  const validId = isPositiveSafeIntegerId || isBoundedStringId;
+  if (!validId || String(login) !== login || login.length === 0)
     return;
-  return { id: Number(id), login };
+  return { id, login };
 };
 var readSession = (session) => {
   if (session === null)
@@ -586,6 +590,7 @@ var unsupported = async (_call, _input, request) => {
   throw new CallError(`${request.method} is not something this Git host offers`, 501, "UNSUPPORTED");
 };
 var handlers = {
+  "auth.status": unsupported,
   "auth.verify": async (call) => {
     const { data } = await api(call, "GET", "/user");
     const user = { id: data.id, login: data.login };

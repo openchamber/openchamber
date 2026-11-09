@@ -332,6 +332,12 @@ const FIXED_USERNAME = /^[A-Za-z0-9._-]{1,64}$/;
 
 const urlTemplatesSchema = z.array(z.string().trim().min(1)).max(SOURCE_CONTROL_URL_TEMPLATES_MAX);
 
+/** Shared service-login shape for manifests and public provider descriptors. */
+export const sourceControlServiceLoginSchema = z.object({
+  kind: z.literal('service'),
+  hint: z.string().min(1).max(2_000),
+});
+
 const sourceControlSchema = z.object({
   wire: z.literal(1),
   label: literalSchema,
@@ -354,6 +360,9 @@ const sourceControlSchema = z.object({
     { message: 'without custom instances, defaultInstances names at least one' },
   ),
   capabilities: sourceControlCapabilitiesSchema,
+  login: sourceControlServiceLoginSchema.extend({
+    hint: z.string().trim().pipe(sourceControlServiceLoginSchema.shape.hint),
+  }).strict().optional(),
   token: z.object({
     header: z.enum(['authorization', 'private-token']),
     scheme: z.enum(['bearer', 'token', 'basic', 'none']),
@@ -367,7 +376,7 @@ const sourceControlSchema = z.object({
     // Basic sends `login:token`, so Settings must ask for the login; no other scheme uses one.
     (token) => (token.scheme === 'basic') === (token.username === true),
     { message: 'the basic scheme needs username: true, and username is only for the basic scheme' },
-  ),
+  ).optional(),
   transport: z.object({
     httpsUsername: z.union([
       z.object({ kind: z.literal('login') }).strict(),
@@ -398,6 +407,9 @@ const sourceControlSchema = z.object({
     })).max(8),
   }).strict(),
 }).strict().superRefine((value, ctx) => {
+  if (!value.login && !value.token) {
+    ctx.addIssue({ code: 'custom', path: ['login'], message: 'at least login or token is required' });
+  }
   for (const kind of ['changeRequest', 'issue'] as const) {
     value.presentation.urls[kind].forEach((template, index) => {
       if (isUrlTemplate(template, value.repositoryPath)) return;

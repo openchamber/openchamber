@@ -310,6 +310,7 @@ and never reads the store itself.
 
 Invariants:
 
+- Service-login metadata reuses the SDK's `sourceControlServiceLoginSchema` from `@openchamber/sdk/schemas`. The UI preserves the server's hint and ignores unknown keys; manifest normalization and strictness stay in the SDK manifest parser.
 - `useSourceControlProvider` always returns a descriptor. An id the registry
   does not hold reads as `unknownProviderDescriptor(id)`: its id as the label,
   pull-request wording with `#`, the branch icon, no auth methods, no URL

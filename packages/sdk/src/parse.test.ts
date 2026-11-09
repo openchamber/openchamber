@@ -1266,6 +1266,21 @@ describe('contributes.sourceControl', () => {
   }));
   const withSourceControl = <T,>(patch: T) => manifest({ sourceControl: { ...sourceControl, ...patch } });
 
+  test('accepts service login alone or beside a token, and requires at least one', () => {
+    const login = { kind: 'service', hint: 'Run teahouse auth login on the OpenChamber server' };
+    const result = withSourceControl({ token: undefined, login });
+    expect(result).toMatchObject({ ok: true, manifest: { contributes: { sourceControl: { login } } } });
+    if (result.ok) expect(result.manifest.contributes.sourceControl).not.toHaveProperty('token');
+    expect(withSourceControl({ login }).ok).toBe(true);
+    expect(withSourceControl({ login: { ...login, hint: `  ${login.hint}  ` } }))
+      .toMatchObject({ ok: true, manifest: { contributes: { sourceControl: { login } } } });
+    expect(withSourceControl({ login: { ...login, hint: '   ' } })).toMatchObject({ ok: false, code: 'invalid-service' });
+    expect(withSourceControl({ login: { ...login, future: true } })).toMatchObject({ ok: false, code: 'invalid-service' });
+    expect(withSourceControl({ token: undefined })).toMatchObject({ ok: false, code: 'invalid-service' });
+    expect(withSourceControl({ login: { kind: 'service', hint: '' } })).toMatchObject({ ok: false, code: 'invalid-service' });
+    expect(withSourceControl({ login: { kind: 'cli', hint: 'Sign in' } })).toMatchObject({ ok: false, code: 'invalid-service' });
+  });
+
   test('a source-control service needs no panel entry, and capabilities left out are off', () => {
     const result = manifest({});
     expect(result.ok).toBe(true);
