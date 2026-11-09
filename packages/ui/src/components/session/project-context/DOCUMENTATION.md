@@ -20,7 +20,7 @@ drawer.
 | `KnowledgeSplit.tsx` | the wide layout: list column and open entry side by side |
 | `KnowledgeEntryView.tsx` | the shell an opened note or memory renders in, in place of the list |
 | `KnowledgeComposer.tsx` | the add field every section except memory uses |
-| `KnowledgeActions.tsx` | the row actions: pin toggle, the ⋯ menu, hover reveal |
+| `KnowledgeActions.tsx` | the row actions: pin toggle, the ⋯ menu, the row's right-click menu, hover reveal |
 | `pendingKnowledgeDeletes.ts` | deletes that wait out an undo window |
 | `knowledgeFormat.ts` | note title from the first line, entry dates |
 | `useProjectTodoSend.ts` | sending a todo to a current/new/worktree session |
@@ -104,9 +104,12 @@ from a file is a button inside the same field.
 ## Row actions
 
 Every row has the same actions in the same place: at most one direct control
-(pin for notes and plans, send for todos), then a ⋯ menu with the rest (share,
-delete). On desktop they appear on hover or keyboard focus; touch layouts show
-them always. A pinned entry keeps its filled pin visible.
+(pin for notes and plans, send for todos), then a menu with the rest (share,
+delete). With a mouse the menu is the row's right click (Shift+F10 from the
+keyboard, `KnowledgeRowContextMenu`), and the direct control appears on hover
+or keyboard focus; touch screens show it always, with a ⋯ button for the menu.
+An opened entry keeps its ⋯ in the toolbar. A pinned entry keeps its filled
+pin visible.
 
 The pin attaches a note or plan to the current session's context, and a pinned
 note says so in its footer. The icon alone read as "pin to the top of the

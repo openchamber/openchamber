@@ -27,6 +27,7 @@ import { heapSnapshotI18n } from './heap-snapshot.i18n';
 import { consoleBudgetsI18n } from './console-budgets.i18n';
 import { imageToolI18n } from './image-tool.i18n';
 import { usageToolI18n } from './usage-tool.i18n';
+import { openchamberToolsLayoutI18n } from './openchamber-tools-layout.i18n';
 import { openchamberToolOutputI18n } from './openchamber-tool-output.i18n';
 import { opencodeToolOutputI18n } from './opencode-tool-output.i18n';
 import { agentStatusI18n } from './agent-status.i18n';
@@ -207,6 +208,7 @@ export const dict = {
   ...consoleBudgetsI18n.de,
   ...imageToolI18n.de,
   ...usageToolI18n.de,
+  ...openchamberToolsLayoutI18n.de,
   ...openchamberToolOutputI18n.de,
   ...opencodeToolOutputI18n.de,
   ...agentStatusI18n.de,
@@ -3715,6 +3717,9 @@ export const dict = {
   'chat.workStatus.breakdown.skillCountPlural': '{count} Skills',
   'chat.workStatus.breakdown.mcpCountSingle': '{count} MCP',
   'chat.workStatus.breakdown.mcpCountPlural': '{count} MCP',
+  'chat.workStatus.breakdown.planCountSingle': '{count} Plan',
+  'chat.workStatus.breakdown.planCountPlural': '{count} Pläne',
+  'chat.workStatus.linkedPlans.open': 'Plan {title} öffnen',
   'chat.workStatus.sections.open': 'Abschnitte wählen',
   'chat.workStatus.sections.dialogTitle': 'Panel-Abschnitte',
   'chat.workStatus.sections.reorder': '{label} ziehen, um neu anzuordnen',

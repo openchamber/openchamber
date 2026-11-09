@@ -91,6 +91,13 @@
   }
 }
 
+/* A detailed sidebar row whose second line opens with text, not an icon:
+   the hover chevron sits over the line's start, and the text's first letters
+   fade away under it. */
+@utility oc-lead-mask {
+  mask-image: linear-gradient(var(--oc-to-inline-end), transparent 0.875rem, #000 1.5rem);
+}
+
 /* File tree rows keep the whole name on one line, and a tree wider than its
    pane scrolls sideways. Every row ends in a lane (its git marks) that sticks
    to the pane's end while long rows scroll under it; a row's hover menu is a

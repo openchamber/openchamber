@@ -124,9 +124,10 @@ export const sessionsListedSchema = z.object({
     id: z.string().min(1),
     title: text,
     parentID: text,
-    time: z.object({ updated: z.number().optional().catch(undefined) }).optional().catch(undefined),
+    directory: text,
+    // Calls stored before the server trimmed each session to its listed fields.
     location: z.object({ directory: text }).optional().catch(undefined),
-  })),
+  }).transform(({ location, ...session }) => ({ ...session, directory: session.directory ?? location?.directory }))),
 });
 
 const modelRefSchema = z.object({ providerID: z.string(), modelID: z.string() });
@@ -331,6 +332,8 @@ const VIEW_SCHEMAS: ReadonlyMap<string, z.ZodType> = new Map<string, z.ZodType>(
   ['session.send', dispatchedSchema],
   ['session.fork', dispatchedSchema],
   ['session.moveToWorktree', movedSchema],
+  ['session.markDone', dispatchedSchema],
+  ['session.track', dispatchedSchema],
   ['memory.save', memorySavedSchema],
   ['knowledge.save', knowledgeSavedSchema],
   ['schedule.create', scheduledSchema],
@@ -469,6 +472,8 @@ export const OPENCHAMBER_ACTION_VERB_KEYS = {
   'session.messages': 'chat.toolPart.openchamber.action.sessionMessages',
   'session.moveToWorktree': 'chat.toolPart.openchamber.action.sessionMoveToWorktree',
   'session.link': 'chat.toolPart.openchamber.action.sessionLink',
+  'session.markDone': 'chat.toolPart.openchamber.action.sessionMarkDone',
+  'session.track': 'chat.toolPart.openchamber.action.sessionTrack',
   'pr.watch': 'chat.toolPart.openchamber.action.prWatch',
   'pr.unwatch': 'chat.toolPart.openchamber.action.prUnwatch',
   'work.name': 'chat.toolPart.openchamber.action.workName',

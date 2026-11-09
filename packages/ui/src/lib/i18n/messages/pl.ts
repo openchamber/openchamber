@@ -28,6 +28,7 @@ import { heapSnapshotI18n } from './heap-snapshot.i18n';
 import { consoleBudgetsI18n } from './console-budgets.i18n';
 import { imageToolI18n } from './image-tool.i18n';
 import { usageToolI18n } from './usage-tool.i18n';
+import { openchamberToolsLayoutI18n } from './openchamber-tools-layout.i18n';
 import { openchamberToolOutputI18n } from './openchamber-tool-output.i18n';
 import { opencodeToolOutputI18n } from './opencode-tool-output.i18n';
 import { agentStatusI18n } from './agent-status.i18n';
@@ -208,6 +209,7 @@ export const dict: Record<I18nKey, string> = {
   ...consoleBudgetsI18n.pl,
   ...imageToolI18n.pl,
   ...usageToolI18n.pl,
+  ...openchamberToolsLayoutI18n.pl,
   ...openchamberToolOutputI18n.pl,
   ...opencodeToolOutputI18n.pl,
   ...agentStatusI18n.pl,
@@ -3722,6 +3724,9 @@ export const dict: Record<I18nKey, string> = {
   'chat.workStatus.breakdown.skillCountPlural': '{count} umiejętności',
   'chat.workStatus.breakdown.mcpCountSingle': '{count} MCP',
   'chat.workStatus.breakdown.mcpCountPlural': '{count} MCP',
+  'chat.workStatus.breakdown.planCountSingle': '{count} plan',
+  'chat.workStatus.breakdown.planCountPlural': '{count} plany',
+  'chat.workStatus.linkedPlans.open': 'Otwórz plan {title}',
   'chat.workStatus.sections.open': 'Wybierz sekcje',
   'chat.workStatus.sections.dialogTitle': 'Sekcje panelu',
   'chat.workStatus.sections.reorder': 'Przeciągnij {label}, aby zmienić kolejność',

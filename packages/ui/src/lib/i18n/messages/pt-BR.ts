@@ -28,6 +28,7 @@ import { heapSnapshotI18n } from './heap-snapshot.i18n';
 import { consoleBudgetsI18n } from './console-budgets.i18n';
 import { imageToolI18n } from './image-tool.i18n';
 import { usageToolI18n } from './usage-tool.i18n';
+import { openchamberToolsLayoutI18n } from './openchamber-tools-layout.i18n';
 import { openchamberToolOutputI18n } from './openchamber-tool-output.i18n';
 import { opencodeToolOutputI18n } from './opencode-tool-output.i18n';
 import { agentStatusI18n } from './agent-status.i18n';
@@ -218,6 +219,7 @@ export const dict: Record<I18nKey, string> = {
   ...consoleBudgetsI18n['pt-BR'],
   ...imageToolI18n['pt-BR'],
   ...usageToolI18n['pt-BR'],
+  ...openchamberToolsLayoutI18n['pt-BR'],
   ...openchamberToolOutputI18n['pt-BR'],
   ...opencodeToolOutputI18n['pt-BR'],
   ...agentStatusI18n['pt-BR'],
@@ -3708,6 +3710,9 @@ export const dict: Record<I18nKey, string> = {
   'chat.workStatus.breakdown.skillCountPlural': '{count} habilidades',
   'chat.workStatus.breakdown.mcpCountSingle': '{count} MCP',
   'chat.workStatus.breakdown.mcpCountPlural': '{count} MCP',
+  'chat.workStatus.breakdown.planCountSingle': '{count} plano',
+  'chat.workStatus.breakdown.planCountPlural': '{count} planos',
+  'chat.workStatus.linkedPlans.open': 'Abrir o plano {title}',
   'chat.workStatus.sections.open': 'Escolher seções',
   'chat.workStatus.sections.dialogTitle': 'Seções do painel',
   'chat.workStatus.sections.reorder': 'Arraste {label} para reordenar',

@@ -567,7 +567,14 @@ export const MobileConnectionsView: React.FC<Props> = (props) => {
   return (
     <>
       {forms}
-      <main className="oc-keyboard-fill-screen flex min-h-dvh flex-col overflow-y-auto bg-background px-4 pb-[calc(var(--safe-area-inset-bottom,env(safe-area-inset-bottom,0px))+16px)] pt-[calc(var(--safe-area-inset-top,env(safe-area-inset-top,0px))+16px)] text-foreground">
+      <main className="oc-keyboard-fill-screen flex min-h-dvh flex-col overflow-y-auto bg-background pb-[calc(var(--safe-area-inset-bottom,env(safe-area-inset-bottom,0px))+16px)] pt-[calc(var(--safe-area-inset-top,env(safe-area-inset-top,0px))+16px)] text-foreground"
+        // Clear the screen's side insets too: the notch in landscape, the status
+        // bar column on the right of iPhone Duo.
+        style={{
+          paddingLeft: 'calc(var(--oc-safe-area-left, 0px) + 1rem)',
+          paddingRight: 'calc(var(--oc-safe-area-right, 0px) + 1rem)',
+        }}
+      >
         <div className="mx-auto flex w-full max-w-[380px] flex-1 flex-col">
           {leadConnection || pendingConnection ? (
             <header className="flex items-center gap-2 px-1 pb-4 pt-2">
