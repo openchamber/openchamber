@@ -58,7 +58,7 @@ const MESSAGE_STREAM_TRANSPORT_OPTIONS: Array<{ id: 'auto' | 'ws' | 'sse'; label
 ];
 
 /** Files and the editor: keymap, tree side, saving, hidden files, preview. */
-const FilesAndEditorSection: React.FC<{ divider: boolean }> = ({ divider }) => {
+const FilesAndEditorSection: React.FC = () => {
   const { t } = useI18n();
   const { isMobile } = useDeviceInfo();
   const isVSCode = isVSCodeRuntime();
@@ -89,7 +89,7 @@ const FilesAndEditorSection: React.FC<{ divider: boolean }> = ({ divider }) => {
   const showTreeControls = !isVSCode && !isMobile;
 
   return (
-    <SettingsSection title={t('settings.layout.general.files.title')} divider={divider} contentClassName="space-y-4">
+    <SettingsSection title={t('settings.layout.general.files.title')} contentClassName="space-y-4">
       <div>
         <SettingsFieldRow
           label={t('settings.openchamber.visual.field.fileEditorKeymap')}
@@ -404,25 +404,25 @@ const PanelsAndLinksSection: React.FC = () => {
   );
 };
 
-/**
- * The workspace part of General: files and the editor, the terminal, and how
- * panels and links behave. VS Code keeps only the editor settings it applies.
- */
-export const GeneralWorkspaceSettings: React.FC<{
-  /** The page opens on these sections (no desktop app section above them). */
-  firstSection: boolean;
-}> = ({ firstSection }) => {
-  const isVSCode = isVSCodeRuntime();
+/** How the window behaves, and the phone's workspace tabs. Not in VS Code. */
+export const GeneralInterfaceSettings: React.FC = () => {
   const { isMobile } = useDeviceInfo();
+  if (isVSCodeRuntime()) return null;
   return (
     <>
-      <FilesAndEditorSection divider={!firstSection} />
-      {isVSCode ? null : <TerminalSection />}
-      {isVSCode ? null : <PanelsAndLinksSection />}
+      <PanelsAndLinksSection />
       {isMobile ? <MobileWorkspaceTabsSettings /> : null}
     </>
   );
 };
+
+/** Files and the editor, then the terminal. VS Code keeps only the editor settings it applies. */
+export const GeneralFilesAndTerminalSettings: React.FC = () => (
+  <>
+    <FilesAndEditorSection />
+    {isVSCodeRuntime() ? null : <TerminalSection />}
+  </>
+);
 
 /** The last sections of General: how messages stream in, and usage reports. */
 export const GeneralConnectionAndPrivacySettings: React.FC = () => {

@@ -15,9 +15,9 @@ import { EnvironmentVariablesSettings } from './EnvironmentVariablesSettings';
 import { IsolatedSpacesSettings } from './IsolatedSpacesSettings';
 import { OpenChamberToolsSettings } from './OpenChamberToolsSettings';
 import { DesktopNetworkSettings } from './DesktopNetworkSettings';
-import { DesktopAppSettings } from './DesktopAppSettings';
+import { DesktopAppSettings, DesktopQuickAccessSettings } from './DesktopAppSettings';
 import { ChatSettings } from './ChatSettings';
-import { GeneralConnectionAndPrivacySettings, GeneralWorkspaceSettings } from './GeneralWorkspaceSettings';
+import { GeneralConnectionAndPrivacySettings, GeneralFilesAndTerminalSettings, GeneralInterfaceSettings } from './GeneralWorkspaceSettings';
 import { KeyboardShortcutsSettings } from './KeyboardShortcutsSettings';
 import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLayout';
 import { isDesktopLocalOriginActive, isDesktopShell, isVSCodeRuntime, isWebRuntime } from '@/lib/desktop';
@@ -103,9 +103,11 @@ const ShortcutsSectionContent: React.FC = () => {
     return <KeyboardShortcutsSettings />;
 };
 
-// General: the desktop app and quick access, files/terminal/panels, network
-// access and sign-in, links, the OpenCode CLI and environment, agent tools,
-// then message transport and privacy.
+// General, by what people come here for: the desktop app itself, the agent's
+// tools, how other devices reach this app, the window, global shortcuts, the
+// OpenCode CLI and its environment, files and the terminal, then trusted
+// links, message transport and privacy. The layout drops the divider above
+// whichever section renders first.
 const GeneralSectionContent: React.FC = () => {
     const isVSCode = isVSCodeRuntime();
     const runtimeEndpointEpoch = useRuntimeEndpointEpoch();
@@ -116,14 +118,16 @@ const GeneralSectionContent: React.FC = () => {
     return (
         <>
             {isLocalDesktop && <DesktopAppSettings />}
-            <GeneralWorkspaceSettings firstSection={!isLocalDesktop} />
+            {!isVSCode && <OpenChamberToolsSettings />}
             {isLocalDesktop && <DesktopNetworkSettings />}
             {showPasskeySettings && <PasskeySettings />}
-            <AppLinkSecuritySettings />
+            <GeneralInterfaceSettings />
+            {isLocalDesktop && <DesktopQuickAccessSettings />}
             {!isVSCode && <OpenCodeCliSettings />}
             {/* Remounts on a runtime switch: the names come from that server. */}
             {!isVSCode && <EnvironmentVariablesSettings key={runtimeEndpointEpoch} />}
-            {!isVSCode && <OpenChamberToolsSettings />}
+            <GeneralFilesAndTerminalSettings />
+            <AppLinkSecuritySettings />
             <GeneralConnectionAndPrivacySettings />
         </>
     );
