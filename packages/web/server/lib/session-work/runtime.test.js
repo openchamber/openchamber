@@ -40,6 +40,7 @@ const makeRuntime = ({
   lineage = null,
   isSessionArchived = async () => false,
   doneHintDelayMs = 5,
+  activityProbe = null,
 } = {}) => {
   const records = new Map([['ses_1', metadata]]);
   const readMetadata = vi.fn(async (id) => records.get(id) ?? {});
@@ -67,6 +68,7 @@ const makeRuntime = ({
     now: () => time++,
     openRetryDelaysMs: [5, 5],
     doneHintDelayMs,
+    activityProbe,
   });
   return { runtime, jev, readMetadata, updateMetadata, records };
 };
@@ -476,6 +478,64 @@ describe('session work runtime: a turn ended', () => {
     });
     await runtime.evaluateTurnEnd({ sessionId: 'ses_1', directory: '/repo', assist: { recap: false, suggestion: false } });
     expect(records.get('ses_1').openchamber.work.state).toBe('open');
+  });
+
+  it('neither hints done nor suggests a next step while the agent waits on its own background work', async () => {
+    stubOpenCode();
+    const open = { openchamber: { work: { state: 'open', openedAt: 1 } } };
+    const probe = (jobs, children = false) => ({
+      fetchRunningBackgroundJobs: vi.fn(async () => jobs),
+      fetchActiveSessionStatuses: vi.fn(async () => ({})),
+      hasWorkingChildren: vi.fn(async () => children),
+    });
+    const continues = { ...looksDone, agent_continues: { noul: 0.9 } };
+    const assist = { recap: false, suggestion: true };
+    // The turn's user message was sent at 3; `now` starts at 100.
+    const waiting = [
+      [{ kind: 'subagent', sessionID: 'ses_child', startedAt: 1 }],
+      [{ kind: 'shell', sessionID: 'ses_1', command: 'bun test', startedAt: 50 }],
+      [],
+    ];
+    for (const [index, jobs] of waiting.entries()) {
+      const done = makeRuntime({ metadata: open, answers: looksDone, activityProbe: probe(jobs, index === 2) });
+      expect(await done.runtime.evaluateTurnEnd({ sessionId: 'ses_1', directory: '/repo', assist })).toMatchObject({ suggestion: false });
+      const next = makeRuntime({ answers: continues, activityProbe: probe(jobs, index === 2) });
+      expect(await next.runtime.evaluateTurnEnd({ sessionId: 'ses_1', directory: '/repo', assist })).toMatchObject({ suggestion: false });
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(done.records.get('ses_1').openchamber.work).not.toHaveProperty('suggestDoneAt');
+    }
+
+    // Known background work still rules out a next step when Jev fails.
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const failed = makeRuntime({ askError: new Error('Jev timed out'), activityProbe: probe(waiting[0]) });
+    expect(await failed.runtime.evaluateTurnEnd({ sessionId: 'ses_1', directory: '/repo', assist })).toEqual({ recap: true, suggestion: false });
+
+    // A dev server started before this turn is not work the agent waits on.
+    const server = [{ kind: 'shell', sessionID: 'ses_1', command: 'bun run dev', startedAt: 1 }];
+    const free = makeRuntime({ answers: continues, activityProbe: probe(server) });
+    expect(await free.runtime.evaluateTurnEnd({ sessionId: 'ses_1', directory: '/repo', assist })).toMatchObject({ suggestion: true });
+    const finished = makeRuntime({ metadata: open, answers: looksDone, activityProbe: probe(server) });
+    await finished.runtime.evaluateTurnEnd({ sessionId: 'ses_1', directory: '/repo', assist });
+    await settle(() => finished.records.get('ses_1').openchamber.work.suggestDoneAt !== undefined);
+    expect(finished.records.get('ses_1').openchamber.work.suggestDoneAt).toBeTypeOf('number');
+  });
+
+  it('asks about a review only when the turn changed files on disk, or when OpenCode took no snapshot', async () => {
+    const withSnapshot = (files) => [
+      answeredTurn[0],
+      { ...answeredTurn[1], snapshot: { start: 'a', end: 'b', files } },
+      { id: 'msg_step', type: 'assistant', content: [], finish: 'tool-calls', snapshot: { start: 'a', end: 'a', files: [] } },
+      ...answeredTurn.slice(2),
+    ];
+    const questionsFor = async (records) => {
+      stubOpenCode({ records });
+      const { runtime, jev } = makeRuntime({ settings: { enabled: false }, answers: { review_ready: { noul: 0.9 } } });
+      await runtime.evaluateTurnEnd({ sessionId: 'ses_1', directory: '/repo', assist: { recap: true, suggestion: false } });
+      return Object.keys(jev.ask.mock.calls[0][0].questions);
+    };
+    expect(await questionsFor(withSnapshot([]))).toEqual(['recap']);
+    expect(await questionsFor(withSnapshot(['src/app.ts']))).toEqual(['review_ready', 'recap']);
+    expect(await questionsFor(answeredTurn)).toEqual(['review_ready', 'recap']);
   });
 
   it('answers unknown on a Jev failure and changes nothing', async () => {

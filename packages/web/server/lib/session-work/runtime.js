@@ -57,6 +57,11 @@ const OPEN_RETRY_DELAYS_MS = [2_000, 10_000, 60_000];
  * minutes; a message in the meantime cancels the hint (see DOCUMENTATION.md).
  */
 const DONE_HINT_DELAY_MS = 10 * 60_000;
+/**
+ * A shell command the agent started in the turn counts as work it waits on for
+ * this long, the goal loop's wait; past it, it is a server left running.
+ */
+const BACKGROUND_SHELL_WAIT_MS = 30 * 60_000;
 
 const errorMessage = (error) => (error instanceof Error ? error.message : String(error));
 
@@ -107,6 +112,8 @@ export function createSessionWorkRuntime({
   chatRoots = [],
   /** `../session-lineage.js`: known subsessions are skipped without reading them. */
   lineage = null,
+  /** `../opencode/session-activity.js`: background work still running for a session; null asks nothing. */
+  activityProbe = null,
   now = Date.now,
   openRetryDelaysMs = OPEN_RETRY_DELAYS_MS,
   doneHintDelayMs = DONE_HINT_DELAY_MS,
@@ -344,6 +351,25 @@ export function createSessionWorkRuntime({
   };
 
   /**
+   * Whether the agent ended its turn waiting on its own background work: a
+   * subagent, an image, a working child session, or a shell command it started
+   * in this turn that has run under 30 minutes. It goes on by itself once that
+   * finishes. Null when OpenCode could not tell.
+   */
+  const waitsOnBackground = async (sessionId, turnStartedAt) => {
+    if (!activityProbe) return null;
+    const jobs = await activityProbe.fetchRunningBackgroundJobs(sessionId);
+    const waitedOn = (job) => job.kind !== 'shell'
+      || (job.startedAt >= turnStartedAt && now() - job.startedAt < BACKGROUND_SHELL_WAIT_MS);
+    if (jobs?.some(waitedOn)) return true;
+    const statuses = await activityProbe.fetchActiveSessionStatuses();
+    const children = statuses ? await activityProbe.hasWorkingChildren(sessionId, statuses) : null;
+    if (children === true) return true;
+    // Jobs this OpenCode cannot list (an older one, or no answer) leave it unknown.
+    return Array.isArray(jobs) && children === false ? false : null;
+  };
+
+  /**
    * One Jev call when a turn ended. `assist` says which assist fields the user
    * has on. Resolves which of them are worth the Small Model, or null when Jev
    * was not asked about them (no Jev, a failure, an ineligible session): the
@@ -356,6 +382,7 @@ export function createSessionWorkRuntime({
     // Never capture 0: an evicted session also reads 0.
     if (!turnGenerations.has(sessionId)) advanceTurn(sessionId);
     const generation = turnGeneration(sessionId);
+    let background = null;
     try {
       const endpoint = await classifierEndpoint();
       if (!endpoint) return null;
@@ -364,15 +391,20 @@ export function createSessionWorkRuntime({
       const session = await eligibleSession(client, sessionId, signal);
       if (!session || session.revert?.messageID) return null;
       const work = settings.enabled ? readWork(await readMetadata(sessionId, directory)) : null;
-      const ask = {
-        wrapUp: settings.enabled && work?.state === 'open',
-        reviewReady: settings.reviewOffer,
-        recap: assist.recap,
-        nextStep: assist.suggestion,
-      };
       const context = await loadAssistContext({ readPage: readPages(client, sessionId, signal), signal });
       if (!context) return null;
       const turn = context.turns.at(-1);
+      // A turn that changed no file on disk has nothing to review. Files that
+      // did change may be another session's in the same folder, so Jev still
+      // reads whether the agent says it changed the project.
+      const changedFiles = turn.changedFiles ? turn.changedFiles.size > 0 : null;
+      const ask = {
+        wrapUp: settings.enabled && work?.state === 'open',
+        reviewReady: settings.reviewOffer && changedFiles !== false,
+        recap: assist.recap,
+        nextStep: assist.suggestion,
+      };
+      background = ask.wrapUp || ask.nextStep ? await waitsOnBackground(sessionId, turn.user.created ?? 0) : null;
       const request = buildTurnEndRequest({
         history: turnsToHistory(context.turns.slice(0, -1)),
         request: excerptHead(turn.user.text, REQUEST_CHARS),
@@ -387,11 +419,16 @@ export function createSessionWorkRuntime({
       if (ask.reviewReady && decideReviewReady(answers)) {
         await writeHint({ sessionId, directory, generation, patch: offerReviewPatch });
       }
-      if (ask.wrapUp && decideWrapUp(answers)) scheduleDoneHint({ sessionId, directory, generation });
-      return ask.recap || ask.nextStep ? decideAssist(answers) : null;
+      // An agent waiting on its own background work goes on by itself: the
+      // work is not done, and there is no next step to suggest.
+      if (ask.wrapUp && background !== true && decideWrapUp(answers)) scheduleDoneHint({ sessionId, directory, generation });
+      if (!ask.recap && !ask.nextStep) return null;
+      const gate = decideAssist(answers);
+      return background === true ? { ...gate, suggestion: false } : gate;
     } catch (error) {
       console.warn('[session-work] turn-end check failed:', errorMessage(error));
-      return null;
+      // Known background work still rules out a next step when Jev failed.
+      return background === true && assist.suggestion ? { recap: true, suggestion: false } : null;
     }
   };
 

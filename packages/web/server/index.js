@@ -1297,6 +1297,7 @@ const sessionWorkRuntime = createSessionWorkRuntime({
   isSessionArchived: (sessionID) => openChamberSessionService.sessionArchive.isArchived(sessionID),
   chatRoots: [path.join(OPENCHAMBER_USER_CONFIG_ROOT, 'chats'), OPENCHAMBER_CHATS_DIR],
   lineage: sessionLineage,
+  activityProbe: createSessionActivityProbe({ buildOpenCodeUrl, getOpenCodeAuthHeaders, timeoutMs: 2_000 }),
 });
 
 const permissionAutoAcceptRuntime = createPermissionAutoAcceptRuntime({

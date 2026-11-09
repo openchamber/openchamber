@@ -113,6 +113,18 @@ not retry a subscriber that failed.
   signs while in work, `review_ready` while the review offer is on, `recap` and
   the two next-step signs for the assist fields the user has on. No applicable
   question, no call.
+- Before Jev, two facts from OpenCode: the files its snapshots saw change
+  during the turn's steps, and the background work still running for the
+  session (`../opencode/session-activity.js`). A turn with snapshots and no
+  changed file gets no `review_ready` question and no review offer; changed
+  files alone do not offer a review, because the folder is shared and another
+  session's edits show up in them too, so Jev still reads whether the agent
+  says it changed the project. Without snapshots Jev decides alone, as before.
+- While the agent waits on its own background work (a subagent, an image, a
+  working child session, or a shell command it started in this turn that has
+  run under 30 minutes) it goes on by itself: no looks-done hint and no
+  next-step suggestion. An older shell is a server left running and does not
+  count. When OpenCode cannot tell, the signs decide alone.
 - Looks done = `report`, and not `agent_continues`, `waits_reader` or
   `offers_agent`, each at 0.5; a sign Jev did not answer means no hint. The
   next-step suggestion is worth waking the Small Model when `agent_continues`
