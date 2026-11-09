@@ -2131,6 +2131,7 @@ export const dict = {
   'directoryExplorerDialog.browse.retry': 'Yeniden dene',
   'directoryExplorerDialog.browse.parentDirectory': 'Üst dizin',
   'directoryExplorerDialog.browse.addedBadge': 'Eklendi',
+  'directoryExplorerDialog.browse.linkTarget': '{path} konumuna bağlantı',
   'directoryExplorerDialog.browse.selectForAdd': 'Eklemek için seç',
   'directoryExplorerDialog.browse.quickAdd': 'Ekle',
   'directoryExplorerDialog.footer.navigate': 'Gezin',

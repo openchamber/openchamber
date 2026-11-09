@@ -2267,6 +2267,7 @@ export const dict: Record<I18nKey, string> = {
   'directoryExplorerDialog.browse.retry': '다시 시도',
   'directoryExplorerDialog.browse.parentDirectory': '상위 디렉터리',
   'directoryExplorerDialog.browse.addedBadge': '추가됨',
+  'directoryExplorerDialog.browse.linkTarget': '{path}(으)로 연결되는 링크',
   'directoryExplorerDialog.browse.quickAdd': '추가',
   'directoryExplorerDialog.browse.selectForAdd': '추가할 항목 선택',
   'directoryExplorerDialog.footer.navigate': '탐색',

@@ -1999,6 +1999,7 @@ export const dict = {
   'directoryExplorerDialog.browse.retry': 'Erneut versuchen',
   'directoryExplorerDialog.browse.parentDirectory': 'Übergeordnetes Verzeichnis',
   'directoryExplorerDialog.browse.addedBadge': 'Hinzugefügt',
+  'directoryExplorerDialog.browse.linkTarget': 'Verknüpfung zu {path}',
   'directoryExplorerDialog.browse.quickAdd': 'Hinzufügen',
   'directoryExplorerDialog.browse.selectForAdd': 'Zum Hinzufügen auswählen',
   'directoryExplorerDialog.footer.navigate': 'Navigieren',

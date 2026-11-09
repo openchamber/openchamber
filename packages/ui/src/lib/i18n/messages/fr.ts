@@ -2014,6 +2014,7 @@ export const dict = {
   'directoryExplorerDialog.browse.retry': 'Réessayer',
   'directoryExplorerDialog.browse.parentDirectory': 'Répertoire parent',
   'directoryExplorerDialog.browse.addedBadge': 'Ajouté',
+  'directoryExplorerDialog.browse.linkTarget': 'Lien vers {path}',
   'directoryExplorerDialog.browse.quickAdd': 'Ajouter',
   'directoryExplorerDialog.browse.selectForAdd': 'Sélectionner pour ajouter',
   'directoryExplorerDialog.footer.navigate': 'Naviguer',

@@ -2267,6 +2267,7 @@ export const dict = {
   'directoryExplorerDialog.browse.retry': 'Try again',
   'directoryExplorerDialog.browse.parentDirectory': 'Parent directory',
   'directoryExplorerDialog.browse.addedBadge': 'Added',
+  'directoryExplorerDialog.browse.linkTarget': 'Link to {path}',
   'directoryExplorerDialog.browse.quickAdd': 'Add',
   'directoryExplorerDialog.browse.selectForAdd': 'Select for add',
   'directoryExplorerDialog.footer.navigate': 'Navigate',

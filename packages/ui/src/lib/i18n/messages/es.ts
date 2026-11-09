@@ -2235,6 +2235,7 @@ export const dict: Record<I18nKey, string> = {
   "directoryExplorerDialog.browse.retry": "Reintentar",
   "directoryExplorerDialog.browse.parentDirectory": "Directorio padre",
   "directoryExplorerDialog.browse.addedBadge": "Añadido",
+  "directoryExplorerDialog.browse.linkTarget": "Enlace a {path}",
   "directoryExplorerDialog.browse.quickAdd": "Añadir",
   "directoryExplorerDialog.browse.selectForAdd": "Seleccionar para añadir",
   "directoryExplorerDialog.footer.navigate": "Navegar",
