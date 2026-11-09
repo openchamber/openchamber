@@ -22,6 +22,7 @@ const USAGE_URL = 'https://api.anthropic.com/api/oauth/usage';
 const OAUTH_BETA_HEADER = 'oauth-2025-04-20';
 const DEFAULT_COOLDOWN_MS = 5 * 60 * 1000;
 const MAX_COOLDOWN_MS = 60 * 60 * 1000;
+const REQUEST_TIMEOUT_MS = 15_000;
 const SESSION_EXPIRED_ERROR = 'Claude session expired. Open Claude Code to sign in again.';
 
 /**
@@ -64,6 +65,13 @@ const cachedResultFor = (fingerprint, planLabel) => {
   });
 };
 
+const isTimeout = (error) => error instanceof DOMException && error.name === 'TimeoutError';
+
+const requestErrorMessage = (error) => {
+  if (isTimeout(error)) return 'Request timed out';
+  return error instanceof Error ? error.message : 'Request failed';
+};
+
 const failure = (error, { configured = true } = {}) =>
   buildResult({ providerId, providerName, ok: false, configured, error });
 
@@ -99,10 +107,11 @@ const fetchQuotaUncoalesced = async () => {
       headers: {
         Authorization: `Bearer ${credential.accessToken}`,
         'anthropic-beta': OAUTH_BETA_HEADER
-      }
+      },
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS)
     });
   } catch (error) {
-    return failure(error instanceof Error ? error.message : 'Request failed');
+    return failure(requestErrorMessage(error));
   }
 
   if (response.status === 429) {
@@ -122,8 +131,8 @@ const fetchQuotaUncoalesced = async () => {
   let payload;
   try {
     payload = await response.json();
-  } catch {
-    return failure('Unexpected response from Anthropic');
+  } catch (error) {
+    return failure(isTimeout(error) ? 'Request timed out' : 'Unexpected response from Anthropic');
   }
 
   const { windows, models } = toClaudeUsage(payload);
