@@ -3650,8 +3650,12 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         if (!isVSCodeRuntime() && inputMode === 'normal') {
             const links = findSessionLinks(e.clipboardData.getData('text'), sessionLinkOrigins);
             if (links.length > 0) void resolveSessionLinks(links.map((range) => range.target), true);
-            if (!isBtwActive) void readPastedReferenceLinks(e.clipboardData.getData('text'));
         }
+        // Issue and PR links are read only when the text lands in the composer,
+        // not when a large paste goes as a file.
+        const readLinksOfPaste = (text: string) => {
+            if (!isVSCodeRuntime() && inputMode === 'normal' && !isBtwActive) void readPastedReferenceLinks(text);
+        };
 
         // Pasting a URL over a selection wraps it as a markdown link:
         // [selected text](pasted url).
@@ -3730,6 +3734,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                 }
                 const sessionId = !isVSCodeRuntime() && inputMode === 'normal' ? bareSessionId(pastedText) : null;
                 if (sessionId) pastedSessionIds.expect(sessionId);
+                readLinksOfPaste(pastedText);
                 return;
             }
 
@@ -3744,6 +3749,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                     pastedText,
                     getFileMentionInputSourceForInsertedText(pastedText),
                 );
+                readLinksOfPaste(pastedText);
             };
 
             const attachAsFile = async (candidate: LargeTextPasteCandidate | null = null) => {

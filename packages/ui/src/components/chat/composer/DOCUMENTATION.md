@@ -1082,7 +1082,8 @@ picker uses, and then draws as a chip where it stands: its number and title.
   deleted from the text is not sent. The model reads the link where the user
   put it. A send waits for a paste still being read, so a quick Enter never
   sends the link bare; a second Enter meanwhile does nothing.
-- Only a paste reads a link, afresh each time, as the picker does. A link
+- Only a paste that lands in the text reads a link, afresh each time, as the
+  picker does; a large paste that goes as a file reads none. A link
   typed by hand stays text: typing passes through `/issues/1` on the way to
   `/issues/12`, and a read per keystroke would attach the wrong item. A link
   this composer has read before draws as its chip again wherever it reappears
