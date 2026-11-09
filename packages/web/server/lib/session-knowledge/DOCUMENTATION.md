@@ -110,6 +110,15 @@ description does not repeat it. Stated only in the action's description it went 
 agent handed an issue to investigate saw no reason to open a session-control
 tool, so it never linked anything. It goes into `openchamber.guidance`.
 
+The same sessions are told how to hand work to another session
+(`DISPATCH_GUIDANCE`). Every guidance line that names an action of the
+`openchamber` tool writes the call path out as `tools.openchamber` inside
+`execute`. Told only "the openchamber tool", an agent looked for a direct tool
+of that name, found `openchamber_secret` and `openchamber_render`, and called
+those again and again (#6608). The guidance also sends part of the
+agent's own task to its subagent tool, so a dispatch stays something the user
+asked for.
+
 ## Which branch the session works on
 
 `WORK_NAME_GUIDANCE` is included only while the managed tool is available and
