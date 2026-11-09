@@ -8,6 +8,7 @@ import type { Session } from '@/lib/opencode/model';
 const EMPTY_FOLDERS: readonly never[] = [];
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { Button } from '@/components/ui/button';
+import { useOpenCodeTrustPausedDirectory, useResumeOpenCodeFolder } from '@/components/projects/useOpenCodeTrustPause';
 import { Icon } from "@/components/icon/Icon";
 import { Spinner } from "@/components/ui/spinner";
 import { FileTreeChevron } from '@/components/views/files/FileTreeRowParts';
@@ -345,6 +346,8 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
       : childStores.getInitializationFailure(failedBootstrapDirectory)
     : undefined;
   const canGrantBootstrapAccess = bootstrapFailure === 'os-permission' && canRequestNativeDirectoryAccess();
+  const trustPausedDirectory = useOpenCodeTrustPausedDirectory(bootstrapDirectories);
+  const resumeFolder = useResumeOpenCodeFolder();
   const [isRequestingBootstrapAccess, setIsRequestingBootstrapAccess] = React.useState(false);
 
   const retryFailedBootstrap = React.useCallback(() => {
@@ -808,7 +811,21 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
       </>}
     </span>
   );
-  const bootstrapFailureNotice = failedBootstrapDirectory ? (
+  // A folder the user declined to trust lists its sessions but runs no agent;
+  // that says more than whatever its load failed with.
+  const bootstrapFailureNotice = trustPausedDirectory ? (
+    <span className="inline-flex flex-wrap items-center gap-1.5">
+      {t('sessions.sidebar.group.empty.trustPaused')}
+      <Button
+        variant="link"
+        size="xs"
+        className="h-auto p-0 typography-micro"
+        onClick={() => void resumeFolder(trustPausedDirectory)}
+      >
+        {t('sessions.sidebar.group.empty.reviewTrust')}
+      </Button>
+    </span>
+  ) : failedBootstrapDirectory ? (
     <span className="inline-flex flex-wrap items-center gap-1.5">
       {bootstrapFailure === 'os-permission'
         ? t('sessions.sidebar.group.empty.permissionDenied')

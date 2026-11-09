@@ -286,6 +286,8 @@ import { LinkedReferenceRow } from './composer/ui/LinkedReferenceRow';
 import { usePlaceholderFitsOneLine } from './composer/ui/usePlaceholderFitsOneLine';
 import { RevertedMessagesStrip } from './RevertedMessagesStrip';
 import { SessionFolderMissingRow } from './SessionFolderMissingRow';
+import { SessionTrustPausedRow } from './SessionTrustPausedRow';
+import { useOpenCodeTrustPaused } from '@/components/projects/useOpenCodeTrustPause';
 import { useFolderMissing } from '@/components/session/sidebar/projects/useProjectFolderMissing';
 import { isSpaceDirectory } from '@/lib/spaces/space-route';
 import { SessionSuggestionChip } from '@/components/chat/SessionSuggestionChip';
@@ -598,6 +600,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     // the panel is expanded, so this composer's sends route to the fork
     // instead of the main session. Collapsed keeps the fork alive (chip stays
     // visible) while the composer talks to the main session again.
+    const trustDirectory = currentSessionDirectoryForSync ?? currentDirectory ?? null;
+    const trustPausedDirectory = useOpenCodeTrustPaused(trustDirectory) ? trustDirectory : null;
     const btwPanel = useBtwPanelState(currentSessionId, currentSessionDirectoryForSync ?? currentDirectory ?? undefined);
     const pendingForms = useScopedBlockingForms(currentSessionId, currentSessionDirectoryForSync ?? currentDirectory ?? undefined);
     const pendingPermissions = useScopedBlockingPermissions(currentSessionId, currentSessionDirectoryForSync ?? currentDirectory ?? undefined);
@@ -4872,9 +4876,15 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     const folderMissingRow = sessionFolder.missing && currentSessionId && currentSessionDirectoryForSync && !isBtwActive && !newSessionDraftOpen
         ? <SessionFolderMissingRow sessionId={currentSessionId} directory={currentSessionDirectoryForSync} busy={sessionPhase !== 'idle'} />
         : null;
-    const composerTopRows = folderMissingRow || worktreeSetupRow || creatingSessionRow || spaceWaitRow || goalRow || autoReviewRow || prWatchRow || backgroundShellsRow || revertRow || queueRow || doneHintRow || reviewHintRow || suggestionRow ? (
+    // A folder the user declined to trust loads no agent or model; the row
+    // brings the prompt back. A missing folder says more, so it wins.
+    const trustPausedRow = trustPausedDirectory && !folderMissingRow && !isBtwActive
+        ? <SessionTrustPausedRow directory={trustPausedDirectory} />
+        : null;
+    const composerTopRows = folderMissingRow || trustPausedRow || worktreeSetupRow || creatingSessionRow || spaceWaitRow || goalRow || autoReviewRow || prWatchRow || backgroundShellsRow || revertRow || queueRow || doneHintRow || reviewHintRow || suggestionRow ? (
         <>
             {folderMissingRow}
+            {trustPausedRow}
             {worktreeSetupRow}
             {creatingSessionRow}
             {spaceWaitRow}
