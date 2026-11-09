@@ -784,8 +784,9 @@ export const ExtensionsPage: React.FC = () => {
           { description: result.diagnostic ? describeGuestRequestFailure(result.diagnostic, t) : undefined },
         );
       } else {
+        // A manifest that did not parse says which field and rule, which is what the author needs.
         toast.error(t(errorToastKey(result.code)), {
-          description: result.diagnostic ? describeGuestRequestFailure(result.diagnostic, t) : undefined,
+          description: result.reason ?? (result.diagnostic ? describeGuestRequestFailure(result.diagnostic, t) : undefined),
         });
       }
       return false;
