@@ -51,10 +51,15 @@ export const userStatePatch = (metadata, { state, now }) => {
     : { state: 'done', doneAt: now, suggestDoneAt: null });
 };
 
-/** The turn that just ended looks like the end of the work. */
+/**
+ * The turn that ended looks like the end of the work, and the user stayed
+ * quiet since. It replaces a review offer from the same turn.
+ */
 export const suggestDonePatch = (metadata, { now }) => {
   if (readWork(metadata)?.state !== 'open') return null;
-  return patchOf({ suggestDoneAt: now });
+  const patch = patchOf({ suggestDoneAt: now });
+  if (reviewOfferSchema.safeParse(metadata).success) patch.openchamber.reviewOffer = null;
+  return patch;
 };
 
 /** The turn that just ended handed over changes worth a look; any session. */

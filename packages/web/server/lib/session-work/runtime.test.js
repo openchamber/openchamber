@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mergeMetadataPatch } from '../openchamber-sessions/session-metadata-store.js';
-import { decideAssist } from './questions.js';
+import { decideAssist, decideWrapUp } from './questions.js';
 import { createSessionWorkRuntime } from './runtime.js';
 import { createSessionLineage } from '../session-lineage.js';
 
@@ -39,6 +39,7 @@ const makeRuntime = ({
   endpoint = ENDPOINT,
   lineage = null,
   isSessionArchived = async () => false,
+  doneHintDelayMs = 5,
 } = {}) => {
   const records = new Map([['ses_1', metadata]]);
   const readMetadata = vi.fn(async (id) => records.get(id) ?? {});
@@ -65,6 +66,7 @@ const makeRuntime = ({
     lineage,
     now: () => time++,
     openRetryDelaysMs: [5, 5],
+    doneHintDelayMs,
   });
   return { runtime, jev, readMetadata, updateMetadata, records };
 };
@@ -78,6 +80,10 @@ const sent = (id = 'msg_new', text = 'Now fix the header') => ({
   properties: { sessionID: 'ses_1', info: { id, role: 'user', text, time: { created: 50 } } },
 });
 
+/** Jev's answers to the looks-done signs: a report with nothing going on, waited for or offered. */
+const looksDone = { report: { noul: 0.9 }, agent_continues: { noul: 0.1 }, waits_reader: { noul: 0.1 }, offers_agent: { noul: 0.1 } };
+const notDone = { ...looksDone, agent_continues: { noul: 0.8 } };
+
 const settle = async (check) => {
   for (let i = 0; i < 50 && !check(); i += 1) await new Promise((resolve) => setTimeout(resolve, 5));
 };
@@ -90,8 +96,13 @@ afterEach(() => {
 describe('session work decisions', () => {
   it('keeps an assist field Jev did not answer, and drops only a clear no', () => {
     expect(decideAssist({})).toEqual({ recap: true, suggestion: true });
-    expect(decideAssist({ recap: { noul: 0.2 }, next_step: { noul: 0.1 } })).toEqual({ recap: false, suggestion: false });
-    expect(decideAssist({ recap: { noul: 0.6 }, next_step: { noul: 0.7 } })).toEqual({ recap: true, suggestion: true });
+    // Looks done needs every sign answered: an unanswered one never hints.
+    expect(decideWrapUp(looksDone)).toBe(true);
+    expect(decideWrapUp({ ...looksDone, offers_agent: undefined })).toBe(false);
+    expect(decideWrapUp(notDone)).toBe(false);
+    expect(decideAssist({ recap: { noul: 0.2 }, agent_continues: { noul: 0.1 }, waits_reader: { noul: 0.1 } })).toEqual({ recap: false, suggestion: false });
+    expect(decideAssist({ agent_continues: { noul: 0.9 }, waits_reader: { noul: 0.8 } })).toMatchObject({ suggestion: false });
+    expect(decideAssist({ recap: { noul: 0.6 }, agent_continues: { noul: 0.7 }, waits_reader: { noul: 0.2 } })).toEqual({ recap: true, suggestion: true });
   });
 });
 
@@ -326,13 +337,13 @@ describe('session work runtime: a turn ended', () => {
   it('asks only the assist and review questions for a session not in work, and never opens it', async () => {
     stubOpenCode();
     const { runtime, jev, records } = makeRuntime({
-      answers: { recap: { noul: 0.9 }, next_step: { noul: 0.1 } },
+      answers: { recap: { noul: 0.9 }, agent_continues: { noul: 0.1 }, waits_reader: { noul: 0.1 } },
     });
 
     const gate = await runtime.evaluateTurnEnd({ sessionId: 'ses_1', directory: '/repo', assist: { recap: true, suggestion: true } });
 
     expect(jev.ask).toHaveBeenCalledTimes(1);
-    expect(Object.keys(jev.ask.mock.calls[0][0].questions).sort()).toEqual(['next_step', 'recap', 'review_ready']);
+    expect(Object.keys(jev.ask.mock.calls[0][0].questions).sort()).toEqual(['agent_continues', 'recap', 'review_ready', 'waits_reader']);
     expect(jev.ask.mock.calls[0][0].state).toMatchObject({ request: 'Implement it', answer: 'Done, try it.' });
     expect(gate).toEqual({ recap: true, suggestion: false });
     expect(records.get('ses_1')).toEqual({});
@@ -342,13 +353,14 @@ describe('session work runtime: a turn ended', () => {
     stubOpenCode();
     const { runtime, jev, records, updateMetadata } = makeRuntime({
       metadata: { openchamber: { work: { state: 'open', openedAt: 1 } } },
-      answers: { wrap_up: { noul: 0.93 } },
+      answers: looksDone,
     });
 
     const gate = await runtime.evaluateTurnEnd({ sessionId: 'ses_1', directory: '/repo', assist: { recap: false, suggestion: false } });
 
-    expect(Object.keys(jev.ask.mock.calls[0][0].questions)).toEqual(['wrap_up', 'review_ready']);
+    expect(Object.keys(jev.ask.mock.calls[0][0].questions)).toEqual(['report', 'agent_continues', 'waits_reader', 'offers_agent', 'review_ready']);
     expect(gate).toBeNull();
+    await settle(() => records.get('ses_1').openchamber.work.suggestDoneAt !== undefined);
     expect(records.get('ses_1').openchamber.work.suggestDoneAt).toBeTypeOf('number');
 
     const busy = { type: 'session.status', properties: { sessionID: 'ses_1', status: { type: 'busy' } } };
@@ -360,18 +372,53 @@ describe('session work runtime: a turn ended', () => {
     expect(updateMetadata).toHaveBeenCalledTimes(2);
   });
 
-  it('offers a review after a turn that changed the project, and looks done wins over it', async () => {
+  it('offers a review at once, and looks done replaces it after the quiet pause', async () => {
     stubOpenCode();
     const open = { openchamber: { work: { state: 'open', openedAt: 1 } } };
-    const review = makeRuntime({ metadata: open, answers: { wrap_up: { noul: 0.2 }, review_ready: { noul: 0.75 } } });
+    const review = makeRuntime({ metadata: open, answers: { ...notDone, review_ready: { noul: 0.75 } } });
     await review.runtime.evaluateTurnEnd({ sessionId: 'ses_1', directory: '/repo', assist: { recap: false, suggestion: false } });
     expect(review.records.get('ses_1').openchamber.reviewOffer.at).toBeTypeOf('number');
     expect(review.records.get('ses_1').openchamber.work).not.toHaveProperty('suggestDoneAt');
 
-    const both = makeRuntime({ metadata: open, answers: { wrap_up: { noul: 0.9 }, review_ready: { noul: 0.9 } } });
+    const both = makeRuntime({ metadata: open, answers: { ...looksDone, review_ready: { noul: 0.9 } }, doneHintDelayMs: 20 });
     await both.runtime.evaluateTurnEnd({ sessionId: 'ses_1', directory: '/repo', assist: { recap: false, suggestion: false } });
+    expect(both.records.get('ses_1').openchamber.reviewOffer.at).toBeTypeOf('number');
+    expect(both.records.get('ses_1').openchamber.work).not.toHaveProperty('suggestDoneAt');
+    await settle(() => both.records.get('ses_1').openchamber.work.suggestDoneAt !== undefined);
     expect(both.records.get('ses_1').openchamber.work.suggestDoneAt).toBeTypeOf('number');
     expect(both.records.get('ses_1').openchamber).not.toHaveProperty('reviewOffer');
+  });
+
+  it('shows no done hint when the user writes again within the pause, or the runtime stops', async () => {
+    stubOpenCode();
+    const open = { openchamber: { work: { state: 'open', openedAt: 1 } } };
+    const replied = makeRuntime({ metadata: open, answers: looksDone, doneHintDelayMs: 30 });
+    await replied.runtime.evaluateTurnEnd({ sessionId: 'ses_1', directory: '/repo', assist: { recap: false, suggestion: false } });
+    replied.runtime.processPayload(sent('msg_next'));
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    expect(replied.records.get('ses_1').openchamber.work).not.toHaveProperty('suggestDoneAt');
+
+    // A late answer about an older turn leaves the newer turn's pending hint alone.
+    const late = makeRuntime({ metadata: open, doneHintDelayMs: 30 });
+    const answers = [];
+    late.jev.ask.mockImplementation(() => new Promise((resolve) => { answers.push(resolve); }));
+    const older = late.runtime.evaluateTurnEnd({ sessionId: 'ses_1', directory: '/repo', assist: { recap: false, suggestion: false } });
+    await settle(() => answers.length === 1);
+    late.runtime.processPayload(busy);
+    const newer = late.runtime.evaluateTurnEnd({ sessionId: 'ses_1', directory: '/repo', assist: { recap: false, suggestion: false } });
+    await settle(() => answers.length === 2);
+    answers[1]({ answers: looksDone, ms: 5 });
+    await newer;
+    answers[0]({ answers: looksDone, ms: 5 });
+    await older;
+    await settle(() => late.records.get('ses_1').openchamber.work.suggestDoneAt !== undefined);
+    expect(late.records.get('ses_1').openchamber.work.suggestDoneAt).toBeTypeOf('number');
+
+    const stopped = makeRuntime({ metadata: open, answers: looksDone, doneHintDelayMs: 30 });
+    await stopped.runtime.evaluateTurnEnd({ sessionId: 'ses_1', directory: '/repo', assist: { recap: false, suggestion: false } });
+    stopped.runtime.stop();
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    expect(stopped.updateMetadata).not.toHaveBeenCalled();
   });
 
   it('offers a review without In work, asks nothing about it when it is off, and a new turn retires it', async () => {
@@ -406,7 +453,7 @@ describe('session work runtime: a turn ended', () => {
       const pending = runtime.evaluateTurnEnd({ sessionId: 'ses_1', directory: '/repo', assist: { recap: false, suggestion: false } });
       await settle(() => answer !== undefined);
       runtime.processPayload(busy);
-      answer({ answers: { wrap_up: { noul: 0.99 } }, ms: 5 });
+      answer({ answers: looksDone, ms: 5 });
       await pending;
       expect(records.get('ses_1').openchamber.work).not.toHaveProperty('suggestDoneAt');
     }
@@ -415,8 +462,9 @@ describe('session work runtime: a turn ended', () => {
     answer = undefined;
     const current = runtime.evaluateTurnEnd({ sessionId: 'ses_1', directory: '/repo', assist: { recap: false, suggestion: false } });
     await settle(() => answer !== undefined);
-    answer({ answers: { wrap_up: { noul: 0.99 } }, ms: 5 });
+    answer({ answers: looksDone, ms: 5 });
     await current;
+    await settle(() => records.get('ses_1').openchamber.work.suggestDoneAt !== undefined);
     expect(records.get('ses_1').openchamber.work.suggestDoneAt).toBeTypeOf('number');
   });
 
@@ -424,7 +472,7 @@ describe('session work runtime: a turn ended', () => {
     stubOpenCode();
     const { runtime, records } = makeRuntime({
       metadata: { openchamber: { work: { state: 'open', openedAt: 1 } } },
-      answers: { wrap_up: { noul: 0.99 } },
+      answers: looksDone,
     });
     await runtime.evaluateTurnEnd({ sessionId: 'ses_1', directory: '/repo', assist: { recap: false, suggestion: false } });
     expect(records.get('ses_1').openchamber.work.state).toBe('open');

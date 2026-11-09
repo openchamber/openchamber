@@ -51,6 +51,12 @@ const ANSWER_EDGE_CHARS = 500;
 const SEEN_MESSAGES_LIMIT = 500;
 /** Waits before each new try at an open that failed; after the last one it gives up. */
 const OPEN_RETRY_DELAYS_MS = [2_000, 10_000, 60_000];
+/**
+ * How long the user stays quiet after a turn that looks done before the hint
+ * shows. Most false hints fall on a finished subtask the user moves past within
+ * minutes; a message in the meantime cancels the hint (see DOCUMENTATION.md).
+ */
+const DONE_HINT_DELAY_MS = 10 * 60_000;
 
 const errorMessage = (error) => (error instanceof Error ? error.message : String(error));
 
@@ -103,6 +109,7 @@ export function createSessionWorkRuntime({
   lineage = null,
   now = Date.now,
   openRetryDelaysMs = OPEN_RETRY_DELAYS_MS,
+  doneHintDelayMs = DONE_HINT_DELAY_MS,
 }) {
   const { canBeInWork } = createWorkMembership({ chatRoots });
   let stopped = false;
@@ -125,8 +132,17 @@ export function createSessionWorkRuntime({
   // after a turn start, and its late answer is dropped rather than accepted.
   const turnGenerations = new Map();
   let lastTurnGeneration = 0;
+  // A looks-done hint waiting out the quiet pause, at most one per session.
+  // In memory only: a server restart drops it, and the session simply gets no
+  // hint for that turn.
+  const pendingDoneHints = new Map();
+  const cancelDoneHint = (sessionId) => {
+    clearTimeout(pendingDoneHints.get(sessionId));
+    pendingDoneHints.delete(sessionId);
+  };
   const turnGeneration = (sessionId) => turnGenerations.get(sessionId) ?? 0;
   const advanceTurn = (sessionId) => {
+    cancelDoneHint(sessionId);
     lastTurnGeneration += 1;
     turnGenerations.delete(sessionId);
     turnGenerations.set(sessionId, lastTurnGeneration);
@@ -300,6 +316,34 @@ export function createSessionWorkRuntime({
   };
 
   /**
+   * Writes a hint about the turn `generation` names. Decided at write time: a
+   * turn that started since makes the hint about an older turn, and it is dropped.
+   */
+  const writeHint = async ({ sessionId, directory, generation, patch }) => {
+    const { changed } = await updateMetadata(
+      sessionId,
+      (metadata) => (turnGeneration(sessionId) === generation ? patch(metadata, { now: now() }) : null),
+      { directory },
+    );
+    if (changed) markSuggested(sessionId, directory);
+  };
+
+  /** Shows the looks-done hint once the user stayed quiet for the pause; the next turn cancels it. */
+  const scheduleDoneHint = ({ sessionId, directory, generation }) => {
+    // A late answer about an older turn must not replace a newer turn's hint.
+    if (turnGeneration(sessionId) !== generation) return;
+    cancelDoneHint(sessionId);
+    const timer = setTimeout(() => {
+      pendingDoneHints.delete(sessionId);
+      if (stopped) return;
+      writeHint({ sessionId, directory, generation, patch: suggestDonePatch })
+        .catch((error) => console.warn('[session-work] could not write a done hint:', errorMessage(error)));
+    }, doneHintDelayMs);
+    timer.unref?.();
+    pendingDoneHints.set(sessionId, timer);
+  };
+
+  /**
    * One Jev call when a turn ended. `assist` says which assist fields the user
    * has on. Resolves which of them are worth the Small Model, or null when Jev
    * was not asked about them (no Jev, a failure, an ineligible session): the
@@ -338,20 +382,12 @@ export function createSessionWorkRuntime({
       if (!request) return null;
       const { answers } = await jev.ask(request, endpoint);
       if (stopped) return null;
-      // Looks done wins over a review offer from the same turn.
-      const suggest = ask.wrapUp && decideWrapUp(answers)
-        ? suggestDonePatch
-        : ask.reviewReady && decideReviewReady(answers) ? offerReviewPatch : null;
-      if (suggest) {
-        // Decided at write time: a turn that started while Jev was answering
-        // makes this answer about an older turn.
-        const { changed } = await updateMetadata(
-          sessionId,
-          (metadata) => (turnGeneration(sessionId) === generation ? suggest(metadata, { now: now() }) : null),
-          { directory },
-        );
-        if (changed) markSuggested(sessionId, directory);
+      // The review offer shows at once, while the user looks at the changes;
+      // looks done waits out the pause and then replaces it.
+      if (ask.reviewReady && decideReviewReady(answers)) {
+        await writeHint({ sessionId, directory, generation, patch: offerReviewPatch });
       }
+      if (ask.wrapUp && decideWrapUp(answers)) scheduleDoneHint({ sessionId, directory, generation });
       return ask.recap || ask.nextStep ? decideAssist(answers) : null;
     } catch (error) {
       console.warn('[session-work] turn-end check failed:', errorMessage(error));
@@ -364,6 +400,8 @@ export function createSessionWorkRuntime({
     seenMessages.clear();
     for (const pending of pendingOpens.values()) clearTimeout(pending.timer);
     pendingOpens.clear();
+    for (const timer of pendingDoneHints.values()) clearTimeout(timer);
+    pendingDoneHints.clear();
     suggested.clear();
     turnGenerations.clear();
   };

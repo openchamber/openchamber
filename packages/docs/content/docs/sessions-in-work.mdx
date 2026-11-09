@@ -51,12 +51,12 @@ Chats don't get the eye: they're plain conversations.
 
 ### "This work looks done"
 
-With a [classification provider](/classification-providers/) set up, Jev checks each turn of a session in work. When a turn looks like the end of the work (you said thanks, asked for a commit, confirmed it works), Jev leaves a hint instead of closing anything:
+With a [classification provider](/classification-providers/) set up, Jev checks each turn of a session in work. When a turn looks like the end of the work (the agent reports finished work, isn't going on by itself, isn't waiting for your answer and offers nothing more), Jev leaves a hint instead of closing anything:
 
 - a grey check on the session row in the sidebar
 - a strip above the composer: **This work looks done.** with a **Mark done** button
 
-Press **Mark done** if Jev is right. If not, just keep going: the hint disappears with your next message. Without a classification provider there's no hint, and you mark sessions done yourself.
+The hint shows once you've been quiet for 10 minutes after the turn, so it stays out of the way while you move from one step to the next. Press **Mark done** if Jev is right. If not, just keep going: the hint disappears with your next message. Without a classification provider there's no hint, and you mark sessions done yourself.
 
 ## Recap and next-message suggestion
 
