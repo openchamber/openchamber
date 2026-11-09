@@ -8,7 +8,7 @@ import {
   isEmptyReport,
   isSameLocalDay,
   projectDisplayName,
-  rangeStart,
+  rangeWindow,
   reasoningShare,
   tokenSegments,
   toolSuccessRate,
@@ -16,13 +16,47 @@ import {
 
 const local = (year: number, month: number, day: number, hour = 0) => new Date(year, month - 1, day, hour).getTime();
 
-describe('rangeStart', () => {
-  test('starts at local midnight and counts today as the first day', () => {
+describe('rangeWindow', () => {
+  test('rolling ranges start at local midnight and count today as the first day', () => {
     const now = new Date(2026, 8, 23, 15, 30);
-    expect(rangeStart('1d', now)).toBe(local(2026, 9, 23));
-    expect(rangeStart('7d', now)).toBe(local(2026, 9, 17));
-    expect(rangeStart('30d', now)).toBe(local(2026, 8, 25));
-    expect(rangeStart('all', now)).toBeUndefined();
+    expect(rangeWindow('1d', now, 1)).toEqual({ from: local(2026, 9, 23) });
+    expect(rangeWindow('7d', now, 1)).toEqual({ from: local(2026, 9, 17) });
+    expect(rangeWindow('30d', now, 1)).toEqual({ from: local(2026, 8, 25) });
+    expect(rangeWindow('all', now, 1)).toEqual({});
+  });
+
+  test('cycle is the whole billing cycle that holds today', () => {
+    expect(rangeWindow('cycle', new Date(2026, 10, 9, 15), 20)).toEqual({ from: local(2026, 10, 20), to: local(2026, 11, 20) });
+  });
+
+  test('cycle opens today when today is the billing day', () => {
+    expect(rangeWindow('cycle', new Date(2026, 10, 20, 9), 20)).toEqual({ from: local(2026, 11, 20), to: local(2026, 12, 20) });
+  });
+
+  test('cycle before the billing day in January opens in the previous year', () => {
+    expect(rangeWindow('cycle', new Date(2026, 0, 5), 20)).toEqual({ from: local(2025, 12, 20), to: local(2026, 1, 20) });
+  });
+
+  test('cycle after the billing day in December ends in the next year', () => {
+    expect(rangeWindow('cycle', new Date(2026, 11, 25), 20)).toEqual({ from: local(2026, 12, 20), to: local(2027, 1, 20) });
+  });
+
+  test('billing day 1 gives whole calendar months', () => {
+    const now = new Date(2026, 10, 9);
+    expect(rangeWindow('cycle', now, 1)).toEqual({ from: local(2026, 11, 1), to: local(2026, 12, 1) });
+    expect(rangeWindow('lastCycle', now, 1)).toEqual({ from: local(2026, 10, 1), to: local(2026, 11, 1) });
+  });
+
+  test('last cycle ends where the current cycle starts', () => {
+    const now = new Date(2026, 10, 9);
+    const current = rangeWindow('cycle', now, 20);
+    expect(rangeWindow('lastCycle', now, 20)).toEqual({ from: local(2026, 9, 20), to: current.from });
+  });
+
+  test('a billing day the month lacks falls on its last day', () => {
+    expect(rangeWindow('cycle', new Date(2026, 2, 15), 31)).toEqual({ from: local(2026, 2, 28), to: local(2026, 3, 31) });
+    expect(rangeWindow('cycle', new Date(2028, 2, 15), 31)).toEqual({ from: local(2028, 2, 29), to: local(2028, 3, 31) });
+    expect(rangeWindow('lastCycle', new Date(2026, 4, 15), 31)).toEqual({ from: local(2026, 3, 31), to: local(2026, 4, 30) });
   });
 });
 

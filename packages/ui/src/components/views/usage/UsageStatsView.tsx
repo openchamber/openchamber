@@ -18,6 +18,7 @@ import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useProjectsInSidebarOrder } from '@/components/session/sidebar/list/useProjectsInSidebarOrder';
 import { useUIStore, type TimeFormatPreference } from '@/stores/useUIStore';
 
+import { BillingDayPicker } from './BillingDayPicker';
 import {
   USAGE_RANGES,
   averagePer,
@@ -59,16 +60,18 @@ const RANGE_LABEL_KEYS = {
   '7d': 'usageStats.range.7d',
   '30d': 'usageStats.range.30d',
   '90d': 'usageStats.range.90d',
+  cycle: 'usageStats.range.cycle',
+  lastCycle: 'usageStats.range.lastCycle',
   all: 'usageStats.range.all',
 } as const satisfies Record<UsageRange, I18nKey>;
 
 /**
- * The cached report for the chosen range and project (by directory). A key
+ * The cached report for the chosen range, billing day and project (by directory). A key
  * with nothing cached loads on first view; a cached key never refetches on
  * its own, except Today once the local day changes. See `usageStatsStore.ts`.
  */
-function useUsageStats(range: UsageRange, projectDirectory: string | null) {
-  const request = React.useMemo(() => ({ range, projectDirectory }), [range, projectDirectory]);
+function useUsageStats(range: UsageRange, projectDirectory: string | null, billingDay: number) {
+  const request = React.useMemo(() => ({ range, projectDirectory, billingDay }), [range, projectDirectory, billingDay]);
   const entry = useUsageStatsStore((store) => selectUsageStatsEntry(store, request));
   const load = useUsageStatsStore((store) => store.load);
 
@@ -102,11 +105,14 @@ export function UsageStatsView({ className }: { className?: string }): React.Rea
   // Read during render: a locale change re-renders through useI18n.
   const intlLocale = getCurrentIntlLocale();
   const projects = useProjectsInSidebarOrder(useProjectsStore((store) => store.projects));
-  const [range, setRange] = React.useState<UsageRange>('30d');
+  const range = useUIStore((store) => store.usageStatsRange);
+  const setRange = useUIStore((store) => store.setUsageStatsRange);
+  const billingDay = useUIStore((store) => store.usageBillingDay);
+  const setBillingDay = useUIStore((store) => store.setUsageBillingDay);
   const [projectChoice, setProjectChoice] = React.useState<string>(ALL_PROJECTS);
   // A project removed from the list while chosen falls back to all projects.
   const selectedProject = projects.find((project) => project.id === projectChoice) ?? null;
-  const { entry, refresh, tools } = useUsageStats(range, selectedProject?.path ?? null);
+  const { entry, refresh, tools } = useUsageStats(range, selectedProject?.path ?? null, billingDay);
   const timeFormatPreference = useUIStore((store) => store.timeFormatPreference);
   const stats = entry?.stats ?? null;
   const loading = entry?.loading ?? true;
@@ -136,6 +142,9 @@ export function UsageStatsView({ className }: { className?: string }): React.Rea
             aria-label={t('usageStats.range.label')}
             options={USAGE_RANGES.map((option) => ({ value: option, label: t(RANGE_LABEL_KEYS[option]) }))}
           />
+          {range === 'cycle' || range === 'lastCycle' ? (
+            <BillingDayPicker value={billingDay} onChange={setBillingDay} />
+          ) : null}
           <Select value={selectedProject ? selectedProject.id : ALL_PROJECTS} onValueChange={setProjectChoice}>
             <SelectTrigger className="w-fit min-w-[140px] max-w-64" aria-label={t('usageStats.scope.label')}>
               <SelectValue>

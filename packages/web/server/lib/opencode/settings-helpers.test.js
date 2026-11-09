@@ -350,6 +350,19 @@ describe('settings helpers', () => {
     expect(helpers.sanitizeSettingsUpdate({ inputHistoryLimit: Number.NEGATIVE_INFINITY })).toEqual({});
   });
 
+  it('accepts usage stats range and billing day, and drops invalid ones', () => {
+    const helpers = createTestHelpers();
+
+    expect(helpers.sanitizeSettingsUpdate({ usageStatsRange: 'lastCycle', usageBillingDay: 20 })).toEqual({
+      usageStatsRange: 'lastCycle',
+      usageBillingDay: 20,
+    });
+    expect(helpers.sanitizeSettingsUpdate({ usageBillingDay: 0 })).toEqual({ usageBillingDay: 1 });
+    expect(helpers.sanitizeSettingsUpdate({ usageBillingDay: 40 })).toEqual({ usageBillingDay: 31 });
+    expect(helpers.sanitizeSettingsUpdate({ usageStatsRange: '14d', usageBillingDay: '20' })).toEqual({});
+    expect(helpers.sanitizeSettingsUpdate({ usageBillingDay: Number.NaN })).toEqual({});
+  });
+
   it('rejects invalid inputHistoryScope values', () => {
     const helpers = createTestHelpers();
 
@@ -918,7 +931,7 @@ describe('settings registry gate', () => {
     stickyUserHeader: true, promptNavigatorEnabled: true, wideChatLayoutEnabled: true, showSplitAssistantMessageActions: true, showToolFileIcons: true,
     selectionApprovalText: 'Agreed.',
     codeBlockLineWrap: true, tableCellWrap: true, copyMessagesAsPlainText: true, showTurnChangedFiles: true, toolJsonViewMode: 'raw',
-    timeFormatPreference: '24h', weekStartPreference: 'monday', messageStreamTransport: 'ws', diffLayoutPreference: 'inline', diffWrapLines: true, diffHideWhitespace: true,
+    timeFormatPreference: '24h', weekStartPreference: 'monday', usageStatsRange: 'cycle', usageBillingDay: 20, messageStreamTransport: 'ws', diffLayoutPreference: 'inline', diffWrapLines: true, diffHideWhitespace: true,
     gitChangesViewMode: 'tree', gitmojiEnabled: true, defaultFileViewerPreview: true, directoryShowHidden: true, filesViewShowGitignored: true,
     fileEditorKeymap: 'vim', fileEditorVimMappings: 'inoremap jk <Esc>', autoSaveEnabled: true, fileEditorWrapLines: false, confirmFileTreeMove: false, layoutAnimations: false, openLinksInBrowserPanel: true, liveBrowserTabLimit: 8, openTrackerLinksOnBoard: true, fileTreeSide: 'left', autoCreateWorktree: true, sessionTabsEnabled: true, sessionTabsPerWorkspace: true,
     allowPromptingSubagentSessions: true, inputSpellcheckEnabled: true, enterToSend: true, enterToSendConfigured: true, mobileReturnKeySends: true,

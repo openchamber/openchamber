@@ -16,6 +16,7 @@ const settingsRegistry = createRequire(import.meta.url)('./settings-registry.jso
 // The sidebar's sections and pin lists, the same shapes the UI keeps
 // (packages/ui/src/lib/sidebarSections.ts, which also restores missing built-in
 // sections on read). The server keeps what is well formed and drops the rest.
+const USAGE_STATS_RANGES = ['1d', '7d', '30d', '90d', 'cycle', 'lastCycle', 'all'];
 const SIDEBAR_BUILTIN_SECTION_IDS = ['chats', 'pinned', 'work', 'projects'];
 const sidebarSectionIdSchema = z.string().trim().min(1).max(64);
 const sidebarSectionNameSchema = z.string().trim().min(1).transform((value) => value.slice(0, 60));
@@ -966,6 +967,12 @@ export const createSettingsHelpers = (dependencies) => {
       if (mode === 'auto' || mode === 'sunday' || mode === 'monday') {
         result.weekStartPreference = mode;
       }
+    }
+    if (USAGE_STATS_RANGES.includes(candidate.usageStatsRange)) {
+      result.usageStatsRange = candidate.usageStatsRange;
+    }
+    if (Number.isFinite(candidate.usageBillingDay)) {
+      result.usageBillingDay = Math.max(1, Math.min(31, Math.round(candidate.usageBillingDay)));
     }
     if (typeof candidate.chatRenderMode === 'string') {
       const mode = candidate.chatRenderMode.trim();

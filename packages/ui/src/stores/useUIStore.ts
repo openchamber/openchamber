@@ -39,6 +39,7 @@ import {
   type MovedZoneViews,
 } from '@/lib/workspace/zones';
 import { sanitizeWorkStatusSectionOrder, type WorkStatusPanelSectionId } from '@/components/chat/work-status/sections';
+import type { UsageRange } from '@/components/views/usage/usageStatsModel';
 
 export type PendingDiffScope = 'working' | 'staged' | 'turn' | 'branch' | 'commit' | 'pr';
 export type { ContextPanelMode };
@@ -1215,6 +1216,8 @@ interface UIStore {
   showTurnChangedFiles: boolean;
   timeFormatPreference: TimeFormatPreference;
   weekStartPreference: WeekStartPreference;
+  usageStatsRange: UsageRange;
+  usageBillingDay: number;
   desktopWindowControlsPosition: DesktopWindowControlsPosition;
   desktopWindowControlsStyle: DesktopWindowControlsStyle;
   mermaidRenderingMode: MermaidRenderingMode;
@@ -1499,6 +1502,8 @@ interface UIStore {
   setShowTurnChangedFiles: (value: boolean) => void;
   setTimeFormatPreference: (value: TimeFormatPreference) => void;
   setWeekStartPreference: (value: WeekStartPreference) => void;
+  setUsageStatsRange: (value: UsageRange) => void;
+  setUsageBillingDay: (value: number) => void;
   setDesktopWindowControlsPosition: (value: DesktopWindowControlsPosition) => void;
   setDesktopWindowControlsStyle: (value: DesktopWindowControlsStyle) => void;
   setMermaidRenderingMode: (value: MermaidRenderingMode) => void;
@@ -1755,6 +1760,8 @@ export const useUIStore = create<UIStore>()(
         showTurnChangedFiles: false,
         timeFormatPreference: 'auto',
         weekStartPreference: 'auto',
+        usageStatsRange: '30d',
+        usageBillingDay: 1,
         desktopWindowControlsPosition: 'right',
         desktopWindowControlsStyle: 'classic',
         mermaidRenderingMode: 'svg',
@@ -3501,6 +3508,12 @@ export const useUIStore = create<UIStore>()(
         setWeekStartPreference: (value) => {
           set({ weekStartPreference: value });
         },
+        setUsageStatsRange: (value) => {
+          set({ usageStatsRange: value });
+        },
+        setUsageBillingDay: (value) => {
+          set({ usageBillingDay: value });
+        },
         setDesktopWindowControlsPosition: (value) => {
           set({ desktopWindowControlsPosition: value === 'left' ? 'left' : 'right' });
         },
@@ -4005,6 +4018,8 @@ export const useUIStore = create<UIStore>()(
           showTurnChangedFiles: state.showTurnChangedFiles,
           timeFormatPreference: state.timeFormatPreference,
           weekStartPreference: state.weekStartPreference,
+          usageStatsRange: state.usageStatsRange,
+          usageBillingDay: state.usageBillingDay,
           desktopWindowControlsPosition: state.desktopWindowControlsPosition,
           desktopWindowControlsStyle: state.desktopWindowControlsStyle,
           inputBarOffset: state.inputBarOffset,

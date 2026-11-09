@@ -464,6 +464,12 @@
     "weekStartPreference": {
       "scope": "profile"
     },
+    "usageStatsRange": {
+      "scope": "profile"
+    },
+    "usageBillingDay": {
+      "scope": "profile"
+    },
     "messageStreamTransport": {
       "scope": "profile"
     },

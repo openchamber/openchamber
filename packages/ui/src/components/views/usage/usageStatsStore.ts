@@ -4,23 +4,24 @@ import { create } from 'zustand';
 import { fetchUsageStats, fetchUsageTools, resolveUsageProjectID, type UsageStats, type UsageTools } from '@/lib/opencode/session-stats';
 import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
 
-import { isSameLocalDay, rangeStart, type UsageRange } from './usageStatsModel';
+import { isSameLocalDay, rangeWindow, type UsageRange } from './usageStatsModel';
 
 /**
  * In-memory cache of Stats page reports for the app session, one entry per
- * (runtime, range, project). Reopening the page or going back to a filter
- * shows the cached report without refetching; only a key with nothing cached
- * loads on its own, and the refresh button forces a new read. A runtime
- * switch drops every entry and ignores answers still in flight.
+ * (runtime, range, project), plus the billing day for the cycle ranges.
+ * Reopening the page or going back to a filter shows the cached report
+ * without refetching; only a key with nothing cached loads on its own, and
+ * the refresh button forces a new read. A runtime switch drops every entry
+ * and ignores answers still in flight.
  *
- * `7d`/`30d` are relative to now: an entry reports the range it was fetched
- * for (`stats.range`) and when (`fetchedAt`), which the page shows.
+ * Every range except `all` is relative to now: an entry reports the range it
+ * was fetched for (`stats.range`) and when (`fetchedAt`), which the page shows.
  *
  * `1d` is the one range that expires: its name says today, so a report read on
  * an earlier local day is dropped and read again, whether or not it was forced.
  */
 
-export type UsageStatsRequest = { range: UsageRange; projectDirectory: string | null };
+export type UsageStatsRequest = { range: UsageRange; projectDirectory: string | null; billingDay: number };
 
 export type UsageStatsEntry = {
   /** Last successful report; kept on screen through refreshes and failed refreshes. */
@@ -52,8 +53,10 @@ export type UsageToolsFetcher = (
   signal: AbortSignal,
 ) => Promise<UsageTools>;
 
-export const usageStatsKey = (runtimeKey: string, request: UsageStatsRequest): string =>
-  `${runtimeKey}::${request.range}::${request.projectDirectory ?? '__all__'}`;
+export const usageStatsKey = (runtimeKey: string, request: UsageStatsRequest): string => {
+  const cycleDay = request.range === 'cycle' || request.range === 'lastCycle' ? `::day${request.billingDay}` : '';
+  return `${runtimeKey}::${request.range}${cycleDay}::${request.projectDirectory ?? '__all__'}`;
+};
 
 type UsageStatsStore = {
   entries: Record<string, UsageStatsEntry>;
@@ -81,13 +84,13 @@ type UsageStatsStore = {
 
 const viewerTimeZone = (): string => Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
 
-const fetchFromOpencode: UsageStatsFetcher = async ({ range, projectDirectory }, signal) => {
+const fetchFromOpencode: UsageStatsFetcher = async ({ range, projectDirectory, billingDay }, signal) => {
   // The `project` filter takes OpenCode's project id, which only OpenCode
   // knows: ask it for the id of the project's directory. A failed lookup is
   // an error for this choice, never an unfiltered or empty report.
   const projectID = projectDirectory ? await resolveUsageProjectID(projectDirectory) : undefined;
   signal.throwIfAborted();
-  return fetchUsageStats({ from: rangeStart(range, new Date()), projectID, timezone: viewerTimeZone() }, signal);
+  return fetchUsageStats({ ...rangeWindow(range, new Date(), billingDay), projectID, timezone: viewerTimeZone() }, signal);
 };
 
 const fetchToolsFromOpencode: UsageToolsFetcher = async ({ projectDirectory }, window, signal) => {

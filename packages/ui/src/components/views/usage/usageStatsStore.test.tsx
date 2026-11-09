@@ -53,8 +53,8 @@ function setup(initialNow = 1000) {
   };
 }
 
-const A: UsageStatsRequest = { range: '7d', projectDirectory: null };
-const B: UsageStatsRequest = { range: '30d', projectDirectory: '/code/app' };
+const A: UsageStatsRequest = { range: '7d', projectDirectory: null, billingDay: 1 };
+const B: UsageStatsRequest = { range: '30d', projectDirectory: '/code/app', billingDay: 1 };
 const entry = (ctx: ReturnType<typeof setup>, request: UsageStatsRequest, runtime = 'runtime-a') =>
   ctx.store.getState().entries[usageStatsKey(runtime, request)];
 
@@ -63,6 +63,13 @@ describe('usage stats cache', () => {
     expect(usageStatsKey('r', A)).not.toBe(usageStatsKey('r', { ...A, range: '30d' }));
     expect(usageStatsKey('r', A)).not.toBe(usageStatsKey('r', { ...A, projectDirectory: '/x' }));
     expect(usageStatsKey('r', A)).not.toBe(usageStatsKey('s', A));
+  });
+
+  test('keys cycle ranges by billing day and other ranges without it', () => {
+    const cycle: UsageStatsRequest = { ...A, range: 'cycle', billingDay: 20 };
+    expect(usageStatsKey('r', cycle)).not.toBe(usageStatsKey('r', { ...cycle, billingDay: 21 }));
+    expect(usageStatsKey('r', cycle)).not.toBe(usageStatsKey('r', { ...cycle, range: 'lastCycle' }));
+    expect(usageStatsKey('r', A)).toBe(usageStatsKey('r', { ...A, billingDay: 20 }));
   });
 
   test('fetches a key once and serves it from cache until forced', async () => {
@@ -116,7 +123,7 @@ describe('usage stats cache', () => {
 });
 
 describe('today across local midnight', () => {
-  const TODAY: UsageStatsRequest = { range: '1d', projectDirectory: null };
+  const TODAY: UsageStatsRequest = { range: '1d', projectDirectory: null, billingDay: 1 };
   const lateEvening = new Date(2026, 10, 7, 23, 59).getTime();
   const afterMidnight = new Date(2026, 10, 8, 0, 1).getTime();
 
