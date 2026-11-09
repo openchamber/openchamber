@@ -361,6 +361,38 @@ same tap, and phones could not open it at all. On desktop the preview's pencil
 edits the comment in place; on mobile it opens the comment shell (see "Mobile
 comment mode").
 
+A draft can arrive already being written: one filed by a surface that lives
+elsewhere (a VS Code code comment whose text is written in chat) carries
+`composing: true`, and that flag is the whole mechanism — while it is set, the
+draft's field is open. It is typed in `comments/CommentInputBar`, the same glass
+pill as the text-selection comment field, anchored where the chip preview opens;
+its preview card is not shown while it is being written. The bar states what
+the comment attaches to through its placeholder (the shared "Comment on {file},
+line {line}" title).
+
+The draft owns the text: every keystroke is written to the store, so a reload, a
+session switch or a surface swap loses nothing, and the comment's editor thread
+follows the text as it grows. Enter or the attach button clears `composing` and
+closes the field; clicking away does the same through the field's blur; Escape
+removes the draft. An empty draft that is finished is removed too, since a
+comment with nothing in it has nothing to send. Every other draft survives an
+empty edit, because its attachment can be the quote itself; a non-composing
+draft still opens its group and edits in place in the preview.
+
+While the draft is composing, the layout switches to the chat, including out of
+a run overview: a field mounted into a hidden column cannot take the keyboard.
+
+### Why a composing draft is typed in the floating bar and not the preview card
+
+The card is a stack: a numbered header, the selected text, and the comment
+field. A VS Code code comment arrives with its text still to be written, so
+the quote and the header repeat what the editor and the chip row already
+show, and the box reads heavier than the comment deserves. The text-selection
+menu already has a field made for exactly this one job — one glass pill, the
+attach button, Enter to save — so the composer uses the same
+`comments/CommentInputBar` for `composing` drafts, anchored in the card's
+slot, and keeps the card for drafts written elsewhere that only need review.
+
 ## Layers
 
 | Directory | Owns |

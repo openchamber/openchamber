@@ -19,6 +19,7 @@ import React from 'react';
 import { createPortal, flushSync } from 'react-dom';
 import { AnimatePresence } from 'motion/react';
 
+import { CommentInputBar } from '@/components/comments/CommentInputBar';
 import { CommentTextEditor } from '@/components/comments/CommentTextEditor';
 import { useCommentImagePaste } from '@/components/comments/useCommentImagePaste';
 import { Icon } from '@/components/icon/Icon';
@@ -57,6 +58,8 @@ interface ComposerContextChipsProps {
     previewHost: HTMLElement | null;
     /** Mobile edits a comment in the composer's comment shell, not in the preview. */
     isMobile: boolean;
+    /** Whether the chat this composer belongs to is on screen. */
+    surfaceActive: boolean;
 }
 
 /** Chip groups: every terminal selection is its own chip; the rest group by kind. */
@@ -244,7 +247,47 @@ const DraftPreviewEntry: React.FC<{
     );
 };
 
-function ComposerContextChipsView({ draftTarget, colors, previewHost, isMobile }: ComposerContextChipsProps) {
+/**
+ * The field for a draft a surface filed ready to be typed in (`composing`).
+ *
+ * It is the text-selection comment pill, anchored where the chip preview
+ * opens. The draft owns the text: every keystroke is written to the store, so
+ * a reload or a surface swap loses nothing, and the flag clears when the
+ * comment is finished or cancelled. There is no separate "open this draft"
+ * request — a composing draft is one that is being written.
+ */
+const ComposingCommentBar: React.FC<{
+    draft: InlineCommentDraft;
+    placeholder: string;
+    onText: (text: string) => void;
+    onFinish: () => void;
+    onCancel: () => void;
+}> = ({ draft, placeholder, onText, onFinish, onCancel }) => {
+    const imagePaste = useCommentImagePaste();
+    const finish = () => {
+        void imagePaste.attachCitedImages(draft.text);
+        onFinish();
+    };
+    const cancel = () => {
+        imagePaste.discardPastedImages();
+        onCancel();
+    };
+
+    return (
+        <CommentInputBar
+            value={draft.text}
+            onChange={onText}
+            onSubmit={finish}
+            onCancel={cancel}
+            onBlur={finish}
+            imagePaste={imagePaste}
+            placeholder={placeholder}
+            className="w-full"
+        />
+    );
+};
+
+function ComposerContextChipsView({ draftTarget, colors, previewHost, isMobile, surfaceActive }: ComposerContextChipsProps) {
     const { t } = useI18n();
     const draftKey = draftTarget
         ? getInlineCommentDraftKey(getRuntimeKey(), draftTarget.directory, draftTarget.sessionKey)
@@ -262,6 +305,11 @@ function ComposerContextChipsView({ draftTarget, colors, previewHost, isMobile }
     const attachedFiles = useInputStore((state) => state.attachedFiles);
     const attachmentFilenames = React.useMemo(() => attachedFiles.map((file) => file.filename), [attachedFiles]);
     const mobileComment = useMobileCommentComposerController();
+
+    /** Ends an in-card edit. The card never drops a draft; only its own X does. */
+    const endEdit = React.useCallback((draftId: string) => {
+        setEditingDraftId((current) => (current === draftId ? null : current));
+    }, []);
 
     const [openGroupKey, setOpenGroupKey] = React.useState<string | null>(null);
     const [editingDraftId, setEditingDraftId] = React.useState<string | null>(null);
@@ -326,6 +374,8 @@ function ComposerContextChipsView({ draftTarget, colors, previewHost, isMobile }
             const target = event.target as Node;
             if (containerRef.current?.contains(target) || previewRef.current?.contains(target)) return;
             setOpenGroupKey(null);
+            // Only the preview closes here: the field's own blur commits what
+            // was typed and ends the edit, so a just-typed comment is kept.
             setEditingDraftId(null);
         };
         document.addEventListener('pointerdown', handlePointerDown);
@@ -369,6 +419,30 @@ function ComposerContextChipsView({ draftTarget, colors, previewHost, isMobile }
             }
         }
     }, [t, termOf]);
+
+    /**
+     * Opens a draft's card for editing. Mobile writes in the comment shell
+     * instead, which mounts and focuses inside the tap for the soft keyboard.
+     */
+    const startEdit = React.useCallback((draft: InlineCommentDraft) => {
+        if (!draftTarget) return;
+        if (!isMobile || !mobileComment) {
+            setEditingDraftId(draft.id);
+            return;
+        }
+        // flushSync mounts and focuses the shell inside the tap, as iOS requires
+        // for the soft keyboard (see composer/comment/).
+        const opened = flushSync(() => mobileComment.openEdit({
+            target: draftTarget,
+            draftId: draft.id,
+            // Shown in the shell's quote row only; a save writes nothing but
+            // the text. Without quoted text the row names the item, as the
+            // preview does.
+            quote: { plainText: draft.code.trim() ? draft.code : titleFor(draft), markdownText: draft.code, messageId: null },
+            text: draft.text,
+        }));
+        if (opened) setOpenGroupKey(null);
+    }, [draftTarget, isMobile, mobileComment, titleFor]);
 
     const groups = React.useMemo<ChipGroup[]>(() => {
         const result: ChipGroup[] = [];
@@ -446,6 +520,11 @@ function ComposerContextChipsView({ draftTarget, colors, previewHost, isMobile }
     if (!draftTarget || drafts.length === 0) return null;
 
     const openGroup = openGroupKey ? groups.find((group) => group.key === openGroupKey) ?? null : null;
+    // A composing draft is being written right now: its field shows until the
+    // text is committed or the draft is dropped.
+    const composingDraft = surfaceActive
+        ? drafts.find((draft) => draft.composing) ?? null
+        : null;
 
     return (
         <div className="flex flex-wrap items-center gap-2 pt-2" ref={containerRef}>
@@ -453,7 +532,31 @@ function ComposerContextChipsView({ draftTarget, colors, previewHost, isMobile }
                 // AnimatePresence keeps the last rendered preview mounted
                 // while it fades out after the group closes.
                 <AnimatePresence>
-                {openGroup ? (
+                {composingDraft ? (
+                <div
+                    key={`composing-${composingDraft.id}`}
+                    ref={previewRef}
+                    // The same slot as the preview, so the field appears where
+                    // the chip's card would.
+                    className="absolute bottom-full inset-s-0 z-50 mb-1.5 w-full max-w-[480px]"
+                >
+                <GlassPopupMotion className="origin-bottom-left rtl:origin-bottom-right">
+                    <ComposingCommentBar
+                        draft={composingDraft}
+                        placeholder={titleFor(composingDraft)}
+                        onText={(text) => updateDraft(draftTarget, composingDraft.id, { text })}
+                        onFinish={() => {
+                            if (!composingDraft.text.trim()) {
+                                removeDraft(draftTarget, composingDraft.id);
+                                return;
+                            }
+                            updateDraft(draftTarget, composingDraft.id, { composing: false });
+                        }}
+                        onCancel={() => removeDraft(draftTarget, composingDraft.id)}
+                    />
+                </GlassPopupMotion>
+                </div>
+                ) : openGroup ? (
                 <div
                     key="context-preview"
                     ref={previewRef}
@@ -482,27 +585,8 @@ function ComposerContextChipsView({ draftTarget, colors, previewHost, isMobile }
                                 index={index}
                                 title={titleFor(draft)}
                                 editing={editingDraftId === draft.id}
-                                onStartEdit={() => {
-                                    if (!isMobile || !mobileComment) {
-                                        setEditingDraftId(draft.id);
-                                        return;
-                                    }
-                                    // flushSync mounts and focuses the shell
-                                    // inside the tap, as iOS requires for the
-                                    // soft keyboard (see composer/comment/).
-                                    const opened = flushSync(() => mobileComment.openEdit({
-                                        target: draftTarget,
-                                        draftId: draft.id,
-                                        // Shown in the shell's quote row only;
-                                        // a save writes nothing but the text.
-                                        // Without quoted text the row names
-                                        // the item, as the preview does.
-                                        quote: { plainText: draft.code.trim() ? draft.code : titleFor(draft), markdownText: draft.code, messageId: null },
-                                        text: draft.text,
-                                    }));
-                                    if (opened) setOpenGroupKey(null);
-                                }}
-                                onEndEdit={() => setEditingDraftId((current) => (current === draft.id ? null : current))}
+                                onStartEdit={() => startEdit(draft)}
+                                onEndEdit={() => endEdit(draft.id)}
                                 onRemove={() => removeDraft(draftTarget, draft.id)}
                                 onSaveComment={editableSource(draft.source)
                                     ? (text) => updateDraft(draftTarget, draft.id, { text })

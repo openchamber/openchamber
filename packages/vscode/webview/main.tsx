@@ -1605,6 +1605,7 @@ onCommand('addLineComment', (payload) => {
     language?: unknown;
     comment?: unknown;
     targetSessionId?: unknown;
+    openInComposer?: unknown;
   };
 
   // The editor thread mints the id so it can track its own draft without a
@@ -1621,6 +1622,9 @@ onCommand('addLineComment', (payload) => {
   const code = typeof record.code === 'string' ? record.code : '';
   const language = typeof record.language === 'string' ? record.language : 'text';
   const comment = typeof record.comment === 'string' ? record.comment.trim() : '';
+  // The comment's text is written here rather than in the editor thread; open
+  // the card it becomes so the keyboard lands in it.
+  const openInComposer = record.openInComposer === true;
 
   if (!relativePath) {
     console.warn('[openchamber] inline comment arrived without a path; dropping', record);
@@ -1682,6 +1686,9 @@ onCommand('addLineComment', (payload) => {
       code,
       language,
       text: comment,
+      // The card this draft becomes can be cancelled while it is still empty;
+      // the draft it filed goes with it.
+      composing: openInComposer,
     }, { written: true });
   });
 });

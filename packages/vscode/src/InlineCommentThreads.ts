@@ -15,12 +15,17 @@
 
 import * as vscode from 'vscode';
 
-import { DELIVERY_CONFIRMATION_TIMEOUT_MS, canCommentOnDocument, nextDraftId, reconcileThreadFate, resolveCommentFilePath, resolveCommentOrigin, selectionLineRange, shouldAbandonUnconfirmed, shouldDisposeOnEmptyBody, snapshotOwnsThread, type CommentOrigin, type LineRange } from './inlineCommentSelection';
+import { DELIVERY_CONFIRMATION_TIMEOUT_MS, canCommentOnDocument, composingThreadFate, nextDraftId, reconcileThreadFate, resolveCommentFilePath, resolveCommentOrigin, selectionLineRange, shiftLineRangeOnEdits, shouldAbandonUnconfirmed, shouldDisposeOnEmptyBody, snapshotOwnsThread, type CommentOrigin, type LineEdit, type LineRange } from './inlineCommentSelection';
 
 // Also written literally in package.json, which gates the thread menus with
 // `commentController == openchamber.inlineComments`. JSON cannot import, so the
 // two have to be kept in step by hand.
 const INLINE_COMMENT_CONTROLLER_ID = 'openchamber.inlineComments';
+
+/** The setting that decides where a code comment's text is written. */
+export function writesInChatComposer(): boolean {
+    return vscode.workspace.getConfiguration('openchamber').get<string>('lineCommentPlacement') === 'chat';
+}
 
 export interface InlineCommentDraftPayload {
     draftId: string;
@@ -33,9 +38,13 @@ export interface InlineCommentDraftPayload {
     code: string;
     language: string;
     comment: string;
+    /** Whether the text is written in the chat composer instead of the editor thread. */
+    openInComposer?: boolean;
 }
 
 interface OpenChamberCommentThread extends vscode.CommentThread {
+    /** Whether the rendered comment still carries the "not delivered" label. */
+    commentPending?: boolean;
     draftId?: string;
     /** Diff identity captured while the thread's editor is authoritative. */
     commentOrigin?: CommentOrigin;
@@ -62,6 +71,24 @@ interface OpenChamberCommentThread extends vscode.CommentThread {
 
 /** Identifies one chat webview: a session panel id, or the sidebar. */
 export const SIDEBAR_SURFACE_ID = 'sidebar';
+
+/**
+ * A comment whose text is being written in the chat composer.
+ *
+ * Nothing is anchored in the editor until the draft has text, so this records
+ * what the thread will need when it appears.
+ */
+interface PendingComposition {
+    uri: vscode.Uri;
+    range: vscode.Range;
+    /** Captured while the editor is still active; the chat reveal moves focus away. */
+    origin: CommentOrigin;
+    /** The chat webview that accepted the draft; only its snapshots can decide this comment's fate. */
+    surfaceId: string;
+    /** Set once a snapshot has shown the draft, so a later absence means it was cancelled. */
+    confirmed?: boolean;
+    confirmationTimer?: ReturnType<typeof setTimeout>;
+}
 
 export interface InlineCommentThreadsOptions {
     /**
@@ -95,6 +122,9 @@ export interface InlineCommentThreadsOptions {
 export class InlineCommentThreads implements vscode.Disposable {
     private readonly controller: vscode.CommentController;
     private readonly threadsByDraftId = new Map<string, OpenChamberCommentThread>();
+    private readonly compositionsByDraftId = new Map<string, PendingComposition>();
+    /** Watches the documents of pending comments so their anchor lines keep up. */
+    private pendingAnchorListener: vscode.Disposable | undefined;
     private readonly options: InlineCommentThreadsOptions;
 
     constructor(options: InlineCommentThreadsOptions) {
@@ -103,11 +133,17 @@ export class InlineCommentThreads implements vscode.Disposable {
             INLINE_COMMENT_CONTROLLER_ID,
             'OpenChamber',
         );
-        // Any line of a workspace file can take a comment; the gutter `+`
-        // follows from this.
+        // Any line of a workspace file can take a comment, which is what puts
+        // the `+` in the gutter. That `+` is not a shortcut to the thread
+        // above: the workbench creates the thread itself through
+        // `createCommentThreadTemplate` and renders its own header and input,
+        // and an extension can neither observe nor restyle it. In `chat`
+        // placement the comment belongs in the composer, so the range is not
+        // offered rather than opening a box the setting opted out of.
         this.controller.commentingRangeProvider = {
             provideCommentingRanges: (document) => {
                 if (!this.canCommentOn(document.uri)) return [];
+                if (writesInChatComposer()) return [];
                 return [new vscode.Range(0, 0, Math.max(document.lineCount - 1, 0), 0)];
             },
         };
@@ -141,6 +177,67 @@ export class InlineCommentThreads implements vscode.Disposable {
     }
 
     /**
+     * Opens a comment that is written in the chat composer instead of here.
+     *
+     * The editor keeps the anchor: the thread appears on these lines as soon as
+     * the draft has text, and follows it from then on. The note itself is typed
+     * above the composer, where the composer's own field lives.
+     */
+    public async composeInChat(uri: vscode.Uri, range: vscode.Range): Promise<void> {
+        // Captured before the chat reveal: once the sidebar or a session panel
+        // takes focus, the active tab no longer names the diff pane the user
+        // commented on.
+        const origin = this.resolveOrigin(uri);
+        const { payload } = await this.buildPayload(uri, range, '', origin);
+        payload.openInComposer = true;
+
+        const surfaceId = await this.options.submitDraft(payload);
+        if (!surfaceId) {
+            this.options.reportUndelivered();
+            return;
+        }
+
+        const pending: PendingComposition = {
+            uri,
+            range,
+            origin,
+            surfaceId,
+            confirmationTimer: setTimeout(() => {
+                const current = this.compositionsByDraftId.get(payload.draftId);
+                if (!current || current.confirmed) return;
+                this.compositionsByDraftId.delete(payload.draftId);
+                this.options.removeDraft(payload.draftId);
+                this.options.reportUndelivered();
+            }, DELIVERY_CONFIRMATION_TIMEOUT_MS),
+        };
+        this.compositionsByDraftId.set(payload.draftId, pending);
+        this.pendingAnchorListener ??= vscode.workspace.onDidChangeTextDocument((event) => {
+            this.shiftPendingAnchors(event.document.uri, event.contentChanges);
+        });
+    }
+
+    /**
+     * Keeps a pending comment on the code it was written against.
+     *
+     * The editor has no thread for it yet, so VS Code cannot move the anchor;
+     * an agent editing the file while the comment is typed would otherwise
+     * leave the thread on whatever now occupies those lines.
+     */
+    private shiftPendingAnchors(uri: vscode.Uri, changes: readonly vscode.TextDocumentContentChangeEvent[]): void {
+        if (changes.length === 0) return;
+        const edits: LineEdit[] = changes.map((change) => ({
+            startLine: change.range.start.line + 1,
+            endLine: change.range.end.line + 1,
+            insertedLines: change.text.split('\n').length,
+        }));
+        for (const pending of this.compositionsByDraftId.values()) {
+            if (pending.uri.toString() !== uri.toString()) continue;
+            const lines = shiftLineRangeOnEdits(selectionLineRange(pending.range), edits);
+            pending.range = new vscode.Range(lines.startLine - 1, 0, lines.endLine - 1, 0);
+        }
+    }
+
+    /**
      * Turns a typed reply into a draft the composer will send.
      *
      * An empty body is a cancel: the thread is disposed rather than left behind
@@ -168,32 +265,12 @@ export class InlineCommentThreads implements vscode.Disposable {
         // diff pane where the user submitted it.
         const origin = thread.commentOrigin ?? this.resolveOrigin(thread.uri);
         thread.commentOrigin = origin;
-        const document = await vscode.workspace.openTextDocument(thread.uri);
-        const lines = selectionLineRange(range);
-        const draftId = nextDraftId(Date.now(), Math.random());
+        const { payload, lines } = await this.buildPayload(thread.uri, range, reply.text, origin);
 
         // The gutter `+` produces a thread VS Code created, which never went
         // through openThread and so carries no label. Set it here so both entry
         // points read the same.
         thread.label = this.options.strings.threadLabel(lines);
-
-        // Quote the pane the user commented on, but name the real file: a diff's
-        // original side is a `git:` document, and its raw path is not something
-        // the composer can match against the workspace.
-        const filePath = resolveCommentFilePath(thread.uri.fsPath, thread.uri.query);
-        const fileUri = vscode.Uri.file(filePath);
-
-        const payload: InlineCommentDraftPayload = {
-            draftId,
-            filePath,
-            relativePath: vscode.workspace.asRelativePath(fileUri, false),
-            ...origin,
-            startLine: lines.startLine,
-            endLine: lines.endLine,
-            code: document.getText(range),
-            language: document.languageId,
-            comment: reply.text,
-        };
 
         const surfaceId = await this.options.submitDraft(payload);
         if (!surfaceId) {
@@ -203,18 +280,114 @@ export class InlineCommentThreads implements vscode.Disposable {
             return;
         }
 
+        this.markAttached(thread, surfaceId, payload.draftId, reply.text);
+    }
+
+    /**
+     * Turns a draft written in the composer into an editor thread the first time
+     * it carries text, and forgets one cancelled before anything was written.
+     */
+    private reconcileCompositions(surfaceId: string, byId: ReadonlyMap<string, string>): void {
+        for (const [draftId, pending] of [...this.compositionsByDraftId]) {
+            if (pending.surfaceId !== surfaceId) continue;
+            const text = byId.get(draftId);
+
+            if (text !== undefined && !pending.confirmed) {
+                pending.confirmed = true;
+                if (pending.confirmationTimer) {
+                    clearTimeout(pending.confirmationTimer);
+                    pending.confirmationTimer = undefined;
+                }
+            }
+
+            const fate = composingThreadFate(text, Boolean(pending.confirmed));
+            if (fate === 'wait') continue;
+
+            this.compositionsByDraftId.delete(draftId);
+            if (pending.confirmationTimer) clearTimeout(pending.confirmationTimer);
+            if (this.compositionsByDraftId.size === 0) {
+                this.pendingAnchorListener?.dispose();
+                this.pendingAnchorListener = undefined;
+            }
+            if (fate === 'create' && text !== undefined) this.createComposedThread(draftId, pending, text);
+        }
+    }
+
+    /** The thread a comment written in the composer anchors to, once it has text. */
+    private createComposedThread(draftId: string, pending: PendingComposition, text: string): void {
+        // SAFETY: this controller creates and owns the thread; the added fields
+        // are optional extension-local bookkeeping on VS Code's mutable object.
+        const thread = this.controller.createCommentThread(pending.uri, pending.range, []) as OpenChamberCommentThread;
+        thread.commentOrigin = pending.origin;
+        thread.label = this.options.strings.threadLabel(selectionLineRange(pending.range));
+        thread.collapsibleState = vscode.CommentThreadCollapsibleState.Expanded;
+        // The snapshot that carried the text already confirmed the delivery.
+        thread.confirmed = true;
+        this.markAttached(thread, pending.surfaceId, draftId, text);
+    }
+
+    /** Turns an editor thread into the read-only view of an attached draft. */
+    private markAttached(thread: OpenChamberCommentThread, surfaceId: string, draftId: string, text: string): void {
         thread.surfaceId = surfaceId;
         thread.draftId = draftId;
-        thread.commentBody = reply.text;
+        thread.commentBody = text;
         thread.canReply = false;
         thread.contextValue = 'openchamberAttached';
-        thread.comments = [this.buildComment(reply.text)];
+        thread.commentPending = !thread.confirmed;
+        thread.comments = [this.buildComment(text, thread.commentPending)];
         this.threadsByDraftId.set(draftId, thread);
+        this.startConfirmationTimer(thread);
+    }
 
-        // Accepting the draft is not the same as it landing. A panel whose
-        // webview never boots leaves this thread showing "Not sent yet" for a
-        // comment that will never be sent and cannot be rewritten, so it is
-        // given up on rather than left as a standing promise.
+    /**
+     * The draft a comment becomes, wherever its text is written.
+     *
+     * The origin is passed in rather than resolved here: a caller that already
+     * captured the diff identity must not have it replaced by whatever tab is
+     * active after an await.
+     */
+    private async buildPayload(
+        uri: vscode.Uri,
+        range: vscode.Range,
+        text: string,
+        origin: CommentOrigin,
+    ): Promise<{ payload: InlineCommentDraftPayload; lines: LineRange }> {
+        const document = await vscode.workspace.openTextDocument(uri);
+        const lines = selectionLineRange(range);
+
+        // Quote the pane the user commented on, but name the real file: a diff's
+        // original side is a `git:` document, and its raw path is not something
+        // the composer can match against the workspace.
+        const filePath = resolveCommentFilePath(uri.fsPath, uri.query);
+        const fileUri = vscode.Uri.file(filePath);
+
+        return {
+            lines,
+            payload: {
+                draftId: nextDraftId(Date.now(), Math.random()),
+                filePath,
+                relativePath: vscode.workspace.asRelativePath(fileUri, false),
+                ...origin,
+                startLine: lines.startLine,
+                endLine: lines.endLine,
+                code: document.getText(range),
+                language: document.languageId,
+                comment: text,
+            },
+        };
+    }
+
+    /**
+     * Gives up on a thread whose draft the composer never confirmed.
+     *
+     * Accepting the draft is not the same as it landing. A panel whose webview
+     * never boots leaves the thread showing "Not sent yet" for a comment that
+     * will never be sent and cannot be rewritten, so it is given up on rather
+     * than left as a standing promise.
+     */
+    private startConfirmationTimer(thread: OpenChamberCommentThread): void {
+        const draftId = thread.draftId;
+        if (thread.confirmed || !draftId) return;
         thread.confirmationTimer = setTimeout(() => {
             thread.confirmationTimer = undefined;
             if (!shouldAbandonUnconfirmed(thread.confirmed)) return;
@@ -258,6 +431,8 @@ export class InlineCommentThreads implements vscode.Disposable {
     public reconcile(surfaceId: string, drafts: ReadonlyArray<{ id: string; text: string }>): void {
         const byId = new Map(drafts.map((draft) => [draft.id, draft.text]));
 
+        this.reconcileCompositions(surfaceId, byId);
+
         for (const [draftId, thread] of [...this.threadsByDraftId]) {
             if (!snapshotOwnsThread(thread.surfaceId, surfaceId)) continue;
             const text = byId.get(draftId);
@@ -274,9 +449,10 @@ export class InlineCommentThreads implements vscode.Disposable {
                 clearTimeout(thread.confirmationTimer);
                 thread.confirmationTimer = undefined;
             }
-            if (text !== undefined && thread.commentBody !== text) {
+            if (text !== undefined && (thread.commentBody !== text || thread.commentPending)) {
                 thread.commentBody = text;
-                thread.comments = [this.buildComment(text)];
+                thread.commentPending = false;
+                thread.comments = [this.buildComment(text, false)];
             }
         }
     }
@@ -297,6 +473,12 @@ export class InlineCommentThreads implements vscode.Disposable {
     }
 
     public dispose(): void {
+        for (const pending of this.compositionsByDraftId.values()) {
+            if (pending.confirmationTimer) clearTimeout(pending.confirmationTimer);
+        }
+        this.compositionsByDraftId.clear();
+        this.pendingAnchorListener?.dispose();
+        this.pendingAnchorListener = undefined;
         for (const thread of this.threadsByDraftId.values()) {
             if (thread.confirmationTimer) clearTimeout(thread.confirmationTimer);
         }
@@ -304,7 +486,7 @@ export class InlineCommentThreads implements vscode.Disposable {
         this.controller.dispose();
     }
 
-    private buildComment(body: string): vscode.Comment {
+    private buildComment(body: string, pending = false): vscode.Comment {
         // The body is the user's own prose, not a document: rendering it as
         // Markdown would eat underscores and asterisks they meant literally,
         // and a comment on code is full of both.
@@ -315,7 +497,9 @@ export class InlineCommentThreads implements vscode.Disposable {
             body: rendered,
             mode: vscode.CommentMode.Preview,
             author: { name: this.options.strings.author, iconPath: this.options.avatar },
-            label: this.options.strings.notSent,
+            // Only while the composer has not confirmed it holds the draft:
+            // the label belongs to that delivery deadline, not to the message.
+            label: pending ? this.options.strings.notSent : undefined,
             contextValue: 'openchamberAttached',
         };
     }

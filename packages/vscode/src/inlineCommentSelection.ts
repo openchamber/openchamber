@@ -38,6 +38,45 @@ export function nextDraftId(now: number, randomFraction: number): string {
     return `icd-${now}-${randomFraction.toString(36).substring(2, 9)}`;
 }
 
+/**
+ * A text edit in line terms: the lines it replaces and the lines it inserts.
+ *
+ * Fed from VS Code's content changes so the pending anchor of a comment written
+ * in the composer follows the document until its thread exists.
+ */
+export interface LineEdit {
+    /** 1-based, inclusive: the first line the edit replaced. */
+    startLine: number;
+    /** 1-based, inclusive: the last line the edit replaced. */
+    endLine: number;
+    /** Lines the replacement text occupies; 1 for text without a newline. */
+    insertedLines: number;
+}
+
+/**
+ * Moves an anchor's lines across edits made while the comment is being typed.
+ *
+ * Edits entirely above the anchor shift it; edits below leave it alone. An edit
+ * that rewrites the anchored lines themselves cannot be followed line by line,
+ * so the comment moves to the first line of the rewrite instead of pointing at
+ * unrelated code.
+ */
+export function shiftLineRangeOnEdits(range: LineRange, edits: readonly LineEdit[]): LineRange {
+    let { startLine, endLine } = range;
+    for (const edit of [...edits].sort((left, right) => left.startLine - right.startLine)) {
+        const removedLines = edit.endLine - edit.startLine + 1;
+        const delta = edit.insertedLines - removedLines;
+        if (edit.endLine < startLine) {
+            startLine += delta;
+            endLine += delta;
+        } else if (edit.startLine <= endLine) {
+            startLine = edit.startLine;
+            endLine = edit.startLine;
+        }
+    }
+    return { startLine: Math.max(startLine, 1), endLine: Math.max(endLine, startLine, 1) };
+}
+
 /** An empty body is a cancel, not a comment worth keeping on screen. */
 export function shouldDisposeOnEmptyBody(body: string): boolean {
     return body.trim().length === 0;
@@ -196,4 +235,24 @@ export function reconcileThreadFate(text: string | undefined, confirmed: boolean
     if (text === undefined) return confirmed ? 'dispose' : 'wait';
     if (shouldDisposeOnEmptyBody(text)) return 'dispose';
     return 'show';
+}
+
+/** What a comment written in the composer asks of its editor anchor. */
+export type ComposingThreadFate = 'wait' | 'create' | 'drop';
+
+/**
+ * Decides when a comment written in the composer earns its editor thread.
+ *
+ * The draft exists before it has text, and the thread shows the comment on the
+ * code. An empty body says nothing — the composer's own rules discard one — so
+ * the anchor is created the first time the draft carries text. A draft that
+ * never arrives, or is cancelled before anything was written, leaves no thread
+ * behind.
+ *
+ * @param text the draft's text in the snapshot, or undefined when absent
+ * @param confirmed whether a snapshot has shown the draft at least once
+ */
+export function composingThreadFate(text: string | undefined, confirmed: boolean): ComposingThreadFate {
+    if (text === undefined) return confirmed ? 'drop' : 'wait';
+    return shouldDisposeOnEmptyBody(text) ? 'wait' : 'create';
 }

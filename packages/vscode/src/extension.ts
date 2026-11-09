@@ -8,7 +8,7 @@ import { configureProjectStartCommandSource, openCodeProjectStartCommandSource }
 import { startGlobalEventWatcher, stopGlobalEventWatcher, setChatViewProvider } from './sessionActivityWatcher';
 import { pathsEqualWithNormalizedDriveLetter } from './pathUtils';
 import { resolveWorkspaceFolders } from './workspaceResolver';
-import { InlineCommentThreads, SIDEBAR_SURFACE_ID } from './InlineCommentThreads';
+import { InlineCommentThreads, SIDEBAR_SURFACE_ID, writesInChatComposer } from './InlineCommentThreads';
 import { applyConnectAttemptTimeout } from './networkDefaults';
 import { disposeOutputChannel, getOutputChannel } from './outputChannel';
 import { stopGitProcesses } from './bridge-git-process-runtime';
@@ -615,7 +615,9 @@ export async function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(inlineCommentThreads);
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('openchamber.addLineComment', () => {
+    // The line-number menu passes the clicked line (1-based); the editor context
+    // menu passes only the resource. Every other entry has no argument.
+    vscode.commands.registerCommand('openchamber.addLineComment', async (context?: vscode.Uri | { uri: vscode.Uri; lineNumber: number }) => {
       const editor = vscode.window.activeTextEditor;
       if (!editor) {
         vscode.window.showWarningMessage(t('OpenChamber [Add Comment]: No active editor'));
@@ -627,7 +629,25 @@ export async function activate(context: vscode.ExtensionContext) {
         vscode.window.showWarningMessage(t('OpenChamber [Add Comment]: File is outside the workspace'));
         return;
       }
-      inlineCommentThreads.openThread(editor.document.uri, editor.selection);
+      // The line-number menu hands over `{ uri, lineNumber }` (1-based); the
+      // editor menus hand over the resource, and a bare invocation nothing.
+      const clickedLine = (() => {
+        if (!context || context instanceof vscode.Uri) return undefined;
+        const { lineNumber } = context;
+        if (Number.isInteger(lineNumber) && lineNumber >= 1) return lineNumber;
+        console.warn('[openchamber] addLineComment: no usable line number in the command argument', context);
+        return undefined;
+      })();
+      // The line's own text is what a line-number comment quotes; a zero-width
+      // range at column 0 would send the comment without any code.
+      const range = clickedLine === undefined
+        ? editor.selection
+        : editor.document.lineAt(Math.min(clickedLine, editor.document.lineCount) - 1).range;
+      if (writesInChatComposer()) {
+        await inlineCommentThreads.composeInChat(editor.document.uri, range);
+        return;
+      }
+      inlineCommentThreads.openThread(editor.document.uri, range);
     })
   );
 

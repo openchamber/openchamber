@@ -1,6 +1,6 @@
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { DELIVERY_CONFIRMATION_TIMEOUT_MS, broadcastRemoval, canCommentOnDocument, drainPending, dropPendingById, nextDraftId, reconcileThreadFate, resolveCommentFilePath, resolveCommentOrigin, selectionLineRange, shouldAbandonUnconfirmed, shouldDisposeOnEmptyBody, snapshotOwnsThread } from './inlineCommentSelection';
+import { DELIVERY_CONFIRMATION_TIMEOUT_MS, broadcastRemoval, canCommentOnDocument, composingThreadFate, drainPending, dropPendingById, nextDraftId, reconcileThreadFate, resolveCommentFilePath, resolveCommentOrigin, selectionLineRange, shiftLineRangeOnEdits, shouldAbandonUnconfirmed, shouldDisposeOnEmptyBody, snapshotOwnsThread } from './inlineCommentSelection';
 
 const selection = (startLine: number, startChar: number, endLine: number, endChar: number) => ({
     start: { line: startLine, character: startChar },
@@ -246,6 +246,27 @@ describe('reconcileThreadFate', () => {
     });
 });
 
+describe('composingThreadFate', () => {
+    test('a draft absent before it was ever seen is still in flight', () => {
+        assert.equal(composingThreadFate(undefined, false), 'wait');
+    });
+
+    test('a draft cancelled before anything was written leaves no thread', () => {
+        assert.equal(composingThreadFate(undefined, true), 'drop');
+    });
+
+    test('an empty draft is not an anchor yet', () => {
+        // The text is typed in the composer, so the draft exists first.
+        assert.equal(composingThreadFate('', false), 'wait');
+        assert.equal(composingThreadFate('   ', true), 'wait');
+    });
+
+    test('the first non-empty text creates the anchor', () => {
+        assert.equal(composingThreadFate('fix this', false), 'create');
+        assert.equal(composingThreadFate('fix this', true), 'create');
+    });
+});
+
 describe('shouldDisposeOnEmptyBody', () => {
     test('blank and whitespace-only bodies are a cancel', () => {
         assert.equal(shouldDisposeOnEmptyBody(''), true);
@@ -254,5 +275,36 @@ describe('shouldDisposeOnEmptyBody', () => {
 
     test('any real text is kept', () => {
         assert.equal(shouldDisposeOnEmptyBody(' fix this '), false);
+    });
+});
+
+describe('shiftLineRangeOnEdits', () => {
+    const edit = (startLine: number, endLine: number, insertedLines: number) => ({ startLine, endLine, insertedLines });
+
+    test('lines inserted above move the anchor down', () => {
+        assert.deepEqual(shiftLineRangeOnEdits({ startLine: 10, endLine: 12 }, [edit(1, 1, 4)]), { startLine: 13, endLine: 15 });
+    });
+
+    test('lines deleted above move the anchor up', () => {
+        assert.deepEqual(shiftLineRangeOnEdits({ startLine: 10, endLine: 12 }, [edit(2, 4, 1)]), { startLine: 8, endLine: 10 });
+    });
+
+    test('an edit below the anchor leaves it alone', () => {
+        assert.deepEqual(shiftLineRangeOnEdits({ startLine: 10, endLine: 12 }, [edit(20, 21, 9)]), { startLine: 10, endLine: 12 });
+    });
+
+    test('an edit that rewrites the anchored lines moves the anchor to the rewrite', () => {
+        assert.deepEqual(shiftLineRangeOnEdits({ startLine: 10, endLine: 12 }, [edit(11, 11, 3)]), { startLine: 11, endLine: 11 });
+    });
+
+    test('several edits apply in document order', () => {
+        assert.deepEqual(
+            shiftLineRangeOnEdits({ startLine: 10, endLine: 10 }, [edit(11, 11, 2), edit(2, 2, 3)]),
+            { startLine: 13, endLine: 13 },
+        );
+    });
+
+    test('the anchor never leaves the document', () => {
+        assert.deepEqual(shiftLineRangeOnEdits({ startLine: 1, endLine: 1 }, [edit(1, 3, 0)]), { startLine: 1, endLine: 1 });
     });
 });
