@@ -452,21 +452,23 @@ const openCodeGoConsoleCredential = (auth: AuthFile): OpenCodeGoConsoleCredentia
   const orgID = asNonEmptyString(entry.orgID);
   if (!accessToken || entry.server !== CONSOLE_SERVER || !orgID || !CONSOLE_ORGANIZATION_ID_PATTERN.test(orgID)) return null;
   const expires = toNumber(entry.expires);
-  return { accessToken, orgID, expires };
+  return { accessToken, orgID, expires, label: asNonEmptyString(entry.label) };
 };
 
 // A key on `opencode-go` comes first. Otherwise an API key on the shared
 // `opencode` integration serves Go too: OpenCode loads the Console workspace's
 // providers with it and binds OpenCode Go to that integration when the
-// workspace has Go. Providers lists it under OpenCode Go too.
+// workspace has Go. Providers lists it under OpenCode Go too. `label` is the
+// credential's display label, so the result can name the account the key
+// belongs to.
 const openCodeGoApiKey = (auth: AuthFile): OpenCodeGoApiKeyCredential | null => {
   const own = normalizeAuthEntry(getAuthEntry(auth, ['opencode-go']));
   const ownKey = asNonEmptyString(own?.key) ?? asNonEmptyString(own?.token);
-  if (ownKey) return { apiKey: ownKey, consoleKey: false };
+  if (ownKey) return { apiKey: ownKey, consoleKey: false, label: asNonEmptyString(own?.label) };
   const consoleEntry = normalizeAuthEntry(getAuthEntry(auth, ['opencode']));
   if (!consoleEntry || consoleEntry.type === 'oauth') return null;
   const consoleKey = asNonEmptyString(consoleEntry.key) ?? asNonEmptyString(consoleEntry.token);
-  return consoleKey ? { apiKey: consoleKey, consoleKey: true } : null;
+  return consoleKey ? { apiKey: consoleKey, consoleKey: true, label: asNonEmptyString(consoleEntry.label) } : null;
 };
 
 // OpenCode Zen is the Console workspace behind the shared `opencode`
@@ -4274,7 +4276,7 @@ const fetchOpenCodeGoQuota = async (): Promise<ProviderResult> => {
     let consoleFailure: Error | null = null;
     if (consoleCredential) {
       try {
-        return buildResult({ providerId, providerName: 'OpenCode Go', ok: true, configured: true, usage: { windows: await fetchOpenCodeGoUsage(consoleCredential) } });
+        return buildResult({ providerId, providerName: 'OpenCode Go', ok: true, configured: true, usage: { windows: await fetchOpenCodeGoUsage(consoleCredential) }, accountLabel: consoleCredential.label });
       } catch (consoleError) {
         if (!apiKey) throw consoleError;
         consoleFailure = consoleError instanceof Error ? consoleError : new Error('Request failed');
@@ -4282,7 +4284,7 @@ const fetchOpenCodeGoQuota = async (): Promise<ProviderResult> => {
     }
     if (!apiKey) return buildResult({ providerId, providerName: 'OpenCode Go', ok: false, configured: false, error: 'Not configured' });
     try {
-      return buildResult({ providerId, providerName: 'OpenCode Go', ok: true, configured: true, usage: { windows: await fetchOpenCodeGoUsage(apiKey) } });
+      return buildResult({ providerId, providerName: 'OpenCode Go', ok: true, configured: true, usage: { windows: await fetchOpenCodeGoUsage(apiKey) }, accountLabel: apiKey.label });
     } catch (keyError) {
       // The expired-key advice is to connect a Console account; with one
       // already connected, its own failure is the actionable error.

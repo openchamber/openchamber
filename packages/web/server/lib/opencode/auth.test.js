@@ -3,10 +3,10 @@ import http from 'node:http';
 
 import { configureOpenCodeCredentials, getProviderAuth, getStoredLogin, openCodeCredentialSource, projectCredentialEntries, projectEnvironmentKeys, readOpenCodeCredentials, renewStoredLogin } from './auth.js';
 
-const entry = (integrationID, active, value) => ({ id: `cred_${integrationID}_${active}`, integrationID, label: 'default', active, value });
+const entry = (integrationID, active, value, label = 'default') => ({ id: `cred_${integrationID}_${active}`, integrationID, label, active, value });
 
 describe('projectCredentialEntries', () => {
-  it('keeps each integration’s active credential in the legacy entry shape', () => {
+  it('keeps each integration’s active credential in the legacy entry shape, with its label', () => {
     const projected = projectCredentialEntries([
       entry('zai-coding-plan', false, { type: 'key', key: 'old' }),
       entry('zai-coding-plan', true, { type: 'key', key: 'zai-key' }),
@@ -30,10 +30,26 @@ describe('projectCredentialEntries', () => {
     ]);
 
     expect(projected).toEqual({
-      'zai-coding-plan': { type: 'api', key: 'zai-key' },
-      openai: { type: 'oauth', access: 'at', refresh: 'rt', expires: 42, accountId: 'acc_1' },
-      'github-copilot': { type: 'oauth', access: 'gh', refresh: 'gh-r', expires: 0, enterpriseUrl: 'https://ghe.example' },
-      custom: { type: 'api', key: 'k', metadata: { region: 'eu' } },
+      'zai-coding-plan': { label: 'default', type: 'api', key: 'zai-key' },
+      openai: { label: 'default', type: 'oauth', access: 'at', refresh: 'rt', expires: 42, accountId: 'acc_1' },
+      'github-copilot': { label: 'default', type: 'oauth', access: 'gh', refresh: 'gh-r', expires: 0, enterpriseUrl: 'https://ghe.example' },
+      custom: { label: 'default', type: 'api', key: 'k', metadata: { region: 'eu' } },
+    });
+  });
+
+  it('drops a missing, blank, or unnamed label instead of projecting it', () => {
+    const projected = projectCredentialEntries([
+      entry('opencode-go', true, { type: 'key', key: 'k1' }, 'solar tool'),
+      entry('opencode', true, { type: 'key', key: 'k2' }, '   '),
+      entry('kilo', true, { type: 'key', key: 'k3' }, ''),
+      entry('deepseek', true, { type: 'key', key: 'k4' }, 12345),
+    ]);
+
+    expect(projected).toEqual({
+      'opencode-go': { label: 'solar tool', type: 'api', key: 'k1' },
+      opencode: { type: 'api', key: 'k2' },
+      kilo: { type: 'api', key: 'k3' },
+      deepseek: { type: 'api', key: 'k4' },
     });
   });
 
@@ -57,6 +73,7 @@ describe('projectCredentialEntries', () => {
 
     expect(projected).toEqual({
       opencode: {
+        label: 'default',
         type: 'oauth',
         access: 'console-access',
         refresh: 'console-refresh',
@@ -124,8 +141,8 @@ describe('readOpenCodeCredentials', () => {
   });
 
   it('asks the running OpenCode with its auth headers', async () => {
-    await expect(readOpenCodeCredentials()).resolves.toEqual({ deepseek: { type: 'api', key: 'ds' } });
-    await expect(getProviderAuth('deepseek')).resolves.toEqual({ type: 'api', key: 'ds' });
+    await expect(readOpenCodeCredentials()).resolves.toEqual({ deepseek: { label: 'default', type: 'api', key: 'ds' } });
+    await expect(getProviderAuth('deepseek')).resolves.toEqual({ label: 'default', type: 'api', key: 'ds' });
     await expect(getProviderAuth('openai')).resolves.toBeNull();
     expect(requests[0]).toEqual({ url: '/api/credential', authorization: 'Basic test' });
   });
@@ -153,7 +170,7 @@ describe('readOpenCodeCredentials', () => {
     ];
     launchEnvironment = { DEEPSEEK_API_KEY: 'ds-env', ZHIPU_API_KEY: 'zk-env' };
     await expect(readOpenCodeCredentials()).resolves.toEqual({
-      deepseek: { type: 'api', key: 'ds' },
+      deepseek: { label: 'default', type: 'api', key: 'ds' },
       'zai-coding-plan': { type: 'api', key: 'zk-env' },
     });
     // A variable is not a stored login.
@@ -166,7 +183,7 @@ describe('readOpenCodeCredentials', () => {
 
   it('leaves variable keys out for an external OpenCode', async () => {
     integrations = [{ id: 'zai-coding-plan', connections: [{ type: 'env', name: 'ZHIPU_API_KEY' }] }];
-    await expect(readOpenCodeCredentials()).resolves.toEqual({ deepseek: { type: 'api', key: 'ds' } });
+    await expect(readOpenCodeCredentials()).resolves.toEqual({ deepseek: { label: 'default', type: 'api', key: 'ds' } });
     expect(requests.map((request) => request.url)).toEqual(['/api/credential']);
   });
 
