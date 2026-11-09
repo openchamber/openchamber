@@ -79,7 +79,7 @@ const RollingNumber: React.FC<{ value: number }> = ({ value }) => {
       {digits.map((digit, index) => (
         <span key={digits.length - index} className="inline-block h-[1.25em] overflow-hidden leading-[1.25em]">
           <span
-            className="flex flex-col transition-transform duration-[var(--oc-motion-layout-duration)] ease-[var(--oc-motion-layout-easing)] motion-reduce:transition-none"
+            className="flex flex-col transition-transform duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none"
             style={{ transform: `translateY(-${Number(digit) * 10}%)` }}
           >
             {DIGITS.map((option) => <span key={option}>{option}</span>)}
