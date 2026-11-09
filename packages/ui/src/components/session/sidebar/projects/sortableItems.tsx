@@ -288,7 +288,10 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
   // 2px from the edge, then the worktree and menu buttons (24px, 4px apart)
   // from 28px.
   const showWorktreeAction = showCreateButtons && isRepo && !hideDirectoryControls && Boolean(onNewWorktreeSession);
-  const groupedHeaderActionCount = (showWorktreeAction ? 1 : 0) + (hideDirectoryControls ? 0 : 1);
+  // With a mouse the project's menu is its right-click menu (Shift+F10 from
+  // the keyboard); the ⋯ button stays on touch layouts, which have no right click.
+  const showMenuButton = !hideDirectoryControls && alwaysShowActions;
+  const groupedHeaderActionCount = (showWorktreeAction ? 1 : 0) + (showMenuButton ? 1 : 0);
   const headerActionsReserveClass = groupedHeaderActionCount === 2
     ? '[--oc-actions-reserve:4.125rem]'
     : groupedHeaderActionCount === 1 && showCreateButtons
@@ -296,12 +299,13 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
       : showCreateButtons || groupedHeaderActionCount === 1
         ? '[--oc-actions-reserve:0.75rem]'
         : undefined;
-  const headerLabelMaskClass = alwaysShowActions
+  // A header with no hover actions covers nothing.
+  const headerLabelMaskClass = alwaysShowActions || !headerActionsReserveClass
     ? undefined
     : isMenuOpen
       ? 'oc-actions-mask'
       : 'group-hover/project:oc-actions-mask group-has-[:focus-visible]/project:oc-actions-mask';
-  const headerCoveredFadeClass = alwaysShowActions
+  const headerCoveredFadeClass = alwaysShowActions || !headerActionsReserveClass
     ? undefined
     : isMenuOpen
       ? 'opacity-0'
@@ -442,7 +446,7 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
                         )}
                         aria-label={t('sessions.sidebar.project.actions.newWorktree')}
                       >
-                        <Icon name="git-branch" className="h-3.5 w-3.5" />
+                        <Icon name="worktree" className="h-3.5 w-3.5" />
                       </button>
                     </TooltipTrigger>
                     <TooltipContent side="bottom" sideOffset={4}>
@@ -451,7 +455,7 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
                   </Tooltip>
                 ) : null}
 
-                {!hideDirectoryControls ? (
+                {showMenuButton ? (
                 <DropdownMenu
                   open={isMenuOpen}
                   onOpenChange={handleMenuOpenChange}

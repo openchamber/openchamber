@@ -166,7 +166,11 @@ function RunSidebarRowComponent({
     </>
   );
 
-  const hoverOut = alwaysShowActions ? undefined : 'group-hover/run:opacity-0 group-has-[:focus-visible]/run:opacity-0';
+  // With a mouse the run's menu is its right-click menu (Shift+F10 from the
+  // keyboard); the ⋯ button stays on touch layouts, which have no right click.
+  const showMenuButton = alwaysShowActions;
+  const hoverButtons = (sessionWorkEnabled ? 1 : 0) + (showMenuButton ? 1 : 0);
+  const hoverOut = alwaysShowActions || hoverButtons === 0 ? undefined : 'group-hover/run:opacity-0 group-has-[:focus-visible]/run:opacity-0';
   const hoverIn = alwaysShowActions ? undefined : 'opacity-0 group-hover/run:opacity-100 group-has-[:focus-visible]/run:opacity-100';
   const chevron = expandable ? (
     <span
@@ -225,8 +229,8 @@ function RunSidebarRowComponent({
   ) : run.title;
   // The hover actions hide while renaming, so the rename's own buttons take
   // the whole line: no room reserved for them and no fade over its end.
-  const actionsReserve = renaming ? undefined : sessionWorkEnabled ? '[--oc-actions-reserve:2.875rem]' : '[--oc-actions-reserve:1.75rem]';
-  const maskOnHover = alwaysShowActions || renaming ? undefined : 'group-hover/run:oc-actions-mask group-has-[:focus-visible]/run:oc-actions-mask';
+  const actionsReserve = renaming ? undefined : [undefined, '[--oc-actions-reserve:1.75rem]', '[--oc-actions-reserve:2.875rem]'][hoverButtons];
+  const maskOnHover = alwaysShowActions || renaming || hoverButtons === 0 ? undefined : 'group-hover/run:oc-actions-mask group-has-[:focus-visible]/run:oc-actions-mask';
   const actionButtonClass = cn(
     'inline-flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
     alwaysShowActions ? 'h-6 w-6' : 'h-4 w-4',
@@ -336,23 +340,25 @@ function RunSidebarRowComponent({
                   </TooltipContent>
                 </Tooltip>
               ) : null}
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <button
-                    type="button"
-                    className={actionButtonClass}
-                    aria-label={t('sessions.sidebar.work.menu.label', { label: run.title })}
-                    onPointerDown={(event) => event.stopPropagation()}
-                    onClick={(event) => event.stopPropagation()}
-                    onKeyDown={(event) => event.stopPropagation()}
-                  >
-                    <Icon name="more-2" className={alwaysShowActions ? 'h-3.5 w-3.5' : 'h-2.5 w-2.5'} />
-                  </button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="min-w-[180px]">
-                  {renderMenuItems(DROPDOWN_SLOTS)}
-                </DropdownMenuContent>
-              </DropdownMenu>
+              {showMenuButton ? (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <button
+                      type="button"
+                      className={actionButtonClass}
+                      aria-label={t('sessions.sidebar.work.menu.label', { label: run.title })}
+                      onPointerDown={(event) => event.stopPropagation()}
+                      onClick={(event) => event.stopPropagation()}
+                      onKeyDown={(event) => event.stopPropagation()}
+                    >
+                      <Icon name="more-2" className="h-3.5 w-3.5" />
+                    </button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="min-w-[180px]">
+                    {renderMenuItems(DROPDOWN_SLOTS)}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              ) : null}
             </TooltipProvider>
           </div>
         </div>

@@ -13,6 +13,7 @@ import { GlassRedrawGuard } from "./glass-redraw-guard"
 import { PopupOverlayScrollbar } from "./AttachedOverlayScrollbar";
 import { handleDropdownNavigationKey } from "./dropdown-navigation";
 import { useMenuWindowDismiss } from "./menu-window-dismiss";
+import { openContextMenuFromKeyboard } from "./contextMenuKeyboard";
 
 // The wrapper owns `actionsRef` to close the menu on window blur.
 function ContextMenu({ open, defaultOpen, onOpenChange, ...props }: Omit<React.ComponentProps<typeof BaseContextMenu.Root>, "actionsRef">) {
@@ -35,8 +36,16 @@ function ContextMenu({ open, defaultOpen, onOpenChange, ...props }: Omit<React.C
   );
 }
 
-function ContextMenuTrigger({ ...props }: React.ComponentProps<typeof BaseContextMenu.Trigger>) {
-  return <BaseContextMenu.Trigger {...props} />;
+function ContextMenuTrigger({ onKeyDown, ...props }: React.ComponentProps<typeof BaseContextMenu.Trigger>) {
+  return (
+    <BaseContextMenu.Trigger
+      {...props}
+      onKeyDown={(event) => {
+        onKeyDown?.(event);
+        if (!event.defaultPrevented) openContextMenuFromKeyboard(event);
+      }}
+    />
+  );
 }
 
 type ContentProps = {

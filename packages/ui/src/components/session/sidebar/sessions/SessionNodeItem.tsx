@@ -9,6 +9,7 @@ import { SessionActivityIndicator } from '@/components/session/SessionActivityIn
 import type { Session } from '@/lib/opencode/model';
 import { ContextMenu } from '@base-ui/react/context-menu';
 import { ContextMenu as ContextMenuRoot } from '@/components/ui/context-menu';
+import { openContextMenuFromKeyboard } from '@/components/ui/contextMenuKeyboard';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -377,9 +378,14 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
   // Hover-revealed actions besides the menu: work, quick archive, and in VS
   // Code open-in-editor.
   const extraHoverActions = (showWorkAction ? 1 : 0) + (showQuickArchiveAction ? 1 : 0) + (showOpenInEditorAction ? 1 : 0);
+  // With a mouse the row's menu is its right-click menu (Shift+F10 from the
+  // keyboard), so the ⋯ button stays only where there is no right click:
+  // touch layouts.
+  const showMenuButton = alwaysShowActions;
+  const hoverButtons = extraHoverActions + (showMenuButton ? 1 : 0);
   // VS Code reveals its permanent-size actions on hover, so the title makes
   // room for them there.
-  const vscodeAlwaysActionPaddingClass = ['group-hover:pe-8', 'group-hover:pe-14', 'group-hover:pe-18', 'group-hover:pe-22'][extraHoverActions];
+  const vscodeAlwaysActionPaddingClass = hoverButtons === 0 ? undefined : ['group-hover:pe-8', 'group-hover:pe-14', 'group-hover:pe-18', 'group-hover:pe-22'][hoverButtons - 1];
   const alwaysActionPaddingClass = showQuickArchiveAction ? 'pe-13' : 'pe-7';
   const [isTouchPressed, setIsTouchPressed] = React.useState(false);
   const editingIdRef = React.useRef(editingId);
@@ -933,19 +939,22 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
   // is how far the actions reach in from the row content's right edge: their
   // width less the 6px they sit nearer the row edge (16px buttons, 20px on
   // two-line timeline rows, 2px apart).
-  const actionsReserveClass = isTimelineRow && !isOneLineTimelineRow
-    ? ['[--oc-actions-reserve:0.875rem]', '[--oc-actions-reserve:2.25rem]', '[--oc-actions-reserve:3.625rem]', '[--oc-actions-reserve:5rem]'][extraHoverActions]
-    : ['[--oc-actions-reserve:0.625rem]', '[--oc-actions-reserve:1.75rem]', '[--oc-actions-reserve:2.875rem]', '[--oc-actions-reserve:4rem]'][extraHoverActions];
+  const actionsReserveClass = hoverButtons === 0
+    ? undefined
+    : isTimelineRow && !isOneLineTimelineRow
+      ? ['[--oc-actions-reserve:0.875rem]', '[--oc-actions-reserve:2.25rem]', '[--oc-actions-reserve:3.625rem]', '[--oc-actions-reserve:5rem]'][hoverButtons - 1]
+      : ['[--oc-actions-reserve:0.625rem]', '[--oc-actions-reserve:1.75rem]', '[--oc-actions-reserve:2.875rem]', '[--oc-actions-reserve:4rem]'][hoverButtons - 1];
   // An open row menu (dropdown or right-click) keeps the actions shown, so
-  // what they cover gives way too, hover or not.
-  const actionsMaskClass = alwaysShowActions
+  // what they cover gives way too, hover or not. A row with no hover actions
+  // covers nothing.
+  const actionsMaskClass = alwaysShowActions || hoverButtons === 0
     ? undefined
     : isSessionMenuOpen
       ? 'oc-actions-mask'
       : isVSCode
         ? 'group-hover:oc-actions-mask'
         : 'group-hover:oc-actions-mask group-has-[:focus-visible]:oc-actions-mask';
-  const coveredMetaFadeClass = isSessionMenuOpen ? 'opacity-0' : hideOnHoverClass;
+  const coveredMetaFadeClass = hoverButtons === 0 ? '' : isSessionMenuOpen ? 'opacity-0' : hideOnHoverClass;
   const pinnedLabel = t('sessions.sidebar.session.status.pinned');
   const pinnedMarkerContent = (
     <RowMarkTooltip label={pinnedLabel}>
@@ -1661,6 +1670,7 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
       compact={!isTwoLineRow}
       leadToggle={leadToggle}
       leadIconClassName={leadToggle ? leadIconClassName : undefined}
+      leadMaskClassName={leadToggle && !alwaysShowActions ? 'group-hover:oc-lead-mask group-has-[:focus-visible]:oc-lead-mask' : undefined}
       project={timelineProject}
       projectLabel={tooltipProjectLabel}
       title={renderHighlightedText(sessionTitle, normalizedSessionSearchQuery)}
@@ -1775,6 +1785,7 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
       <DraggableSessionRow sessionId={session.id} dragKey={dragKey ?? sessionRowKey} ownerKey={folderOwnerKey ?? selectionScopeKey} sessionDirectory={sessionDirectory ?? null} sessionTitle={sessionTitle} archivedBucket={archivedBucket}>
         <ContextMenuRoot open={isContextMenuOpen} onOpenChange={handleContextMenuOpenChange} onOpenChangeComplete={handleMenuOpenChangeComplete}>
           <ContextMenu.Trigger
+            onKeyDown={openContextMenuFromKeyboard}
             render={
               <div
                 data-session-row={session.id}
@@ -1966,6 +1977,7 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
                 </TooltipContent>
               </Tooltip>
             ) : null}
+            {showMenuButton ? (
             <DropdownMenu open={isMenuOpen} onOpenChange={handleMenuOpenChange} onOpenChangeComplete={handleMenuOpenChangeComplete}>
               <DropdownMenuTrigger asChild>
                 <button
@@ -1989,6 +2001,7 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
               </DropdownMenuTrigger>
               {sessionMenuContent}
             </DropdownMenu>
+            ) : null}
             </TooltipProvider>
           </div>
           </ContextMenu.Trigger>
