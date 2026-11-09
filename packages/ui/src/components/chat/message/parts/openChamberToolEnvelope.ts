@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 import type { ToolInput } from '@/lib/opencode/model';
+import { workflowRunSchema, workflowRunStateSchema } from '@/lib/workflows/model';
 
 /**
  * Reading what OpenChamber's own agent tools answered, for the chat to show
@@ -123,9 +124,10 @@ export const sessionsListedSchema = z.object({
     id: z.string().min(1),
     title: text,
     parentID: text,
-    time: z.object({ updated: z.number().optional().catch(undefined) }).optional().catch(undefined),
+    directory: text,
+    // Calls stored before the server trimmed each session to its listed fields.
     location: z.object({ directory: text }).optional().catch(undefined),
-  })),
+  }).transform(({ location, ...session }) => ({ ...session, directory: session.directory ?? location?.directory }))),
 });
 
 const modelRefSchema = z.object({ providerID: z.string(), modelID: z.string() });
@@ -215,12 +217,123 @@ export const tightestWindow = (provider: UsageProviderRow): { key: string; windo
   return best;
 };
 
+export const memoryReadSchema = z.object({
+  memory: z.object({
+    title: text,
+    body: text,
+    type: z.enum(['fact', 'preference', 'reference']).optional().catch(undefined),
+    scope: z.enum(['global', 'project']).optional().catch(undefined),
+  }),
+});
+
+const deletedSchema = z.object({ deleted: z.literal(true) });
+const knowledgeShownSchema = z.object({ planId: z.string(), shown: z.literal(true) });
+
+export const sessionStatusSchema = z.object({
+  sessionId: z.string().min(1),
+  directory: text,
+  sessionStatus: z.object({ type: z.enum(['idle', 'busy', 'waiting']) }),
+});
+
+export const sessionMessagesSchema = z.object({
+  sessionId: z.string().min(1),
+  directory: text,
+  messages: z.array(z.object({
+    id: z.string(),
+    role: z.enum(['user', 'assistant']),
+    createdAt: z.number().nullable().catch(null),
+    model: z.string().nullable().catch(null),
+    text: z.string(),
+  })),
+});
+
+export const prWatchedSchema = z.object({
+  watching: z.object({
+    url: z.string().url(),
+    number: z.number().nullable().optional().catch(undefined),
+    title: z.string().optional().catch(undefined),
+    status: z.enum(['waking', 'unknown', 'pending', 'passed', 'failed', 'open']).optional().catch(undefined),
+  }),
+});
+
+const prUnwatchedSchema = z.object({ watching: z.literal(false), stopped: z.boolean() });
+
+export const workNamedSchema = z.object({
+  title: text,
+  named: z.boolean(),
+  reason: text,
+  branch: text,
+});
+
+export const fileOpenedSchema = z.object({ path: z.string().trim().min(1), opened: z.literal(true) });
+
+export const scheduleRanSchema = z.object({
+  task: scheduledTaskSchema,
+  sessionId: z.string().min(1),
+  directory: text,
+  // The run started but its record was not saved.
+  persistError: text,
+});
+
+const scheduleDeletedSchema = z.object({ deleted: z.literal(true), tasks: z.array(z.unknown()) });
+
+const pageSchema = z.object({ url: z.string().url().optional().catch(undefined) });
+
+export const browserSnapshotSchema = pageSchema.extend({
+  title: text,
+  elements: z.array(z.unknown()).catch([]),
+  viewport: z.object({ width: z.number().nullable(), height: z.number().nullable() }).optional().catch(undefined),
+  consoleProblems: z.array(z.object({ level: z.string(), message: z.string() })).optional().catch(undefined),
+});
+
+export const browserClickedSchema = pageSchema.extend({ clicked: text, label: text });
+export const browserTypedSchema = pageSchema.extend({ selector: z.string().min(1) });
+export const browserSelectedSchema = pageSchema.extend({ selector: z.string().min(1), label: text, value: z.string().optional().catch(undefined) });
+export const browserScrolledSchema = z.object({
+  scrollY: z.number(),
+  maxScrollY: z.number(),
+  atTop: z.boolean().optional().catch(undefined),
+  atBottom: z.boolean().optional().catch(undefined),
+});
+export const browserNavigatedSchema = z.object({ title: z.string(), settled: z.boolean().optional().catch(undefined) });
+export const browserInspectedSchema = z.object({
+  selector: z.string().min(1),
+  tag: text,
+  label: text,
+  styles: z.record(z.string(), z.string()).catch({}),
+});
+export const browserResizedSchema = z.object({
+  viewport: z.object({ width: z.number().nullable(), height: z.number().nullable() }),
+});
+const browserClosedSchema = z.object({ closed: z.literal(true) });
+
+export const workflowCheckedSchema = z.object({
+  name: z.string(),
+  description: text,
+  phases: z.array(z.string()).catch([]),
+});
+
+export const workflowListedSchema = z.object({
+  workflows: z.array(z.object({ name: z.string(), description: text, error: text })).catch([]),
+  runs: z.array(z.object({ runId: z.string(), name: z.string(), state: workflowRunStateSchema.optional().catch(undefined) })).catch([]),
+});
+
+export const workflowResultSchema = z.union([
+  z.object({ runId: z.string(), agent: z.object({ label: z.string(), state: z.string(), result: z.json().optional().catch(undefined), error: text }) }),
+  z.object({ runId: z.string(), state: workflowRunStateSchema, result: z.json().optional().catch(undefined), error: text }),
+]);
+
+export const workflowStoppedSchema = z.object({ runId: z.string(), state: z.string(), reused: z.number().optional().catch(undefined) });
+export const workflowSavedSchema = z.object({ name: z.string(), path: z.string() });
+
 const VIEW_SCHEMAS: ReadonlyMap<string, z.ZodType> = new Map<string, z.ZodType>([
   ['session.link', linkedSchema],
   ['session.create', dispatchedSchema],
   ['session.send', dispatchedSchema],
   ['session.fork', dispatchedSchema],
   ['session.moveToWorktree', movedSchema],
+  ['session.markDone', dispatchedSchema],
+  ['session.track', dispatchedSchema],
   ['memory.save', memorySavedSchema],
   ['knowledge.save', knowledgeSavedSchema],
   ['schedule.create', scheduledSchema],
@@ -236,6 +349,36 @@ const VIEW_SCHEMAS: ReadonlyMap<string, z.ZodType> = new Map<string, z.ZodType>(
   ['schedule.list', scheduleListedSchema],
   ['browser.open', pageOpenedSchema],
   ['browser.capture', screenshotSchema],
+  ['memory.read', memoryReadSchema],
+  ['memory.delete', deletedSchema],
+  ['knowledge.show', knowledgeShownSchema],
+  ['knowledge.delete', deletedSchema],
+  ['session.status', sessionStatusSchema],
+  ['session.messages', sessionMessagesSchema],
+  ['pr.watch', prWatchedSchema],
+  ['pr.unwatch', prUnwatchedSchema],
+  ['work.name', workNamedSchema],
+  ['file.open', fileOpenedSchema],
+  ['schedule.run', scheduleRanSchema],
+  ['schedule.delete', scheduleDeletedSchema],
+  ['schedule.toggle', scheduledSchema],
+  ['browser.snapshot', browserSnapshotSchema],
+  ['browser.click', browserClickedSchema],
+  ['browser.type', browserTypedSchema],
+  ['browser.select', browserSelectedSchema],
+  ['browser.scroll', browserScrolledSchema],
+  ['browser.back', browserNavigatedSchema],
+  ['browser.forward', browserNavigatedSchema],
+  ['browser.inspect', browserInspectedSchema],
+  ['browser.resize', browserResizedSchema],
+  ['browser.close', browserClosedSchema],
+  ['workflow.check', workflowCheckedSchema],
+  ['workflow.status', workflowRunSchema],
+  ['workflow.result', workflowResultSchema],
+  ['workflow.list', workflowListedSchema],
+  ['workflow.stop', workflowStoppedSchema],
+  ['workflow.resume', workflowStoppedSchema],
+  ['workflow.save', workflowSavedSchema],
 ]);
 
 /**
@@ -248,6 +391,74 @@ export const hasOpenChamberView = (envelope: OpenChamberEnvelope): boolean => {
   const schema = VIEW_SCHEMAS.get(envelope.action);
   return schema ? schema.safeParse(envelope.data).success : false;
 };
+const secretRunSchema = z.object({
+  answer: z.union([
+    z.object({
+      status: z.literal('ran'),
+      outcome: z.enum(['exited', 'timeout', 'killed', 'not-started']).catch('killed'),
+      exitCode: z.number().int().nullable().catch(null),
+    }),
+    z.object({ status: z.literal('declined') }),
+    z.object({ answered: z.literal(false) }),
+  ]),
+  stdout: z.string().optional().catch(undefined),
+  stderr: z.string().optional().catch(undefined),
+  error: z.string().optional().catch(undefined),
+});
+
+type SecretRunVerbKey =
+  | 'chat.toolPart.openchamber.action.secretRun'
+  | 'chat.toolPart.openchamber.action.secretRunFailed'
+  | 'chat.toolPart.openchamber.action.secretRunTimedOut'
+  | 'chat.toolPart.openchamber.action.secretRunNotStarted'
+  | 'chat.toolPart.openchamber.action.secretRunStopped'
+  | 'chat.toolPart.openchamber.action.secretRunDeclined'
+  | 'chat.toolPart.openchamber.action.secretRunNotRun'
+  | 'chat.toolPart.openchamber.action.secretRequestSaved'
+  | 'chat.toolPart.openchamber.action.secretRequestDeclined'
+  | 'chat.toolPart.openchamber.action.secretRequestNotGiven';
+
+const secretRequestSchema = z.object({
+  answer: z.union([
+    z.object({ status: z.literal('saved'), file: z.string().optional().catch(undefined) }),
+    z.object({ status: z.literal('declined') }),
+    z.object({ answered: z.literal(false) }),
+  ]),
+});
+
+/**
+ * How a finished secret tool call reads in its row. For `secret.run`: the
+ * verb (with the exit code when it was not 0) and what the command printed as
+ * the agent got it, stdout, stderr, then why it did not finish, values
+ * already replaced by the server. For `secret.request`: the verb, and the file
+ * a saved value went to. `null` for any other answer.
+ */
+export const secretRowView = (
+  envelope: Pick<OpenChamberEnvelope, 'ok' | 'action'> & { data?: unknown } | null,
+): { key: SecretRunVerbKey; code?: number; output?: string; file?: string } | null => {
+  if (envelope?.ok !== true) return null;
+  if (envelope.action === 'secret.request') {
+    const request = secretRequestSchema.safeParse(envelope.data);
+    if (!request.success) return null;
+    const { answer } = request.data;
+    if ('answered' in answer) return { key: 'chat.toolPart.openchamber.action.secretRequestNotGiven' };
+    if (answer.status === 'declined') return { key: 'chat.toolPart.openchamber.action.secretRequestDeclined' };
+    return { key: 'chat.toolPart.openchamber.action.secretRequestSaved', file: answer.file };
+  }
+  if (envelope.action !== 'secret.run') return null;
+  const parsed = secretRunSchema.safeParse(envelope.data);
+  if (!parsed.success) return null;
+  const { answer, stdout = '', stderr = '', error = '' } = parsed.data;
+  const output = [stdout, stderr, error].map((part) => part.trimEnd()).filter(Boolean).join('\n');
+  if ('answered' in answer) return { key: 'chat.toolPart.openchamber.action.secretRunNotRun', output };
+  if (answer.status === 'declined') return { key: 'chat.toolPart.openchamber.action.secretRunDeclined', output };
+  if (answer.outcome === 'timeout') return { key: 'chat.toolPart.openchamber.action.secretRunTimedOut', output };
+  if (answer.outcome === 'not-started') return { key: 'chat.toolPart.openchamber.action.secretRunNotStarted', output };
+  if (answer.outcome === 'killed' || answer.exitCode === null) return { key: 'chat.toolPart.openchamber.action.secretRunStopped', output };
+  if (answer.exitCode !== 0) return { key: 'chat.toolPart.openchamber.action.secretRunFailed', code: answer.exitCode, output };
+  return { key: 'chat.toolPart.openchamber.action.secretRun', output };
+};
+
 /** The verb key of each OpenChamber tool action, for the row's subtitle once the action succeeded. */
 export const OPENCHAMBER_ACTION_VERB_KEYS = {
   'projects.list': 'chat.toolPart.openchamber.action.projectsList',
@@ -261,6 +472,8 @@ export const OPENCHAMBER_ACTION_VERB_KEYS = {
   'session.messages': 'chat.toolPart.openchamber.action.sessionMessages',
   'session.moveToWorktree': 'chat.toolPart.openchamber.action.sessionMoveToWorktree',
   'session.link': 'chat.toolPart.openchamber.action.sessionLink',
+  'session.markDone': 'chat.toolPart.openchamber.action.sessionMarkDone',
+  'session.track': 'chat.toolPart.openchamber.action.sessionTrack',
   'pr.watch': 'chat.toolPart.openchamber.action.prWatch',
   'pr.unwatch': 'chat.toolPart.openchamber.action.prUnwatch',
   'work.name': 'chat.toolPart.openchamber.action.workName',
@@ -296,6 +509,7 @@ export const OPENCHAMBER_ACTION_VERB_KEYS = {
   'image.generate': 'chat.toolPart.openchamber.action.imageGenerate',
   'render.page': 'chat.toolPart.openchamber.action.renderPage',
   'secret.request': 'chat.toolPart.openchamber.action.secretRequest',
+  'secret.forget': 'chat.toolPart.openchamber.action.secretForget',
   'workflow.check': 'chat.toolPart.openchamber.action.workflowCheck',
   'workflow.run': 'chat.toolPart.openchamber.action.workflowRun',
   'workflow.status': 'chat.toolPart.openchamber.action.workflowStatus',
@@ -318,6 +532,8 @@ const callFields = z.object({
   title: text,
   body: text,
   carry: z.array(z.string()).optional().catch(undefined),
+  // What `knowledge.delete` removed.
+  kind: z.enum(['note', 'todo', 'plan']).optional().catch(undefined),
 });
 const callInputSchema = callFields.extend({ parameters: callFields.optional().catch(undefined) }).catch({});
 
@@ -331,5 +547,6 @@ export const readOpenChamberCallInput = (input: ToolInput | undefined): OpenCham
     title: parsed.parameters?.title ?? parsed.title,
     body: parsed.parameters?.body ?? parsed.body,
     carry: parsed.parameters?.carry ?? parsed.carry,
+    kind: parsed.parameters?.kind ?? parsed.kind,
   };
 };

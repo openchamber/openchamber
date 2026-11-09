@@ -153,6 +153,30 @@ other.
   card says the agent's commands can read it. `createSecretFiles().sweep()`
   deletes files 24 hours after they were written, on server start and
   hourly. Answers `403` while `agentSecretToolEnabled` is `false`.
+- `secret-run.js` runs `secret.run` (and `secret.forget`) for the same tool,
+  through `createSecretRequests`, so one answer route and one wait registry
+  serve both kinds of card. The call names a `program`, its `args`, a `reason`
+  and 1 to 8 `inputs` (`env`, `label`, optional `placeholder`); a malformed
+  call is a `400` before any card. Only a call the agent tool marks
+  `secretRunAuthorized` runs (the secret tool's plugin, after OpenCode's shell
+  permission for the command line, see `../agent-tool/DOCUMENTATION.md`);
+  anything else is a `403`. Before it waits, the call reads the values the
+  chat remembers; with none missing it runs at once and no card waits. While
+  the card waits, `GET /api/openchamber/secret/fields` names the fields it
+  asks for and the ones it reuses (names only; a `404` once it stopped
+  waiting), and the card reads them there. The answer carries exactly the
+  asked fields, each non-empty, plus the ones the user ticked to remember;
+  the values pass the wait in memory, never through its data. The command
+  runs once with `runCommand` from `../spaces/run-command.js`, without a
+  shell, in the session's directory, with the values added to the server's
+  environment, stdin closed, the process tree killed on Stop, a chat message
+  or `timeoutMs` (default 2 minutes, at most 10), on every platform that
+  module supports, Windows included. stdout and stderr are kept in a 1 MB
+  window, every value is replaced by `[secret:NAME]`, and the last 32,000
+  characters of each go back with the exit code and the env names still
+  remembered. Remembered values live in memory only, per session and env
+  name, for 10 minutes from submission; use does not extend them, a restart
+  drops them, and `secret.forget` drops the session's.
 - `routes.js` is the authenticated CLI HTTP adapter. It forwards one action,
   preserves service status and partial-result details, and propagates request
   cancellation. It also carries the chat's answer to a waiting page.
@@ -350,6 +374,34 @@ other.
   together with a 400, so neither silently wins.
 - One failed directory status lookup produces `unknown` for only that
   directory and does not erase other session results.
+- `session.list` returns top-level sessions newest first (OpenCode's
+  `parentID: null`); `children` adds subagent sessions. Each session is
+  trimmed to `id`, `title`, `directory`, `updated`, `archived`, `parentID`,
+  `agent`, `model`, `outcome` (plus the In work fields and `status` below):
+  the raw OpenCode record averaged about 1,100 characters on real sessions,
+  a session in work about 1,750, with tokens, cost, permissions and every
+  metadata namespace; the trimmed one about 300. The chat's tool row reads
+  `directory` and falls back to `location.directory` for calls stored before. While In work is on
+  (`sessionWorkEnabled`), every session carries `inWork` and
+  `doneSuggested`, by the sidebar block's rule
+  (`../session-work/membership.js`: top level, not archived, not a Chat,
+  `work.state` open; the hint while it is newer than `time.idle`). Filters:
+  `inWork`, `busy` (in OpenCode's active map, so busy or waiting) and `query`
+  (every word in the title, case-insensitive, matched here because OpenCode's
+  `search` is SQLite `LIKE`, case-sensitive outside ASCII). `inWork` and
+  `busy` read every project unless `projectId` or `directory` scopes them and
+  return every match unless `limit` is given; a filtered read asks for pages
+  of 200. `inWork` while In work is off is a 409, and a failed active-map read
+  under `busy` is a 503, never an empty list. `busy` stops paging once it saw
+  every running session.
+- `session.markDone` and `session.track` write the record the app's Done and
+  Track write (`userStatePatch` in `../session-work/state.js`) through the
+  injected `updateSessionMetadata`, the session metadata store's queued
+  write that broadcasts the change, so every window updates. The session
+  defaults to the caller and is read first (unknown is a 404). Track refuses
+  a session that can never be in work (400) and an archived one (409); Done
+  takes any session, as the app's button does. Both are a 409 while In work
+  is off and a 503 on a server without the store.
 - Destructive session/worktree deletion and project-path registration are not
   part of the action contract.
 - `session.send` to an archived top-level session restores it, with its
@@ -490,6 +542,36 @@ had two replies and, with a real model, two agents in one session. The release
 takes the page off the list and leaves that call parked until its request
 ends: that OpenCode exits, this server restarts, or the user stops a turn in
 the session (`abortSession`).
+
+### Why secret.run keeps secret.request beside it
+
+`secret.run` delivers a value to one process and returns redacted output, so
+the agent's later commands, and a program's verbose or error output, never see
+it. It cannot serve a program that reads a secret from a file (a key file, a
+kubeconfig, a client certificate), so `secret.request` stays for those. A
+proposal to replace the file mode outright (#6086) was declined for that
+reason.
+
+### Why remembering a value is the user's tick, not the agent's flag
+
+Reusing a password across a script's retries saves typing, but a value kept in
+memory is one more place it lives. The agent asking for reuse would decide
+that for the user, and a one-time code would be kept on the agent's word. The
+card offers the choice per field instead, off by default; the agent only learns
+which env names are remembered from the result.
+
+### Why the card reads its fields from the server and not from the call
+
+Which fields a run still needs depends on what the chat remembers, which only
+the server knows, and every client must draw the same card. The first build
+passed them to the plugin as NDJSON progress frames into the call's progress
+metadata; OpenCode publishes that only to clients connected at that moment and
+keeps none of it in the stored call, so a reload or a second device showed no
+fields while the call waited. The card now asks the server once the wait is
+announced (`openchamber:page-waiting`), which every client hears or reads from
+the host's pending snapshot. The values a run uses are read when it starts, so
+a remembered value that expires while the user fills another field is still
+used.
 
 ### Why work.name leaves session titles alone
 

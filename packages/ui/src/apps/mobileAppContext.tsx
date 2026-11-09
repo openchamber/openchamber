@@ -1,5 +1,6 @@
 /* oxlint-disable react/only-export-components */
 import React from 'react';
+import type { ProjectRef } from '@/lib/projectContextApi';
 
 export type MobileAppActions = {
   /**
@@ -11,6 +12,8 @@ export type MobileAppActions = {
   openFiles: () => void;
   /** Open the issues and PRs board page; what it shows is set in its store first. */
   openSourceBoard: () => void;
+  /** Open a saved plan full screen, as a tap on it in Project knowledge does. */
+  openPlan: (plan: { id: string; title: string; projectRef: ProjectRef }) => void;
 };
 
 const DedicatedMobileAppContext = React.createContext<MobileAppActions | null>(null);

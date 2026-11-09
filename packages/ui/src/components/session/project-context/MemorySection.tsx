@@ -137,6 +137,12 @@ const MemoryCard: React.FC<{
   selected: boolean;
 }> = ({ entry, badge, onOpen, onDelete , selected}) => {
   const { t } = useI18n();
+  const menuItems = [{
+    id: 'delete',
+    label: t('rightSidebar.contextNotesTodo.memory.actions.delete'),
+    destructive: true,
+    onSelect: onDelete,
+  }];
   return (
     <KnowledgeCard
       selected={selected}
@@ -151,16 +157,8 @@ const MemoryCard: React.FC<{
           </span>
         </>
       )}
-      actions={(
-        <KnowledgeMenu
-          items={[{
-            id: 'delete',
-            label: t('rightSidebar.contextNotesTodo.memory.actions.delete'),
-            destructive: true,
-            onSelect: onDelete,
-          }]}
-        />
-      )}
+      actions={<KnowledgeMenu items={menuItems} />}
+      menuItems={menuItems}
       footer={<MemoryMeta entry={entry} />}
     >
       <p className="line-clamp-2 whitespace-pre-wrap break-words typography-meta text-muted-foreground" dir="auto">

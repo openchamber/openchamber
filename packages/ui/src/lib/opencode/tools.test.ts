@@ -19,6 +19,9 @@ import {
   executeNamespace,
   renderedPage,
   requestedSecret,
+  requestedSecretRun,
+  openChamberCallSummary,
+  secretRunCommandLine,
   subagentSessionId,
   toolDescription,
   toolFileDiffs,
@@ -359,20 +362,18 @@ describe("requestedSecret", () => {
   const input = { action: "secret.request", parameters: { label: "Cloudflare API token", reason: "To deploy the worker.", placeholder: "cf-..." } }
   const request = { label: "Cloudflare API token", reason: "To deploy the worker.", placeholder: "cf-..." }
 
-  test("asks while its call runs and folds to how it ended", () => {
-    expect(requestedSecret("openchamber_secret", running(input))).toEqual({ ...request, state: "waiting" })
-    expect(requestedSecret("openchamber_secret", completed(input, { openchamber: { ok: true, answer: { status: "saved", file: "/data/secrets/abc" } } }))?.state).toBe("saved")
-    expect(requestedSecret("openchamber_secret", completed(input, { openchamber: { ok: true, answer: { status: "declined" } } }))?.state).toBe("declined")
-    expect(requestedSecret("openchamber_secret", completed(input, { openchamber: { ok: true, answer: { answered: false, reason: "chat" } } }))?.state).toBe("not-given")
-    expect(requestedSecret("openchamber_secret", { status: "error", input, error: "aborted", time: { start: 1, end: 2 } })?.state).toBe("not-given")
+  test("asks while its call runs, and leaves an answered request to its tool row", () => {
+    expect(requestedSecret("openchamber_secret", running(input))).toEqual(request)
     // Beside the action, as the plugin also accepts it.
     expect(requestedSecret("openchamber_secret", running({ action: "secret.request", label: "Key", reason: "Why" })))
-      .toEqual({ label: "Key", reason: "Why", placeholder: undefined, state: "waiting" })
+      .toEqual({ label: "Key", reason: "Why", placeholder: undefined })
+    const saved = completed(input, { openchamber: { ok: true, answer: { status: "saved" } } })
+    expect(requestedSecret("openchamber_secret", saved)).toBeNull()
+    expect(isShownInPlace("openchamber_secret", saved)).toBe(false)
+    expect(openChamberCallSummary("openchamber_secret", input)).toEqual({ action: "secret.request", detail: "Cloudflare API token" })
   })
 
   test("leaves a refused, incomplete or foreign call to its tool row", () => {
-    expect(requestedSecret("openchamber_secret", completed(input, { openchamber: { ok: false } }))).toBeNull()
-    expect(requestedSecret("openchamber_secret", completed(input))).toBeNull()
     expect(requestedSecret("openchamber_secret", running({ action: "secret.request", parameters: { label: "Key" } }))).toBeNull()
     expect(requestedSecret("openchamber_render", running(input))).toBeNull()
   })
@@ -380,6 +381,42 @@ describe("requestedSecret", () => {
   test("is shown in place and always counts as waiting for the user", () => {
     expect(isShownInPlace("openchamber_secret", running(input))).toBe(true)
     expect(openChamberToolCall("openchamber_secret", input)?.awaitsAnswer).toBe(true)
+    expect(openChamberToolCall("openchamber_secret", { action: "secret.forget" })?.awaitsAnswer).toBe(false)
+  })
+})
+
+describe("requestedSecretRun", () => {
+  const input = {
+    action: "secret.run",
+    parameters: { program: "wrangler", args: ["deploy", "my worker"], reason: "To deploy.", inputs: [{ env: "CF_TOKEN", label: "Cloudflare token" }, { env: "CF_ACCOUNT", label: "Account id" }] },
+  }
+  const running = (metadata?: Metadata): ToolState => ({ status: "running", input, metadata, time: { start: 1 } })
+  const completed = (metadata?: Metadata): ToolState => ({ status: "completed", input, output: "", metadata, time: { start: 1, end: 2 } })
+
+  test("draws the card while the call runs, and leaves a finished run to its tool row", () => {
+    expect(requestedSecretRun("openchamber_secret", running())).toEqual({
+      reason: "To deploy.",
+      program: "wrangler",
+      command: "wrangler deploy 'my worker'",
+      fields: [{ env: "CF_TOKEN", label: "Cloudflare token", placeholder: undefined }, { env: "CF_ACCOUNT", label: "Account id", placeholder: undefined }],
+    })
+    expect(isShownInPlace("openchamber_secret", running())).toBe(true)
+    const finished = completed({ openchamber: { ok: true, answer: { status: "ran", outcome: "exited", exitCode: 0 } } })
+    expect(requestedSecretRun("openchamber_secret", finished)).toBeNull()
+    expect(isShownInPlace("openchamber_secret", finished)).toBe(false)
+    // The row names the command it ran.
+    expect(openChamberCallSummary("openchamber_secret", input)).toEqual({ action: "secret.run", detail: "wrangler deploy 'my worker'" })
+  })
+
+  test("leaves a refused call and other actions to their own rendering", () => {
+    expect(requestedSecretRun("openchamber_secret", completed({ openchamber: { ok: false } }))).toBeNull()
+    expect(requestedSecretRun("openchamber_secret", { status: "running", input: { action: "secret.request", label: "Key", reason: "Why" }, time: { start: 1 } })).toBeNull()
+    // A run is not drawn as a file request, even when it carries a label.
+    expect(requestedSecret("openchamber_secret", { status: "running", input: { ...input, parameters: { ...input.parameters, label: "x" } }, time: { start: 1 } })).toBeNull()
+  })
+
+  test("shows characters that would hide or reorder the command line", () => {
+    expect(secretRunCommandLine("echo", [`a${String.fromCharCode(0x202e)}b`])).toBe("echo 'a\\u{202E}b'")
   })
 })
 

@@ -332,7 +332,7 @@ export const BranchSelector: React.FC<BranchSelectorProps> = ({
                   {recentBranches.filter((branch) => localBranches.includes(branch)).map((branch) => (
                     <CommandItem key={`recent-${branch}`} onSelect={() => handleCheckout(branch)}>
                       <span className="flex flex-1 items-center gap-2 min-w-0">
-                        <span className="typography-ui-label text-foreground truncate">{branch}</span>
+                        <span dir="ltr" className="typography-ui-label text-foreground truncate">{branch}</span>
                         {(() => {
                           const ahead = unpushedCounts[branch] ?? (branch === currentBranch ? currentBranchAhead : 0);
                           const aheadLabel = ahead === 1

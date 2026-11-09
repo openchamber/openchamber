@@ -69,7 +69,7 @@ export const SessionGoalRow: React.FC<SessionGoalRowProps> = React.memo(({ sessi
       aria-label={t('chat.goal.row.aria')}
     >
       <Icon name="target" className="size-3.5 flex-shrink-0" style={{ color: sessionGoalStatusColor[goal.status] }} aria-hidden="true" />
-      <span className="min-w-0 flex-1 truncate text-sm text-foreground" title={objectiveContent ?? undefined}>
+      <span dir="auto" className="min-w-0 flex-1 truncate oc-ui-start-align text-sm text-foreground" title={objectiveContent ?? undefined}>
         {objectiveContent || t('chat.goal.dialog.titleManage')}
       </span>
       {evaluating ? (

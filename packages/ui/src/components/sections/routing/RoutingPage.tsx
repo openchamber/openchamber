@@ -353,7 +353,7 @@ export const RoutingPage: React.FC = () => {
   return (
     <SettingsPageLayout
       title={t('settings.page.routing.title')}
-      description={t('settings.page.routing.description')}
+      namedBySidebar
       showSaveStatus
     >
       {loadError ? <p className={SETTINGS_DESCRIPTION_CLASS}>{t('settings.routing.loadError', { error: loadError })}</p> : null}

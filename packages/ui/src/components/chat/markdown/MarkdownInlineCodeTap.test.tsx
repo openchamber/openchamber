@@ -47,7 +47,7 @@ const host = document.createElement('div');
 document.body.append(host);
 const root = createRoot(host);
 let drawerOpened = 0;
-const actions = { openChanges: () => undefined, openFiles: () => { drawerOpened += 1; }, openSourceBoard: () => undefined };
+const actions = { openChanges: () => undefined, openFiles: () => { drawerOpened += 1; }, openSourceBoard: () => undefined, openPlan: () => undefined };
 const toastError = spyOn(toast, 'error').mockImplementation(() => 'test-toast');
 let toastsSeen = 0;
 const toasts = () => toastError.mock.calls.slice(toastsSeen).map(([message]) => message);

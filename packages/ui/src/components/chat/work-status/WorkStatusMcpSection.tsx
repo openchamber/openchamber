@@ -137,6 +137,7 @@ export const WorkStatusMcpSection: React.FC<Props> = ({ sessionId, directory: se
             // settings rows put it; the icon column is too narrow for one.
             leading={touch ? undefined : toggle}
             label={name}
+            labelDir="auto"
             muted={!connected}
             value={touch ? <>{stateAction}{toggle}</> : stateAction ?? undefined}
           />

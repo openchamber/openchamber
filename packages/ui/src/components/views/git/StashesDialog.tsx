@@ -165,7 +165,7 @@ export const StashesDialog: React.FC<StashesDialogProps> = ({
           ) : filtered.map((stash, index) => (
             <div key={stash.ref} className="group -mx-2 flex items-center gap-2 rounded-md px-2 py-1.5 transition-colors hover:bg-interactive-hover">
               <div className="min-w-0 flex-1">
-                <p className="typography-ui-label truncate text-foreground">{stash.message || t('gitView.stashes.untitled')}</p>
+                <p dir={stash.message ? 'auto' : undefined} className="oc-ui-start-align typography-ui-label truncate text-foreground">{stash.message || t('gitView.stashes.untitled')}</p>
                 <p className="typography-micro truncate text-muted-foreground">
                   <Tooltip>
                     <TooltipTrigger asChild>

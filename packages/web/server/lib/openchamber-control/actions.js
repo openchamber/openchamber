@@ -11,7 +11,9 @@ export const OPENCHAMBER_CONTROL_ACTION_DEFINITIONS = Object.freeze([
   { action: 'projects.list', title: 'List session destinations', description: 'Projects and Chats; use an id as projectId for session.create. No parameters' },
   { action: 'models.list', title: 'Show model preferences', description: 'Default, favorite and recent models; no parameters' },
   { action: 'models.search', title: 'Search models', description: 'The model catalog, favorites and recent models first; optional query, provider, all, limit, offset' },
-  { action: 'session.list', title: 'List sessions', description: 'Optional limit, all, withStatus (each session\'s status as in session.status)' },
+  { action: 'session.list', title: 'List sessions', description: 'Newest top-level sessions here; each has inWork (in the sidebar\'s In work) and doneSuggested (its last turn looks finished). Filters inWork, busy (running now), query (title words); inWork and busy span every project unless scoped and return all matches. Optional limit, all, children, withStatus (status as in session.status)' },
+  { action: 'session.markDone', title: 'Mark a session done', description: 'Take sessionId (default: this session) out of In work, as the Done button does. Only on the user\'s word; a later message puts it back' },
+  { action: 'session.track', title: 'Put a session in work', description: 'Put sessionId back in In work, as the Track button does, such as to undo a markDone' },
   { action: 'session.create', title: 'Create a session', description: 'In this directory by default; projectId from projects.list selects a project or openchamber:chats for a new Chat. Use the returned directory for later session actions. Prompt optional' },
   { action: 'session.send', title: 'Send a prompt', description: 'New prompt to sessionId' },
   { action: 'session.fork', title: 'Fork a session', description: 'Fork sessionId at messageId; prompt optional' },
@@ -162,11 +164,14 @@ export const OPENCHAMBER_IMAGE_ACTIONS = Object.freeze(
 
 /**
  * Asking for a secret is its own tool: it is the one action that takes a
- * credential from the user, so it can be switched off alone. The value goes
+ * credential from the user, so it can be switched off alone. `secret.run`
+ * hands the values to one command's environment; `secret.request` writes one
  * to a private file and only its path reaches the agent.
  */
 export const OPENCHAMBER_SECRET_ACTION_DEFINITIONS = Object.freeze([
+  { action: 'secret.run', title: 'Run with secrets', description: 'Requires program, reason and inputs; optional args and timeoutMs' },
   { action: 'secret.request', title: 'Ask for a secret', description: 'Requires label and reason' },
+  { action: 'secret.forget', title: 'Forget remembered secrets', description: 'No inputs' },
 ]);
 
 export const OPENCHAMBER_SECRET_ACTIONS = Object.freeze(

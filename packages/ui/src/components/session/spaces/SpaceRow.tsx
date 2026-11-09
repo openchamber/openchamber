@@ -17,7 +17,8 @@ import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { Button } from '@/components/ui/button';
 import type { I18nKey } from '@/lib/i18n';
 import { formatDiskSize, useSpaceDiskBytes } from '@/lib/spaces/space-disk';
-import { SpaceActionsMenu } from './SpaceActions';
+import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from '@/components/ui/context-menu';
+import { SpaceActionsMenu, SpaceMenuItems } from './SpaceActions';
 import { openSpaceApply, pickSpaceAction, useSpaceActions } from './spaceActionsState';
 import { SPACE_ACTION_TEXT } from './spaceActionText';
 import { SpaceStatusLines } from './SpaceStatus';
@@ -32,6 +33,8 @@ const SPACE_STATE_TEXT = {
 } satisfies Record<SpaceEntry['state'], I18nKey>;
 
 const ACTION_BUTTON_CLASS = 'inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring';
+
+const CONTEXT_MENU_SLOTS = { Item: ContextMenuItem, Separator: ContextMenuSeparator };
 
 const BADGE_CLASS = 'shrink-0 typography-micro px-1 rounded leading-none pb-px';
 
@@ -79,7 +82,7 @@ export const SpaceRow: React.FC<{
   // Start or Stop. The rest, rarer, is in the menu beside them.
   const toggle = available.find((action) => action === 'start' || action === 'stop') ?? null;
   const meta = [t(SPACE_STATE_TEXT[entry.state]), ...(bytes !== null ? [formatDiskSize(bytes)] : [])].join(' · ');
-  return (
+  const row = (
     <div className="flex w-full items-start gap-2 py-1.5" data-space-row={entry.id}>
       <Icon name="instance" className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
       <div className="min-w-0 flex-1 space-y-0.5">
@@ -116,5 +119,16 @@ export const SpaceRow: React.FC<{
         )}
       </div>
     </div>
+  );
+  if (actions !== 'menu') return row;
+  // On the desktop the row's right click opens every action, the ones it
+  // shows as buttons included, as the space's work row in the sidebar does.
+  return (
+    <ContextMenu>
+      <ContextMenuTrigger render={row} />
+      <ContextMenuContent className="min-w-[200px]">
+        <SpaceMenuItems spaceId={entry.id} slots={CONTEXT_MENU_SLOTS} />
+      </ContextMenuContent>
+    </ContextMenu>
   );
 };

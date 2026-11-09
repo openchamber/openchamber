@@ -13,6 +13,8 @@ import { createSecretRequests } from './secret-request.js';
 import { createUsageReadAction } from './usage-read.js';
 import { createWorkNamer } from '../openchamber-sessions/work-naming.js';
 import { CHATS_SCOPE_PUBLIC_ID } from '../scheduled-tasks/chats-scope.js';
+import { createWorkMembership } from '../session-work/membership.js';
+import { userStatePatch } from '../session-work/state.js';
 
 const DEFAULT_WAIT_TIMEOUT_SECONDS = 600;
 const MAX_WAIT_TIMEOUT_SECONDS = 86_400;
@@ -279,6 +281,12 @@ export const createOpenChamberControlService = (dependencies) => {
     waitForOpenCodeReady,
     sessionService,
     chatsScope = null,
+    // Roots of managed Chats, which are never in work (../session-work/membership.js).
+    chatRoots = [],
+    // `(sessionID, decide, { directory }) => { metadata, changed }`, the store
+    // write the app's own Done goes through; absent means the server cannot
+    // change In work.
+    updateSessionMetadata = null,
     scheduledTaskService,
     browserControl = null,
     fileOpen = null,
@@ -564,7 +572,7 @@ export const createOpenChamberControlService = (dependencies) => {
   // lookup that fails any other way says nothing about the session.
   const assertSessionExists = async (client, sessionID) => {
     try {
-      await client.session.get({ sessionID });
+      return await client.session.get({ sessionID });
     } catch (error) {
       if (error?._tag === 'SessionNotFoundError' || error?._tag === 'InvalidRequestError') {
         throw new OpenChamberControlError(`Session not found: ${sessionID}`, 404);
@@ -574,6 +582,145 @@ export const createOpenChamberControlService = (dependencies) => {
         503,
       );
     }
+  };
+
+  const workMembership = createWorkMembership({ chatRoots });
+  // On by default, read at every use like the session-work runtime reads it.
+  const isSessionWorkEnabled = async () => {
+    const settings = await readSettingsFromDiskMigrated().catch(() => null);
+    return settings?.sessionWorkEnabled !== false;
+  };
+
+  // A filtered read walks every page, so it asks for big ones.
+  const FILTERED_PAGE_SIZE = 200;
+
+  /**
+   * What `session.list` tells about one session. The OpenCode record runs to
+   * about 750 characters (tokens, cost, permissions, every metadata
+   * namespace), a session in work to about 1,700; this keeps what choosing a
+   * session needs, about 210. `session.status` and `session.messages` read
+   * one session in full.
+   */
+  const listedSession = (record, workEnabled) => {
+    const session = {
+      id: record.id,
+      title: asNonEmptyString(record.title),
+      directory: asNonEmptyString(record.location?.directory) ?? asNonEmptyString(record.directory),
+      updated: record.time?.updated,
+      archived: record.time?.archived,
+      parentID: asNonEmptyString(record.parentID),
+      agent: asNonEmptyString(record.agent),
+      model: record.model,
+      outcome: record.outcome,
+    };
+    if (workEnabled) {
+      session.inWork = workMembership.isInWork(record);
+      session.doneSuggested = workMembership.isDoneSuggested(record);
+    }
+    // A field the record lacks stays out of the answer.
+    return Object.fromEntries(Object.entries(session).filter(([, value]) => value !== undefined && value !== null));
+  };
+
+  /**
+   * `session.list`. Newest first, top-level sessions unless `children`, the
+   * caller's directory unless scoped. `inWork` and `busy` read every project
+   * when unscoped, as the sidebar and the session status do, and return every
+   * match unless `limit` says otherwise; `query` matches every word in the
+   * title, case-insensitively, which OpenCode's own `search` (SQLite LIKE)
+   * does not do for non-ASCII titles. Each session says whether it is in work
+   * while In work is on.
+   */
+  const listSessions = async (input, contextDirectory) => {
+    assertSingleScope(input);
+    const inWork = input.inWork === true;
+    const busy = input.busy === true;
+    const terms = (asNonEmptyString(input.query) ?? '').toLowerCase().split(/\s+/).filter(Boolean);
+    const scoped = Boolean(asNonEmptyString(input.projectId) || asNonEmptyString(input.directory));
+    const everywhere = (inWork || busy) && !scoped;
+    const directory = everywhere ? null : await resolveReadDirectory(input, contextDirectory);
+    const limit = positiveInteger(input.limit, inWork || busy ? null : 10, 'limit');
+    const workEnabled = await isSessionWorkEnabled();
+    if (inWork && !workEnabled) throw new OpenChamberControlError('In work is turned off in Settings', 409);
+
+    const client = await getClient(directory ?? '');
+    const wantStatus = busy || input.withStatus === true;
+    const statuses = wantStatus ? await activeSessions(client).catch(() => null) : null;
+    // A failed read is never an empty answer.
+    if (busy && !statuses) throw new OpenChamberControlError('Could not read which sessions are running', 503);
+    const runningCount = busy ? Object.keys(statuses).length : 0;
+
+    // Session reads are cursor-paginated: one upstream page is not the
+    // collection. Collect only until the limit is satisfied, skip ids a
+    // repeated page already contributed, and stop on a cursor seen twice
+    // so a pathological server cannot spin the walk.
+    const collected = [];
+    const full = () => limit !== null && collected.length >= limit;
+    const seenCursors = new Set();
+    const seenSessionIds = new Set();
+    let runningSeen = 0;
+    let cursor;
+    while (!(busy && runningSeen >= runningCount)) {
+      const listInput = {};
+      if (directory) listInput.directory = directory;
+      if (input.children !== true) listInput.parentID = null;
+      if (inWork || busy || terms.length > 0) listInput.limit = FILTERED_PAGE_SIZE;
+      if (cursor) listInput.cursor = cursor;
+      const response = await client.session.list(listInput);
+      const page = await Promise.all((Array.isArray(response?.data) ? response.data : []).map(withArchiveEntry));
+      for (const record of page) {
+        const id = asNonEmptyString(record?.id);
+        if (id) {
+          if (seenSessionIds.has(id)) continue;
+          seenSessionIds.add(id);
+        }
+        const running = Boolean(id && statuses?.[id]);
+        if (running) runningSeen += 1;
+        if (input.all !== true && record?.time?.archived) continue;
+        if (busy && !running) continue;
+        if (terms.length > 0) {
+          const title = (asNonEmptyString(record?.title) ?? '').toLowerCase();
+          if (!terms.every((term) => title.includes(term))) continue;
+        }
+        const session = listedSession(record, workEnabled);
+        if (inWork && !session.inWork) continue;
+        collected.push(session);
+        if (full()) break;
+      }
+      if (full()) break;
+      const next = asNonEmptyString(response?.cursor?.next);
+      if (!next || page.length === 0 || seenCursors.has(next)) break;
+      seenCursors.add(next);
+      cursor = next;
+    }
+
+    const sessions = wantStatus
+      ? await Promise.all(collected.map(async (session) => ({
+        ...session,
+        status: statuses ? await asPublicStatus(statuses, session.id) : { type: 'unknown' },
+      })))
+      : collected;
+    return { sessions, limit, directory, archived: input.all === true ? 'included' : 'excluded' };
+  };
+
+  /**
+   * `session.markDone` and `session.track`: the record the app's Done and
+   * Track write, through the same store, so every window updates.
+   */
+  const setWorkState = async (input, contextSessionId, state) => {
+    if (!updateSessionMetadata) throw new OpenChamberControlError('Changing In work is not available on this server', 503);
+    if (!(await isSessionWorkEnabled())) throw new OpenChamberControlError('In work is turned off in Settings', 409);
+    const sessionID = asNonEmptyString(input.sessionId) || asNonEmptyString(contextSessionId);
+    if (!sessionID) throw new OpenChamberControlError('sessionId is required', 400);
+    const session = await withArchiveEntry(await assertSessionExists(await getClient(), sessionID));
+    if (state === 'open' && !workMembership.canBeInWork(session)) {
+      throw new OpenChamberControlError(`${sessionID} cannot be in work: subsessions, Chats, reviews, /btw questions and scheduled runs never are`, 400);
+    }
+    if (state === 'open' && session?.time?.archived) {
+      throw new OpenChamberControlError(`${sessionID} is archived; In work shows no archived sessions`, 409);
+    }
+    const directory = asNonEmptyString(session?.location?.directory) || '';
+    const { changed } = await updateSessionMetadata(sessionID, (metadata) => userStatePatch(metadata, { state, now: now() }), { directory });
+    return { sessionId: sessionID, directory, title: asNonEmptyString(session?.title), inWork: state === 'open', changed };
   };
 
   // The message list is cursor-paginated and `order: 'desc'` puts the newest
@@ -1109,6 +1256,18 @@ export const createOpenChamberControlService = (dependencies) => {
           signal: options.signal,
         });
       }
+      if (action === 'secret.run') {
+        return await secretRequests.run(input, {
+          sessionId: asNonEmptyString(options.contextSessionId),
+          callId: asNonEmptyString(options.contextCallId),
+          directory: asNonEmptyString(contextDirectory),
+          signal: options.signal,
+          authorized: options.secretRunAuthorized === true,
+        });
+      }
+      if (action === 'secret.forget') {
+        return await secretRequests.forget(asNonEmptyString(options.contextSessionId));
+      }
       if (action === 'file.open') {
         if (!fileOpen) {
           throw new OpenChamberControlError('The file viewer is not available on this server', 503);
@@ -1230,54 +1389,15 @@ export const createOpenChamberControlService = (dependencies) => {
         }
         return moved;
       }
+      if (action === 'session.markDone' || action === 'session.track') {
+        return setWorkState(input, options.contextSessionId, action === 'session.track' ? 'open' : 'done');
+      }
+      if (action === 'session.list') return listSessions(input, contextDirectory);
       if (action.startsWith('session.')) {
         const sessionID = asNonEmptyString(input.sessionId);
-        if (action !== 'session.list' && !sessionID) throw new OpenChamberControlError('sessionId is required', 400);
+        if (!sessionID) throw new OpenChamberControlError('sessionId is required', 400);
         const directory = await resolveReadDirectory(input, contextDirectory);
         const client = await getClient(directory);
-        if (action === 'session.list') {
-          const limit = positiveInteger(input.limit, 10, 'limit');
-          // Session reads are cursor-paginated: one upstream page is not the
-          // collection. Collect only until the limit is satisfied, skip ids a
-          // repeated page already contributed, and stop on a cursor seen twice
-          // so a pathological server cannot spin the walk.
-          const collected = [];
-          const seenCursors = new Set();
-          const seenSessionIds = new Set();
-          let cursor;
-          for (;;) {
-            const listInput = {};
-            if (directory) listInput.directory = directory;
-            if (cursor) listInput.cursor = cursor;
-            const response = await client.session.list(listInput);
-            const page = await Promise.all((Array.isArray(response?.data) ? response.data : []).map(withArchiveEntry));
-            for (const session of page) {
-              const id = asNonEmptyString(session?.id);
-              if (id) {
-                if (seenSessionIds.has(id)) continue;
-                seenSessionIds.add(id);
-              }
-              if (input.all !== true && session?.time?.archived) continue;
-              collected.push(session);
-              if (collected.length >= limit) break;
-            }
-            if (collected.length >= limit) break;
-            const next = asNonEmptyString(response?.cursor?.next);
-            if (!next || page.length === 0 || seenCursors.has(next)) break;
-            seenCursors.add(next);
-            cursor = next;
-          }
-          let sessions = collected.slice(0, limit);
-          if (input.withStatus === true) {
-            // One global call now: v2 reports active sessions across directories.
-            const statuses = await activeSessions(client).catch(() => null);
-            sessions = await Promise.all(sessions.map(async (session) => ({
-              ...session,
-              status: statuses ? await asPublicStatus(statuses, session.id) : { type: 'unknown' },
-            })));
-          }
-          return { sessions, limit, directory, archived: input.all === true ? 'included' : 'excluded' };
-        }
         if (!directory) throw new OpenChamberControlError('directory is required', 400);
         if (action === 'session.status') {
           await assertSessionExists(client, sessionID);
@@ -1318,6 +1438,7 @@ export const createOpenChamberControlService = (dependencies) => {
     resolveSessionDirectory,
     answerPage: pageAnswers.answer,
     answerSecret: secretRequests.answer,
+    secretFields: secretRequests.fields,
     releaseAnswerWaits,
     stopSession,
     answerPermission,

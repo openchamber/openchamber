@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { fetchUpdateNotes, renderCanaryNotes, renderUpdateNotes } from './update-notes.js';
+import { fetchReleaseNotes, fetchUpdateNotes, renderCanaryNotes, renderUpdateNotes } from './update-notes.js';
 import { compareVersions } from '../version-order.js';
 
 const compare = (a, b) => {
@@ -78,6 +78,70 @@ describe('fetchUpdateNotes', () => {
   });
 });
 
+describe('release sources', () => {
+  const apiFeed = {
+    entries: [
+      { version: '1.2.3', date: '2026-03-03', title: 'From the API', intro: null, groups: { new: ['Api.'], improvements: [], fixes: [], sdk: [], misc: [] } },
+      { version: '1.2.2', date: '2026-03-02', title: null, intro: null, groups: null, notes: 'From a release body.' },
+    ],
+  };
+
+  it('reads the website API first and skips entries without groups', async () => {
+    const urls = [];
+    const fetchApi = async (url) => { urls.push(url); return { ok: true, json: async () => apiFeed }; };
+    expect(await fetchReleaseNotes('1.2.3', '1.2.1', compare, { fetch: fetchApi })).toEqual([
+      { version: '1.2.3', date: '2026-03-03', title: 'From the API', intro: null, groups: [{ key: 'new', bullets: ['Api.'] }] },
+    ]);
+    expect(urls).toEqual(['https://api.openchamber.dev/v1/changelog/full']);
+  });
+
+  it('falls back to the index on GitHub when the API fails', async () => {
+    const urls = [];
+    const apiDown = async (url) => {
+      urls.push(url);
+      return url.includes('api.openchamber.dev') ? { ok: false } : { ok: true, json: async () => index };
+    };
+    expect((await fetchReleaseNotes('1.2.3', undefined, compare, { fetch: apiDown }))[0].title).toBe('Comments everywhere');
+    expect(urls).toEqual(['https://api.openchamber.dev/v1/changelog/full', 'https://raw.githubusercontent.com/openchamber/openchamber/main/changelog/index.json']);
+  });
+});
+
+describe('fetchReleaseNotes', () => {
+  const ok = (entries) => async () => ({ ok: true, json: async () => entries });
+
+  it('returns the installed release alone, with its empty groups dropped', async () => {
+    expect(await fetchReleaseNotes('1.2.3', undefined, compare, { fetch: ok(index) })).toEqual([{
+      version: '1.2.3',
+      date: '2026-03-03',
+      title: 'Comments everywhere',
+      intro: 'A short intro.',
+      groups: [{ key: 'new', bullets: ['**Comments:** on code.'] }, { key: 'fixes', bullets: ['Chat: no freeze.'] }],
+    }]);
+  });
+
+  it('returns what an update brings, newest first, and the target alone on the way back', async () => {
+    expect((await fetchReleaseNotes('1.2.3', '1.2.1', compare, { fetch: ok(index) })).map((release) => release.version)).toEqual(['1.2.3', '1.2.2']);
+    expect((await fetchReleaseNotes('1.2.2', '1.2.3', compare, { fetch: ok(index) })).map((release) => release.version)).toEqual(['1.2.2']);
+  });
+
+  it('tells a release without notes from a source it could not read', async () => {
+    expect(await fetchReleaseNotes('9.9.9', undefined, compare, { fetch: ok(index) })).toEqual([]);
+    expect(await fetchReleaseNotes('1.2.3', undefined, compare, { fetch: async () => ({ ok: false }) })).toBe(null);
+    expect(await fetchReleaseNotes('1.2.3', undefined, compare, { fetch: ok({ entries: [] }) })).toBe(null);
+  });
+
+  it('reads a Canary build from its night', async () => {
+    const nights = [{ version: '2.5.4-canary.20261031.5', date: '2026-10-31', new: [{ area: 'chat', text: 'remember thinking level', pr: '5505' }], fixes: [] }];
+    expect(await fetchReleaseNotes('2.5.4-canary.20261031.5', undefined, compareVersions, { fetch: ok(nights) })).toEqual([{
+      version: '2.5.4-canary.20261031.5',
+      date: '2026-10-31',
+      title: null,
+      intro: null,
+      groups: [{ key: 'new', bullets: ['**Chat:** remember thinking level [#5505](https://github.com/openchamber/openchamber/pull/5505)'] }],
+    }]);
+  });
+});
+
 describe('Canary notes', () => {
   const nights = [
     { version: '2.5.4-canary.20261031.5', date: '2026-10-31', new: [{ area: 'chat', text: 'remember thinking level per model', pr: '5505' }], fixes: [{ area: 'scheduled-tasks', text: 'record dispatched runs as sent', pr: null }] },
@@ -108,10 +172,17 @@ describe('Canary notes', () => {
     expect(renderCanaryNotes(nights, '2.5.4-canary.20261031.5', '2.5.4-canary.20261031.5', compareVersions)).toBe(null);
   });
 
-  it('reads them from the canary pre-release for a Canary target', async () => {
+  it('reads them from the R2 mirror for a Canary target', async () => {
     const urls = [];
     const ok = async (url) => { urls.push(url); return { ok: true, json: async () => nights }; };
     expect(await fetchUpdateNotes('2.5.4-canary.20261030.4', '2.5.4-canary.20261031.5', compareVersions, { fetch: ok })).toMatch(/^## \[2\.5\.4-canary\.20261031\.5\]/);
-    expect(urls).toEqual(['https://github.com/openchamber/openchamber/releases/download/canary/canary-notes.json']);
+    expect(urls).toEqual(['https://downloads.openchamber.dev/desktop/canary/canary-notes.json']);
+  });
+
+  it('falls back to the canary pre-release when the mirror fails', async () => {
+    const urls = [];
+    const mirrorDown = async (url) => { urls.push(url); return url.includes('downloads.openchamber.dev') ? { ok: false } : { ok: true, json: async () => nights }; };
+    expect(await fetchUpdateNotes('2.5.4-canary.20261030.4', '2.5.4-canary.20261031.5', compareVersions, { fetch: mirrorDown })).toMatch(/^## \[2\.5\.4-canary\.20261031\.5\]/);
+    expect(urls.at(-1)).toBe('https://github.com/openchamber/openchamber/releases/download/canary/canary-notes.json');
   });
 });

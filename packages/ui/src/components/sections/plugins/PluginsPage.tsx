@@ -387,6 +387,7 @@ export const PluginsPage: React.FC = () => {
           settingsItem="plugins.options"
         >
           <Textarea
+            dir="ltr"
             value={draft.optionsJson}
             onChange={(e) =>
               setDraft({ ...draft, optionsJson: e.target.value })

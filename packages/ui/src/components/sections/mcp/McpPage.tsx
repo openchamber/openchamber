@@ -1763,6 +1763,7 @@ export const McpPage: React.FC = () => {
 
           <div className="space-y-3">
             <Textarea
+              dir="ltr"
               value={importJsonText}
               onChange={(e) => {
                 setImportJsonText(e.target.value);

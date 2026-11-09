@@ -112,7 +112,8 @@ import { ApplyPatchFileButtons } from './ApplyPatchFileButtons';
 import { OpenChamberToolOutput } from './OpenChamberToolOutput';
 import { OpencodeToolOutput } from './OpencodeToolOutput';
 import { opencodeCallSucceeded, opencodeToolVerb, parseOpencodeToolResult } from './opencodeToolResult';
-import { hasOpenChamberView, openChamberVerbKey, parseOpenChamberEnvelope } from './openChamberToolEnvelope';
+import { hasOpenChamberView, openChamberVerbKey, parseOpenChamberEnvelope, secretRowView } from './openChamberToolEnvelope';
+import { Field } from './ToolResultParts';
 import { openApplyPatchFileInEditor } from './applyPatchEditorAction';
 import { WebSearchResults } from './WebSearchResults';
 import { toBackgroundShellPart, type BackgroundShellPhase } from './backgroundShellPart';
@@ -521,6 +522,13 @@ const describeOpenChamberRow = (
     // A history page leaves the result out until the row opens, and says
     // which action it answered instead.
     const envelope = parseOpenChamberEnvelope(output) ?? toolContentShellEnvelope(part);
+    // A secret call's verb says how it ended; a history page keeps only the
+    // action, so its row names the action until it opens.
+    const run = secretRowView(envelope);
+    if (summary && run) {
+        const verb = translate(run.key, run.code === undefined ? undefined : { code: String(run.code) });
+        return summary.detail ? `${verb} · ${summary.detail.slice(0, 120)}` : verb;
+    }
     // The envelope names the action the server ran, a bare `link` included.
     const key = openChamberVerbKey(envelope?.action);
     if (!summary || !key || envelope?.ok !== true) return null;
@@ -818,6 +826,27 @@ const JsonToolOutput: React.FC<{
     );
 };
 
+/** What a command printed, with a copy button: a shell row's output, and a secret run's. */
+const CommandOutput: React.FC<{ output: string; language: string }> = ({ output, language }) => (
+    // min-h-7 holds the copy button (top-1 + h-6): an absolute child taller
+    // than one output line overflows the scroller, and platforms with
+    // classic scrollbars (Windows) then show one for a single line.
+    <div className="relative min-h-7 typography-code text-muted-foreground">
+        <div className="absolute inset-e-1 top-1 z-10">
+            <CopyToolOutputButton output={output} />
+        </div>
+        <div className="pe-8">
+            <WorkerHighlightedCode
+                language={language}
+                code={output}
+                style={TOOL_COLLAPSED_CUSTOM_STYLE}
+                codeStyle={CODE_TAG_PROPS.style}
+                wrap
+            />
+        </div>
+    </div>
+);
+
 const ToolScrollableTextOutput: React.FC<{
     output: string;
     part: ToolPartType;
@@ -874,27 +903,7 @@ const ToolScrollableTextOutput: React.FC<{
         return <JsonToolOutput jsonResult={jsonResult} renderedOutput={renderedOutput} />;
     }
 
-    if (isShellTool(part.tool)) {
-        return (
-            // min-h-7 holds the copy button (top-1 + h-6): an absolute child taller
-            // than one output line overflows the scroller, and platforms with
-            // classic scrollbars (Windows) then show one for a single line.
-            <div className="relative min-h-7 typography-code text-muted-foreground">
-                <div className="absolute inset-e-1 top-1 z-10">
-                    <CopyToolOutputButton output={renderedOutput} />
-                </div>
-                <div className="pe-8">
-                    <WorkerHighlightedCode
-                        language={outputLanguage}
-                        code={renderedOutput}
-                        style={TOOL_COLLAPSED_CUSTOM_STYLE}
-                        codeStyle={CODE_TAG_PROPS.style}
-                        wrap
-                    />
-                </div>
-            </div>
-        );
-    }
+    if (isShellTool(part.tool)) return <CommandOutput output={renderedOutput} language={outputLanguage} />;
 
     return (
         <div>
@@ -1382,7 +1391,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
                             {parsedQA.map((qa, index) => (
                                 <div key={index} className="space-y-0.5">
                                     <FormMarkdown content={qa.question} size="micro" className="text-muted-foreground" />
-                                    <div className="typography-meta text-foreground whitespace-pre-wrap">{qa.answer}</div>
+                                    <div dir="auto" className="typography-meta text-foreground whitespace-pre-wrap">{qa.answer}</div>
                                 </div>
                             ))}
                         </div>,
@@ -1415,13 +1424,13 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
                         {questionInput.questions.map((q, index) => (
                             <div key={index} className="space-y-0.5">
                                 {q.header ? (
-                                    <div className="typography-micro text-muted-foreground">{coerceToText(q.header)}</div>
+                                    <div dir="auto" className="typography-micro text-muted-foreground">{coerceToText(q.header)}</div>
                                 ) : null}
                                 <FormMarkdown content={coerceToText(q.question)} size="meta" className="text-foreground" />
                                 {Array.isArray(q.options) && q.options.length > 0 ? (
                                     <div className="flex flex-wrap gap-1 mt-0.5">
                                         {q.options.map((opt) => (
-                                            <span key={coerceToText(opt.label)} className="typography-micro px-1.5 py-0.5 rounded oc-tile-inset text-muted-foreground">
+                                            <span key={coerceToText(opt.label)} dir="auto" className="typography-micro px-1.5 py-0.5 rounded oc-tile-inset text-muted-foreground">
                                                 {coerceToText(opt.label)}
                                             </span>
                                         ))}
@@ -1526,6 +1535,26 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
                         rawToggle={<RawAnswerToggle label={t('chat.toolPart.openchamber.raw.show')} onToggle={() => setShowRawToolAnswer(true)} />}
                     />
                 </div>
+            );
+        }
+
+        // A secret run reads like a shell row: what the command printed, values
+        // already replaced by the server. A saved secret names its file.
+        const secret = !showRawToolAnswer ? secretRowView(openChamberEnvelope) : null;
+        if (secret) {
+            const ran = openChamberEnvelope?.action === 'secret.run';
+            return renderScrollableBlock(
+                <div className="space-y-2">
+                    {secret.output
+                        ? <CommandOutput output={secret.output} language="text" />
+                        : secret.file
+                            ? <Field label={t('chat.toolPart.openchamber.field.file')}>{secret.file}</Field>
+                            : ran ? <div className="typography-meta text-muted-foreground">{t('chat.toolPart.noOutputProduced')}</div> : null}
+                    <div className="-ms-2">
+                        <RawAnswerToggle label={t('chat.toolPart.openchamber.raw.show')} onToggle={() => setShowRawToolAnswer(true)} />
+                    </div>
+                </div>,
+                { maxHeightClass: ran ? 'max-h-[46vh]' : 'max-h-60' },
             );
         }
 

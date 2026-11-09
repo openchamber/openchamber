@@ -260,7 +260,7 @@ export const CommandPalette: React.FC = () => {
       {
         id: 'new-worktree-dialog',
         title: t('commandPalette.item.newWorktreeDialog'),
-        icon: <Icon name="git-branch" className="me-2 h-4 w-4" />,
+        icon: <Icon name="worktree" className="me-2 h-4 w-4" />,
         shortcutId: 'open_new_worktree_dialog',
         searchText: t('commandPalette.item.newWorktreeDialog'),
         onSelect: run(openNewWorktreeDialog),
@@ -1015,12 +1015,12 @@ export const CommandPalette: React.FC = () => {
                           <Icon name="chat-ai-3" className="me-2 h-4 w-4" />
                           <span dir="auto" className="min-w-0 flex-1 truncate oc-ui-start-align"><Matched text={title} ranges={ranges} /></span>
                           {projectLabel ? (
-                            <span className="max-w-[180px] shrink-0 truncate text-muted-foreground typography-meta">{projectLabel}</span>
+                            <span dir="auto" className="max-w-[180px] shrink-0 truncate text-muted-foreground typography-meta">{projectLabel}</span>
                           ) : null}
                           {branch ? (
                             <span className="inline-flex max-w-[160px] shrink-0 items-center gap-1 text-muted-foreground typography-meta">
                               <Icon name="git-branch" className="h-3 w-3" />
-                              <span className="truncate">{branch}</span>
+                              <span dir="ltr" className="truncate">{branch}</span>
                             </span>
                           ) : null}
                         </CommandItem>
@@ -1046,7 +1046,7 @@ export const CommandPalette: React.FC = () => {
                         onSelect={() => handleOpenProject(project.id, project.path)}
                       >
                         <Icon name="folder" className="me-2 h-4 w-4" />
-                        <span className="shrink-0 truncate"><Matched text={project.displayName} ranges={nameRanges} /></span>
+                        <span dir="auto" className="shrink-0 truncate"><Matched text={project.displayName} ranges={nameRanges} /></span>
                         <LeadingTruncated text={project.path} ranges={pathRanges} className="flex-1" />
                       </CommandItem>
                     ))}

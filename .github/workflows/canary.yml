@@ -189,7 +189,19 @@ jobs:
           fi
           codesign -vv --deep --strict "$APP_PATH"
           codesign -dv --verbose=4 "$APP_PATH" 2>&1 | grep -q "flags=.*runtime"
-          xcrun stapler validate "$APP_PATH"
+          # stapler validate looks the ticket up in Apple CloudKit, which drops
+          # connections now and then (error 68); retry before failing the build.
+          for attempt in 1 2 3 4 5; do
+            if xcrun stapler validate "$APP_PATH"; then
+              break
+            fi
+            if [ "$attempt" -eq 5 ]; then
+              echo "Error: stapler validate failed after $attempt attempts"
+              exit 1
+            fi
+            echo "stapler validate failed (attempt $attempt), retrying in 30s"
+            sleep 30
+          done
           # The same app as the release, at the Canary version.
           test "$(defaults read "$PWD/$APP_PATH/Contents/Info" CFBundleIdentifier)" = "dev.openchamber.desktop"
           test "$(defaults read "$PWD/$APP_PATH/Contents/Info" CFBundleShortVersionString)" = "$VERSION"
@@ -632,6 +644,28 @@ jobs:
           fi
           node scripts/changelog/canary-notes.mjs --previous "$RUNNER_TEMP/previous-notes.json" \
             --from "$FROM" --to "$SHA" --version "$VERSION" > "$RUNNER_TEMP/canary-notes.json"
+
+      # The desktop app reads Canary updates from the R2 mirror first, and the
+      # website links its Canary downloads there, so the night goes there
+      # before the GitHub release names it. A failed upload stops the night
+      # unpublished; the GitHub release still names the previous commit, so
+      # the next run builds this one again.
+      - name: Mirror to R2
+        env:
+          R2_ACCOUNT_ID: ${{ vars.R2_ACCOUNT_ID }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          # R2 rejects the checksums newer AWS CLI versions send by default.
+          AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+          AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/mirror"
+          cp files/OpenChamber-* files/latest-linux.yml files/latest-linux-arm64.yml \
+            "$RUNNER_TEMP/latest-mac.yml" "$RUNNER_TEMP/latest.yml" "$RUNNER_TEMP/latest-arm64.yml" \
+            "$RUNNER_TEMP/canary-notes.json" "$RUNNER_TEMP/mirror/"
+          node scripts/release-mirror/mirror-to-r2.mjs --channel canary --dir "$RUNNER_TEMP/mirror" --version "$VERSION"
 
       - name: Publish to the canary pre-release
         env:

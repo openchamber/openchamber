@@ -4,6 +4,7 @@ import path from 'node:path';
 import { isString } from '../shared/guards.js';
 import { OpenChamberControlError } from './error.js';
 import { createPageAnswers } from './render-page.js';
+import { createSecretRuns } from './secret-run.js';
 
 export const SECRET_REQUEST_MAX_LABEL_LENGTH = 120;
 export const SECRET_REQUEST_MAX_REASON_LENGTH = 1000;
@@ -21,7 +22,7 @@ const CHAT_SENT_EARLIER_NOTE = "The card did not wait: the user had already writ
  * the card. The plugin builds that result itself (see ../agent-tool/runtime.js),
  * because the wait ends there, before this server hears of it.
  */
-export const SECRET_REQUEST_CLOSED_IN_CHAT_NOTE = "The user did not give the secret and wrote in the chat instead; their message follows this result. If they pasted a secret there, tell them to rotate it, since the chat keeps it.";
+export const SECRET_REQUEST_CLOSED_IN_CHAT_NOTE = "The user wrote in the chat before the call finished; their message follows this result. If the card was still waiting, they gave no secret; if they pasted one in the chat, tell them to rotate it, since the chat keeps it. A command secret.run had started was stopped.";
 
 const NOT_WAITING_MESSAGE = 'This request is no longer waiting for a secret';
 
@@ -75,13 +76,29 @@ export const createSecretFiles = ({ directory, now = Date.now, fsPromises = fs }
  * the user sent before it appeared: OpenCode delivers that message only once
  * this call returns, so waiting would hold it back.
  */
-export const createSecretRequests = ({ isEnabled, files, onWaitChange, hasUnreadChat = async () => false }) => {
+export const createSecretRequests = ({ isEnabled, files, onWaitChange, hasUnreadChat = async () => false, leases, runCommand }) => {
   const waits = createPageAnswers({ onWaitChange });
+  // `secret.run` waits on the same card, so one answer route reaches both.
+  const runs = createSecretRuns({ waits, hasUnreadChat, leases, run: runCommand });
 
-  const request = async (input, { sessionId, callId, directory, signal } = {}) => {
+  const assertEnabled = async () => {
     if (!await isEnabled()) {
       throw new OpenChamberControlError('The secret tool is turned off in OpenChamber settings', 403);
     }
+  };
+
+  const run = async (input, options = {}) => {
+    await assertEnabled();
+    return runs.execute(input, options);
+  };
+
+  const forget = async (sessionId) => {
+    await assertEnabled();
+    return runs.forget(sessionId);
+  };
+
+  const request = async (input, { sessionId, callId, directory, signal } = {}) => {
+    await assertEnabled();
     if (!files) {
       throw new OpenChamberControlError('This server cannot store secrets', 503);
     }
@@ -147,6 +164,7 @@ export const createSecretRequests = ({ isEnabled, files, onWaitChange, hasUnread
       settle(sessionId, callId, 'declined', null);
       return { status: 'declined' };
     }
+    if (runs.fieldsFor(sessionId, callId)) return runs.submit(sessionId, callId, input, settle);
     const value = isString(input.value) ? input.value : '';
     if (!value.trim()) {
       throw new OpenChamberControlError('value is required', 400);
@@ -167,5 +185,12 @@ export const createSecretRequests = ({ isEnabled, files, onWaitChange, hasUnread
     return { status: 'saved' };
   };
 
-  return { request, answer, release: waits.release };
+  /** The fields a waiting `secret.run` card asks for; a 404 once it stopped waiting. */
+  const fields = (input = {}) => {
+    const asked = runs.fieldsFor(readText(input.sessionId), readText(input.callId));
+    if (!asked) throw new OpenChamberControlError(NOT_WAITING_MESSAGE, 404);
+    return asked;
+  };
+
+  return { request, run, forget, answer, fields, release: waits.release };
 };
