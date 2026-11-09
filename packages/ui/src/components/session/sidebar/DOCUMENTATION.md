@@ -1158,6 +1158,31 @@ The actions and what they cover swap in one step. A fade on every pointer
 pass over a list reads as lag, and the mask under the title already keeps the
 swap from jumping.
 
+### Why the session menu takes no new items
+
+A session row's menu is already as long as it should be. A new session-level
+action goes where actions of its kind already live, such as the chat's
+work-status panel (`components/chat/work-status/`), and not into the row menu;
+a "Link PR" entry there was turned down for this reason. Keep warm is the one
+item added since, because the maintainer asked for that placement. Add a menu
+item only when the maintainer asks for that placement.
+
+### Hierarchy ideas that were tried and rejected
+
+These came up while making the list read less cluttered, and the maintainer
+turned each down. Propose one again only with a reason that is new.
+
+- A "main" header over the project root's sessions: a level of hierarchy that
+  made the list more complex. Root sessions sit directly under the project
+  header.
+- Project and zone headers as full-width tinted bands with hairlines, as
+  collapsible sections look in other apps: tried in the running app and
+  reverted. Headers are set apart by space and label weight (see "One view").
+- Grouping In work by state (running, waiting, idle): the lifecycle order
+  already lifts a work when a turn starts and when it finishes.
+- Naming a worktree row after one of its sessions: see "Works", a worktree is
+  named by its task or branch.
+
 ### Why every project list follows the sidebar's sort and has no sort of its own
 
 The maintainer decided (#4829) that a project sits in the same place in every

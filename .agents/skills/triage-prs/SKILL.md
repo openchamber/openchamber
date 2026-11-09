@@ -30,7 +30,7 @@ Bucket every non-draft PR:
 | Clean | mergeable and not waiting on the author | phase 3 review pool |
 | Draft | `isDraft` | untouched while the author committed within 14 days, and always for the team's own drafts (`btriapitsyn`, `yulia-ivashko`, `deatheros`, `AlexKutas`, `Galnaz`); otherwise close with **stale-draft** |
 
-Those five authors' PRs are the team bucket and skip review: they land through the team's own process. `IbrahimKhan12` is reviewed like anyone else, but fixes left on his PRs, as on any team member's, are ours to finish, never a push-back list.
+Those five authors' PRs are the team bucket and skip review: they land through the team's own process. The exception is `btriapitsyn`'s `deslop/<date>` PRs, weekly cleanups a scheduled agent opens: review them for behavior preservation only and merge once CI is green. `IbrahimKhan12` is reviewed like anyone else, but fixes left on his PRs, as on any team member's, are ours to finish, never a push-back list.
 
 Then detect **duplicate clusters** across the survivors: pairs with high title-token overlap or high changed-file overlap. For each cluster recommend one keeper (prefer: mergeable over conflicted, references an issue, smaller diff, earlier author — a later near-identical body is likely a regenerated copy of the earlier PR, and the earlier author keeps the credit); the rest close with **duplicate-close**.
 
@@ -46,7 +46,7 @@ Execute the approved closes/comments with retries and ~1–2s spacing between ca
 
 PRs closed by the contribution gate (label `needs-accepted-issue`, `.github/scripts/pr-checks.cjs`) are not in the queue: they reopen on their own once they link a bug report or an accepted feature request. PRs labeled `evidence-in-branch` or `needs-visual-evidence` are *waiting on author*, one line each in the report; the label comes off on its own once fixed, and removing it by hand waives the check for that PR. The retired `needs-discussion` label from the earlier parking rule is size information only; such a PR is an ordinary review pool entry.
 
-The review bot's `review:*` labels are a pre-sort, not a verdict: `review:ready` PRs go first (the bot found no code defects — likely MERGE/MERGE-THEN-FIX), `review:blocked` ones carry a bot comment whose findings the verdict review verifies rather than rediscovers. Bot labels never replace the pr-review pass — the bot cannot judge product fit or maintainability scope.
+The review bot's `review:*` labels are a pre-sort, not a verdict: `review:ready` PRs go first (the bot found no code defects — likely MERGE/MERGE-THEN-FIX), `review:blocked` ones carry a bot comment whose findings the verdict review verifies rather than rediscovers. Bot labels never replace the pr-review pass — the bot cannot judge product fit or maintainability scope. The bot (`.opencode/agent/pr-review-bot.md`) runs a small model on purpose, because it only finds; its model is not a breach of the verdict rule below.
 
 Split the clean pool smallest-first (tiny diffs are fast wins and most likely mergeable). Fan out the `review-pr` subagent (`.opencode/agent/review-pr.md`, which loads the `pr-review` skill and carries the hard rules). It takes one PR or several per call — group related PRs together when one context can serve them, give a large or contentious PR its own call; fall back to a general subagent that receives the full `pr-review` skill text when `review-pr` is unavailable. Never hand verdicts to a smaller model to save quota — a verdict from a small model is a pre-sort, not a decision. Each returns per-PR verdict blocks in the skill's output format.
 
@@ -63,7 +63,7 @@ A yes on any of them moves the verdict or lands on the action list; it never sta
 
 **Report format.** The consolidated report is what the maintainer decides from — calibrate each entry so no follow-up question is needed, without ballooning:
 
-- One entry per PR, one or two plain sentences: what changes for the user, and the thing the decision turns on (the risk, the product question, why it closes). "Closes #N" links included.
+- One entry per PR: the PR as a markdown link, then one or two plain sentences, so the maintainer follows without opening it: what changes for the user, and the thing the decision turns on (the risk, the product question, why it closes). "Closes #N" links included.
 - A "needs your hands" line appears only when the check gates the merge (per the pr-review skill), and lives INSIDE the PR's own entry as its final line — never as a separate section repeating the numbers. A plain MERGE entry carries no checklist.
 - Thread-state line first for pickup-mode entries.
 - A genuinely trivial diff gets a few words ("точковий фікс").
@@ -93,6 +93,7 @@ Hold build-heavy agents to about 3 at a time on a laptop with a limiter in the s
 - **Review findings on the branch are verified, not obeyed.** Read every unresolved bot and reviewer comment against the current head: one a later push fixed or made moot is done, the rest stand however old they are. Answer each finding the way `openchamber-change-discipline` (*Answering Review Findings*) says, and a finding you decline gets a written reason in the PR, so the next reader does not raise it again.
 - **A red check is read before it is believed.** Find which check failed: the review bot's `automation` job failing means the bot did not run, and a test that fails on the PR but passes on current `main` is a stale run, not the PR.
 - **A PR that must not close its issue says `Part of #N`.** Dropping the link from the body makes the contribution gate close the PR; `Part of` keeps it passing without closing the issue on merge.
+- **A PR body is edited from its live text.** Fetch it right before the edit (`gh pr view <N> --json body -q .body`) and change that, because the maintainer adds screenshots to the body on GitHub and a body rebuilt from an earlier copy wipes them.
 - **Renovate PRs that touch the same file conflict with each other once one lands.** Merge them one at a time; for the rest tick the rebase checkbox in the PR body (`gh pr edit --body-file`) and come back.
 
 ### Decision rounds through the question tool

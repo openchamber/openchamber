@@ -6,6 +6,7 @@
 - Each package uses the ordinary SDK manifest and public SDK APIs. Built-in status does not expose private stores, credentials, or native bridges to its iframe.
 - `scripts/build-builtin-extensions.mjs` copies only declared files, bundles declared entries, stamps the app version, and validates the staged output before replacing the previous complete bundle. Browser output is a self-contained IIFE. Node service output is ESM.
 - Panel translations live with the package and use `HostReadyContext.locale`. They cannot consume the host React i18n context across the iframe boundary. Keep all 12 host locales covered.
+- That all-locales rule binds the built-ins here only. An external extension keeps its own dictionaries, reads the app language from `HostReadyContext.locale` in frames and `query.locale` on a status source, and may ship any subset: untranslated text falls back to English, so a contribution of one language is accepted. The SDK has no translation mechanism and needs none. Either way, `zh-TW` never gets simplified strings, keys are semantic, and names, file names and log text stay verbatim.
 - `packages/web/server/built-in-extensions/` is generated app code, not user data. Web builds, web prepack and root postinstall prepare it. Packaged Electron keeps it in `app.asar.unpacked/node_modules/@openchamber/web/server/built-in-extensions` and supplies that physical root to the in-process backend.
 
 ## Runtime authority

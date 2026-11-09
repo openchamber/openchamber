@@ -157,6 +157,18 @@ without edits. The lab is `julia-lab/jev-work` (`run-review.mjs`,
 real work, because it reads the same three turns the recap does. Do not change
 the wording or thresholds without re-running this measurement.
 
+### What counts as done
+
+The boundary to use when labelling turns, judging a looks-done hint, or
+rewording the signs. A commit, push, merge or "thanks" closes the work only
+when nothing more is planned in the conversation. The work is not done when
+the same request says more comes next ("after that", "then we continue",
+"now I need…"); when the step is interim (a commit to keep the branch clean,
+a sync to test); when the agent's answer names what is left (unchecked parts,
+open questions, next steps); or when the thanks is for undoing a trial or
+experiment. Models asked "is this done" call such turns done at every
+thinking level, so judge them against this boundary, not a model's verdict.
+
 ### Why looks done waits 10 minutes and not shows at once
 
 In a long session almost every turn finishes something, so a closing-looking

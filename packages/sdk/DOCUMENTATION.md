@@ -56,6 +56,7 @@ Notification services can receive kind `pull-request` for a GitHub merge the use
 - `storage` is instance-owned JSON under the guest's namespace, without a new capability. `storage.js` serializes authorization, read-modify-write, and removal per namespace; writes use unique temporary files and rename. Missing keys differ from stored null; corrupt files and failed writes fail without clearing data. Device scope is an explicit SDK opt-in only when ready features advertise `deviceStorage`; it uses the host runtime key plus guest ID and server-issued installation `storageId`, and has no instance fallback. Different runtime identities remain separate even if a server duplicates a storage ID. URL-based runtime keys separate address aliases; saved-host and relay keys retain their existing identity rules. IndexedDB limits are 2 MiB per namespace and 16 MiB of serialized preference data across the database; browser metadata has separate overhead. A confirmed uninstall makes the namespace inaccessible, but an offline profile retains its bytes until site data is removed. Device storage does not promise secret or SSO storage. Limits and public result shapes live in `API.md`. For project data, extensions namespace keys with project IDs.
 
 - Manifest `apiVersion` is `1`. Wire envelope `v` stays `1`. Any other value is `unsupported-api-version`. Optional `engines.openchamber` is `1.22.0` or `>=1.22.0`. Install refuses with `host-too-old` when this OpenChamber build is older. Package installs also need a semver `version` on `package.json` (`1.0.0`); the catalog exposes it and Settings → Extensions shows `v1.0.0` on the card. Already-installed packages without `version` still list; new installs without it fail as `invalid-manifest`.
+- An extension names itself with `id`, `name` and `icon` beside `contributes`; `contributes.panel` then means only its rail page. The older form with identity inside `panel` stays valid, and `liftIdentity` in `parse.ts` folds the new form into it, so everything downstream reads one shape.
 - `panel.entry` is optional; `panel.id/name/icon` remain the identity on Settings and approval cards. `hasGuestPage` means a visible panel, not an execution runtime. `background.entry` provides independent package-local `.html` for on-demand code without a rail icon. Without a panel, actions must explicitly use `mode: "background"`; `page` and enabled `attach` fail as `invalid-panel`. A background-only extension can declare commands, services, integrations and capabilities, with the existing grants. Without either entry, only tools and provider logos are allowed, HTML/JS serving is refused, and `examples/tools-only` remains the reference. Settings shows "No panel" whenever the visible entry is absent.
 - Panel `id` is kebab-case. `icon` is a Remixicon kebab-case name (`RiWindowLine` → `window`, `RiGitMergeLine` → `git-merge`) or a package `.svg` path (`icon.svg`). URLs and absolute paths fail parse. `entry` stays inside the package (no `..`, no absolute, no URL). The rail paints a Remixicon from the host sprite, or a `currentColor` mask for a package SVG. Package SVGs often fill the 24×24 viewBox; the rail scales that mask so it matches Remixicon optical size. A Remixicon name the sprite does not carry falls back to `apps`.
 - Extra manifest keys are dropped, not forwarded.
@@ -359,6 +360,16 @@ The outcome should appear where the user pressed Generate. Panel tabs are kept p
 ### Why a listen notice and not a push to every reconnecting frame
 
 An extension built against an older SDK has no listener, and a push it ignores would count as delivered. The frame asks only when its code registered `onLateGenerateResult`, and the host only advertises the feature it implements, so old guests and old hosts keep working unchanged.
+
+## Where extensions plug in
+
+Decided for every new integration point:
+
+- OpenCode's own GUI plugins are not copied: they run in process with no sandbox.
+- A new point is drawn by the host from data the extension supplies. The composer and sidebar rows get no extension frames. The one exception is a UI block in a chat reply (`contributes.blocks`), a sandboxed frame with the panel's grants.
+- Agents pass over extension text that competes with OpenChamber's own guidance, so behaviour that must hold is a manifest flag the app turns into its own words (`blocks[].answers`, read by `describeExtensionBlocks` in `server/lib/guests/agent-context.js`), not instructions the extension writes.
+- Sidebar session marks, when they come: an icon in a theme tone right after the PR badge, a click opens only that extension's panel, at most two per row and one per extension, no "+N".
+- Rejected: native window embedding, native menu or tray items, arbitrary server routes, new items in the session row menu, a separate Settings page per extension, manifest tools the service answers, a chat secret form for extensions, and a check that runs before every send.
 
 ## Not here yet
 

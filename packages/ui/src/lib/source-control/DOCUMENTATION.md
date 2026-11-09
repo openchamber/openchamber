@@ -456,6 +456,14 @@ Invariants:
   branch icon. `providerIconSrc` gives the same mark as a data URI for surfaces
   that mask an icon URL.
 
+### Why a GitLab gap is built and not hidden
+
+GitLab is held to full parity with GitHub, a maintainer decision: every surface
+that works for a GitHub pull request works for a GitLab merge request, in
+merge-request wording with `!` numbers. When a surface turns out to have no
+GitLab path (a missing server route, an unread field), the fix is to build it,
+not to hide the surface for GitLab.
+
 ### Why descriptors are fetched and not mirrored in the UI
 
 Desktop and mobile connect to servers of other versions. A copy in the UI would
