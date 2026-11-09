@@ -24,8 +24,8 @@ import { useI18n } from '@/lib/i18n';
 interface ToolRowProps {
   icon: IconName;
   title: string;
+  /** Carries what is worth knowing before turning it on (safety, cost), so the row needs no info hint. */
   summary: string;
-  info: string;
   ariaLabel: string;
   checked: boolean;
   onChange: (checked: boolean) => void;
@@ -38,17 +38,14 @@ interface ToolRowProps {
 const TOOL_LIST_CLASS = 'max-w-[44rem] space-y-1';
 const TOOL_OPTION_TRIGGER_CLASS = 'ms-auto w-auto min-w-0 max-w-[16rem]';
 
-const ToolRow: React.FC<ToolRowProps> = ({ icon, title, summary, info, ariaLabel, checked, onChange, settingsItem, children }) => (
+const ToolRow: React.FC<ToolRowProps> = ({ icon, title, summary, ariaLabel, checked, onChange, settingsItem, children }) => (
   <div className="py-2">
     <div data-settings-item={settingsItem} className="flex items-start gap-3">
       {/* The switch alone says "off": dimming the row would read as disabled.
           The icon sits on the title's line, so a two-line summary leaves it there. */}
       <Icon name={icon} className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
       <div className="min-w-0 flex-1">
-        <div className="flex min-w-0 items-center gap-1.5">
-          <span className="truncate typography-ui-label text-foreground">{title}</span>
-          <SettingsInfoHint>{info}</SettingsInfoHint>
-        </div>
+        <div className="truncate typography-ui-label text-foreground">{title}</div>
         <p className="typography-meta text-muted-foreground">{summary}</p>
       </div>
       <Switch checked={checked} onCheckedChange={onChange} aria-label={ariaLabel} className="mt-0.5" />
@@ -58,10 +55,10 @@ const ToolRow: React.FC<ToolRowProps> = ({ icon, title, summary, info, ariaLabel
 );
 
 /** The one setting a tool has: under its summary, from the tool's text to the switch's edge. */
-const ToolOption: React.FC<{ settingsItem: string; label: string; info: string; children: React.ReactNode }> = ({ settingsItem, label, info, children }) => (
+const ToolOption: React.FC<{ settingsItem: string; label: string; info?: string; children: React.ReactNode }> = ({ settingsItem, label, info, children }) => (
   <div data-settings-item={settingsItem} className="mt-2 flex min-w-0 items-center gap-2 ps-7">
     <span className="truncate typography-meta text-muted-foreground">{label}</span>
-    <SettingsInfoHint>{info}</SettingsInfoHint>
+    {info ? <SettingsInfoHint>{info}</SettingsInfoHint> : null}
     {children}
   </div>
 );
@@ -232,7 +229,6 @@ export const OpenChamberToolsSettings: React.FC = () => {
           onChange={handleAgentControlToolChange}
           title={t('settings.openchamber.tools.name.control')}
           summary={t('settings.openchamber.tools.field.agentControlToolSummary')}
-          info={t('settings.openchamber.tools.field.agentControlToolInfo')}
           ariaLabel={t('settings.openchamber.tools.field.agentControlToolAria')}
         />
         {agentWorkflowAvailable ? (
@@ -243,7 +239,6 @@ export const OpenChamberToolsSettings: React.FC = () => {
             onChange={handleAgentWorkflowToolChange}
             title={t('settings.openchamber.tools.name.workflow')}
             summary={t('settings.openchamber.tools.field.agentWorkflowToolSummary')}
-            info={t('settings.openchamber.tools.field.agentWorkflowToolInfo')}
             ariaLabel={t('settings.openchamber.tools.field.agentWorkflowToolAria')}
           />
         ) : null}
@@ -254,7 +249,6 @@ export const OpenChamberToolsSettings: React.FC = () => {
           onChange={handleAgentScheduleToolChange}
           title={t('settings.openchamber.tools.name.schedule')}
           summary={t('settings.openchamber.tools.field.agentScheduleToolSummary')}
-          info={t('settings.openchamber.tools.field.agentScheduleToolInfo')}
           ariaLabel={t('settings.openchamber.tools.field.agentScheduleToolAria')}
         />
         <ToolRow
@@ -264,7 +258,6 @@ export const OpenChamberToolsSettings: React.FC = () => {
           onChange={handleAgentWebToolChange}
           title={t('settings.openchamber.tools.name.web')}
           summary={t('settings.openchamber.tools.field.agentWebToolSummary')}
-          info={t('settings.openchamber.tools.field.agentWebToolInfo')}
           ariaLabel={t('settings.openchamber.tools.field.agentWebToolAria')}
         >
           {/* Shown even with nothing to choose: the hint is how people
@@ -314,7 +307,6 @@ export const OpenChamberToolsSettings: React.FC = () => {
           onChange={handleAgentRenderToolChange}
           title={t('settings.openchamber.tools.name.render')}
           summary={t('settings.openchamber.tools.field.agentRenderToolSummary')}
-          info={t('settings.openchamber.tools.field.agentRenderToolInfo')}
           ariaLabel={t('settings.openchamber.tools.field.agentRenderToolAria')}
         />
         <ToolRow
@@ -324,14 +316,12 @@ export const OpenChamberToolsSettings: React.FC = () => {
           onChange={handleAgentImageToolChange}
           title={t('settings.openchamber.tools.name.image')}
           summary={t('settings.openchamber.tools.field.agentImageToolSummary')}
-          info={t('settings.openchamber.tools.field.agentImageToolInfo')}
           ariaLabel={t('settings.openchamber.tools.field.agentImageToolAria')}
         >
           {agentImageToolEnabled ? (
             <ToolOption
               settingsItem="sessions.agent-image-model"
               label={t('settings.openchamber.tools.imageModel.label')}
-              info={t('settings.openchamber.tools.imageModel.info')}
             >
               <Select<string>
                 value={agentImageModel}
@@ -380,7 +370,6 @@ export const OpenChamberToolsSettings: React.FC = () => {
           onChange={handleAgentSecretToolChange}
           title={t('settings.openchamber.tools.name.secret')}
           summary={t('settings.openchamber.tools.field.agentSecretToolSummary')}
-          info={t('settings.openchamber.tools.field.agentSecretToolInfo')}
           ariaLabel={t('settings.openchamber.tools.field.agentSecretToolAria')}
         />
         <ToolRow
@@ -390,7 +379,6 @@ export const OpenChamberToolsSettings: React.FC = () => {
           onChange={handleAgentNotifyToolChange}
           title={t('settings.openchamber.tools.name.notify')}
           summary={t('settings.openchamber.tools.field.agentNotifyToolSummary')}
-          info={t('settings.openchamber.tools.field.agentNotifyToolInfo')}
           ariaLabel={t('settings.openchamber.tools.field.agentNotifyToolAria')}
         />
       </SettingsControlGroup>
@@ -404,7 +392,6 @@ export const OpenChamberToolsSettings: React.FC = () => {
             onChange={handleAgentMemoryToolChange}
             title={t('settings.openchamber.tools.name.memory')}
             summary={t('settings.openchamber.tools.field.agentMemoryToolSummary')}
-            info={t('settings.openchamber.tools.field.agentMemoryToolInfo')}
             ariaLabel={t('settings.openchamber.tools.field.agentMemoryToolAria')}
           />
         ) : null}
@@ -415,7 +402,6 @@ export const OpenChamberToolsSettings: React.FC = () => {
           onChange={handleAgentKnowledgeToolChange}
           title={t('settings.openchamber.tools.name.knowledge')}
           summary={t('settings.openchamber.tools.field.agentKnowledgeToolSummary')}
-          info={t('settings.openchamber.tools.field.agentKnowledgeToolInfo')}
           ariaLabel={t('settings.openchamber.tools.field.agentKnowledgeToolAria')}
         />
         <ToolRow
@@ -425,7 +411,6 @@ export const OpenChamberToolsSettings: React.FC = () => {
           onChange={handleAgentUsageToolChange}
           title={t('settings.openchamber.tools.name.usage')}
           summary={t('settings.openchamber.tools.field.agentUsageToolSummary')}
-          info={t('settings.openchamber.tools.field.agentUsageToolInfo')}
           ariaLabel={t('settings.openchamber.tools.field.agentUsageToolAria')}
         />
       </SettingsControlGroup>
