@@ -26,7 +26,7 @@ import { openExternalUrl } from '@/lib/url';
 import { cn } from '@/lib/utils';
 import { ArtifactMetaBar } from './ArtifactMetaBar';
 import { formatArtifactSize } from './artifactMeta';
-import { delimiterForPath, parseDelimitedText, setDelimitedField, shiftDelimitedColumn, shiftDelimitedRow } from './delimitedText';
+import { parseDelimitedText, resolveDelimiter, setDelimitedField, shiftDelimitedColumn, shiftDelimitedRow } from './delimitedText';
 import { columnName } from '@/sync/document-attachments';
 import { markSeen, noteOwnEdit, traceChanges } from './cellTraces';
 import { chartProgram } from './tableChart';
@@ -958,7 +958,7 @@ export const TableArtifact: React.FC<{
   /** Absent where the file cannot be written. */
   onContentChange?: (content: string) => void;
 }> = ({ path, content, sizeBytes, onContentChange }) => {
-  const delimiter = delimiterForPath(path);
+  const delimiter = resolveDelimiter(path, content);
   const table = React.useMemo(() => parseDelimitedText(content, delimiter), [content, delimiter]);
   const undoStack = React.useRef<string[]>([]);
   const redoStack = React.useRef<string[]>([]);

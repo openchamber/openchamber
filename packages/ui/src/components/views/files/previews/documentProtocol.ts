@@ -54,7 +54,7 @@ export type DocumentCalls = {
   'sqlite.query': { args: { database: string; query: string; rowCap: number }; chunk: TableChunk; result: DataTableEnd };
   'sqlite.close': { args: { database: string }; chunk: never; result: null };
   'parquet.read': { args: { bytes: Uint8Array<ArrayBuffer>; rowCap: number }; chunk: TableChunk; result: DataTableEnd };
-  'delimited.read': { args: { bytes: Uint8Array<ArrayBuffer>; delimiter: ',' | '\t'; rowCap: number }; chunk: TableChunk; result: DataTableEnd };
+  'delimited.read': { args: { bytes: Uint8Array<ArrayBuffer>; path: string; rowCap: number }; chunk: TableChunk; result: DataTableEnd };
 };
 
 type Op = keyof DocumentCalls;
