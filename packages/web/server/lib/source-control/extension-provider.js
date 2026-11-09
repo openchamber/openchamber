@@ -127,7 +127,8 @@ export function createExtensionProvider({
 }) {
   const { id, label } = descriptor;
   const tokenFormat = descriptor.extension.token;
-  const basicAuth = tokenFormat.scheme === 'basic';
+  const basicAuth = tokenFormat?.scheme === 'basic';
+  const serviceLogin = descriptor.authMethods.cli?.kind === 'service';
 
   // After the registry unregisters the provider, a call still running (a
   // connect waiting on the service) must not write an account back into a
@@ -142,6 +143,8 @@ export function createExtensionProvider({
     setAccount: guardedWrite(sectionStore.setAccount),
     activate: guardedWrite(sectionStore.activate),
     markAccountInvalid: guardedWrite(sectionStore.markAccountInvalid),
+    setCliActive: guardedWrite(sectionStore.setCliActive),
+    setCliDisabled: guardedWrite(sectionStore.setCliDisabled),
   });
 
   const serviceError = (error, outbound) => callError(`${label} could not answer (${error.code}): ${error.message}`, {
@@ -171,7 +174,7 @@ export function createExtensionProvider({
    * username a `basic` token is sent with. Answers the parsed data and what
    * the proxy saw the call send to the forge.
    */
-  const forward = async (method, { instance, token, user, login = null, input }) => {
+  const forward = async (method, { instance, token, user, login = null, input, tokenless = false }) => {
     if (token && basicAuth && !isProviderUsername(login)) {
       throw refusedInput('SOURCE_CONTROL_USERNAME_REQUIRED', `${label} signs in with a username, and this account has none it can send`);
     }
@@ -185,7 +188,7 @@ export function createExtensionProvider({
       origin: new URL(instance).origin,
       credential,
       deadline: Date.now() + timeoutMs,
-      methods: outboundMethodsOf(method),
+      methods: tokenless ? [] : outboundMethodsOf(method),
     });
     try {
       let proxied;
@@ -225,6 +228,9 @@ export function createExtensionProvider({
       if (!envelope.success) throw malformed(label, 'not a source-control answer', grant.outbound);
       if (!envelope.data.ok) {
         const { message, status, code } = envelope.data.error;
+        if (tokenless && user && code === 'ACCOUNT_CHANGED') {
+          throw callError(message, { status: 401, code, kind: 'invalid-token', outbound: grant.outbound });
+        }
         if (status === 401) {
           // The service's word alone never writes an account off.
           if (!grant.outbound.some((request) => request.status === 401)) {
@@ -237,6 +243,10 @@ export function createExtensionProvider({
       const data = schemas.data[method].safeParse(envelope.data.data);
       if (!data.success) throw malformed(label, `${method} does not match its schema`, grant.outbound);
       return { data: data.data, outbound: grant.outbound };
+    } catch (error) {
+      // The proxy cannot observe writes a service performs through its own CLI.
+      if (tokenless) error.sourceControlServiceLogin = true;
+      throw error;
     } finally {
       grant.revoke();
     }
@@ -249,12 +259,23 @@ export function createExtensionProvider({
   })).data.user;
   const probe = async (origin) => (await forward('auth.probe', { instance: origin, token: null, user: null, input: {} })).data;
   const classifyFailure = (error) => error?.kind ?? 'provider-error';
-  const accounts = createPatAccountAuth({ descriptor, store, events, verify, probe, classifyFailure });
+  const cli = serviceLogin ? {
+    status: async (instance) => (await forward('auth.status', {
+      instance, token: null, user: null, input: {}, tokenless: true,
+    })).data.user,
+    listInstances: async () => [...descriptor.instance.defaultInstances],
+  } : null;
+  const accounts = createPatAccountAuth({ descriptor, store, events, verify, probe, classifyFailure, cli });
 
   const userOf = async (session) => {
-    const account = await store.readAccount(session.instance, session.accountId, session.credentialRevision);
+    const account = session.persisted
+      ? await store.readAccount(session.instance, session.accountId, session.credentialRevision)
+      : { user: accounts.userFor(session) };
     const login = account?.user?.login ?? account?.user?.username;
-    return Number.isSafeInteger(account?.user?.id) && login ? { id: account.user.id, login } : null;
+    const userId = account?.user?.id;
+    const validId = Number.isSafeInteger(userId) && userId > 0
+      || typeof userId === 'string' && userId.length > 0 && userId.length <= 256;
+    return validId && login ? { id: userId, login } : null;
   };
 
   /** A call as the session's account; a refused token carries the account for the shell's write-off. */
@@ -266,6 +287,7 @@ export function createExtensionProvider({
         user: await userOf(session),
         login: accounts.loginFor(session) ?? null,
         input,
+        tokenless: serviceLogin && session.secretKind === 'cli',
       });
     } catch (error) {
       if (error?.status === 401) {
@@ -380,6 +402,7 @@ export function createExtensionProvider({
   /** Decided on what the proxy saw, never on the status the service reports. */
   const classifyError = (error) => {
     if (error?.sourceControlNotReached) return 'failed';
+    if (error?.sourceControlServiceLogin) return 'outcome-unknown';
     const outbound = Array.isArray(error?.sourceControlOutbound) ? error.sourceControlOutbound : null;
     if (!outbound) return 'outcome-unknown';
     const writes = outbound.filter((request) => request.method !== 'GET');

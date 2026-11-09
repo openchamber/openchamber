@@ -3,7 +3,7 @@ import { ownedOriginInstance } from './origin-instance.js';
 
 /**
  * The account half of a provider that signs in with personal access tokens
- * only and keeps its accounts in its origin-keyed section of the auth store
+ * and/or a CLI login, keeping tokens in its origin-keyed section of the auth store
  * (`authStore.section(id)`): Gitea, Forgejo, and extension providers. The provider
  * supplies the two network calls; everything else is the store.
  *
@@ -44,6 +44,10 @@ import { ownedOriginInstance } from './origin-instance.js';
  *   `{ unknown: true }`, as `../gitlab/glab-credential.js` does.
  * - `cli.listInstances()` answers the origins the CLI has a login for, which
  *   are listed beside the stored ones.
+ * A service-owned CLI login instead supplies `cli.status(origin)`: the user
+ * or null for that origin, with errors left unknown. It uses the same CLI
+ * account without a token. With no PAT method it is current without a stored
+ * activation flag; token-backed built-in CLIs retain their existing switches.
  */
 
 const UNSUPPORTED_METHOD = Object.freeze({ available: false, reason: 'unsupported' });
@@ -67,6 +71,10 @@ export function createPatAccountAuth({
   normalizeSshUrl = null, parseSshUrl = null, cli = null,
 }) {
   const cliEnabled = Boolean(cli && descriptor.authMethods?.cli);
+  const patEnabled = descriptor.authMethods?.pat !== false;
+  const serviceLogin = cliEnabled && descriptor.authMethods.cli.kind === 'service';
+  const serviceOnly = serviceLogin && !descriptor.authMethods.pat;
+  const cliIsCurrent = (instance) => cliEnabled && (serviceOnly || instance.cliActive) && !instance.cliDisabled;
   const takesUsername = descriptor.settings?.some((field) => field.type === 'username') === true;
   const takesSshUrl = descriptor.settings?.some((field) => field.key === 'sshUrl') === true;
   if (takesSshUrl && (!(normalizeSshUrl instanceof Function) || !(parseSshUrl instanceof Function))) {
@@ -115,6 +123,15 @@ export function createPatAccountAuth({
    */
   const cliState = async (origin, instance) => {
     if (instance.cliDisabled) return { status: 'disabled' };
+    if (serviceLogin) {
+      // Errors remain unknown. Only an explicit null means this instance has no login.
+      try {
+        const user = await cli.status(origin);
+        return user ? { status: 'usable', user } : { status: 'gone' };
+      } catch (error) {
+        return { status: 'unknown', error };
+      }
+    }
     const lookup = await cli.tokenResult(origin);
     if (lookup.gone) return { status: 'gone' };
     if (!lookup.token) return { status: 'unknown' };
@@ -156,17 +173,18 @@ export function createPatAccountAuth({
 
   const buildStatus = async (origin) => {
     const instance = await store.readInstance(origin);
-    const switched = cliEnabled && instance.cliActive;
-    const active = switched ? null : instance.accounts.find((account) => account.id === instance.activeAccountId && account.status !== 'invalid') ?? null;
+    const storedAccounts = patEnabled ? instance.accounts : [];
+    const switched = cliIsCurrent(instance);
+    const active = switched ? null : storedAccounts.find((account) => account.id === instance.activeAccountId && account.status !== 'invalid') ?? null;
     const login = cliEnabled ? await cliState(origin, instance) : null;
     // The user's switch to the CLI login is undone only when that login is
     // really gone; a timeout, a missing CLI or an unreachable instance keep it.
-    if (switched && login.status === 'gone') {
+    if (switched && !serviceOnly && login.status === 'gone') {
       await store.setCliActive(origin, false);
       return buildStatus(origin);
     }
     const usable = login?.status === 'usable' ? login : null;
-    const accounts = instance.accounts.map((account) => accountView(origin, account, Boolean(active && account.id === active.id), instance.accounts));
+    const accounts = storedAccounts.map((account) => accountView(origin, account, Boolean(active && account.id === active.id), storedAccounts));
     if (usable) accounts.push(cliAccountView(origin, usable.user, switched));
     const cliBlock = (current) => {
       const block = { available: Boolean(usable), disabled: instance.cliDisabled, active: current };
@@ -174,6 +192,7 @@ export function createPatAccountAuth({
       return block;
     };
     if (!active) {
+      if (login?.error) throw Object.assign(login.error, { sourceControlAuthUnknown: true });
       if (!cliEnabled) return { provider: descriptor.id, instance: origin, status: 'disconnected', connected: false, accounts };
       if (usable && switched) {
         return {
@@ -208,6 +227,7 @@ export function createPatAccountAuth({
   const tokens = new WeakMap();
   const logins = new WeakMap();
   const sshUrls = new WeakMap();
+  const users = new WeakMap();
 
   const notConnected = (origin, requestedAccountId) => {
     const error = new Error(`${descriptor.label} is not connected`);
@@ -226,6 +246,15 @@ export function createPatAccountAuth({
 
   /** The CLI login asked for by its account id, while the CLI is still logged in as that user. */
   const resolveCliAccount = async (origin, instance, requestedAccountId) => {
+    if (serviceLogin) {
+      const login = await cliState(origin, instance);
+      if (login.error) throw login.error;
+      if (login.status !== 'usable' || requestedAccountId !== cliAccountId(origin, login.user)) {
+        await events.invalidated(identityFor(origin, requestedAccountId));
+        throw notConnected(origin, requestedAccountId);
+      }
+      return cliSession(origin, instance, login);
+    }
     const lookup = instance.cliDisabled ? null : await cli.tokenResult(origin);
     if (!lookup?.token) throw notConnected(origin, requestedAccountId);
     let user;
@@ -242,24 +271,30 @@ export function createPatAccountAuth({
     }
     return cliSession(origin, instance, { token: lookup.token, user });
   };
-  const cliSession = (origin, instance, { token, user }) => sessionWith(instance, {
-    instance: origin,
-    accountId: cliAccountId(origin, user),
-    credentialRevision: 1,
-    providerUserId: `${origin}#${user.id}`,
-    secretKind: 'cli',
-    persisted: false,
-  }, { token, login: user.login ?? '' });
+  const cliSession = (origin, instance, { token, user }) => {
+    const session = sessionWith(instance, {
+      instance: origin,
+      accountId: cliAccountId(origin, user),
+      credentialRevision: 1,
+      providerUserId: `${origin}#${user.id}`,
+      secretKind: 'cli',
+      persisted: false,
+    }, { token, login: user.login ?? '' });
+    users.set(session, user);
+    return session;
+  };
 
   /** The exact account asked for, else the instance's current one: the CLI login while the user switched to it. */
   const resolveAccount = async ({ instance: origin, accountId: requestedAccountId = '' }) => {
     const instance = await store.readInstance(origin);
     if (isCliAccountId(origin, requestedAccountId)) return resolveCliAccount(origin, instance, requestedAccountId);
-    if (!requestedAccountId && cliEnabled && instance.cliActive) {
+    if (!requestedAccountId && cliIsCurrent(instance)) {
       const login = await cliState(origin, instance);
+      if (login.error) throw login.error;
       if (login.status !== 'usable') throw notConnected(origin, '');
       return cliSession(origin, instance, login);
     }
+    if (!patEnabled) throw notConnected(origin, requestedAccountId);
     const account = requestedAccountId
       ? instance.accounts.find((candidate) => candidate.id === requestedAccountId)
       : instance.accounts.find((candidate) => candidate.id === instance.activeAccountId && candidate.status !== 'invalid') ?? null;
@@ -296,19 +331,21 @@ export function createPatAccountAuth({
         authentication: supported,
         authenticationMethods: {
           device: UNSUPPORTED_METHOD,
-          pat: supported ? { available: true } : UNSUPPORTED_METHOD,
+          pat: supported && patEnabled ? { available: true } : UNSUPPORTED_METHOD,
           cli: await cliCapability(origin, supported),
         },
       };
     },
     status: ({ instance }) => buildStatus(instance),
     accounts: async ({ instance: origin }) => {
+      if (serviceLogin) return (await buildStatus(origin)).accounts;
       const instance = await store.readInstance(origin);
       const switched = cliEnabled && instance.cliActive;
       return instance.accounts.map((account) => accountView(origin, account, account.id === instance.activeAccountId && !switched, instance.accounts));
     },
     /** The token's user first, then the instance's support and owner; nothing is stored unless all pass. */
     connectToken: async ({ instance: origin, token, username }) => {
+      if (!patEnabled) throw responseError(501, { error: `${descriptor.label} does not accept tokens` });
       if (takesUsername && !username) throw responseError(400, { error: 'username is required' });
       const credentials = { username };
       // A Basic-auth host's stored login is the username the user typed, the
@@ -340,6 +377,7 @@ export function createPatAccountAuth({
         await store.setCliActive(origin, true);
         return buildStatus(origin);
       }
+      if (!patEnabled) throw responseError(404, { error: `${descriptor.label} account not found` });
       if (!accountId || !(await store.activate(origin, accountId))) throw responseError(404, { error: `${descriptor.label} account not found` });
       return buildStatus(origin);
     },
@@ -364,7 +402,13 @@ export function createPatAccountAuth({
     /** The CLI login while the user switched to it and it still works, else the active stored account. */
     readCurrentAccountId: async ({ instance: origin }) => {
       const instance = await store.readInstance(origin);
-      const usable = cliEnabled && instance.cliActive ? await usableCli(origin) : null;
+      if (serviceLogin && cliIsCurrent(instance)) {
+        const login = await cliState(origin, instance);
+        if (login.error) throw login.error;
+        return login.status === 'usable' ? cliAccountId(origin, login.user) : null;
+      }
+      if (!patEnabled) return null;
+      const usable = cliIsCurrent(instance) ? await usableCli(origin) : null;
       if (usable) return cliAccountId(origin, usable.user);
       return instance.accounts.find((account) => account.id === instance.activeAccountId && account.status !== 'invalid')?.id ?? null;
     },
@@ -402,6 +446,7 @@ export function createPatAccountAuth({
     },
     /** Every valid stored account, for identity backfill and binding repair at start. */
     listConnectedAccounts: async () => {
+      if (!patEnabled) return [];
       const connected = [];
       for (const origin of (await store.listInstances?.()) ?? []) {
         for (const account of (await store.listAccounts?.(origin)) ?? []) {
@@ -424,12 +469,15 @@ export function createPatAccountAuth({
     auth,
     /** The token behind a session `resolveAccount` returned; undefined for any other object. */
     tokenFor: (session) => tokens.get(session),
+    /** The verified CLI user, kept outside the serializable session. */
+    userFor: (session) => users.get(session),
     /** The stored login of that session's account (a Basic-auth host's username); undefined for any other object. */
     loginFor: (session) => logins.get(session),
     /** The instance's separate SSH address for that session's instance; null when it has none. */
     sshUrlFor: (session) => sshUrls.get(session) ?? null,
     /** Git transport's view of an exact stored credential, or null. */
     readCredential: async ({ instance, credentialId, credentialRevision }) => {
+      if (!patEnabled) return null;
       const account = await store.readAccount(instance, credentialId, credentialRevision);
       if (!account) return null;
       return {

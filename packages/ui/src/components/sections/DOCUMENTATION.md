@@ -67,6 +67,8 @@ writes when the dialog closes, while a new file is only created on confirm.
 
 ## Providers
 
+Source-control cards whose descriptor carries `auth.login` show its service-owned sign-in hint when that instance has no account. With no PAT method, the instance renders its signed-in user without token, add-account or CLI-switch controls. The service owns sign-in outside the app. Opening that card rechecks status; a failed read keeps the auth store's prior account metadata and reports an error, while only a successful empty result removes the displayed login. The same card is used by the web, desktop and mobile Integrations pages.
+
 `providers/` is not an autosave page. Connecting a provider is an action, not a
 setting: an API key is submitted, an OAuth flow is completed, a credential is
 removed. OpenCode owns the credential store and announces every change
