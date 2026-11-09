@@ -232,11 +232,22 @@ jobs:
           exit 1
 
       - name: Post intake comment and labels
+        # The intake step can end without a comment (a refused tool, an empty
+        # completion, or the 25m timeout). Its failure already marks the run
+        # red; this step runs anyway so the reporter is not left with silence.
+        if: always()
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           ISSUE_NUMBER: ${{ github.event.issue.number }}
         run: |
           message="$RUNNER_TEMP/intake-message.md"
+          if [ ! -s "$message" ]; then
+            # Best-effort: a failure to post must not hide the original error.
+            gh api "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}/comments" \
+              -f body='The intake run ended without a comment, so this issue was not triaged automatically. Comment `@openchamber-bot triage` to run it again.' > /dev/null \
+              || echo "::warning::could not post the intake-failure notice"
+            exit 0
+          fi
           trailer_pattern='^[[:space:]]*<!-- intake (\{.*\}) -->[[:space:]]*$'
 
           trailer="$(grep -E "$trailer_pattern" "$message" | tail -n 1 | sed -E "s/${trailer_pattern}/\\1/")"
