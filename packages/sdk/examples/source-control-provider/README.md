@@ -77,11 +77,9 @@ the following contribution and implements `auth.status`. It can also keep
 }
 ```
 
-Build the SDK and host from this checkout together. Its current version is
-2.7.0, so use `engines.openchamber: ">=2.7.0"` for this development variant.
-The published 2.7.0 packages are not a substitute for the matching build.
-When publishing, raise the floor to the release that first includes this
-field. The token-only example retains its existing floor.
+`login` needs OpenChamber 2.7.1 or newer, so declare
+`engines.openchamber: ">=2.7.1"`. The token-only example keeps its existing
+floor.
 
 `auth.status` receives `session.instance`, an empty `input` and no candidate
 token. Return `{ user: null }` for an origin the CLI is not signed in to;

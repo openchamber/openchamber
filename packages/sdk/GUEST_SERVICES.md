@@ -347,7 +347,7 @@ Every resource call carries the verified `session.user`. Check the CLI identity 
 
 The account's handles cannot reach the forge proxy. Read through the service's CLI and leave clone, fetch and push on system Git, `mode: 'system'`. OpenChamber never extracts a CLI credential or supplies this account as a managed HTTPS credential. A failed CLI mutation whose service was reached has an unknown outcome, because the proxy cannot observe its writes.
 
-This addition requires the SDK and host built from the same revision. The checkout version is currently 2.7.0; that does not mean the published 2.7.0 SDK or host contains this addition. Set `engines.openchamber` to the release that first includes it when publishing. Older parsers reject the unknown `login` field.
+`login` and string IDs need OpenChamber 2.7.1 or newer: declare `engines.openchamber: ">=2.7.1"`. Older hosts reject the unknown `login` field.
 
 ### Lifecycle
 
