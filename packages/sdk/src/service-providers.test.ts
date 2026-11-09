@@ -91,6 +91,8 @@ describe('source-control provider contract', () => {
       v: 1, requestId: 'req-1', method: 'listIssues', provider: 'ext-teahouse', session, input: { directory: '/repo', remote: 'origin', page: 1 },
     });
     expect(readSourceControlProviderRequest(call({ method: 'auth.verify', session: { ...session, user: null }, input: {} }))?.session?.user).toBeNull();
+    expect(readSourceControlProviderRequest(call({ method: 'auth.status', session: { ...session, user: null }, input: {} }))?.session)
+      .toEqual({ ...session, user: null });
     expect(readSourceControlProviderRequest(call({ session: null }))?.session).toBeNull();
 
     expect(readSourceControlProviderRequest('not json')).toBeNull();
@@ -101,18 +103,18 @@ describe('source-control provider contract', () => {
     expect(readSourceControlProviderRequest(call({ requestId: '' }))).toBeNull();
     expect(readSourceControlProviderRequest(call({ input: [] }))).toBeNull();
     expect(readSourceControlProviderRequest(call({ session: { ...session, handle: '' } }))).toBeNull();
-    expect(readSourceControlProviderRequest(call({ session: { ...session, user: { id: '7', login: 'mona' } } }))).toBeNull();
   });
 
   test('forwards the auth hooks, the fifteen reads and the three mutation steps, each with its deadline', () => {
     expect(SOURCE_CONTROL_PROVIDER_METHODS.filter((method) => !method.includes('.'))).toHaveLength(15);
-    expect(SOURCE_CONTROL_PROVIDER_METHODS).toHaveLength(20);
+    expect(SOURCE_CONTROL_PROVIDER_METHODS).toHaveLength(21);
     expect(isSourceControlProviderMethod('mutation.perform')).toBe(true);
     expect(isSourceControlProviderMethod('references')).toBe(false);
     expect(sourceControlProviderTimeoutMs('changeRequestStatus')).toBe(12_000);
     expect(sourceControlProviderTimeoutMs('listIssues')).toBe(20_000);
     expect(sourceControlProviderTimeoutMs('mutation.reconcile')).toBe(30_000);
     expect(sourceControlProviderTimeoutMs('auth.probe')).toBe(15_000);
+    expect(sourceControlProviderTimeoutMs('auth.status')).toBe(15_000);
   });
 
   test('the forge helper posts to the callback listener with the handle and relays any forge status', async () => {
@@ -162,8 +164,20 @@ describe('source-control provider contract', () => {
   });
 
   test('answers the host acts on are checked deeply', () => {
-    expect(schemas.data['auth.verify'].safeParse({ user: { id: 7, login: 'mona' } }).success).toBe(true);
-    expect(schemas.data['auth.verify'].safeParse({ user: { id: '7', login: 'mona' } }).success).toBe(false);
+    for (const id of [7, Number.MAX_SAFE_INTEGER, 'member:mona', '0007', '90071992547409931234567', ' member:mona ', 'x'.repeat(256)]) {
+      const user = { id, login: 'mona' };
+      expect(schemas.data['auth.verify'].parse({ user }).user).toEqual(user);
+      expect(schemas.data['auth.status'].parse({ user }).user).toEqual(user);
+      expect(readSourceControlProviderRequest(call({ session: { ...session, user } }))?.session?.user).toEqual(user);
+    }
+    for (const id of ['', 'x'.repeat(257), 0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1, null, true]) {
+      const user = { id, login: 'mona' };
+      expect(schemas.data['auth.verify'].safeParse({ user }).success).toBe(false);
+      expect(schemas.data['auth.status'].safeParse({ user }).success).toBe(false);
+      expect(readSourceControlProviderRequest(call({ session: { ...session, user } }))).toBeNull();
+    }
+    expect(schemas.data['auth.status'].safeParse({ user: null }).success).toBe(true);
+    expect(schemas.data['auth.status'].safeParse({}).success).toBe(false);
     expect(schemas.data['auth.probe'].safeParse({ supported: true, version: '1.22.0' }).success).toBe(true);
 
     const head = schemas.data.readChangeRequestHead.safeParse({

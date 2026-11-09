@@ -79,7 +79,10 @@ Auto. There is no env gate — the feature shipped dark behind
   runtime throws 400 rather than forwarding. The OpenChamber session service
   (`openchamber-sessions/routes.js`) talks to OpenCode through the SDK and can
   pick Auto up from Session Defaults, so it calls `resolveAutoSelection` itself
-  before switching the session.
+  before switching the session. So do scheduled task runs
+  (`scheduled-tasks/runtime.js`): a run on Auto creates its session without a
+  model, routes on the expanded task prompt with the new session's id, and
+  switches the session before the goal and the first send.
 - The mark lives in process memory. A server restart between the model switch
   and the next send drops it (see the TODO in `runtime.js`).
 - Routing failures keep the user's own behaviour: a Jev error, timeout, unknown

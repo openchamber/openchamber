@@ -912,6 +912,10 @@ Reconnect and watchdog candidates come from non-idle status, the viewed session,
 
 A failed watchdog status read preserves the previous status and waits 10, 20, 40, then at most 60 s after failure completion before retrying. A successful snapshot, including an empty one, restores the 5 s cadence and reconciles normally. Directory disposal, having no recovery candidates, and restarting the watchdog for a new SDK clear the delay.
 
+### Why a status snapshot keeps a retry status
+
+`session.active` only says a session runs, so its snapshot reads a turn waiting for a retry as busy. Taking that busy replaced the directory store's retry status a few seconds into the wait (the 5 s poll), or right after it began (the resync a turn started from a draft runs), so a model pick made during the wait no longer reached the retrying turn. A snapshot's busy therefore confirms a retry status in both modes until the attempt is due (the status's `next`); the attempt's `session.step.started` turns it back into busy. Past that time the snapshot's busy wins, so a busy lost in a stream gap is repaired by the next snapshot.
+
 ### Why stale resync and child discovery have separate retry state
 
 Stale resync and child discovery each wait 30 s after a failed attempt completes, then 60 s after subsequent failures. A successful attempt clears only its own delay and restores its 15 s cadence. The watchdog keeps its 5 s tick and per-directory overlap guards. Failure in one directory cannot delay another directory or reset another mechanism's outstanding failure. The 60 s cap bounds the added wait for a missed idle event or an undiscovered child once reads become available again.

@@ -764,6 +764,28 @@ async function fetchDistTags() {
 }
 
 /**
+ * The oldest OpenCode a published release runs against, from `engines.opencode`
+ * (">=2.2.4") in its package.json, or null when the registry could not be read
+ * or the release does not say.
+ */
+export async function fetchRequiredOpenCodeVersion(version) {
+  const target = normalizeTargetVersion(version);
+  if (!target) return null;
+  try {
+    const request = resolveNpmRegistryRequest(PACKAGE_NAME, target);
+    const response = await fetch(request.url, {
+      headers: { Accept: 'application/json', ...request.headers },
+      signal: AbortSignal.timeout(10000),
+    });
+    if (!response.ok) return null;
+    const data = await response.json();
+    return /^>=\s*v?(\d+\.\d+\.\d+)$/.exec(String(data?.engines?.opencode ?? '').trim())?.[1] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Fetch latest version from npm registry
  */
 async function getLatestVersion() {

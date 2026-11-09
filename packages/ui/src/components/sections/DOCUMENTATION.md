@@ -67,6 +67,8 @@ writes when the dialog closes, while a new file is only created on confirm.
 
 ## Providers
 
+Source-control cards whose descriptor carries `auth.login` show its service-owned sign-in hint when that instance has no account. With no PAT method, the instance renders its signed-in user without token, add-account or CLI-switch controls. The service owns sign-in outside the app. Opening that card rechecks status; a failed read keeps the auth store's prior account metadata and reports an error, while only a successful empty result removes the displayed login. The same card is used by the web, desktop and mobile Integrations pages.
+
 `providers/` is not an autosave page. Connecting a provider is an action, not a
 setting: an API key is submitted, an OAuth flow is completed, a credential is
 removed. OpenCode owns the credential store and announces every change
@@ -210,6 +212,16 @@ per Location) and mounts the shared `providers/ProviderOAuthMethods.tsx`
 with that directory. While the server reports `needs_auth`, the status card
 shows its sign-in row; once the credential is stored, the page connects the
 server again, which is what moves it out of `needs_auth` or `failed`.
+
+A started sign-in keeps its row until it completes or fails, whatever the
+status says (`onActiveChange`). A failed one stays only while the status
+itself offers a sign-in, so its error never lingers on a connected server.
+A sign-in from another machine writes the server's redirect first
+(`packages/web/server/lib/opencode/mcp-oauth.js`), OpenCode reconnects the
+server and reports `pending` for about a second, and
+unmounting the row then cancelled the attempt: the first Connect did nothing
+visible and only the second one opened the consent page. The Integrations
+catalog keeps its sign-in row the same way.
 
 The detail page looks up the integration for a failed server or a configured
 remote server with `oauth !== false`. An absent `oauth` field is included:

@@ -264,12 +264,13 @@ export const readBrowserProviderRequest = (body: string): BrowserProviderRequest
 /*
  * Source control: a service with `provides: ["source-control"]` is the Git
  * host `contributes.sourceControl` describes. OpenChamber keeps the user's
- * accounts and tokens, the bindings, the idempotent mutation records and the
+ * token accounts, the bindings, the idempotent mutation records and the
  * caches; it forwards the resource reads and the three mutation steps to the
  * service at `SOURCE_CONTROL_PROVIDER_PATH`. The service never sees a token: it
  * reaches the forge through OpenChamber's outbound proxy
  * (`createSourceControlForge`), which pins the instance origin and adds the
- * stored token itself.
+ * stored token itself. A declared service login instead reads through its CLI,
+ * gives OpenChamber only identity, and cannot use the forge proxy.
  */
 
 /** Route on the service loopback OpenChamber posts every source-control call to. */
@@ -279,7 +280,8 @@ export const SOURCE_CONTROL_PROVIDER_WIRE_VERSION = 1;
 
 /**
  * Every call OpenChamber forwards. `auth.verify` reads who a candidate token
- * belongs to and `auth.probe` whether the instance is this forge; the fifteen
+ * belongs to, `auth.probe` whether the instance is this forge, and `auth.status`
+ * the declared service login for this origin; the fifteen
  * reads take the shell's own input without the session; the three
  * `mutation.*` steps are the part of a write the service owns, while
  * OpenChamber owns the kind, the normalized input, its digest, the
@@ -288,6 +290,7 @@ export const SOURCE_CONTROL_PROVIDER_WIRE_VERSION = 1;
 export const SOURCE_CONTROL_PROVIDER_METHODS = [
   'auth.verify',
   'auth.probe',
+  'auth.status',
   'changeRequestStatus',
   'listChangeRequests',
   'changeRequestContext',
@@ -328,7 +331,7 @@ export const SOURCE_CONTROL_PROVIDER_TARGET_MAX = 4_096;
 /** How long OpenChamber waits for the service to answer `method`. */
 export const sourceControlProviderTimeoutMs = (method: SourceControlProviderMethod): number => {
   if (method === 'changeRequestStatus') return SOURCE_CONTROL_PROVIDER_STATUS_TIMEOUT_MS;
-  if (method === 'auth.verify' || method === 'auth.probe') return SOURCE_CONTROL_PROVIDER_AUTH_TIMEOUT_MS;
+  if (method === 'auth.verify' || method === 'auth.probe' || method === 'auth.status') return SOURCE_CONTROL_PROVIDER_AUTH_TIMEOUT_MS;
   if (method.startsWith('mutation.')) return SOURCE_CONTROL_PROVIDER_MUTATION_TIMEOUT_MS;
   return SOURCE_CONTROL_PROVIDER_READ_TIMEOUT_MS;
 };
@@ -365,8 +368,8 @@ export const SOURCE_CONTROL_OUTBOUND_TIMEOUT_MS = 20_000;
 export type SourceControlJson = null | boolean | number | string | SourceControlJson[] | { [key: string]: SourceControlJson };
 export type SourceControlJsonObject = { [key: string]: SourceControlJson };
 
-/** The forge account a call acts as; `null` in `auth.verify` and `auth.probe`, before one is known. */
-export type SourceControlProviderUser = { id: number; login: string };
+/** The acting account; null on auth calls. IDs are positive safe integers or non-empty strings up to 256 characters, preserved as received. */
+export type SourceControlProviderUser = { id: number | string; login: string };
 
 /**
  * Who a call is for. `instance` is the normalized origin (`https://git.example.com`).
@@ -443,6 +446,7 @@ type MutationStepInput = {
 export type SourceControlProviderInputs = {
   'auth.verify': Record<string, never>;
   'auth.probe': Record<string, never>;
+  'auth.status': Record<string, never>;
   changeRequestStatus: ReadInput & { branch: string; force: boolean };
   listChangeRequests: ListInput;
   changeRequestContext: ReadInput & RevisionInput & {
@@ -470,8 +474,12 @@ export type SourceControlProviderInputs = {
   'mutation.reconcile': MutationStepInput;
 };
 
-export type SourceControlForgeUser = { id: number; login: string; name?: string; email?: string; avatarUrl?: string };
+export type SourceControlNumericForgeUser = { id: number; login: string; name?: string; email?: string; avatarUrl?: string };
+export type SourceControlStringForgeUser = { id: string; login: string; name?: string; email?: string; avatarUrl?: string };
+export type SourceControlForgeUser = SourceControlNumericForgeUser | SourceControlStringForgeUser;
 export type SourceControlVerifyData = { user: SourceControlForgeUser };
+/** No login for this exact instance is `null`; failure to determine it is an error. */
+export type SourceControlStatusData = { user: SourceControlForgeUser | null };
 export type SourceControlProbeData = { supported: boolean; version?: string; message?: string };
 export type SourceControlChangeRequestHead = { project: SourceControlProjectRef; headSha: string; headBranch: string; headOwner: string };
 /** OpenChamber adds the context and the requested remote name; the service names where the head lives. */
@@ -530,8 +538,11 @@ const readSessionUser = (user: WireSourceControlUser | null | undefined): Source
   if (user === null) return null;
   if (Object(user) !== user || user === undefined) return undefined;
   const { id, login } = user;
-  if (!Number.isSafeInteger(id) || String(login) !== login || login.length === 0) return undefined;
-  return { id: Number(id), login };
+  const isPositiveSafeIntegerId = typeof id === 'number' && Number.isSafeInteger(id) && id > 0;
+  const isBoundedStringId = typeof id === 'string' && id.length > 0 && id.length <= 256;
+  const validId = isPositiveSafeIntegerId || isBoundedStringId;
+  if (!validId || String(login) !== login || login.length === 0) return undefined;
+  return { id, login };
 };
 
 /** `undefined` is a session that is neither `null` nor `{ instance, handle, user }`. */

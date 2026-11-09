@@ -27,6 +27,8 @@ This module provides Git repository operations for the web server runtime, inclu
 
 ## Public API
 
+Extension source-control user IDs may be non-empty strings up to 256 characters. Git identity profiles preserve their exact account references. HTTPS credential references encode and decode the instance-prefixed provider user ID without trimming it; instance, credential ID, key ID and endpoint validation retain their existing rules. This identity metadata grants no CLI credential or managed transport to a service-login account.
+
 The following functions are exported and used by the web server:
 
 ### Repository Operations

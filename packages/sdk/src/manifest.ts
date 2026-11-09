@@ -700,8 +700,10 @@ export type SourceControlContribution = {
     placeholder: string;
   };
   capabilities: SourceControlCapabilities;
+  /** The service owns sign-in. Settings shows `hint` when this instance has no login. At least login or token is required. */
+  login?: { kind: 'service'; hint: string };
   /** How OpenChamber sends the token: which header, with which prefix. */
-  token: {
+  token?: {
     header: 'authorization' | 'private-token';
     /**
      * `bearer` → `Bearer <token>`, `token` → `token <token>`, `basic` →

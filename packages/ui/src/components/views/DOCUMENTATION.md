@@ -341,7 +341,11 @@ file, read afresh, expanded. A repository the picker drops again ends the
 attempt on the repository left on screen. Picking Last turn by hand asks
 nothing and stays there, empty or not. The phone's Changes surface
 (`apps/MobileChangesSurface.tsx`) answers the same way and opens the file's own
-diff screen, since it has no expanded list to scroll.
+diff screen, since it has no expanded list to scroll. VS Code has no Diff view
+panel: the chip reads the turn's diff once and opens the file's patch in the
+editor's own diff (`editor.openDiff` with `patch`; a file the turn deleted shows
+its old content against an empty side). A file the list does not hold opens as
+it is, and a failed read shows an error toast.
 
 ### Why the click is a one-shot request and not derived from the tab
 

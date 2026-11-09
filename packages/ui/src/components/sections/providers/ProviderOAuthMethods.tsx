@@ -47,6 +47,11 @@ interface ProviderOAuthMethodsProps {
   connectLabel?: string;
   /** Off when the caller starts the sign-in from its own button; only the attempt's progress and errors show. */
   showStartButton?: boolean;
+  /**
+   * Told `true` when a sign-in starts and `false` when it ends, fails or this unmounts,
+   * so a caller that mounts this only in some states can keep it until then.
+   */
+  onActiveChange?: (active: boolean) => void;
 }
 
 type Flow =
@@ -89,6 +94,7 @@ export const ProviderOAuthMethods: React.FC<ProviderOAuthMethodsProps> = ({
   showMethodLabels = true,
   connectLabel,
   showStartButton = true,
+  onActiveChange,
 }) => {
   const { t } = useI18n();
   // Picked once per directory prop: OpenCode keeps an OAuth attempt in the
@@ -130,6 +136,13 @@ export const ProviderOAuthMethods: React.FC<ProviderOAuthMethodsProps> = ({
   }, [cancelAttempt]);
 
   const activeMethodID = flow.phase === 'idle' ? null : flow.methodID;
+
+  const signInActive = flow.phase !== 'idle' && flow.phase !== 'failed';
+  React.useEffect(() => {
+    if (!signInActive || !onActiveChange) return undefined;
+    onActiveChange(true);
+    return () => onActiveChange(false);
+  }, [signInActive, onActiveChange]);
   const busy = flow.phase === 'connecting'
     || flow.phase === 'waiting'
     || (flow.phase === 'awaitingCode' && flow.submitting);

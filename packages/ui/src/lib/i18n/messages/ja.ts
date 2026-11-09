@@ -3454,6 +3454,7 @@ export const dict: Record<I18nKey, string> = {
   'updateDialog.status.autoReloadHint': '更新が完了すると自動的にページが再読み込みされます。',
   'updateDialog.fallback.updateViaTerminal': 'またはターミナルで更新:',
   'updateDialog.desktopHostInstall': 'OpenChamber {version} が利用可能です。実行しているコンピューター上で更新してください。',
+  'updateDialog.openCodeTooOld': 'OpenChamber {version} には OpenCode {required} が必要です。このサーバーは {current} です。先に OpenCode を更新してください。',
   'updateDialog.actions.copyCommand': 'コマンドをコピー',
   'updateDialog.actions.copied': 'コピーしました！',
   'updateDialog.status.downloadingPayload': '更新ペイロードをダウンロード中...',
