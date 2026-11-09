@@ -312,7 +312,12 @@ export const createSessionKnowledgeRuntime = (dependencies) => {
     projectContextRuntime,
     agentMemoryRuntime,
     resolveProjectId,
+    // The memory switch: what the panel counts.
     isAgentMemoryEnabled,
+    // Whether this session's agent has the `openchamber_memory` tool: what
+    // the session is told. The switch alone is not enough, since an OpenCode
+    // OpenChamber did not launch never gets the tool.
+    isMemoryToolAvailable,
     // Whether this session's agent has the `openchamber` tool to link with.
     isSessionLinkingAvailable = null,
     // A linked worktree or isolated space; main checkout tasks keep session titles.
@@ -392,8 +397,8 @@ export const createSessionKnowledgeRuntime = (dependencies) => {
     }
 
     let memory = { global: [], project: [], enabled: false, complete: false };
-    const memoryEnabled = typeof isAgentMemoryEnabled === 'function'
-      ? await isAgentMemoryEnabled().catch(() => false)
+    const memoryEnabled = typeof isMemoryToolAvailable === 'function'
+      ? await isMemoryToolAvailable().catch(() => false)
       : true;
     if (memoryEnabled) {
       try {
