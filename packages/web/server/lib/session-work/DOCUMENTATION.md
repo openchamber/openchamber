@@ -16,6 +16,8 @@ Small Model is worth waking.
   "Measurement"), the thresholds, and the decisions taken from the answers.
 - `state.js` — `metadata.openchamber.work` and the merge patches that change
   it. Every patch is decided against the record at write time.
+- `membership.js` — which sessions can be in work and which ones the block
+  shows.
 - `runtime.js` — `createSessionWorkRuntime`: `processPayload` (a sent message,
   a turn start), `evaluateTurnEnd` (called by session assist), `stop`.
 
@@ -36,11 +38,18 @@ needs neither the In work block nor a session in work.
 The UI parser is `packages/ui/src/lib/sessionWorkMetadata.ts`; the user's own
 Track / Done go through the generic metadata route
 (`setSessionWorkState` in `packages/ui/src/sync/session-actions.ts`), which
-also exists in VS Code.
+also exists in VS Code. An agent does the same on the user's word with the
+`openchamber` tool's `session.markDone` / `session.track`, which write
+`userStatePatch` (`../openchamber-control/DOCUMENTATION.md`).
+
+`membership.js` holds which sessions this feature serves (`canBeInWork`) and
+which ones the sidebar block shows (`isInWork`, `isDoneSuggested`), for this
+runtime and for the agent tool's `session.list`.
 
 ## Invariants
 
-- A sent message only opens. Nothing here ever writes `done`.
+- A sent message only opens. This runtime never writes `done`; only the user
+  closes, in the app or through an agent they asked.
 - A message reopens a closed session only when it was sent after the user
   closed it (`openPatch` compares the message's `time.created` with `doneAt`).
 - Writes go through `updateSessionMetadata`, which decides the patch inside the

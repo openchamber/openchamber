@@ -842,7 +842,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     const enterToSend = useUIStore((state) => state.enterToSend);
     const enterToSendConfigured = useUIStore((state) => state.enterToSendConfigured);
     const mobileReturnKeySends = useUIStore((state) => state.mobileReturnKeySends);
-    const { enabled: isTabletLayout } = useTabletLayout();
+    const { enabled: isTabletLayout, roomyForOnePanel } = useTabletLayout();
     const setImagePreviewOpen = useUIStore((state) => state.setImagePreviewOpen);
     const inputBarOffset = useUIStore((state) => state.inputBarOffset);
     const inputSpellcheckEnabled = useUIStore((state) => state.inputSpellcheckEnabled);
@@ -1326,8 +1326,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         editorRef: composerRef,
         formRef: composerFormRef,
         setExpandedInput,
-        // Without a soft keyboard, keep the full composer up.
-        alwaysExpanded: hasHardwareKeyboard || isTabletLayout,
+        // Without a soft keyboard, keep the full composer up. So does a tablet,
+        // except where only one side panel fits (an unfolded iPhone Duo, a
+        // 13-inch iPad in portrait), which keeps the phone's pill.
+        alwaysExpanded: hasHardwareKeyboard || (isTabletLayout && !roomyForOnePanel),
         holders: {
             controlsPanelOpen: Boolean(mobileControlsPanel),
             attachMenuOpen: mobileAttachMenuOpen,

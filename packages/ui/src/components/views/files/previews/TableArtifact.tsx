@@ -882,7 +882,7 @@ export const TableGrid: React.FC<{
                               startEditing({ row: -1, column });
                             }}
                           >
-                            <span className="min-w-0 truncate">{name}</span>
+                            <span dir="auto" className="min-w-0 truncate">{name}</span>
                             {sorted ? <Icon name={sorted === 'ascending' ? 'arrow-up-s' : 'arrow-down-s'} className="size-3.5 shrink-0" /> : null}
                             {filtered ? <span className="size-1.5 shrink-0 rounded-full bg-[var(--primary-base)]" aria-hidden /> : null}
                           </button>

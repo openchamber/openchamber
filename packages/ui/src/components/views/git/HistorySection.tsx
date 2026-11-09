@@ -178,7 +178,7 @@ export const HistorySection: React.FC<HistorySectionProps> = ({
             <div className="flex items-center gap-2 px-3 py-1.5" aria-hidden>
               <span className="h-px flex-1 bg-edge" />
               <span className="inline-flex max-w-[80%] items-center gap-1 typography-micro text-muted-foreground">
-                <span className="truncate" title={branchDivider.branchName}>{branchDivider.branchName}</span>
+                <span dir="ltr" className="truncate" title={branchDivider.branchName}>{branchDivider.branchName}</span>
                 {dividerIcon}
               </span>
               <span className="h-px flex-1 bg-edge" />

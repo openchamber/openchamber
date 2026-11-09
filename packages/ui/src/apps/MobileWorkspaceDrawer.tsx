@@ -286,7 +286,7 @@ export const MobileWorkspaceDrawer: React.FC<{
       aria-modal="true"
       aria-label={t('mobile.header.openWorkspaceAria')}
       aria-hidden={!open}
-      className="oc-keyboard-inset-surface oc-bottom-safe-surface fixed inset-0 z-50 flex flex-col bg-background text-foreground"
+      className="oc-keyboard-inset-surface oc-bottom-safe-surface oc-side-safe-area fixed inset-0 z-50 flex flex-col bg-background text-foreground"
       style={{
         paddingTop: 'var(--oc-safe-area-top, 0px)',
         // Settled state drops the transform entirely so the drawer isn't kept

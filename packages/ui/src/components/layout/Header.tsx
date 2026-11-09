@@ -1133,11 +1133,11 @@ export const Header: React.FC = () => {
                     ? 'typography-ui-label text-[0.875rem] text-foreground'
                     : 'typography-micro text-[0.65625rem] text-muted-foreground',
                 )}>
-                  {activeProjectLabel ? <span className="truncate">{activeProjectLabel}</span> : null}
+                  {activeProjectLabel ? <span dir="auto" className="truncate">{activeProjectLabel}</span> : null}
                   {currentBranchLabel ? (
                     <span className="inline-flex min-w-0 items-center gap-0.5">
                       <Icon name="git-branch" className={cn('flex-shrink-0 text-muted-foreground', isNewSessionDraftOpen ? 'h-3.5 w-3.5' : 'h-3 w-3')} />
-                      <span className={cn('truncate', isNewSessionDraftOpen && 'text-muted-foreground')}>{currentBranchLabel}</span>
+                      <span dir="ltr" className={cn('truncate', isNewSessionDraftOpen && 'text-muted-foreground')}>{currentBranchLabel}</span>
                     </span>
                   ) : null}
                   {!isNewSessionDraftOpen && worktreeBadgeKind ? (

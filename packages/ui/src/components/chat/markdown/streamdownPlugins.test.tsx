@@ -3,7 +3,7 @@ import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { Window } from 'happy-dom';
 import { Streamdown } from 'streamdown';
-import { getMarkdownCjk, getMarkdownProcessingOptions, markdownMath } from './streamdownPlugins';
+import { getMarkdownCjk, getMarkdownProcessingOptions, markdownMath, remarkLiteralText } from './streamdownPlugins';
 
 const dom = new Window();
 function render(source: string, raw = false, vscode = false, singleTilde = false) {
@@ -263,5 +263,35 @@ describe('Streamdown math and CJK compatibility', () => {
     expect(result.querySelector('table a')?.getAttribute('href')).toBe('https://reference.test');
     expect(result.querySelector('input')?.hasAttribute('disabled')).toBe(true);
     expect(result.textContent).toContain('Footnote');
+  });
+});
+
+describe('literal text a person typed', () => {
+  const renderTyped = (source: string) => {
+    const base = getMarkdownProcessingOptions(false, false);
+    const html = renderToStaticMarkup(<Streamdown
+      mode="static" parseIncompleteMarkdown={false} controls={false}
+      plugins={{ math: markdownMath, cjk: getMarkdownCjk(false) }}
+      remarkPlugins={[...(base.remarkPlugins ?? []), remarkLiteralText]} rehypePlugins={base.rehypePlugins}
+    >{source}</Streamdown>);
+    const body = dom.document.createElement('div');
+    body.innerHTML = html;
+    return body;
+  };
+
+  test('keeps shell variables, quotes, code and tags as typed', () => {
+    const shell = renderTyped(`run sh -c 'echo user $DEPLOY_USER; test -n "$DEPLOY_PASSWORD"' now`);
+    expect(shell.textContent).toBe(`run sh -c 'echo user $DEPLOY_USER; test -n "$DEPLOY_PASSWORD"' now`);
+    expect(shell.querySelector('.katex, .katex-error')).toBeNull();
+    expect(renderTyped('code `a<b && c` here').querySelector('code')?.textContent).toBe('a<b && c');
+    const tags = renderTyped('<b>bold</b> AT&amp;T <details><summary>s</summary>x</details>');
+    expect(tags.textContent).toBe('<b>bold</b> AT&amp;T <details><summary>s</summary>x</details>');
+    expect(tags.querySelector('b, details')).toBeNull();
+  });
+
+  test('still draws a formula from what was typed', () => {
+    const formula = renderTyped('so $x<y$ holds');
+    expect(formula.querySelector('.katex-error')).toBeNull();
+    expect(formula.querySelector('.katex')).not.toBeNull();
   });
 });

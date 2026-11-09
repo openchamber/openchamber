@@ -395,6 +395,7 @@ const UserTextPart: React.FC<UserTextPartProps> = ({
                             className="[&_.markdown-content>*:first-child]:mt-0 [&_.markdown-content>*:last-child]:mb-0"
                             disableLinkSafety
                             enableFileReferences={false}
+                            literalText
                         />
                     </SessionMentionChipsContext.Provider>
                 ) : (

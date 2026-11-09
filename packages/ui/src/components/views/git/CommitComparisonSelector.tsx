@@ -68,7 +68,7 @@ export function CommitComparisonSelector({ commits, selectedHash, loading, error
             {open && rankByQuery(commits, search, (commit) => [commit.message, commit.author_name, commit.hash]).map((commit) => (
               <CommandItem key={commit.hash} value={commit.hash} className={mobile ? 'min-h-11' : undefined} onSelect={() => { onSelect(commit); changeOpen(false); }}>
                 <div className="min-w-0 flex-1">
-                  <div className="truncate typography-ui-label font-semibold" title={commit.message}>{commit.message}</div>
+                  <div dir="auto" className="oc-ui-start-align truncate typography-ui-label font-semibold" title={commit.message}>{commit.message}</div>
                   <div className="flex min-w-0 gap-1 typography-meta text-muted-foreground">
                     <span className="min-w-0 truncate">
                       {commit.author_name} · {Number.isNaN(new Date(commit.date).getTime()) ? commit.date : formatDateTimeForPreference(new Date(commit.date), timeFormat, {
