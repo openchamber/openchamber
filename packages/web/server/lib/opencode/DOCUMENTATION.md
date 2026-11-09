@@ -110,6 +110,11 @@ in that user's sessions. On the fallback path the same rules are merged into
   `theme-catalog.js` owns POST catalog search/package routes under
   `/api/config/themes/catalog/`. It fetches only Open VSX and its Eclipse CDN over
   HTTPS, validates redirects and checksums, and verifies packaged identity.
+  An empty search query returns the most downloaded color themes; the catalog
+  opens on them. The Themes category also holds icon themes, VS Code's built-ins
+  and tools that ship a theme on the side, so the popular list keeps entries
+  outside the `vscode` namespace whose name has no "icon" and whose name or
+  description speaks of a theme or colors.
   `theme-archive.js` reads selected JSON entries in memory with bounded decompression.
   JSON includes and token references stay inside the package. Each failed variant
   is reported separately so valid siblings remain available. No extension code runs.

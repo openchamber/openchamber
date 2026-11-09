@@ -260,7 +260,7 @@ export const CommandPalette: React.FC = () => {
       {
         id: 'new-worktree-dialog',
         title: t('commandPalette.item.newWorktreeDialog'),
-        icon: <Icon name="git-branch" className="me-2 h-4 w-4" />,
+        icon: <Icon name="worktree" className="me-2 h-4 w-4" />,
         shortcutId: 'open_new_worktree_dialog',
         searchText: t('commandPalette.item.newWorktreeDialog'),
         onSelect: run(openNewWorktreeDialog),

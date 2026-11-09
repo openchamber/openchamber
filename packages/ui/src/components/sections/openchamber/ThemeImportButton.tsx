@@ -68,12 +68,20 @@ export function ThemeImportButton() {
 
   return (
     <div className="flex items-center gap-2" data-settings-item="appearance.import-theme">
-      <Button variant="outline" size="sm" disabled={busy || customThemesLoading} onClick={() => setOpen(true)}>
-        <Icon name={busy ? 'loader' : 'add'} className={busy ? 'size-3.5 animate-spin' : 'size-3.5'} />
-        {t(busy ? 'settings.themeImport.busy' : 'settings.themeImport.action')}
+      <span className="hidden @xl:contents"><SettingsInfoHint>{t('settings.themeImport.catalogHint')}</SettingsInfoHint></span>
+      {/* Below the pane's @xl width the button keeps only its plus, so it fits beside the section title. */}
+      <Button
+        variant="outline"
+        size="sm"
+        disabled={busy || customThemesLoading}
+        onClick={() => setOpen(true)}
+        aria-label={t(busy ? 'settings.themeImport.busy' : 'settings.themeImport.action')}
+        className="w-7 px-0 @xl:w-auto @xl:px-2"
+      >
+        <Icon name={busy ? 'loader' : 'search'} className={busy ? 'size-3.5 animate-spin' : 'size-3.5'} />
+        <span className="hidden @xl:inline">{t(busy ? 'settings.themeImport.busy' : 'settings.themeImport.action')}</span>
       </Button>
-      <SettingsInfoHint>{t('settings.themeImport.catalogHint')}</SettingsInfoHint>
-      <input ref={inputRef} type="file" accept=".json,.jsonc" className="hidden" aria-label={t('settings.themeImport.action')} onChange={handleFile} />
+      <input ref={inputRef} type="file" accept=".json,.jsonc" className="hidden" aria-label={t('settings.themeImport.chooseFile')} onChange={handleFile} />
       {open && <ThemeCatalogDialog pickFile={() => void pickFile()} fileBusy={busy} onClose={close} />}
     </div>
   );

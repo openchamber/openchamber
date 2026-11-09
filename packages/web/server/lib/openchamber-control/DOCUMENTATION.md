@@ -374,6 +374,34 @@ other.
   together with a 400, so neither silently wins.
 - One failed directory status lookup produces `unknown` for only that
   directory and does not erase other session results.
+- `session.list` returns top-level sessions newest first (OpenCode's
+  `parentID: null`); `children` adds subagent sessions. Each session is
+  trimmed to `id`, `title`, `directory`, `updated`, `archived`, `parentID`,
+  `agent`, `model`, `outcome` (plus the In work fields and `status` below):
+  the raw OpenCode record averaged about 1,100 characters on real sessions,
+  a session in work about 1,750, with tokens, cost, permissions and every
+  metadata namespace; the trimmed one about 300. The chat's tool row reads
+  `directory` and falls back to `location.directory` for calls stored before. While In work is on
+  (`sessionWorkEnabled`), every session carries `inWork` and
+  `doneSuggested`, by the sidebar block's rule
+  (`../session-work/membership.js`: top level, not archived, not a Chat,
+  `work.state` open; the hint while it is newer than `time.idle`). Filters:
+  `inWork`, `busy` (in OpenCode's active map, so busy or waiting) and `query`
+  (every word in the title, case-insensitive, matched here because OpenCode's
+  `search` is SQLite `LIKE`, case-sensitive outside ASCII). `inWork` and
+  `busy` read every project unless `projectId` or `directory` scopes them and
+  return every match unless `limit` is given; a filtered read asks for pages
+  of 200. `inWork` while In work is off is a 409, and a failed active-map read
+  under `busy` is a 503, never an empty list. `busy` stops paging once it saw
+  every running session.
+- `session.markDone` and `session.track` write the record the app's Done and
+  Track write (`userStatePatch` in `../session-work/state.js`) through the
+  injected `updateSessionMetadata`, the session metadata store's queued
+  write that broadcasts the change, so every window updates. The session
+  defaults to the caller and is read first (unknown is a 404). Track refuses
+  a session that can never be in work (400) and an archived one (409); Done
+  takes any session, as the app's button does. Both are a 409 while In work
+  is off and a 503 on a server without the store.
 - Destructive session/worktree deletion and project-path registration are not
   part of the action contract.
 - `session.send` to an archived top-level session restores it, with its

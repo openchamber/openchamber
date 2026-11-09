@@ -288,7 +288,7 @@ const SessionsListedBody: React.FC<{ data: unknown }> = ({ data }) => {
         <>
             <List count={sessions.length}>
                 {sessions.map((session) => {
-                    const directory = session.location?.directory;
+                    const { directory } = session;
                     return (
                         <li key={session.id} className="min-w-0">
                             <SessionLinkRow
@@ -954,7 +954,9 @@ const OpenChamberView: React.FC<{
         case 'session.link': return <LinkedBody data={data} />;
         case 'session.create':
         case 'session.send':
-        case 'session.fork': return <DispatchedBody data={data} />;
+        case 'session.fork':
+        case 'session.markDone':
+        case 'session.track': return <DispatchedBody data={data} />;
         case 'session.moveToWorktree': return <MovedBody data={data} call={call} />;
         case 'memory.save': return <MemorySavedBody data={data} call={call} directory={directory} isMobile={isMobile} />;
         case 'knowledge.save': return <KnowledgeSavedBody data={data} call={call} directory={directory} isMobile={isMobile} />;

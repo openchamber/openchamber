@@ -17,8 +17,7 @@ export const htmlRenderI18n = {
     'chat.htmlRender.answerFailed': 'Could not send the answer',
     'settings.openchamber.tools.field.agentRenderTool': 'Agent render tool',
     'settings.openchamber.tools.field.agentRenderToolAria': 'Agent render tool',
-    'settings.openchamber.tools.field.agentRenderToolSummary': 'Let agents show charts, tables, diagrams and interface mockups right in the chat, and ask you to pick an option there.',
-    'settings.openchamber.tools.field.agentRenderToolInfo': 'Pages run in a sandbox with no access to your sessions or files. Links open in your browser.',
+    'settings.openchamber.tools.field.agentRenderToolSummary': 'Let agents show charts, tables, diagrams and interface mockups in the chat, sandboxed from your files, and ask you to pick an option there.',
   },
   nl: {
     'chat.htmlRender.fullscreen': 'Volledig scherm openen',
@@ -37,8 +36,7 @@ export const htmlRenderI18n = {
     'chat.htmlRender.answerFailed': 'Het antwoord kon niet worden verstuurd',
     'settings.openchamber.tools.field.agentRenderTool': 'Weergavetool voor agents',
     'settings.openchamber.tools.field.agentRenderToolAria': 'Weergavetool voor agents',
-    'settings.openchamber.tools.field.agentRenderToolSummary': 'Laat agents grafieken, tabellen, diagrammen en interfaceontwerpen direct in de chat tonen en je daar een optie laten kiezen.',
-    'settings.openchamber.tools.field.agentRenderToolInfo': 'Pagina\'s draaien in een sandbox zonder toegang tot je sessies of bestanden. Links openen in je browser.',
+    'settings.openchamber.tools.field.agentRenderToolSummary': 'Laat agents grafieken, tabellen, diagrammen en interfaceontwerpen in de chat tonen, afgeschermd van je bestanden, en je daar een optie laten kiezen.',
   },
   de: {
     'chat.htmlRender.fullscreen': 'Im Vollbild öffnen',
@@ -57,8 +55,7 @@ export const htmlRenderI18n = {
     'chat.htmlRender.answerFailed': 'Die Antwort konnte nicht gesendet werden',
     'settings.openchamber.tools.field.agentRenderTool': 'Darstellungstool für Agenten',
     'settings.openchamber.tools.field.agentRenderToolAria': 'Darstellungstool für Agenten',
-    'settings.openchamber.tools.field.agentRenderToolSummary': 'Agenten zeigen Diagramme, Tabellen, Grafiken und Oberflächenentwürfe direkt im Chat und lassen dich dort eine Option wählen.',
-    'settings.openchamber.tools.field.agentRenderToolInfo': 'Seiten laufen in einer Sandbox ohne Zugriff auf deine Sitzungen oder Dateien. Links öffnen sich in deinem Browser.',
+    'settings.openchamber.tools.field.agentRenderToolSummary': 'Agenten zeigen Diagramme, Tabellen, Grafiken und Oberflächenentwürfe im Chat, abgeschirmt von deinen Dateien, und lassen dich dort eine Option wählen.',
   },
   es: {
     'chat.htmlRender.fullscreen': 'Abrir a pantalla completa',
@@ -77,8 +74,7 @@ export const htmlRenderI18n = {
     'chat.htmlRender.answerFailed': 'No se pudo enviar la respuesta',
     'settings.openchamber.tools.field.agentRenderTool': 'Herramienta de visualización del agente',
     'settings.openchamber.tools.field.agentRenderToolAria': 'Herramienta de visualización del agente',
-    'settings.openchamber.tools.field.agentRenderToolSummary': 'Permite que los agentes muestren gráficos, tablas, diagramas y maquetas de interfaz en el chat, y te pidan elegir una opción allí.',
-    'settings.openchamber.tools.field.agentRenderToolInfo': 'Las páginas se ejecutan en un entorno aislado sin acceso a tus sesiones ni archivos. Los enlaces se abren en tu navegador.',
+    'settings.openchamber.tools.field.agentRenderToolSummary': 'Permite que los agentes muestren gráficos, tablas, diagramas y maquetas de interfaz en el chat, aislados de tus archivos, y te pidan elegir una opción allí.',
   },
   fr: {
     'chat.htmlRender.fullscreen': 'Ouvrir en plein écran',
@@ -97,8 +93,7 @@ export const htmlRenderI18n = {
     'chat.htmlRender.answerFailed': 'Impossible d\'envoyer la réponse',
     'settings.openchamber.tools.field.agentRenderTool': 'Outil d\'affichage de l\'agent',
     'settings.openchamber.tools.field.agentRenderToolAria': 'Outil d\'affichage de l\'agent',
-    'settings.openchamber.tools.field.agentRenderToolSummary': 'Permet aux agents d\'afficher graphiques, tableaux, diagrammes et maquettes d\'interface dans le chat, et de vous y faire choisir une option.',
-    'settings.openchamber.tools.field.agentRenderToolInfo': 'Les pages tournent dans un bac à sable sans accès à vos sessions ni à vos fichiers. Les liens s\'ouvrent dans votre navigateur.',
+    'settings.openchamber.tools.field.agentRenderToolSummary': 'Permet aux agents d\'afficher graphiques, tableaux, diagrammes et maquettes d\'interface dans le chat, isolés de vos fichiers, et de vous y faire choisir une option.',
   },
   ja: {
     'chat.htmlRender.fullscreen': '全画面で開く',
@@ -117,8 +112,7 @@ export const htmlRenderI18n = {
     'chat.htmlRender.answerFailed': '回答を送信できませんでした',
     'settings.openchamber.tools.field.agentRenderTool': 'エージェント表示ツール',
     'settings.openchamber.tools.field.agentRenderToolAria': 'エージェント表示ツール',
-    'settings.openchamber.tools.field.agentRenderToolSummary': 'エージェントがグラフ、表、図、画面のモックアップをチャット内に直接表示し、その場で選択肢を選んでもらえます。',
-    'settings.openchamber.tools.field.agentRenderToolInfo': 'ページはサンドボックス内で動作し、セッションやファイルにはアクセスできません。リンクはブラウザーで開きます。',
+    'settings.openchamber.tools.field.agentRenderToolSummary': 'エージェントがグラフ、表、図、画面のモックアップをファイルから隔離された状態でチャット内に表示し、その場で選択肢を選んでもらえます。',
   },
   ko: {
     'chat.htmlRender.fullscreen': '전체 화면으로 열기',
@@ -137,8 +131,7 @@ export const htmlRenderI18n = {
     'chat.htmlRender.answerFailed': '답변을 보내지 못했습니다',
     'settings.openchamber.tools.field.agentRenderTool': '에이전트 표시 도구',
     'settings.openchamber.tools.field.agentRenderToolAria': '에이전트 표시 도구',
-    'settings.openchamber.tools.field.agentRenderToolSummary': '에이전트가 차트, 표, 다이어그램, 화면 시안을 채팅에 바로 보여 주고 그 자리에서 선택지를 고르게 합니다.',
-    'settings.openchamber.tools.field.agentRenderToolInfo': '페이지는 세션이나 파일에 접근할 수 없는 샌드박스에서 실행됩니다. 링크는 브라우저에서 열립니다.',
+    'settings.openchamber.tools.field.agentRenderToolSummary': '에이전트가 차트, 표, 다이어그램, 화면 시안을 파일과 격리된 상태로 채팅에 보여 주고 그 자리에서 선택지를 고르게 합니다.',
   },
   pl: {
     'chat.htmlRender.fullscreen': 'Otwórz na pełnym ekranie',
@@ -157,8 +150,7 @@ export const htmlRenderI18n = {
     'chat.htmlRender.answerFailed': 'Nie udało się wysłać odpowiedzi',
     'settings.openchamber.tools.field.agentRenderTool': 'Narzędzie wyświetlania agenta',
     'settings.openchamber.tools.field.agentRenderToolAria': 'Narzędzie wyświetlania agenta',
-    'settings.openchamber.tools.field.agentRenderToolSummary': 'Pozwól agentom pokazywać wykresy, tabele, diagramy i makiety interfejsu bezpośrednio w czacie oraz prosić cię tam o wybór opcji.',
-    'settings.openchamber.tools.field.agentRenderToolInfo': 'Strony działają w piaskownicy bez dostępu do twoich sesji i plików. Linki otwierają się w przeglądarce.',
+    'settings.openchamber.tools.field.agentRenderToolSummary': 'Pozwól agentom pokazywać wykresy, tabele, diagramy i makiety interfejsu w czacie, odizolowane od twoich plików, oraz prosić cię tam o wybór opcji.',
   },
   'pt-BR': {
     'chat.htmlRender.fullscreen': 'Abrir em tela cheia',
@@ -177,8 +169,7 @@ export const htmlRenderI18n = {
     'chat.htmlRender.answerFailed': 'Não foi possível enviar a resposta',
     'settings.openchamber.tools.field.agentRenderTool': 'Ferramenta de exibição do agente',
     'settings.openchamber.tools.field.agentRenderToolAria': 'Ferramenta de exibição do agente',
-    'settings.openchamber.tools.field.agentRenderToolSummary': 'Permite que agentes mostrem gráficos, tabelas, diagramas e protótipos de interface direto no chat e peçam que você escolha uma opção ali.',
-    'settings.openchamber.tools.field.agentRenderToolInfo': 'As páginas rodam em uma sandbox sem acesso às suas sessões ou arquivos. Os links abrem no seu navegador.',
+    'settings.openchamber.tools.field.agentRenderToolSummary': 'Permite que agentes mostrem gráficos, tabelas, diagramas e protótipos de interface no chat, isolados dos seus arquivos, e peçam que você escolha uma opção ali.',
   },
   tr: {
     'chat.htmlRender.fullscreen': 'Tam ekran aç',
@@ -197,8 +188,7 @@ export const htmlRenderI18n = {
     'chat.htmlRender.answerFailed': 'Yanıt gönderilemedi',
     'settings.openchamber.tools.field.agentRenderTool': 'Ajan görüntüleme aracı',
     'settings.openchamber.tools.field.agentRenderToolAria': 'Ajan görüntüleme aracı',
-    'settings.openchamber.tools.field.agentRenderToolSummary': 'Ajanların grafik, tablo, diyagram ve arayüz taslaklarını doğrudan sohbette göstermesine ve orada bir seçenek seçmeni istemesine izin ver.',
-    'settings.openchamber.tools.field.agentRenderToolInfo': 'Sayfalar, oturumlarına ve dosyalarına erişimi olmayan bir korumalı alanda çalışır. Bağlantılar tarayıcında açılır.',
+    'settings.openchamber.tools.field.agentRenderToolSummary': 'Ajanların grafik, tablo, diyagram ve arayüz taslaklarını dosyalarından yalıtılmış olarak sohbette göstermesine ve orada bir seçenek seçmeni istemesine izin ver.',
   },
   uk: {
     'chat.htmlRender.fullscreen': 'Відкрити на весь екран',
@@ -217,8 +207,7 @@ export const htmlRenderI18n = {
     'chat.htmlRender.answerFailed': 'Не вдалося надіслати відповідь',
     'settings.openchamber.tools.field.agentRenderTool': 'Інструмент показу для агентів',
     'settings.openchamber.tools.field.agentRenderToolAria': 'Інструмент показу для агентів',
-    'settings.openchamber.tools.field.agentRenderToolSummary': 'Агенти показують графіки, таблиці, діаграми й макети інтерфейсу просто в чаті та можуть попросити вас обрати там варіант.',
-    'settings.openchamber.tools.field.agentRenderToolInfo': 'Сторінки працюють в ізольованому середовищі без доступу до ваших сесій і файлів. Посилання відкриваються в браузері.',
+    'settings.openchamber.tools.field.agentRenderToolSummary': 'Агенти показують графіки, таблиці, діаграми й макети інтерфейсу просто в чаті, ізольовано від ваших файлів, і можуть попросити вас обрати там варіант.',
   },
   'zh-CN': {
     'chat.htmlRender.fullscreen': '全屏打开',
@@ -237,8 +226,7 @@ export const htmlRenderI18n = {
     'chat.htmlRender.answerFailed': '无法发送回答',
     'settings.openchamber.tools.field.agentRenderTool': '智能体展示工具',
     'settings.openchamber.tools.field.agentRenderToolAria': '智能体展示工具',
-    'settings.openchamber.tools.field.agentRenderToolSummary': '让智能体直接在聊天中展示图表、表格、示意图和界面草图，并请你在其中选择一个选项。',
-    'settings.openchamber.tools.field.agentRenderToolInfo': '页面在沙盒中运行，无法访问你的会话或文件。链接会在浏览器中打开。',
+    'settings.openchamber.tools.field.agentRenderToolSummary': '让智能体在聊天中展示图表、表格、示意图和界面草图（与你的文件隔离），并请你在其中选择一个选项。',
   },
   'zh-TW': {
     'chat.htmlRender.fullscreen': '全螢幕開啟',
@@ -257,8 +245,7 @@ export const htmlRenderI18n = {
     'chat.htmlRender.answerFailed': '無法傳送回答',
     'settings.openchamber.tools.field.agentRenderTool': '代理程式展示工具',
     'settings.openchamber.tools.field.agentRenderToolAria': '代理程式展示工具',
-    'settings.openchamber.tools.field.agentRenderToolSummary': '讓代理程式直接在聊天中顯示圖表、表格、示意圖和介面草圖，並請你在其中選擇一個選項。',
-    'settings.openchamber.tools.field.agentRenderToolInfo': '頁面在沙盒中執行，無法存取你的工作階段或檔案。連結會在瀏覽器中開啟。',
+    'settings.openchamber.tools.field.agentRenderToolSummary': '讓代理程式在聊天中顯示圖表、表格、示意圖和介面草圖（與你的檔案隔離），並請你在其中選擇一個選項。',
   },
   ar: {
     'chat.htmlRender.fullscreen': 'فتح بملء الشاشة',
@@ -277,8 +264,7 @@ export const htmlRenderI18n = {
     'chat.htmlRender.answerFailed': 'تعذّر إرسال الإجابة',
     'settings.openchamber.tools.field.agentRenderTool': 'أداة العرض للوكيل',
     'settings.openchamber.tools.field.agentRenderToolAria': 'أداة العرض للوكيل',
-    'settings.openchamber.tools.field.agentRenderToolSummary': 'السماح للوكلاء بعرض المخططات والجداول والرسوم ونماذج الواجهة مباشرةً في المحادثة، وطلب اختيارك لأحد الخيارات هناك.',
-    'settings.openchamber.tools.field.agentRenderToolInfo': 'تعمل الصفحات في بيئة معزولة دون وصول إلى جلساتك أو ملفاتك. تُفتح الروابط في متصفحك.',
+    'settings.openchamber.tools.field.agentRenderToolSummary': 'السماح للوكلاء بعرض المخططات والجداول والرسوم ونماذج الواجهة في المحادثة، معزولةً عن ملفاتك، وطلب اختيارك لأحد الخيارات هناك.',
   },
   he: {
     'chat.htmlRender.fullscreen': 'פתיחה במסך מלא',
@@ -297,7 +283,6 @@ export const htmlRenderI18n = {
     'chat.htmlRender.answerFailed': 'לא ניתן היה לשלוח את התשובה',
     'settings.openchamber.tools.field.agentRenderTool': 'כלי התצוגה של הסוכן',
     'settings.openchamber.tools.field.agentRenderToolAria': 'כלי התצוגה של הסוכן',
-    'settings.openchamber.tools.field.agentRenderToolSummary': 'אפשר לסוכנים להציג תרשימים, טבלאות, דיאגרמות והדמיות ממשק ישירות בצ\'אט ולבקש ממך לבחור שם אפשרות.',
-    'settings.openchamber.tools.field.agentRenderToolInfo': 'הדפים רצים בסביבה מבודדת ללא גישה לסשנים או לקבצים שלך. קישורים נפתחים בדפדפן.',
+    'settings.openchamber.tools.field.agentRenderToolSummary': 'אפשר לסוכנים להציג תרשימים, טבלאות, דיאגרמות והדמיות ממשק בצ\'אט, בבידוד מהקבצים שלך, ולבקש ממך לבחור שם אפשרות.',
   },
 } as const;

@@ -27,6 +27,7 @@ import { heapSnapshotI18n } from './heap-snapshot.i18n';
 import { consoleBudgetsI18n } from './console-budgets.i18n';
 import { imageToolI18n } from './image-tool.i18n';
 import { usageToolI18n } from './usage-tool.i18n';
+import { openchamberToolsLayoutI18n } from './openchamber-tools-layout.i18n';
 import { openchamberToolOutputI18n } from './openchamber-tool-output.i18n';
 import { opencodeToolOutputI18n } from './opencode-tool-output.i18n';
 import { agentStatusI18n } from './agent-status.i18n';
@@ -3631,6 +3632,9 @@ export const dict = {
   'chat.workStatus.breakdown.skillCountPlural': '{count} מיומנויות',
   'chat.workStatus.breakdown.mcpCountSingle': 'MCP {count}',
   'chat.workStatus.breakdown.mcpCountPlural': '{count} שרתי MCP',
+  'chat.workStatus.breakdown.planCountSingle': 'תוכנית {count}',
+  'chat.workStatus.breakdown.planCountPlural': '{count} תוכניות',
+  'chat.workStatus.linkedPlans.open': 'פתיחת התוכנית {title}',
   'chat.workStatus.sections.open': 'בחר מקטעים',
   'chat.workStatus.sections.dialogTitle': 'מקטעי החלונית',
   'chat.workStatus.sections.reorder': 'גרור את {label} כדי לשנות את הסדר',
@@ -3933,6 +3937,7 @@ export const dict = {
   ...consoleBudgetsI18n.he,
   ...imageToolI18n.he,
   ...usageToolI18n.he,
+  ...openchamberToolsLayoutI18n.he,
   ...openchamberToolOutputI18n.he,
   ...opencodeToolOutputI18n.he,
   ...agentStatusI18n.he,

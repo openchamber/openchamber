@@ -378,6 +378,7 @@ export const SkillsCatalogPage: React.FC<SkillsCatalogPageProps> = ({ mode, onMo
       <SettingsPageLayout
         title={t('settings.skills.catalog.page.title')}
         showSaveStatus={false}
+        namedBySidebar
       >
       {showModeTabs && (
             <div className="mb-4">
@@ -399,10 +400,6 @@ export const SkillsCatalogPage: React.FC<SkillsCatalogPageProps> = ({ mode, onMo
               </div>
             </div>
           )}
-
-        <p className="typography-meta text-muted-foreground mb-4">
-          {t('settings.skills.catalog.page.subtitle')}
-        </p>
 
         <div data-settings-item="skills.catalog.search" className="mb-5">
           <div className="relative max-w-md">
