@@ -2267,6 +2267,7 @@ export const dict = {
   'directoryExplorerDialog.browse.retry': 'Probeer het opnieuw',
   'directoryExplorerDialog.browse.parentDirectory': 'Bovenliggende map',
   'directoryExplorerDialog.browse.addedBadge': 'Toegevoegd',
+  'directoryExplorerDialog.browse.linkTarget': 'Koppeling naar {path}',
   'directoryExplorerDialog.browse.quickAdd': 'Toevoegen',
   'directoryExplorerDialog.browse.selectForAdd': 'Selecteren om toe te voegen',
   'directoryExplorerDialog.footer.navigate': 'Navigeren',

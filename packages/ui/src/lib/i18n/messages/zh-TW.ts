@@ -2244,6 +2244,7 @@ export const dict: Record<I18nKey, string> = {
   'directoryExplorerDialog.browse.retry': '再試一次',
   'directoryExplorerDialog.browse.parentDirectory': '上層目錄',
   'directoryExplorerDialog.browse.addedBadge': '已新增',
+  'directoryExplorerDialog.browse.linkTarget': '連結至 {path}',
   'directoryExplorerDialog.browse.quickAdd': '添加',
   'directoryExplorerDialog.browse.selectForAdd': '選取以新增',
   'directoryExplorerDialog.footer.navigate': '導覽',

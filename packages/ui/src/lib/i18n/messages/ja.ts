@@ -2263,6 +2263,7 @@ export const dict: Record<I18nKey, string> = {
   'directoryExplorerDialog.browse.retry': '再試行',
   'directoryExplorerDialog.browse.parentDirectory': '親ディレクトリ',
   'directoryExplorerDialog.browse.addedBadge': '追加済み',
+  'directoryExplorerDialog.browse.linkTarget': '{path} へのリンク',
   'directoryExplorerDialog.browse.quickAdd': '追加',
   'directoryExplorerDialog.browse.selectForAdd': '追加するものを選択',
   'directoryExplorerDialog.footer.navigate': '移動',

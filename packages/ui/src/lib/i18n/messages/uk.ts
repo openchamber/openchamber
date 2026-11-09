@@ -2235,6 +2235,7 @@ export const dict: Record<I18nKey, string> = {
   "directoryExplorerDialog.browse.retry": "Спробувати знову",
   "directoryExplorerDialog.browse.parentDirectory": "Батьківський каталог",
   "directoryExplorerDialog.browse.addedBadge": "Додано",
+  "directoryExplorerDialog.browse.linkTarget": "Посилання на {path}",
   "directoryExplorerDialog.browse.quickAdd": "Додати",
   "directoryExplorerDialog.browse.selectForAdd": "Вибрати для додавання",
   "directoryExplorerDialog.footer.navigate": "Навігація",

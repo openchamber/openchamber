@@ -2233,6 +2233,7 @@ export const dict: Record<I18nKey, string> = {
   'directoryExplorerDialog.browse.retry': '重试',
   'directoryExplorerDialog.browse.parentDirectory': '上级目录',
   'directoryExplorerDialog.browse.addedBadge': '已添加',
+  'directoryExplorerDialog.browse.linkTarget': '链接到 {path}',
   'directoryExplorerDialog.browse.quickAdd': '添加',
   'directoryExplorerDialog.browse.selectForAdd': '选择以添加',
   'directoryExplorerDialog.footer.navigate': '导航',
