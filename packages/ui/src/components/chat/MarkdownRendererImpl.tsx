@@ -288,7 +288,7 @@ export interface MarkdownContentProps {
   emojiShortcodes?: EmojiShortcodes | null;
   /** A long document read in its own scroller: only the blocks near the view mount (`markdownWindow`). */
   windowed?: boolean;
-  /** `openui-lang` fences draw as UI blocks; only assistant replies set it. */
+  /** `openui-lang` fences draw as UI blocks; only assistant and subagent replies set it. */
   uiBlocks?: boolean;
   /** Text a person typed: no HTML and no character references, so `<b>` and `&amp;` read as typed (`remarkLiteralText`). */
   literalText?: boolean;

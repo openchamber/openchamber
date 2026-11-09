@@ -6,7 +6,7 @@ An assistant reply can carry fenced `openui-lang` blocks. This module owns the c
 
 ## Invariants
 
-- Only an assistant reply on screen draws blocks: `MarkdownRenderer` sets `uiBlocks` for the `assistant` variant, and copies and image exports keep the source. User messages, reasoning, tool output and documents show the fence as code.
+- Only an assistant reply on screen draws blocks: `MarkdownRenderer` sets `uiBlocks` for the `assistant` variant, and a subagent call's expanded row draws the subagent's reply the same way (`ToolPart`). Copies and image exports keep the source. User messages, reasoning, other tool output and documents show the fence as code.
 - The catalog in `catalog.ts` is the one source for the parser, validation and the agent's signatures of the built-in components. An extension's component never takes a catalog name or one an earlier extension holds. After changing it, run `bun run --cwd packages/ui ui-blocks:generate`; `guidance.test.ts` fails while the server copy is stale.
 - A finished block that has any parser error, an undefined or unused name, state, a query or a mutation, or no `Stack` root draws nothing but its source and a short note. One exception: a reply's block with no fields, Buttons or expressions that is not cut short draws its sound parts and says what it lost, under the block. A block never shows with parts silently dropped.
 - While a block streams, a node keeps drawing its last props that parsed against its schema; a node that never parsed draws nothing.
@@ -91,7 +91,11 @@ A triage of five cards was a wall of buttons in which the undecided cards were h
 
 ### Why an `<openui-lang>` tag and an `openui` fence draw as a block
 
-The guidance reaches the agent inside XML context tags, and weaker models (GLM Flash) answered with the block wrapped in `<openui-lang>…</openui-lang>`: the program was valid, but the chat showed it as one paragraph. Other models open the fence as `openui`, the library's name, and the chat showed the program as code. The guidance spells the fence out, and `taggedBlocks.ts` turns both into an `openui-lang` fence before an assistant reply renders, so replies already written that way draw too. Only a tag or fence at the start of a line outside other code fences counts. Rejecting them as model errors was the alternative; the program inside is correct, and the user loses the reply over a label.
+The guidance reaches the agent inside XML context tags, and weaker models (GLM Flash) answered with the block wrapped in `<openui-lang>…</openui-lang>`: the program was valid, but the chat showed it as one paragraph. Other models open the fence as `openui`, the library's name, and the chat showed the program as code. The guidance spells the fence out, and `taggedBlocks.ts` turns both into an `openui-lang` fence before an assistant or subagent reply renders, so replies already written that way draw too. Only a tag or fence at the start of a line outside other code fences counts. Rejecting them as model errors was the alternative; the program inside is correct, and the user loses the reply over a label.
+
+### Why a subagent's reply draws its blocks
+
+A subagent writes blocks like any agent, and its reply reaches the chat as the output of the subagent call. Shown there as tool output, the block was its source with a header and line numbers, and on a phone users read it as a block that failed to draw. The expanded call row draws the reply's blocks and recovers mislabelled ones (`taggedBlocks.ts`) as a reply does. Its Fields and Buttons stay disabled: the subagent has finished, and nothing would take the answer. Keeping the source, as for other tool output, was the alternative; the maintainer chose the drawing.
 
 ### Why a block that cannot be drawn shows its reasons and folds its source
 
