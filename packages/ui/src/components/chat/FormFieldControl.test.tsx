@@ -6,6 +6,7 @@ Object.assign(globalThis, {
     window: browser,
     document: browser.document,
     navigator: browser.navigator,
+    Element: browser.Element,
     HTMLElement: browser.HTMLElement,
     HTMLTextAreaElement: browser.HTMLTextAreaElement,
     Event: browser.Event,
@@ -167,9 +168,11 @@ describe('form answer dictation', () => {
         const textarea = await mountField(false);
         const mic = micButton();
         if (!mic) throw new Error('Dictation mic missing');
-        // The trailing slot of the box's own row, not a row of its own.
+        // The trailing slot of the box's own row, not a row of its own. The
+        // ButtonTooltip span is the only wrapper between the row and button.
         expect(textarea.parentElement?.contains(mic)).toBe(true);
-        expect(mic.parentElement?.firstElementChild).toBe(textarea);
+        expect(mic.parentElement?.tagName).toBe('SPAN');
+        expect(mic.parentElement?.parentElement).toBe(textarea.parentElement);
         expect(mic.disabled).toBe(false);
 
         await enterText(textarea, 'An existing answer');
