@@ -70,6 +70,7 @@ import { BusyDots } from '@/components/ui/busy-dots';
 import { MobileConnectionWelcome, type MobileConnectionNotice } from './MobileConnectionWelcome';
 import { MobileHeader } from './MobileHeader';
 import { MobileInstancesSurface } from './MobileInstancesSurface';
+import { MobileConnectionHeartbeat } from './MobileConnectionHeartbeat';
 import { MobileSessionsSheet } from './MobileSessionsSheet';
 import { MobileFullscreenSurface } from './MobileFullscreenSurface';
 import { fileNameOf, sessionLineage } from './mobileFileRequest';
@@ -782,6 +783,7 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
                 // About is shown in the native app too: there it checks and
                 // installs updates of the connected server (AboutSettings).
                 visiblePageSlugs={[...MOBILE_SETTINGS_PAGES]}
+                mobileNavHeader={<MobileConnectionHeartbeat />}
                 onClose={closeSurface}
               />
             </ErrorBoundary>

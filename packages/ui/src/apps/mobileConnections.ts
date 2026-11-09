@@ -1400,6 +1400,10 @@ export const isActiveRuntimeConnection = (connection: MobileSavedConnection): bo
   return Boolean(runtimeKey) && secureTokenKeyOf(connection) === runtimeKey;
 };
 
+// The connected server's name: its saved instance label, else the host the app talks to.
+export const getActiveConnectionLabel = (): string =>
+  findActiveConnection()?.label ?? getConnectionLabel(getRuntimeApiBaseUrl() || window.location.origin);
+
 type ReprobeOutcome = 'switched' | 'unchanged' | 'unreachable' | 'relay-limit' | 'needs-login' | 'no-connection';
 
 // App-resume re-probe: when the app wakes (Capacitor `isActive`), the network may

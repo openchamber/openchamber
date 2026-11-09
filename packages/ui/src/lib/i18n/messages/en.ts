@@ -22,6 +22,7 @@ import { sessionNoticesI18n } from './session-notices.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
 import { sessionWarmingI18n } from './session-warming.i18n';
+import { connectionHeartbeatI18n } from './connection-heartbeat.i18n';
 import { compactionSettingsI18n } from './compaction-settings.i18n';
 import { heapSnapshotI18n } from './heap-snapshot.i18n';
 import { consoleBudgetsI18n } from './console-budgets.i18n';
@@ -203,6 +204,7 @@ export const dict = {
   ...usageStatsI18n.en,
   ...webSearchI18n.en,
   ...sessionWarmingI18n.en,
+  ...connectionHeartbeatI18n.en,
   ...compactionSettingsI18n.en,
   ...heapSnapshotI18n.en,
   ...consoleBudgetsI18n.en,
