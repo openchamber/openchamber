@@ -513,7 +513,7 @@ it replaced (`resolveSidebarGrouping`: List sorted by time keeps the list by
 time, everything else groups by project); the phone follows the same
 setting, and VS Code always groups by project. The display menu opens with Select sessions, then Grouping, then
 (grouped by project) the project sort and project display,
-then Sections…, which opens the sections manager beside the sidebar (the order,
+then Customize sections…, which opens the sections manager beside the sidebar (the order,
 each section's visibility, the "Also in projects" chip on In work
 (`keepWorkInPlace`, `sidebarKeepWorkInPlace`, off by default) and the user's
 own sections), Detailed rows, "Name worktrees by branch", then Collapse all /
