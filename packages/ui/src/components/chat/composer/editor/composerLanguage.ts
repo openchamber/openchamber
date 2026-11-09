@@ -21,6 +21,7 @@ import { getFileTypeIconHref } from '@/lib/fileTypeIcons';
 import { findAttachmentCitationRanges } from '../../attachmentCitations';
 import { resolveHighlightSegments, DEFAULT_HIGHLIGHT_CLASS, type HighlightRange } from '../../composerHighlight';
 import { findSessionLinks, sessionLinkKey } from '@/lib/sessionLinks';
+import { findWebLinks } from '../referenceLinks';
 import { filterKnownTokens, scanPrefixTokens } from '../language/prefixTokens';
 import { tokenizeComposer, tokenizeMentions, type ComposerLanguageContext } from '../language/tokenize';
 
@@ -213,6 +214,14 @@ function referenceChips(text: string, context: ComposerLanguageContext, typingEn
     if (context.sessionLinkChips?.size) {
         for (const range of findSessionLinks(text, context.sessionLinkOrigins ?? [])) {
             const chip = context.sessionLinkChips.get(sessionLinkKey(range.target));
+            if (chip) chips.push({ start: range.start, end: range.end, widget: new ReferenceChipWidget(chip.label, chip.title, chip.iconHref, true) });
+        }
+    }
+
+    // So is a linked issue, change request or tracker item once read.
+    if (context.referenceLinkChips?.size) {
+        for (const range of findWebLinks(text)) {
+            const chip = context.referenceLinkChips.get(range.link);
             if (chip) chips.push({ start: range.start, end: range.end, widget: new ReferenceChipWidget(chip.label, chip.title, chip.iconHref, true) });
         }
     }
