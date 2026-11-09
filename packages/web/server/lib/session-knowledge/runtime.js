@@ -78,15 +78,25 @@ const memoryTitleLines = (entries) => entries
  * When to save, stated in every session where memory is on, and only here. The
  * tool description alone is read only when the agent already means to call it,
  * so agents told nothing here saved only when the user said "remember".
+ *
+ * Project knowledge goes to the project's own agent docs when it has them.
+ * Told only to skip what the docs already hold, agents saved every new rule and
+ * recipe to memory, the one-call path: a maintainer's store grew to 205 entries,
+ * a third of them copies of module docs, and the rules in it never reached the
+ * teammates' agents.
  */
 const MEMORY_SAVE_GUIDANCE = 'The openchamber_memory tool keeps memory across sessions. Save to it in the'
   + ' moment, without asking, when the user corrects how you work or states a'
-  + ' preference, confirms a non-obvious approach worked, or you learn a project fact'
-  + ' that took real effort to find. A project fact an agent would learn from the code,'
-  + ' docs and skills, including why and whether it may change, needs no entry; the'
-  + ' user\'s corrections and preferences always do. A decision is saved once it is made,'
-  + ' never while it is still being discussed, and what the current task\'s own code or'
-  + ' commit records needs no entry. Save before your final reply and'
+  + ' preference, or confirms a non-obvious approach worked. Project knowledge (a'
+  + ' decision and its reason, a rule, a recipe, a gotcha that took real effort to find)'
+  + ' goes where the project keeps agent instructions, when it has such a place'
+  + ' (AGENTS.md, skills, module docs): add it to the matching file as part of your work'
+  + ' and say so, since every agent and teammate reads those and memory reaches only this'
+  + ' user. Memory takes project knowledge only when the project has no such place or it'
+  + ' must stay out of the repository: people, business, private setups. What the code,'
+  + ' docs, skills or the current commit already hold needs no entry, and unfinished'
+  + ' work goes to the project\'s todos and plans. A decision is saved once it is made,'
+  + ' never while it is still being discussed. Save before your final reply and'
   + ' mention the save there briefly: the app shows only the text after a turn\'s last'
   + ' tool call as the reply.';
 
