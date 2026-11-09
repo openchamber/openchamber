@@ -115,6 +115,8 @@ Run the scenario in the runtime that executes the changed code. Every route belo
 | Capacitor shell | The iOS Simulator (`serve-sim`); timing, motion and keyboard latency on a device (`performance-engineering`, `references/ios-webkit.md`) |
 | Pure logic | A deterministic test that fails without the change |
 
+A scenario with real sessions, OpenCode turns or extensions runs in an isolated dev instance, set up and driven as `references/live-dev-instance.md` describes: a plain `bun run dev` writes the user's own settings and sessions.
+
 Use `localhost`, never `127.0.0.1`, for the web server: the desktop app lifts Chromium's connection cap for `127.0.0.1`, and the panel then overruns Vite and resets connections. Build the desktop app only for a change that lives in its shell. Stop each instance by its own process id or process group, never by a name pattern that would stop someone else's.
 
 The panel's browser actions run in the app the agent itself works from, so they cannot reach a change to the panel's own code until that app is rebuilt; the `electron:dev` route above covers it before.
