@@ -136,8 +136,8 @@ import { DraftPresetChips } from './DraftPresetChips';
 import type { ResolvedStarter } from './useDraftStarters';
 import { useChatSearchDirectory } from '@/hooks/useChatSearchDirectory';
 import { useGuestAttachItems, useGuestCommands } from '@/hooks/useGuestSurfaces';
-import { useGuestDialogStore } from '@/lib/guests/dialog-store';
-import { useGuestItemStore } from '@/lib/guests/item-store';
+import { guestAttachContextText } from '@/lib/guests/attach-text';
+import { openGuestWithItem, useGuestDialogStore } from '@/lib/guests/dialog-store';
 import { runGuestCommand } from '@/lib/guests/run-command';
 import { useGuestsStore } from '@/lib/guests/store';
 import { isGuestActive } from '@/lib/guests/capabilities';
@@ -4331,9 +4331,12 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         const guest = guestAttachItems.find((entry) => entry.id === issue.providerId);
         // Only an extension that declared a dialog gets one; everything else
         // (panel mode, no attach declared) opens the rail with the item.
+        // The panel opens and stays open; a second chip click on an open panel
+        // must not toggle it closed with the item still parked.
         if (guest?.mode !== 'dialog') {
-            useGuestItemStore.getState().setPendingItem(issue.providerId, issue);
-            useUIStore.getState().openContextSurface(currentDirectory || '', pluginModeFromId(issue.providerId));
+            if (!openGuestWithItem({ id: issue.providerId, attach: undefined }, issue, currentDirectory)) {
+                toast.info(t('chat.guestLink.noProject', { name: installed.name }));
+            }
             return;
         }
         setAttachDialogItem(issue);
@@ -4341,8 +4344,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     }, [currentDirectory, guestAttachItems, t]);
     const handleGuestAttach = React.useCallback((issue: AttachIssueRequest) => {
         if (isBtwActive) return;
-        const contextText = issue.text
-            ?? `Attached ${issue.providerId} ${issue.id}: ${issue.title}\n${issue.url}`;
+        const contextText = guestAttachContextText(issue);
         const reference: ComposerReference = {
             kind: 'guest',
             providerId: issue.providerId,
