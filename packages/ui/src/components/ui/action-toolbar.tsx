@@ -41,7 +41,7 @@ export interface ToolbarAction {
   menu?: React.ReactNode;
   /** Never moves into "More actions". */
   pinned?: boolean;
-  /** Attributes on the button, for code that recognises it (outside-click checks). */
+  /** Attributes on the button and on its "More actions" menu item, for code that recognises either (outside-click checks). */
   buttonAttributes?: Record<`data-${string}`, string>;
   /** The action's keyboard shortcut as the shortcuts dialog writes it (`formatShortcutForDisplay`), shown in its tooltip and menu item. */
   shortcut?: string;
@@ -291,6 +291,7 @@ export function ActionToolbar({
       variant={action.destructive ? 'destructive' : 'default'}
       disabled={action.disabled}
       onClick={action.onMenuSelect ?? action.onSelect}
+      {...action.buttonAttributes}
     >
       <Icon name={action.icon} className={cn('size-4', action.iconClassName)} />
       <span className={cn('min-w-0 truncate typography-ui-label', !action.destructive && 'text-foreground')}>{action.label}</span>
