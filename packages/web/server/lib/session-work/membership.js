@@ -12,6 +12,12 @@ import { readWork } from './state.js';
  */
 const notWorkSessionSchema = z.object({ openchamber: z.object({ kind: z.enum(['review', 'btw', 'scheduled']) }) });
 
+/**
+ * Sessions whose row belongs to another session's work: a review and a `/btw`
+ * fork nest under the session they came from, which owns their Track and Done.
+ */
+const nestedWorkSessionSchema = z.object({ openchamber: z.object({ kind: z.enum(['review', 'btw']) }) });
+
 const sessionDirectory = (session) => session?.location?.directory ?? session?.directory;
 
 /** `chatRoots`: roots of managed Chats, plain conversations that are never work. */
@@ -28,6 +34,19 @@ export const createWorkMembership = ({ chatRoots = [] } = {}) => {
     && !session.parentID
     && !isChatDirectory(sessionDirectory(session))
     && !notWorkSessionSchema.safeParse(session.metadata).success;
+
+  /**
+   * Whether the user's Track applies to the session: a top level session that
+   * is not a Chat, whatever the runtime opens on its own. A scheduled task's
+   * run is a row of its own and the sidebar offers Track on it, while a review
+   * or a `/btw` fork nests under the session it came from and that row owns
+   * Track. Callers refuse an archived session, as the sidebar hides Track on
+   * one.
+   */
+  const canTrackWork = (session) => Boolean(session)
+    && !session.parentID
+    && !isChatDirectory(sessionDirectory(session))
+    && !nestedWorkSessionSchema.safeParse(session.metadata).success;
 
   /**
    * Whether the sidebar's In work block shows the session
@@ -49,5 +68,5 @@ export const createWorkMembership = ({ chatRoots = [] } = {}) => {
     return isInWork(session) && suggestedAt !== undefined && suggestedAt >= (session.time?.idle ?? 0);
   };
 
-  return { isChatDirectory, canBeInWork, isInWork, isDoneSuggested };
+  return { isChatDirectory, canBeInWork, canTrackWork, isInWork, isDoneSuggested };
 };

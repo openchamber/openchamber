@@ -712,8 +712,11 @@ export const createOpenChamberControlService = (dependencies) => {
     const sessionID = asNonEmptyString(input.sessionId) || asNonEmptyString(contextSessionId);
     if (!sessionID) throw new OpenChamberControlError('sessionId is required', 400);
     const session = await withArchiveEntry(await assertSessionExists(await getClient(), sessionID));
-    if (state === 'open' && !workMembership.canBeInWork(session)) {
-      throw new OpenChamberControlError(`${sessionID} cannot be in work: subsessions, Chats, reviews, /btw questions and scheduled runs never are`, 400);
+    // Track mirrors the sidebar's row: subsessions and Chats have no Track,
+    // and a review or a scheduled run has one even though the runtime never
+    // opens it by itself.
+    if (state === 'open' && !workMembership.canTrackWork(session)) {
+      throw new OpenChamberControlError(`${sessionID} cannot be in work: a subsession or a Chat never is`, 400);
     }
     if (state === 'open' && session?.time?.archived) {
       throw new OpenChamberControlError(`${sessionID} is archived; In work shows no archived sessions`, 409);
@@ -721,6 +724,54 @@ export const createOpenChamberControlService = (dependencies) => {
     const directory = asNonEmptyString(session?.location?.directory) || '';
     const { changed } = await updateSessionMetadata(sessionID, (metadata) => userStatePatch(metadata, { state, now: now() }), { directory });
     return { sessionId: sessionID, directory, title: asNonEmptyString(session?.title), inWork: state === 'open', changed };
+  };
+
+  /**
+   * `session.archive`: the record and store the sidebar's batch Archive writes,
+   * through the sessions service (`../openchamber-sessions/routes.js`), so a
+   * session in a worktree, and one whose directory is gone, archive exactly as
+   * the UI's batch does. The session defaults to the caller; another one is the
+   * caller's to name, as for every session action.
+   */
+  const archiveSessions = async (input, contextSessionId) => {
+    assertSingleScope(input);
+    if (!(sessionService?.archive instanceof Function)) {
+      throw new OpenChamberControlError('Archiving sessions is not available on this server', 503);
+    }
+    const single = asNonEmptyString(input.sessionId);
+    const ids = [];
+    if (input.sessionIds !== undefined) {
+      if (single) throw new OpenChamberControlError('Pass sessionId or sessionIds, not both', 400);
+      if (!Array.isArray(input.sessionIds) || input.sessionIds.length === 0) {
+        throw new OpenChamberControlError('sessionIds must be a non-empty array of session ids', 400);
+      }
+      for (const value of input.sessionIds) {
+        const id = asNonEmptyString(value);
+        if (!id) throw new OpenChamberControlError('sessionIds must contain non-empty session ids', 400);
+        ids.push(id);
+      }
+    } else {
+      const id = single || asNonEmptyString(contextSessionId);
+      if (!id) throw new OpenChamberControlError('sessionId is required', 400);
+      ids.push(id);
+    }
+    // The sidebar keeps these off the batch: archiving one has to unlink the
+    // original's `reviewSessionID` / `btwSessionID`, and a parent with an open
+    // `/btw` has to delete that fork. Both rewrite or remove a second session,
+    // which this action does not do. An unreadable session falls through and
+    // the archive reports it in `failedIds`.
+    const client = await getClient();
+    for (const id of ids) {
+      const session = await client.session.get({ sessionID: id }).catch(() => null);
+      const openchamber = session?.metadata?.openchamber;
+      const linkedKind = openchamber?.kind === 'review' || openchamber?.kind === 'btw';
+      const needsPartner = (linkedKind && asNonEmptyString(openchamber?.originalSessionID))
+        || asNonEmptyString(openchamber?.btwSessionID);
+      if (needsPartner) {
+        throw new OpenChamberControlError(`${id} is a review or a /btw conversation, or has one open: archive it in the app, which unlinks or removes the partner session`, 400);
+      }
+    }
+    return sessionService.archive({ ids, archivedAt: now() });
   };
 
   // The message list is cursor-paginated and `order: 'desc'` puts the newest
@@ -1391,6 +1442,9 @@ export const createOpenChamberControlService = (dependencies) => {
       }
       if (action === 'session.markDone' || action === 'session.track') {
         return setWorkState(input, options.contextSessionId, action === 'session.track' ? 'open' : 'done');
+      }
+      if (action === 'session.archive') {
+        return archiveSessions(input, options.contextSessionId);
       }
       if (action === 'session.list') return listSessions(input, contextDirectory);
       if (action.startsWith('session.')) {

@@ -398,10 +398,23 @@ other.
   Track write (`userStatePatch` in `../session-work/state.js`) through the
   injected `updateSessionMetadata`, the session metadata store's queued
   write that broadcasts the change, so every window updates. The session
-  defaults to the caller and is read first (unknown is a 404). Track refuses
-  a session that can never be in work (400) and an archived one (409); Done
-  takes any session, as the app's button does. Both are a 409 while In work
-  is off and a 503 on a server without the store.
+  defaults to the caller and is read first (unknown is a 404). Track serves
+  the rows the sidebar offers Track on: a top-level session that is not a
+  Chat, a scheduled task's run included, which the runtime still never opens
+  by itself. A review or a `/btw` fork is refused (400) because its row
+  belongs to the session it came from, and so is an archived session (409).
+  Done takes any session, as the app's button does. Both are a 409 while In
+  work is off and a 503 on a server without the store.
+- `session.archive` archives `sessionId` or every id in `sessionIds` (default:
+  the caller) through the sessions service's own `archive`, the handler behind
+  `POST /api/openchamber/sessions/archive`: one batch, OpenCode's archive
+  record, the legacy archive file, and the same handling for a session in a
+  worktree or one whose directory is gone. It answers the route's
+  `{ archived, failedIds }`, so a partial failure names what did not archive
+  and leaves the rest. A review, a `/btw` fork and a session with an open
+  `/btw` are refused (400): the app unlinks or deletes the partner session
+  and the action does not. `projectId` with `directory` is refused as for
+  every session action, and a server without the sessions service answers 503.
 - Destructive session/worktree deletion and project-path registration are not
   part of the action contract.
 - `session.send` to an archived top-level session restores it, with its
@@ -572,6 +585,33 @@ announced (`openchamber:page-waiting`), which every client hears or reads from
 the host's pending snapshot. The values a run uses are read when it starts, so
 a remembered value that expires while the user fills another field is still
 used.
+
+### Why session.archive calls the sessions service
+
+The archive route owns the batch shape, the archive file for sessions OpenCode
+cannot change, and the handling for a session in a worktree or one whose
+directory is gone. Repeating any of that in the control service would drift,
+so the action forwards the ids and the timestamp to the same handler and an
+agent's archive and the sidebar's batch leave one record.
+
+### Why session.archive leaves review and /btw sessions to the app
+
+The sidebar keeps them off its batch (`hasLinkedSessionCleanup` in
+`packages/ui`): archiving a review or a `/btw` fork unlinks the original's
+`reviewSessionID` / `btwSessionID`, and archiving a parent deletes its open
+fork. Those are a read-modify-write and a deletion on a second session, and
+destructive session deletion is not part of this action contract. The action
+refuses them with the reason, before anything is archived, instead of leaving
+a stray fork or a review the next review reuses.
+
+### Why an agent may archive a session it does not own
+
+`session.send`, `session.link`, `session.track` and `session.markDone` all take
+a session id the caller names, and issue #6387 asks whether an agent may act on
+another session. Archive follows those actions: the action defaults to the
+calling session, and a named one is the caller's to choose. Restricting it to
+the caller's project would make it the only cross-session action with a scope
+rule, and OpenCode 2's archive is global, so the rule would guard nothing.
 
 ### Why work.name leaves session titles alone
 

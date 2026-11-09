@@ -189,6 +189,10 @@ const createService = (overrides = {}) => {
     }),
     send: vi.fn(),
     fork: vi.fn(),
+    archive: vi.fn(async ({ ids, archivedAt }) => ({
+      archived: ids.map((id) => ({ id, archivedAt })),
+      failedIds: [],
+    })),
   };
   const scheduledTaskService = {
     status: vi.fn(async () => ({ enabledScheduledTasksCount: 0 })),
@@ -998,20 +1002,33 @@ describe('OpenChamber control service', () => {
       expect(decide({ openchamber: { work: { state: 'done', doneAt: 1 } } })).toBeNull();
     });
 
-    it('puts a session back in work, never a subsession or an archived one', async () => {
+    it('puts a session back in work, never a subsession, a Chat or a nested review, and a scheduled run like Track', async () => {
       const updateSessionMetadata = vi.fn(async () => ({ changed: true }));
       const { service, client } = createService({
+        chatRoots: ['/chats'],
         updateSessionMetadata,
         now: () => 700,
         archiveStore: { entry: async (id) => (id === 'archived' ? 100 : undefined) },
       });
-      client.session.get.mockImplementation(async ({ sessionID }) => session(sessionID, sessionID === 'child' ? { parentID: 'p' } : {}));
+      client.session.get.mockImplementation(async ({ sessionID }) => {
+        const fields = {};
+        if (sessionID === 'child') fields.parentID = 'p';
+        if (sessionID === 'chat') fields.location = { directory: '/chats/one' };
+        if (sessionID === 'report') fields.metadata = { openchamber: { kind: 'scheduled' } };
+        if (sessionID === 'review') fields.metadata = { openchamber: { kind: 'review', originalSessionID: 'root' } };
+        return session(sessionID, fields);
+      });
 
       await expect(service.execute('session.track', { sessionId: 'child' })).rejects.toMatchObject({ statusCode: 400 });
+      await expect(service.execute('session.track', { sessionId: 'chat' })).rejects.toMatchObject({ statusCode: 400 });
+      await expect(service.execute('session.track', { sessionId: 'review' })).rejects.toMatchObject({ statusCode: 400 });
       await expect(service.execute('session.track', { sessionId: 'archived' })).rejects.toMatchObject({ statusCode: 409 });
+      // The runtime never opens a scheduled run, but the sidebar offers Track on
+      // its row, so the agent writes the same record on the user's word.
+      await expect(service.execute('session.track', { sessionId: 'report' })).resolves.toMatchObject({ inWork: true });
       await expect(service.execute('session.track', { sessionId: 'plain' })).resolves.toMatchObject({ inWork: true });
 
-      expect(updateSessionMetadata).toHaveBeenCalledTimes(1);
+      expect(updateSessionMetadata).toHaveBeenCalledTimes(2);
       const decide = updateSessionMetadata.mock.calls[0][1];
       expect(decide({})).toEqual({ openchamber: { work: { state: 'open', openedAt: 700, openedBy: 'user', doneAt: null, suggestDoneAt: null } } });
     });
@@ -1022,6 +1039,76 @@ describe('OpenChamber control service', () => {
       client.session.get.mockRejectedValue(tagged);
       await expect(service.execute('session.markDone', { sessionId: 'ses_gone' })).rejects.toMatchObject({ statusCode: 404 });
       await expect(createService().service.execute('session.markDone', { sessionId: 'a' })).rejects.toMatchObject({ statusCode: 503 });
+    });
+  });
+
+  describe('Archive', () => {
+    it('archives the calling session through the sessions service', async () => {
+      const { service, sessionService } = createService({ now: () => 1234 });
+
+      await expect(service.execute('session.archive', {}, '/repo', { contextSessionId: 'ses_me' }))
+        .resolves.toEqual({ archived: [{ id: 'ses_me', archivedAt: 1234 }], failedIds: [] });
+
+      expect(sessionService.archive).toHaveBeenCalledWith({ ids: ['ses_me'], archivedAt: 1234 });
+    });
+
+    it('archives every named session, another project\'s included', async () => {
+      // No scope check: like session.send and session.track, the caller may name
+      // any session, and the archive route is global in OpenCode 2.
+      const { service, sessionService } = createService({ now: () => 55 });
+
+      await expect(service.execute('session.archive', { sessionIds: ['ses_a', 'ses_elsewhere'] }, '/repo', { contextSessionId: 'ses_me' }))
+        .resolves.toEqual({
+          archived: [{ id: 'ses_a', archivedAt: 55 }, { id: 'ses_elsewhere', archivedAt: 55 }],
+          failedIds: [],
+        });
+
+      expect(sessionService.archive).toHaveBeenCalledWith({ ids: ['ses_a', 'ses_elsewhere'], archivedAt: 55 });
+    });
+
+    it('reports the sessions that did not archive and leaves the rest', async () => {
+      const { service, sessionService } = createService();
+      sessionService.archive.mockResolvedValue({ archived: [{ id: 'ses_a', archivedAt: 9 }], failedIds: ['ses_gone'] });
+
+      await expect(service.execute('session.archive', { sessionId: 'ses_a' })).resolves.toEqual({
+        archived: [{ id: 'ses_a', archivedAt: 9 }],
+        failedIds: ['ses_gone'],
+      });
+    });
+
+    it('refuses conflicting or empty input, a scope conflict, and a server without the sessions service', async () => {
+      const { service, sessionService } = createService();
+
+      await expect(service.execute('session.archive', { sessionId: 'a', sessionIds: ['b'] })).rejects.toMatchObject({ statusCode: 400 });
+      await expect(service.execute('session.archive', { sessionIds: [] })).rejects.toMatchObject({ statusCode: 400 });
+      await expect(service.execute('session.archive', { sessionIds: ['a', ''] })).rejects.toMatchObject({ statusCode: 400 });
+      await expect(service.execute('session.archive', {})).rejects.toMatchObject({ statusCode: 400 });
+      await expect(service.execute('session.archive', { sessionId: 'a', projectId: 'p', directory: '/repo' })).rejects.toMatchObject({ statusCode: 400 });
+      expect(sessionService.archive).not.toHaveBeenCalled();
+
+      const unwired = createService({ sessionService: {} }).service;
+      await expect(unwired.execute('session.archive', { sessionId: 'a' })).rejects.toMatchObject({ statusCode: 503 });
+    });
+
+    it('leaves a review, a /btw fork and their parent to the app', async () => {
+      // Archiving one of these unlinks or deletes the partner session, which
+      // this action does not do; the sidebar keeps them off its batch too.
+      const { service, client, sessionService } = createService();
+      client.session.get.mockImplementation(async ({ sessionID }) => {
+        const metadata = {};
+        if (sessionID === 'review') metadata.openchamber = { kind: 'review', originalSessionID: 'root' };
+        if (sessionID === 'fork') metadata.openchamber = { kind: 'btw', originalSessionID: 'root' };
+        if (sessionID === 'parent') metadata.openchamber = { btwSessionID: 'fork' };
+        return { id: sessionID, metadata };
+      });
+
+      for (const id of ['review', 'fork', 'parent']) {
+        await expect(service.execute('session.archive', { sessionId: id })).rejects.toMatchObject({ statusCode: 400 });
+      }
+      expect(sessionService.archive).not.toHaveBeenCalled();
+
+      await expect(service.execute('session.archive', { sessionIds: ['plain', 'review'] })).rejects.toMatchObject({ statusCode: 400 });
+      expect(sessionService.archive).not.toHaveBeenCalled();
     });
   });
 

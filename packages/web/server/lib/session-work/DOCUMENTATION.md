@@ -40,7 +40,12 @@ Track / Done go through the generic metadata route
 (`setSessionWorkState` in `packages/ui/src/sync/session-actions.ts`), which
 also exists in VS Code. An agent does the same on the user's word with the
 `openchamber` tool's `session.markDone` / `session.track`, which write
-`userStatePatch` (`../openchamber-control/DOCUMENTATION.md`).
+`userStatePatch` (`../openchamber-control/DOCUMENTATION.md`). Track serves the
+rows the sidebar offers it on, a top-level session that is not a Chat, and a
+scheduled task's run is one of them: the runtime still never opens that run by
+itself, but `isInWork` shows it once the user or an agent they asked opens it.
+A review and a `/btw` fork have no Track of their own; their row belongs to the
+session they came from.
 
 `membership.js` holds which sessions this feature serves (`canBeInWork`) and
 which ones the sidebar block shows (`isInWork`, `isDoneSuggested`), for this
@@ -110,6 +115,19 @@ not retry a subscriber that failed.
   the assist fields the user has on. No applicable question, no call.
 - Jev reads the request's first 1500 characters, the answer's first and last
   500, and three earlier turns cut as routing cuts them.
+
+## Decisions
+
+### Why Track serves a scheduled run but the runtime never opens one
+
+A scheduled report's run is issue #6387: it arrives every morning inside a
+collapsed project, and the user wants it in In work without expanding the
+project. The runtime leaves such a run alone because a task's own prompt is
+not the user starting work; opening it there would put every scheduled run in
+In work whether the user wants it or not. Track on the row is the user's own
+choice, so the agent action writes the record the button writes and `isInWork`
+shows the run once it is open. Nothing else moves: the runtime still opens no
+run and closes nothing.
 
 ## Measurement
 
