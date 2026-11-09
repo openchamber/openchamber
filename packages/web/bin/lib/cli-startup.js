@@ -114,6 +114,11 @@ function shouldPersistStartupEnv(key, value) {
   if (typeof key !== 'string' || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) return false;
   if (typeof value !== 'string') return false;
   if (/[\r\n]/.test(value)) return false;
+  // A saved PATH outlives the toolchains it lists, and the server would keep
+  // it ahead of the login shell's current PATH. Without one, the service gets
+  // the platform default and the server adds the login shell's PATH at start.
+  // Windows spells it `Path`.
+  if (key.toUpperCase() === 'PATH') return false;
 
   // These are shell/session implementation details, not app configuration.
   const volatileKeys = new Set([
