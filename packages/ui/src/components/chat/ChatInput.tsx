@@ -2515,7 +2515,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
 
         // The chips, then the items the text links that are not chips already.
         const sentComposerText = !queuedOnly && inputSnapshot.hasContent ? inputSnapshot.message : '';
-        const linkedToSend = withReferencesFromText(linkedReferences, referenceLinksIn(sentComposerText));
+        const linkedReferencesToSend = withReferencesFromText(linkedReferences, referenceLinksIn(sentComposerText));
 
         const outgoing = buildOutgoingMessage({
             queued: queuedMessagesToSend,
@@ -2526,7 +2526,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                 ...buildBtwSyntheticTexts({ isBtwActive, isPromotedBtwSession }),
                 ...(syntheticParts?.map((part) => part.text) ?? []),
             ],
-            references: isBtwActive ? [] : linkedToSend.map(toContextReference).concat(
+            references: isBtwActive ? [] : linkedReferencesToSend.map(toContextReference).concat(
                 !queuedOnly && inputSnapshot.hasContent ? sessionMentionsIn(inputSnapshot.message) : [],
             ),
         }, {
@@ -2752,13 +2752,13 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                     ?? (linkTargetSessionId ? sessionState.getDirectoryForSession(linkTargetSessionId) : null)
                     ?? currentDirectory;
             if (linkTargetSessionId) {
-                recordLinkedReferences(linkTargetSessionId, linkTargetDirectory, linkedToSend);
+                recordLinkedReferences(linkTargetSessionId, linkTargetDirectory, linkedReferencesToSend);
             }
             // A session that starts with a tracker item attached reports itself
             // on that item (the tracker's Session comments, where it has them),
             // however it was started: a draft, a worktree made from the item.
             if (!currentSessionId && linkTargetSessionId) {
-                for (const reference of linkedToSend) {
+                for (const reference of linkedReferencesToSend) {
                     if (reference.kind !== 'tracker-item') continue;
                     void postTrackerSessionStarted(runtimeTrackers, reference.provider, {
                         sessionId: linkTargetSessionId,
