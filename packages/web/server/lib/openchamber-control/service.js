@@ -839,7 +839,9 @@ export const createOpenChamberControlService = (dependencies) => {
   const answerPermission = async ({ sessionID, requestID, decision, message }) => {
     const client = await sessionClient(sessionID);
     try {
-      await client.permission.reply({ sessionID, requestID, decision, ...(message ? { message } : {}) });
+      const reply = { sessionID, requestID, decision };
+      if (message) reply.message = message;
+      await client.permission.reply(reply);
     } catch (error) {
       throw asAnswerError(error);
     }
@@ -850,7 +852,9 @@ export const createOpenChamberControlService = (dependencies) => {
     const client = await sessionClient(sessionID);
     try {
       if (!answer) {
-        await client.session.form.cancel({ sessionID, formID, ...(message ? { message } : {}) });
+        const cancellation = { sessionID, formID };
+        if (message) cancellation.message = message;
+        await client.session.form.cancel(cancellation);
         return;
       }
       const form = await client.session.form.get({ sessionID, formID });
