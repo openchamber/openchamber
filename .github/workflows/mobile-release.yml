@@ -310,7 +310,15 @@ jobs:
           security set-keychain-settings -lut 21600 "$keychain_path"
           security unlock-keychain -p "$RUNNER_TEMP" "$keychain_path"
           security import "$cert_path" -P "$IOS_DISTRIBUTION_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$keychain_path"
+          # The macOS 27 runner image lacks the intermediate that issued the
+          # distribution certificate, and codesign then fails with
+          # errSecInternalComponent. Bring it into the signing keychain, pinned.
+          wwdr_path="$RUNNER_TEMP/AppleWWDRCAG3.cer"
+          curl -fsSL --retry 3 -o "$wwdr_path" https://www.apple.com/certificateauthority/AppleWWDRCAG3.cer
+          echo "dcf21878c77f4198e4b4614f03d696d89c66c66008d4244e1b99161aac91601f  $wwdr_path" | shasum -a 256 -c -
+          security import "$wwdr_path" -t cert -f x509 -k "$keychain_path"
           security list-keychain -d user -s "$keychain_path"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$RUNNER_TEMP" "$keychain_path" >/dev/null
 
           app_profile="$RUNNER_TEMP/openchamber-app.mobileprovision"
           widget_profile="$RUNNER_TEMP/openchamber-widget.mobileprovision"
