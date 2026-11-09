@@ -13,6 +13,7 @@ import { ensureGuestStorageIds, onExtensionStoreWrite, readExtensionStore } from
 import { buildPublicSocketBindings } from './sockets.js';
 import { isReservedBuiltInId, readBuiltInRegistry } from './builtins.js';
 import { resolveOpenCodePluginFolder } from './opencode-plugin.js';
+import { toPublicLinks } from './links.js';
 
 const builtInsByStore = new Map();
 
@@ -367,6 +368,9 @@ export const inspectGuestPackage = async (packageRoot, { openchamberVersion, ski
   if (parsed.manifest.contributes.mentions) {
     guest.mentions = parsed.manifest.contributes.mentions;
   }
+  if (parsed.manifest.contributes.links) {
+    guest.links = parsed.manifest.contributes.links;
+  }
   // The package's skills folder; a declared folder that is not there fails the install.
   if (parsed.manifest.contributes.skills) {
     if (!await isGuestPackageFolder(packageRoot, parsed.manifest.contributes.skills)) {
@@ -552,6 +556,14 @@ export const toPublicGuest = (guest) => {
   }
   if (guest.mentions) {
     row.mentions = { label: guest.mentions.label };
+  }
+  if (guest.links) {
+    // A template the compiler refuses drops this row's links, never the catalog.
+    try {
+      row.links = toPublicLinks(guest.links);
+    } catch (error) {
+      console.warn(`[guests] links of ${guest.id} left out: ${error?.message ?? error}`);
+    }
   }
   const configurationNote = configurationNotes.get(guest.id);
   if (configurationNote) {

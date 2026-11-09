@@ -426,6 +426,48 @@ describe('actions and commands on the public row', () => {
   });
 });
 
+describe('links on the public row', () => {
+  test('copies the declaration, asks for links, and serves compiled patterns, not templates', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-guest-'));
+    await writeBuiltGuest(root);
+    const pkg = JSON.parse(await fs.readFile(path.join(root, 'package.json'), 'utf8'));
+    pkg.version = '1.0.0';
+    pkg.openchamber.contributes.links = {
+      action: 'open',
+      identifier: { keys: ['DEMO'] },
+      urls: { origin: 'https://tasks.example.com', identifier: 'key-number', item: ['/tasks/{id}'] },
+    };
+    await fs.writeFile(path.join(root, 'package.json'), JSON.stringify(pkg));
+    const inspected = await inspectGuestPackage(root);
+    expect(inspected.ok).toBe(true);
+    if (inspected.ok) {
+      expect(inspected.guest.links).toEqual(pkg.openchamber.contributes.links);
+      const row = toPublicGuest({ ...inspected.guest, source: 'path', path: root, capabilityGrants: [] });
+      expect(row.capabilities).toEqual({ requested: ['links'], granted: [] });
+      expect(row.links).toMatchObject({ action: 'open', keys: ['DEMO'], urls: { origin: 'https://tasks.example.com', itemTemplate: '/tasks/{id}' } });
+      expect(row.links.urls.patterns[0].path).toContain('^/tasks/');
+    }
+    await fs.rm(root, { recursive: true, force: true });
+  });
+
+  test('a template the compiler refuses drops that row\'s links and keeps the row', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-guest-'));
+    await writeBuiltGuest(root);
+    const pkg = JSON.parse(await fs.readFile(path.join(root, 'package.json'), 'utf8'));
+    pkg.version = '1.0.0';
+    await fs.writeFile(path.join(root, 'package.json'), JSON.stringify(pkg));
+    const inspected = await inspectGuestPackage(root);
+    expect(inspected.ok).toBe(true);
+    if (inspected.ok) {
+      const links = { action: 'open', urls: { origin: 'https://x.example.com', identifier: 'number', item: ['/(.*)'] } };
+      const row = toPublicGuest({ ...inspected.guest, links, source: 'path', path: root, capabilityGrants: [] });
+      expect(row.id).toBe(inspected.guest.id);
+      expect(row).not.toHaveProperty('links');
+    }
+    await fs.rm(root, { recursive: true, force: true });
+  });
+});
+
 describe('an OpenCode plugin in the package', () => {
   const writePluginGuest = async (root, plugin) => {
     await fs.mkdir(root, { recursive: true });

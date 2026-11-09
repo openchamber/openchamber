@@ -1981,6 +1981,13 @@ diffs-container {
   -webkit-user-select: text !important;
 }
 
+/* An identifier an extension claims is a word in the sentence: a selection
+   across it keeps it, though its button role is unselectable app-wide. */
+.markdown-content [data-oc-guest-link] {
+  user-select: text !important;
+  -webkit-user-select: text !important;
+}
+
 .markdown-content [data-openchamber-file-link="true"]:hover {
   color: var(--markdown-link-hover, var(--primary));
 }

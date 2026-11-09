@@ -5,6 +5,7 @@ import type {
   GuestBlockContribution,
   GuestCapability,
   GuestCommandContribution,
+  GuestLinkAction,
   GuestSurfaceDock,
   GuestToolContribution,
   PublicService,
@@ -79,6 +80,8 @@ export type InstalledGuest = {
   opencodePlugin?: true;
   /** The section the extension adds to the composer's `@` menu. */
   mentions?: { label: string };
+  /** Identifiers and links in chat messages a click hands to the extension (`contributes.links`, compiled by the server). */
+  links?: PublicGuestLinks;
   /** What the running service says is missing; shown on its card. */
   needsConfiguration?: string;
   /** Declared `contributes.blocks`; agents write them only for an active guest. */
@@ -124,6 +127,20 @@ export type OpenCodePlugins = {
   delivery: OpenCodePluginDeliveryState;
   globalConfigPath: string | null;
   inGlobalConfig: string[];
+};
+
+/** `contributes.links` as the catalog serves it: literal keys and compiled link patterns. */
+export type PublicGuestLinks = {
+  action: GuestLinkAction;
+  keys: string[];
+  urls: {
+    origin: string;
+    /** Anchored; the identifier a query template carries is checked against it. */
+    identifierPattern: string;
+    patterns: Array<{ path: string; query?: { name: string } }>;
+    /** A template the host fills from an identifier alone, or null. */
+    itemTemplate: string | null;
+  } | null;
 };
 
 export type GuestCatalog = { guests: InstalledGuest[]; unreadable: UnreadableGuest[]; opencodePlugins: OpenCodePlugins | null };

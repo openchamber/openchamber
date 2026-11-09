@@ -31,6 +31,8 @@ import { remarkRepositoryReferences } from './markdown/remarkRepositoryReference
 import { fenceUiBlocks } from './uiBlocks/taggedBlocks';
 import type { EmojiShortcodes } from '@/lib/emoji/shortcodes';
 import type { RepositoryLinkContext } from '@/lib/source-control/repositoryLinks';
+import { guestLinksVersion, type GuestLinkRule } from '@/lib/guests/links';
+import { remarkGuestLinks } from './markdown/remarkGuestLinks';
 import { MarkdownMediaProvider, type MarkdownDocumentAssets } from './markdown/MarkdownMediaContext';
 import {
   MarkdownImage,
@@ -73,6 +75,8 @@ export interface MarkdownRendererProps {
   variant?: MarkdownVariant;
   onShowPopup?: (content: ToolPopupContent) => void;
   enableFileReferences?: boolean;
+  /** What active extensions claim in this message (`useGuestLinkRules`). Keep the array stable. */
+  guestLinks?: readonly GuestLinkRule[] | null;
 }
 
 const defaultMermaidControls: MermaidControls = {
@@ -292,6 +296,8 @@ export interface MarkdownContentProps {
   uiBlocks?: boolean;
   /** Text a person typed: no HTML and no character references, so `<b>` and `&amp;` read as typed (`remarkLiteralText`). */
   literalText?: boolean;
+  /** What active extensions claim in chat messages (`useGuestLinkRules`); only chat messages pass it. Keep the array stable. */
+  guestLinks?: readonly GuestLinkRule[] | null;
 }
 
 /** Shared screen/copy/image renderer. Streamdown owns the Markdown subtree. */
@@ -323,6 +329,7 @@ export function MarkdownContent({
   windowed = false,
   uiBlocks = false,
   literalText = false,
+  guestLinks = null,
 }: MarkdownContentProps) {
   const themeSystem = useOptionalThemeSystem();
   const theme = themeSystem?.currentTheme ?? getDefaultTheme(
@@ -422,15 +429,18 @@ export function MarkdownContent({
     return createMarkdownCodePlugin({ isVSCode, purpose, prepared: preparedHighlights, resolvePaths });
   }, [isVSCode, purpose, preparedHighlights, fileReferences, directory, confirmFile]);
   const plugins = React.useMemo(() => ({ code, math: markdownMath, cjk: getMarkdownCjk(singleTilde), renderers }), [code, singleTilde]);
+  const activeGuestLinks = guestLinks && guestLinks.length > 0 && !purpose ? guestLinks : null;
   const processing = React.useMemo(() => {
     const base = getMarkdownProcessingOptions(allowRawHtml, isVSCode, singleTilde);
     const extra: Pluggable[] = [];
     if (emojiShortcodes) extra.push([remarkEmojiShortcodes, emojiShortcodes]);
     if (repositoryLinks) extra.push([remarkRepositoryReferences, repositoryLinks]);
     if (literalText) extra.push(remarkLiteralText);
+    // A copy or an image keeps the text as written.
+    if (activeGuestLinks) extra.push([remarkGuestLinks, activeGuestLinks]);
     if (extra.length === 0) return base;
     return { ...base, remarkPlugins: [...(base.remarkPlugins ?? []), ...extra] };
-  }, [allowRawHtml, emojiShortcodes, isVSCode, literalText, repositoryLinks, singleTilde]);
+  }, [activeGuestLinks, allowRawHtml, emojiShortcodes, isVSCode, literalText, repositoryLinks, singleTilde]);
   const presentation = React.useMemo(() => ({
     directory,
     fileReferences,
@@ -443,6 +453,7 @@ export function MarkdownContent({
     uiBlocks: uiBlocks && !purpose,
     settledReply: uiBlocks && !purpose && settled && sessionId && messageId ? { sessionId, messageId } : null,
     disableLinkSafety,
+    guestLinks: activeGuestLinks,
     tableWidthScope,
     theme,
     mermaidControls,
@@ -451,7 +462,7 @@ export function MarkdownContent({
     confirmFile,
     code,
   }), [
-    directory, fileReferences, fileNavigation, loopbackPreview, settled, purpose, uiBlocks, sessionId, messageId, disableLinkSafety, tableWidthScope, theme,
+    directory, fileReferences, fileNavigation, loopbackPreview, settled, purpose, uiBlocks, sessionId, messageId, disableLinkSafety, activeGuestLinks, tableWidthScope, theme,
     mermaidControls, onShowPopup, onExportCode, confirmFile, code,
   ]);
 
@@ -479,6 +490,7 @@ export function MarkdownContent({
       data-oc-html-mode={allowRawHtml ? 'sanitize' : 'text'}
       data-oc-export-highlighted={preparedHighlights ? 'ready' : undefined}
       data-oc-directory={directory}
+      data-oc-guest-links={activeGuestLinks ? guestLinksVersion(activeGuestLinks) : undefined}
       data-oc-runtime={runtimeKey}
       data-oc-file-references={fileReferences ? 'enabled' : 'disabled'}
       data-code-wrap={codeWrap ? 'true' : 'false'}
@@ -546,6 +558,7 @@ export const MarkdownRenderer = React.memo(function MarkdownRenderer({
   variant = 'assistant',
   onShowPopup,
   enableFileReferences = true,
+  guestLinks = null,
 }: MarkdownRendererProps) {
   const directory = useEffectiveDirectory() ?? '';
   const settledPart = part && (part.type === 'text' || part.type === 'reasoning') && part.time?.end !== undefined
@@ -578,6 +591,7 @@ export const MarkdownRenderer = React.memo(function MarkdownRenderer({
       enableFileReferences={enableFileReferences}
       loopbackPreview
       uiBlocks={variant === 'assistant'}
+      guestLinks={guestLinks}
     />
   );
 
