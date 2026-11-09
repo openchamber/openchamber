@@ -77,7 +77,7 @@
                         "v2.2.6" = {
                           "x86_64-linux" = "sha256-O2hF8pGUSArKgYBeP99oOW3iXVVZl5bV5WPTp3E7JIA=";
                           "aarch64-linux" = "sha256-CCUNtPLO2d6FdWPMUOgkz/tsT/Mju+vRk5PY06gJ3TE=";
-                          "aarch64-darwin" = "sha256-KKBjcy7DhWMxNR+hGWkpp90D60YIFCfjRFQuiPYymAY=";
+                          "aarch64-darwin" = "sha256-J0mGbOwVOjpN3nEZKzKamRPdVj0RJbo0TcghvP9NrP8=";
                         };
                       }.${opencodeTag}.${system}
                         or (builtins.fromJSON (builtins.readFile "${opencode}/nix/hashes.json")).nodeModules.${system};
