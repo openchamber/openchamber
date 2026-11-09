@@ -35,7 +35,6 @@ import {
     SettingsTwoColumn,
     SettingsStackedField,
     SettingsFieldRow,
-    SettingsInset,
     SettingsCheckboxRow,
     SettingsChipGroup,
     SETTINGS_SELECT_TRIGGER_CLASS,
@@ -192,16 +191,6 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     const setTimeFormatPreference = useUIStore(state => state.setTimeFormatPreference);
     const weekStartPreference = useUIStore(state => state.weekStartPreference);
     const setWeekStartPreference = useUIStore(state => state.setWeekStartPreference);
-    // macOS-desktop-only dock badge that counts chats with unseen activity.
-    // The tray sync (mac-only) pumps the count to the main process, so the
-    // toggle is offered only where it actually has an effect. No relaunch needed.
-    const dockBadgeSupported = React.useMemo(
-        () => isDesktopShell() && typeof window !== 'undefined'
-            && (window as unknown as { __OPENCHAMBER_PLATFORM__?: string }).__OPENCHAMBER_PLATFORM__ === 'darwin',
-        [],
-    );
-    const dockBadgeEnabled = useUIStore(state => state.dockBadgeEnabled);
-    const setDockBadgeEnabled = useUIStore(state => state.setDockBadgeEnabled);
     const alwaysShowScrollbars = useUIStore(state => state.alwaysShowScrollbars === true);
     const setAlwaysShowScrollbars = useUIStore(state => state.setAlwaysShowScrollbars);
     const showWindowControlsPosition = usesFramelessElectronChrome();
@@ -391,19 +380,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                 {hasAppearanceSettings && (
                     <div className="space-y-0">
                         {hasThemeSettings && (
-                            <ThemeAppearancePicker>
-                                {dockBadgeSupported && (
-                                    <SettingsInset settingsItem="appearance.dock-badge">
-                                        <SettingsCheckboxRow
-                                            checked={dockBadgeEnabled}
-                                            onChange={setDockBadgeEnabled}
-                                            label={t('settings.openchamber.visual.field.dockBadge')}
-                                            info={t('settings.openchamber.visual.field.dockBadgeHint')}
-                                            ariaLabel={t('settings.openchamber.visual.field.dockBadge')}
-                                        />
-                                    </SettingsInset>
-                                )}
-                            </ThemeAppearancePicker>
+                            <ThemeAppearancePicker />
                         )}
 
                         {showWindowControlsPositionSetting && (

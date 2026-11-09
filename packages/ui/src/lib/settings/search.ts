@@ -106,11 +106,11 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
   },
   {
     id: 'appearance.dock-badge',
-    page: 'appearance',
+    page: 'general',
     titleKey: 'settings.openchamber.visual.field.dockBadge',
     descriptionKey: 'settings.openchamber.visual.field.dockBadgeHint',
     keywords: ['dock', 'badge', 'unread', 'unseen', 'counter', 'count', 'notification', 'macos'],
-    // Exactly matches the render guard in OpenChamberVisualSettings: any darwin
+    // Exactly matches the render guard in DesktopAppSettings: any darwin
     // Electron shell (isMac already implies isDesktopShell), local or remote host.
     isAvailable: (ctx) => ctx.isMac,
   },

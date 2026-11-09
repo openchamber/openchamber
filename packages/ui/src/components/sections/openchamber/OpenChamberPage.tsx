@@ -117,7 +117,8 @@ const GeneralSectionContent: React.FC = () => {
     const showPasskeySettings = isWebRuntime() && !isDesktopShell() && !isVSCode && !isCapacitorApp();
     return (
         <>
-            {isLocalDesktop && <DesktopAppSettings />}
+            {/* Remote hosts too: the Dock badge works there. */}
+            {isDesktopShell() && <DesktopAppSettings />}
             {!isVSCode && <OpenChamberToolsSettings />}
             {isLocalDesktop && <DesktopNetworkSettings />}
             {showPasskeySettings && <PasskeySettings />}

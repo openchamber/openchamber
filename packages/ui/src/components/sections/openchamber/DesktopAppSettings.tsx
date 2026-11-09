@@ -49,6 +49,13 @@ export const DesktopAppSettings: React.FC = () => {
   const isLinuxDesktop = isLocalDesktop
     && typeof window !== 'undefined'
     && window.__OPENCHAMBER_PLATFORM__ === 'linux';
+  // The Dock badge counts chats with unseen activity, local or remote host:
+  // the tray sync pumps the count to the main process. No relaunch needed.
+  const dockBadgeSupported = isDesktopShell()
+    && typeof window !== 'undefined'
+    && window.__OPENCHAMBER_PLATFORM__ === 'darwin';
+  const dockBadgeEnabled = useUIStore((state) => state.dockBadgeEnabled);
+  const setDockBadgeEnabled = useUIStore((state) => state.setDockBadgeEnabled);
   const [isLoading, setIsLoading] = React.useState(true);
   const [isSaving, setIsSaving] = React.useState(false);
   const [launchAtLoginSupported, setLaunchAtLoginSupported] = React.useState(false);
@@ -284,9 +291,10 @@ export const DesktopAppSettings: React.FC = () => {
     }
   }, [draftLinuxNativeFrame, draftMacMenuBarEnabled, t]);
 
-  const hasAppSettings = launchAtLoginSupported || isMacDesktop || isLinuxDesktop || minimizeToTraySupported || keepAwakeSupported;
+  // Every flag but the Dock badge is false away from a local desktop.
+  const hasAppSettings = launchAtLoginSupported || isMacDesktop || isLinuxDesktop || minimizeToTraySupported || keepAwakeSupported || dockBadgeSupported;
 
-  if (!isLocalDesktop || !hasAppSettings) {
+  if (!hasAppSettings) {
     return null;
   }
 
@@ -335,6 +343,17 @@ export const DesktopAppSettings: React.FC = () => {
             label={t('settings.openchamber.desktopNetwork.field.keepAwake')}
             info={t('settings.openchamber.desktopNetwork.field.keepAwakeDescription')}
             ariaLabel={t('settings.openchamber.desktopNetwork.field.keepAwakeAria')}
+          />
+        ) : null}
+
+        {dockBadgeSupported ? (
+          <SettingsCheckboxRow
+            settingsItem="appearance.dock-badge"
+            checked={dockBadgeEnabled}
+            onChange={setDockBadgeEnabled}
+            label={t('settings.openchamber.visual.field.dockBadge')}
+            info={t('settings.openchamber.visual.field.dockBadgeHint')}
+            ariaLabel={t('settings.openchamber.visual.field.dockBadge')}
           />
         ) : null}
 

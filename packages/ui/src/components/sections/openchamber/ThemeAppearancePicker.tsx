@@ -52,18 +52,13 @@ const filterThemes = (themes: Theme[], query: string): Theme[] => {
     .map((entry) => entry.theme);
 };
 
-interface ThemeAppearancePickerProps {
-  /** Rows that follow the theme list in the same section (dock badge, scrollbars). */
-  children?: React.ReactNode;
-}
-
 /**
  * Color mode cards and the theme list of the Appearance page. The cards draw
  * the app in the chosen themes; hovering a theme in the list previews it on
  * the cards without applying it, so the list itself stays a plain list of
  * names with a background-and-accent swatch.
  */
-export function ThemeAppearancePicker({ children }: ThemeAppearancePickerProps) {
+export function ThemeAppearancePicker() {
   const { t, direction } = useI18n();
   const { isMobile } = useDeviceInfo();
   const {
@@ -233,7 +228,6 @@ export function ThemeAppearancePicker({ children }: ThemeAppearancePickerProps) 
             onSelect={selectTheme}
             onPreview={setPreviewId}
           />
-          {children}
         </div>
       </SettingsSection>
     </>
