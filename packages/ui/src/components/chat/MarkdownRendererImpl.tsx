@@ -438,8 +438,8 @@ export function MarkdownContent({
     loopbackPreview,
     settled,
     purpose,
-    // Only an assistant reply on screen draws UI blocks; copies and image
-    // exports keep the block's source.
+    // Only an assistant or subagent reply on screen draws UI blocks; copies
+    // and image exports keep the block's source.
     uiBlocks: uiBlocks && !purpose,
     settledReply: uiBlocks && !purpose && settled && sessionId && messageId ? { sessionId, messageId } : null,
     disableLinkSafety,
