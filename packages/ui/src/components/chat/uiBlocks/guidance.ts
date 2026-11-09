@@ -18,7 +18,7 @@ export const UI_BLOCK_EXAMPLES = [
   [
     'root = Stack([note, flow])',
     'note = Callout("Routers rewrite the MAC header, keep the IP header.", "info")',
-    'flow = Steps([{title: "Sender", status: "done"}, {title: "Router", status: "current"}, {title: "Receiver"}], "row")',
+    'flow = Steps([{title: "Sender"}, {title: "Router"}, {title: "Receiver"}], "row")',
   ].join('\n'),
   [
     'root = Stack([a])',
@@ -48,6 +48,8 @@ export function buildUiBlocksGuidance(): string {
     '',
     'Syntax: one statement per line, name = Component(args); first line root = Stack([...]). Positional args in signature order, optional ones droppable from the end. Args are positional only; name: value is not supported in a call. Strings "...", arrays [...], objects {key: value}. Every name must be reachable from root.',
     `Item = any component below except Tab and Series. Card holds no Card or Tabs; Row holds no Row, Tabs or Details; Tab holds no Tabs; Details holds no Card, Tabs or Details. Tone = ${TONE_UNION}.`,
+    '',
+    'A Steps status is live execution progress only. For a flow that is not running (an architecture, a pipeline, a process the reply explains), leave status off: every step then reads at normal contrast instead of looking stalled.',
     '',
     'Examples:',
     UI_BLOCK_EXAMPLES[0],
