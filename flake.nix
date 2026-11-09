@@ -75,7 +75,7 @@
                     hash =
                       {
                         "v2.2.6" = {
-                          "x86_64-linux" = "sha256-s8XswivimwgzG0wMleHee5zliDKd+UC84eAvBvzr6cI=";
+                          "x86_64-linux" = "sha256-O2hF8pGUSArKgYBeP99oOW3iXVVZl5bV5WPTp3E7JIA=";
                           "aarch64-linux" = "sha256-CCUNtPLO2d6FdWPMUOgkz/tsT/Mju+vRk5PY06gJ3TE=";
                           "aarch64-darwin" = "sha256-KKBjcy7DhWMxNR+hGWkpp90D60YIFCfjRFQuiPYymAY=";
                         };
