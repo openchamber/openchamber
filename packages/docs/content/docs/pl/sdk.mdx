@@ -108,7 +108,7 @@ Rysowanie panelu i odczyt bieżącej sesji nie wymagają żadnej zgody. Wszystko
 | `files` | odczyt i zapis plików w otwartym projekcie (`readFile`, `writeFile`, `listDir`, `stat` ze ścieżką względną) |
 | `model` | jednorazowe generowanie tekstu za pomocą Small Model użytkownika (`generate`), poza jakąkolwiek sesją |
 
-Jedenaście kolejnych jest dodawanych automatycznie: `network`, gdy deklarujesz `integration`, `service`, gdy deklarujesz `service`, `filesystem`, gdy deklarujesz wzorce `filesystem`, `origins`, gdy deklarujesz `origins`, `conversation`, gdy akcja sesji prosi o wiadomości (zobacz [Akcje, polecenia i odznaka](#akcje-polecenia-i-odznaka)), `transcript`, gdy `sessionEvents` lub `sessionControl` prosi o `content` (zobacz [Zdarzenia sesji](/sdk/host/#zdarzenia-sesji)), `sessionControl`, gdy Twoja usługa działa na sesjach (zobacz [Wywoływanie OpenChamber](/sdk/host/#wywoływanie-openchamber-z-usługi)), `sessionAnswers`, gdy odpowiada w imieniu użytkownika na żądania uprawnień i formularze agenta (`sessionControl: { answers: true }`), `instructions`, gdy uzupełnia to, co czytają agenci, oraz `skills`, gdy deklarujesz `contributes.skills`, folder pakietu ze skillami, które docierają do każdego agenta, dopóki rozszerzenie jest włączone, oraz `opencodePlugin`, gdy deklarujesz `contributes.opencodePlugin` (patrz niżej).
+Dwanaście kolejnych jest dodawanych automatycznie: `network`, gdy deklarujesz `integration`, `service`, gdy deklarujesz `service`, `filesystem`, gdy deklarujesz wzorce `filesystem`, `origins`, gdy deklarujesz `origins`, `conversation`, gdy akcja sesji prosi o wiadomości (zobacz [Akcje, polecenia i odznaka](#akcje-polecenia-i-odznaka)), `transcript`, gdy `sessionEvents` lub `sessionControl` prosi o `content` (zobacz [Zdarzenia sesji](/sdk/host/#zdarzenia-sesji)), `sessionControl`, gdy Twoja usługa działa na sesjach (zobacz [Wywoływanie OpenChamber](/sdk/host/#wywoływanie-openchamber-z-usługi)), `sessionAnswers`, gdy odpowiada w imieniu użytkownika na żądania uprawnień i formularze agenta (`sessionControl: { answers: true }`), `instructions`, gdy uzupełnia to, co czytają agenci, `skills`, gdy deklarujesz `contributes.skills`, folder pakietu ze skillami, które docierają do każdego agenta, dopóki rozszerzenie jest włączone, `opencodePlugin`, gdy deklarujesz `contributes.opencodePlugin` (patrz niżej), oraz `links`, gdy deklarujesz `contributes.links` (patrz [Linki w wiadomościach czatu](#linki-w-wiadomościach-czatu)).
 
 Użytkownik widzi pełną listę raz, przy instalacji rozszerzenia, i albo ją zatwierdza, albo usuwa rozszerzenie. Jeśli nowa wersja prosi o więcej, okno pojawia się ponownie. Wywołanie, które wymaga niezatwierdzonego uprawnienia, kończy się błędem `NOT_GRANTED`.
 
@@ -130,6 +130,25 @@ Okno zatwierdzania dostaje jeszcze jeden wiersz, **Dodawanie pluginu do OpenCode
 Tam, gdzie ten plik nie dociera do OpenCode, ekran rozszerzenia mówi o tym i oferuje **Dodaj do globalnej konfiguracji**, co zapisuje Twój folder do globalnej konfiguracji OpenCode użytkownika jako wpis, który od tej chwili należy do niego. Dzieje się tak, gdy OpenChamber nie uruchomił OpenCode, z którym rozmawia, albo gdy środowisko serwera ustawia własne `OPENCODE_CONFIG` (plugin ładuje się wtedy przy następnym uruchomieniu OpenCode). OpenCode na innym komputerze nie może załadować folderu z tego komputera; ekran mówi o tym i niczego nie oferuje. Plugin, który się nie ładuje, OpenCode zgłasza w Ustawieniach → Pluginy, gdy ma tam wpis; Twoje rozszerzenie działa dalej w każdym przypadku. Instalacja odrzuca pakiet, którego folder pluginu nie istnieje albo którego `package.json` nie wskazuje pliku wejściowego.
 
 VS Code i aplikacje mobilne nie ładują rozszerzeń, więc żaden plugin tam nie trafia. Sesja w izolowanej przestrzeni uruchamia własne OpenCode, które nigdy nie czyta konfiguracji hosta. Tryb enterprise traktuje plugin jak lokalną usługę: instaluje się tylko z repozytorium wskazanego przez administratora. SDK ma działający przykład, `examples/opencode-plugin`.
+
+## Linki w wiadomościach czatu
+
+Rozszerzenie może sprawić, że jego identyfikatory i linki w wiadomościach czatu staną się klikalne, więc `DEMO-12` w odpowiedzi agenta otworzy to zadanie w Twoim rozszerzeniu zamiast w karcie przeglądarki. Zadeklaruj, co ma być rozpoznawane i co robi kliknięcie:
+
+```json
+"links": {
+  "action": "open",
+  "identifier": { "keys": ["DEMO"] },
+  "urls": { "origin": "https://tasks.example.com", "identifier": "key-number", "item": ["/tasks/{id}"] }
+}
+```
+
+- `identifier.keys` to do 8 stałych kluczy pisanych wielkimi literami. `DEMO` rozpoznaje `DEMO-12` tylko jako całe słowo; kod, linki, ścieżki, słowa takie jak `XDEMO-1` i wersje takie jak `DEMO-1.5` zostają tekstem.
+- `urls` rozpoznaje linki z jednego originu https, który musi pasować dokładnie. `item` to szablony linków w postaci, której używa sam tracker: `{id}` raz, w ścieżce albo jako `?name={id}`, oraz `{segment}` lub `{segments+}` dla części, które się zmieniają. `identifier` mówi, jak wygląda `{id}`: `key-number`, `number` lub `short-code`. Nigdy nie piszesz wyrażenia regularnego; OpenChamber sam kompiluje szablony.
+- `action: "open"` otwiera Twoje rozszerzenie z `ready.item` (lub `onItem`) ustawionym na `{ kind: "link", identifier, url? }`: w Twoim oknie dialogowym, gdy `attach` ma wartość `"dialog"`, a w przeciwnym razie w panelu na pasku bocznym. Zawęź typ za pomocą `isGuestLinkItem`. Wymaga to `panel.entry`. `url` to kliknięty link bez fragmentu i bez parametrów zapytania innych niż te z samego szablonu; dla identyfikatora w tekście jest to link, który daje Twój pierwszy szablon bez `{segment}`, jeśli taki masz, a identyfikator ma postać zadeklarowaną w `urls.identifier` (`DEMO-12` nigdy nie wypełnia `number`).
+- `action: "attach"` zamiast tego dodaje do pola czatu chip z identyfikatorem i wymaga szablonu bez `{segment}` i `{segments+}`, żeby chip mógł wskazać swój link; przy `identifier.keys` `urls.identifier` nie może mieć wartości `number`.
+
+Rozpoznawanie działa w odpowiedziach agenta i we własnych wiadomościach użytkownika, ale nie w rozumowaniu, wynikach narzędzi ani w widoku Files, a skopiowana wiadomość zachowuje tekst w takiej postaci, w jakiej go napisano. Link, który OpenChamber odczytuje sam, czyli element trackera, issue lub pull request repozytorium albo commit, działa jak zwykle, a kliknięcie z klawiszem modyfikującym robi to, co zwykle robi przeglądarka. Zadeklarowanie `links` dodaje uprawnienie `links`: okno zatwierdzania wymienia Twoje klucze i origin oraz mówi, co robi kliknięcie, a wersja, która zmienia którąkolwiek z tych rzeczy, pyta ponownie. `examples/tasks-demo` rozpoznaje `DEMO-2` i `https://example.com/tasks/DEMO-2`.
 
 ## Generowanie tekstu
 

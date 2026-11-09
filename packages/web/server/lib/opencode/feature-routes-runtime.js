@@ -999,6 +999,9 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       cloneRepository: networkOperations.cloneRepository,
       managedChatsRoot,
       environmentRuntime,
+      projectRealpath: (target) => new Promise((resolve, reject) => {
+        fs.realpath(target, (error, resolved) => (error ? reject(error) : resolve(resolved)));
+      }),
     });
     registerEnvironmentRoutes(app, { store: environmentStore, runtime: environmentRuntime, listProjects: listConfiguredProjects });
   };

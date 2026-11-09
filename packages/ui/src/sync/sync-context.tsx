@@ -895,6 +895,11 @@ export function applySessionStatusSnapshot(
 
       if (incoming && incoming.type !== "idle") {
         // Confirm or raise active status (catches a busy event the SSE missed).
+        // `session.active` reports a turn waiting for a retry as plain busy, so
+        // its busy confirms a retry status until the attempt is due; the
+        // attempt's own busy event ends it.
+        const held = current[sessionId]
+        if (incoming.type === "busy" && held?.type === "retry" && (held.next === undefined || held.next > Date.now())) continue
         if (!haveEquivalentSyncSnapshots(current[sessionId], incoming)) {
           draft()[sessionId] = incoming
           changed = true

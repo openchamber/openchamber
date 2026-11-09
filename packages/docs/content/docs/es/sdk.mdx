@@ -108,7 +108,7 @@ Dibujar un panel y leer la sesión actual no requiere permisos. Todo lo que act�
 | `files` | leer y escribir archivos dentro del proyecto abierto (`readFile`, `writeFile`, `listDir`, `stat` con una ruta relativa) |
 | `model` | generación de texto puntual con el Small Model del usuario (`generate`), fuera de cualquier sesión |
 
-Otras once se añaden por ti: `network` cuando declaras una `integration`, `service` cuando declaras un `service`, `filesystem` cuando declaras patrones `filesystem`, `origins` cuando declaras `origins`, `conversation` cuando una acción de sesión pide los mensajes (ver [Acciones, comandos y la insignia](#acciones-comandos-y-la-insignia)), `transcript` cuando `sessionEvents` o `sessionControl` piden `content` (ver [Eventos de sesión](/sdk/host/#eventos-de-sesión)), `sessionControl` cuando tu servicio actúa sobre sesiones (ver [Llamar a OpenChamber](/sdk/host/#llamar-a-openchamber-desde-tu-servicio)), `sessionAnswers` cuando responde en nombre del usuario a las solicitudes de permiso y los formularios del agente (`sessionControl: { answers: true }`), `instructions` cuando añade contenido a lo que leen los agentes, y `skills` cuando declaras `contributes.skills`, una carpeta del paquete con skills que llegan a todos los agentes mientras la extensión está activa, y `opencodePlugin` cuando declaras `contributes.opencodePlugin` (ver más abajo).
+Otras doce se añaden por ti: `network` cuando declaras una `integration`, `service` cuando declaras un `service`, `filesystem` cuando declaras patrones `filesystem`, `origins` cuando declaras `origins`, `conversation` cuando una acción de sesión pide los mensajes (ver [Acciones, comandos y la insignia](#acciones-comandos-y-la-insignia)), `transcript` cuando `sessionEvents` o `sessionControl` piden `content` (ver [Eventos de sesión](/sdk/host/#eventos-de-sesión)), `sessionControl` cuando tu servicio actúa sobre sesiones (ver [Llamar a OpenChamber](/sdk/host/#llamar-a-openchamber-desde-tu-servicio)), `sessionAnswers` cuando responde en nombre del usuario a las solicitudes de permiso y los formularios del agente (`sessionControl: { answers: true }`), `instructions` cuando añade contenido a lo que leen los agentes, `skills` cuando declaras `contributes.skills`, una carpeta del paquete con skills que llegan a todos los agentes mientras la extensión está activa, `opencodePlugin` cuando declaras `contributes.opencodePlugin` (ver más abajo), y `links` cuando declaras `contributes.links` (ver [Enlaces en los mensajes del chat](#enlaces-en-los-mensajes-del-chat)).
 
 El usuario ve la lista completa una vez, al instalar la extensión, y la aprueba o quita la extensión. Si una versión nueva pide más, el diálogo vuelve a aparecer. Una llamada que necesita una capacidad que el usuario no ha aprobado falla con `NOT_GRANTED`.
 
@@ -130,6 +130,25 @@ El diálogo de aprobación recibe una fila más, **Añadir un plugin a OpenCode*
 Cuando ese archivo no llega a OpenCode, la pantalla de la extensión lo dice y ofrece **Añadir a la configuración global**, que escribe tu carpeta en la configuración global de OpenCode del usuario como una entrada que desde entonces es suya. Eso ocurre cuando OpenChamber no inició el OpenCode con el que habla, o cuando el entorno del servidor define su propio `OPENCODE_CONFIG` (el plugin se carga entonces en el siguiente arranque de OpenCode). Un OpenCode en otra máquina no puede cargar una carpeta de esta; la pantalla lo dice y no ofrece nada. Un plugin que no carga lo informa OpenCode en Ajustes → Plugins cuando tiene una entrada allí; tu extensión sigue funcionando en cualquier caso. La instalación rechaza un paquete cuya carpeta del plugin falta o cuyo `package.json` no indica un archivo de entrada.
 
 VS Code y las apps móviles no cargan extensiones, así que ningún plugin llega a ellas. Una sesión dentro de un espacio aislado ejecuta su propio OpenCode, que nunca lee la configuración del host. El modo empresa trata el plugin como un servicio local: solo se instala desde un repositorio aprobado por el administrador. El SDK tiene un ejemplo funcional, `examples/opencode-plugin`.
+
+## Enlaces en los mensajes del chat
+
+Una extensión puede hacer clicables sus identificadores y enlaces en los mensajes del chat, de modo que `DEMO-12` en la respuesta de un agente abra esa tarea en tu extensión en vez de en una pestaña del navegador. Declara qué se reconoce y qué hace un clic:
+
+```json
+"links": {
+  "action": "open",
+  "identifier": { "keys": ["DEMO"] },
+  "urls": { "origin": "https://tasks.example.com", "identifier": "key-number", "item": ["/tasks/{id}"] }
+}
+```
+
+- `identifier.keys` son hasta 8 claves literales en mayúsculas. `DEMO` reconoce `DEMO-12` solo como palabra completa; el código, los enlaces, las rutas, palabras como `XDEMO-1` y versiones como `DEMO-1.5` siguen siendo texto.
+- `urls` reconoce enlaces de un único origen https, con coincidencia exacta. `item` son plantillas de enlace con la forma que usa el propio gestor de incidencias: `{id}` una vez, en la ruta o como `?name={id}`, y `{segment}` o `{segments+}` para las partes que varían. `identifier` indica cómo es `{id}`: `key-number`, `number` o `short-code`. Nunca escribes una expresión regular; OpenChamber compila las plantillas.
+- `action: "open"` abre tu extensión con `ready.item` (o `onItem`) igual a `{ kind: "link", identifier, url? }`: en tu diálogo cuando `attach` es `"dialog"` y, si no, en el panel de la barra lateral. Acota el tipo con `isGuestLinkItem`. Necesita `panel.entry`. `url` es el enlace pulsado sin su fragmento y sin parámetros de consulta distintos de los de la propia plantilla; para un identificador en el texto es el enlace que forma tu primera plantilla sin `{segment}`, si tienes una y el identificador tiene la forma que declara `urls.identifier` (`DEMO-12` nunca rellena un `number`).
+- `action: "attach"` pone en cambio un chip con el identificador en el cuadro de chat, y necesita una plantilla sin `{segment}` ni `{segments+}` para que el chip pueda nombrar su enlace; con `identifier.keys`, `urls.identifier` no puede ser `number`.
+
+El reconocimiento funciona en las respuestas del agente y en los propios mensajes del usuario, no en el razonamiento, la salida de herramientas ni la vista Files, y al copiar un mensaje su texto se mantiene tal como se escribió. Un enlace que OpenChamber ya lee por su cuenta, como un elemento de un gestor de incidencias, una incidencia o pull request de un repositorio o un commit, sigue su ruta habitual, y un clic con una tecla modificadora hace lo que el navegador hace normalmente. Declarar `links` añade la capacidad `links`: el diálogo de aprobación muestra tus claves y tu origen y dice qué hace un clic, y una versión que cambie cualquiera de ellos vuelve a preguntar. `examples/tasks-demo` reconoce `DEMO-2` y `https://example.com/tasks/DEMO-2`.
 
 ## Generar texto
 

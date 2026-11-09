@@ -1101,7 +1101,7 @@ export const settingsDict = {
   'settings.openchamber.messageSearch.actions.delete': '刪除索引',
   'settings.openchamber.messageSearch.actions.working': '處理中…',
   'settings.openchamber.sessionWork.title': '進行中的工作階段',
-  'settings.openchamber.sessionWork.info': '側邊欄中位於聊天下方的區塊，用來顯示正在處理的工作階段。傳送訊息後，工作階段就會顯示在這裡。預設只會顯示在此區塊。若要同時顯示在所屬專案下，請在側邊欄選單中開啟「在專案下也顯示進行中的工作」。VS Code 一律會在專案下顯示工作階段。點選勾號或使用工作階段選單即可將其標記為完成。當某一輪看起來像工作的結尾時，勾號會變灰作為提示。',
+  'settings.openchamber.sessionWork.info': '側邊欄中位於聊天下方的區塊，用來顯示正在處理的工作階段。傳送訊息後，工作階段就會顯示在這裡。預設只會顯示在此區塊。若要同時顯示在所屬專案下，請在側邊欄選單中開啟「自訂區段…」，並在「進行中」一列開啟「也在專案中」。在手機上，請在側邊欄選單中開啟「在專案下也顯示進行中的工作」。VS Code 一律會在專案下顯示工作階段。點選勾號或使用工作階段選單即可將其標記為完成。當某一輪看起來像工作的結尾時，勾號會變灰作為提示。',
   'settings.openchamber.sessionWork.field.enabled': '顯示進行中的工作階段',
   'settings.openchamber.sessionRetention.archivedTooltip': '刪除超過保留期限的已封存工作階段。保留最近封存的 5 個工作階段、目前開啟的工作階段、執行中的工作階段及已釘選的工作階段。如果刪除父工作階段會同時刪除受保護的子工作階段，則保留父工作階段。',
   'settings.openchamber.sessionRetention.tooltip': '根據最後活動時間封存或刪除未封存的工作階段。保留最近 5 個工作階段、目前開啟的工作階段、執行中的工作階段及已釘選的工作階段。「進行中」區塊裡的工作階段也會保留，除非你選擇包含它們。已封存的工作階段會保留。如果刪除父工作階段會同時刪除受保護的子工作階段，則保留父工作階段。',

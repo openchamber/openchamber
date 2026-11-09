@@ -109,7 +109,7 @@ Drawing a panel and reading the current session need no permission. Anything tha
 | `model` | one-off text generation with the user's Small Model (`generate`), outside any session |
 | `shells` | watch the shell commands your agents run in the background, read their output, and stop them (`onRunningShells`, `readShellOutput`, `stopShell`) |
 
-Eleven more are added for you: `network` when you declare an `integration`, `service` when you declare a `service`, `filesystem` when you declare `filesystem` patterns, `origins` when you declare `origins`, `conversation` when a session action asks for the messages (see [Actions, commands, and the badge](#actions-commands-and-the-badge)), `transcript` when `sessionEvents` or `sessionControl` asks for `content` (see [Session events](/sdk/host/#session-events)), `sessionControl` when your service acts on sessions (see [Calling OpenChamber](/sdk/host/#calling-openchamber-from-your-service)), `sessionAnswers` when it answers the agent's permission requests and forms for the user (`sessionControl: { answers: true }`), `instructions` when it adds to what agents read, `skills` when you declare `contributes.skills`, a package folder of skills that reach every agent while the extension is on, and `opencodePlugin` when you declare `contributes.opencodePlugin` (see [An OpenCode plugin in your package](#an-opencode-plugin-in-your-package)).
+Twelve more are added for you: `network` when you declare an `integration`, `service` when you declare a `service`, `filesystem` when you declare `filesystem` patterns, `origins` when you declare `origins`, `conversation` when a session action asks for the messages (see [Actions, commands, and the badge](#actions-commands-and-the-badge)), `transcript` when `sessionEvents` or `sessionControl` asks for `content` (see [Session events](/sdk/host/#session-events)), `sessionControl` when your service acts on sessions (see [Calling OpenChamber](/sdk/host/#calling-openchamber-from-your-service)), `sessionAnswers` when it answers the agent's permission requests and forms for the user (`sessionControl: { answers: true }`), `instructions` when it adds to what agents read, `skills` when you declare `contributes.skills`, a package folder of skills that reach every agent while the extension is on, `opencodePlugin` when you declare `contributes.opencodePlugin` (see [An OpenCode plugin in your package](#an-opencode-plugin-in-your-package)), and `links` when you declare `contributes.links` (see [Links in chat messages](#links-in-chat-messages)).
 
 The user sees the full list once, when they install the extension, and approves it or removes the extension. If a new version asks for more, the dialog appears again. A call that needs a capability the user has not approved fails with `NOT_GRANTED`.
 
@@ -131,6 +131,25 @@ The approval dialog gets one more row, **Add a plugin to OpenCode**, which says 
 Where that file does not reach OpenCode, the extension's screen says so and offers **Add to global config**, which writes your folder into the user's global OpenCode config as an entry they own from then on. That happens when OpenChamber did not start the OpenCode it talks to, or when the server's environment sets its own `OPENCODE_CONFIG` (the plugin then loads at the next OpenCode start). An OpenCode on another machine cannot load a folder from this one; the screen says so and offers nothing. A plugin that fails to load is reported by OpenCode on Settings → Plugins when it has an entry there; your extension keeps working either way. The install refuses a package whose plugin folder is missing or whose `package.json` names no entry file.
 
 VS Code and the mobile apps load no extensions, so no plugin reaches them. A session inside an isolated space runs its own OpenCode, which never reads the host's config. Enterprise mode treats the plugin like a local service: it installs only from a repository the administrator listed. The SDK has a working example, `examples/opencode-plugin`.
+
+## Links in chat messages
+
+An extension can make its identifiers and links clickable in chat messages, so `DEMO-12` in an agent's reply opens that task in your extension instead of a browser tab. Declare what to recognise and what a click does:
+
+```json
+"links": {
+  "action": "open",
+  "identifier": { "keys": ["DEMO"] },
+  "urls": { "origin": "https://tasks.example.com", "identifier": "key-number", "item": ["/tasks/{id}"] }
+}
+```
+
+- `identifier.keys` are up to 8 literal upper-case keys. `DEMO` claims `DEMO-12` as a whole word; code, links, paths, and words like `XDEMO-1` or versions like `DEMO-1.5` stay text.
+- `urls` claims links on one https origin, matched exactly. `item` are link templates in the tracker's form: `{id}` once, in the path or as `?name={id}`, and `{segment}` or `{segments+}` for parts that vary. `identifier` says what `{id}` looks like: `key-number`, `number`, or `short-code`. You never write a regular expression; OpenChamber compiles the templates.
+- `action: "open"` opens your extension with `ready.item` (or `onItem`) set to `{ kind: "link", identifier, url? }`: in your dialog when `attach` is `"dialog"`, otherwise in your rail panel. Narrow it with `isGuestLinkItem`. It needs `panel.entry`. `url` is the clicked link without its fragment and without query parameters other than the template's own; for an identifier in text it is the link your first template without `{segment}` names, when you have one and the identifier has the shape `urls.identifier` declares (`DEMO-12` never fills a `number`).
+- `action: "attach"` puts a chip with the identifier on the composer instead, and needs a template without `{segment}` or `{segments+}` so the chip can name its link; with `identifier.keys`, `urls.identifier` can't be `number`.
+
+Recognition runs in agent replies and in the user's own messages, not in reasoning, tool output, or the Files view, and copying a message keeps its text as written. A link OpenChamber reads itself, a tracker item, a repository issue or pull request, or a commit, keeps its usual route, and a click with a modifier key keeps the browser's meaning. Declaring `links` adds the `links` capability: the approval dialog lists your keys and origin and says what a click does, and a version that changes any of them asks again. `examples/tasks-demo` recognises `DEMO-2` and `https://example.com/tasks/DEMO-2`.
 
 ## Generate text
 

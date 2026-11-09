@@ -108,7 +108,7 @@ OpenChamber がマニフェストを読み、拡張機能が求めているも�
 | `files` | 開いているプロジェクト内のファイルを読み書きする(相対パス付きの `readFile`、`writeFile`、`listDir`、`stat`) |
 | `model` | セッションの外で、ユーザーの Small Model による一回限りのテキスト生成を行う(`generate`) |
 
-さらに 11 個が自動で追加されます。`integration` を宣言すると `network`、`service` を宣言すると `service`、`filesystem` パターンを宣言すると `filesystem`、`origins` を宣言すると `origins`、セッションのアクションがメッセージを求めると `conversation`([アクション、コマンド、バッジ](#アクションコマンドバッジ) を参照)、`sessionEvents` または `sessionControl` が `content` を求めると `transcript`([セッションイベント](/sdk/host/#セッションイベント) を参照)、サービスがセッションを操作すると `sessionControl`([OpenChamber の呼び出し](/sdk/host/#サービスから-openchamber-を呼び出す) を参照)、サービスがユーザーの代わりにエージェントの権限リクエストやフォームに応答すると `sessionAnswers`(`sessionControl: { answers: true }`)、エージェントが読む内容に追加すると `instructions`、`contributes.skills` を宣言すると `skills` です。`contributes.skills` はパッケージ内のスキルのフォルダーで、拡張機能がオンの間、すべてのエージェントに届きます。`contributes.opencodePlugin` を宣言すると `opencodePlugin` も追加されます（下記参照）。
+さらに 12 個が自動で追加されます。`integration` を宣言すると `network`、`service` を宣言すると `service`、`filesystem` パターンを宣言すると `filesystem`、`origins` を宣言すると `origins`、セッションのアクションがメッセージを求めると `conversation`([アクション、コマンド、バッジ](#アクションコマンドバッジ) を参照)、`sessionEvents` または `sessionControl` が `content` を求めると `transcript`([セッションイベント](/sdk/host/#セッションイベント) を参照)、サービスがセッションを操作すると `sessionControl`([OpenChamber の呼び出し](/sdk/host/#サービスから-openchamber-を呼び出す) を参照)、サービスがユーザーの代わりにエージェントの権限リクエストやフォームに応答すると `sessionAnswers`(`sessionControl: { answers: true }`)、エージェントが読む内容に追加すると `instructions`、`contributes.skills` を宣言すると `skills` です。`contributes.skills` はパッケージ内のスキルのフォルダーで、拡張機能がオンの間、すべてのエージェントに届きます。`contributes.opencodePlugin` を宣言すると `opencodePlugin`（下記参照）、`contributes.links` を宣言すると `links`（[チャットメッセージ内のリンク](#チャットメッセージ内のリンク) を参照）も追加されます。
 
 ユーザーは拡張機能をインストールするときに一覧を一度だけ見て、承認するか拡張機能を削除するかを選びます。新しいバージョンがより多くを求める場合、ダイアログが再び表示されます。ユーザーが承認していない権限を必要とする呼び出しは `NOT_GRANTED` で失敗します。
 
@@ -130,6 +130,25 @@ OpenChamber がマニフェストを読み、拡張機能が求めているも�
 そのファイルが OpenCode に届かない場合、拡張機能の画面がそう伝え、**グローバル設定に追加** を提示します。これはあなたのフォルダーを利用者のグローバル OpenCode 設定に、以後は利用者が所有する項目として書き込みます。これに該当するのは、OpenChamber が通信相手の OpenCode を起動していない場合と、サーバーの環境が独自の `OPENCODE_CONFIG` を設定している場合です（後者ではプラグインは次回の OpenCode 起動時に読み込まれます）。別のマシンの OpenCode はこのマシンのフォルダーを読み込めません。画面はそう伝え、何も提示しません。読み込みに失敗したプラグインは、項目がある場合に設定 → Plugins で OpenCode が報告します。どちらの場合も拡張機能自体は動き続けます。プラグインのフォルダーがない、またはその `package.json` にエントリーファイルの指定がないパッケージは、インストールが拒否されます。
 
 VS Code とモバイルアプリは拡張機能を読み込まないため、プラグインも届きません。隔離スペース内のセッションは独自の OpenCode を実行し、ホストの設定を読むことはありません。エンタープライズモードではプラグインはローカルサービスと同じ扱いで、管理者が登録したリポジトリからのみインストールできます。SDK には動作する例 `examples/opencode-plugin` があります。
+
+## チャットメッセージ内のリンク
+
+拡張機能は、チャットメッセージ内の自分の識別子やリンクをクリックできるようにできます。たとえばエージェントの返信にある `DEMO-12` が、ブラウザーのタブではなくあなたの拡張機能でそのタスクを開きます。何を認識し、クリックで何が起きるかを宣言します。
+
+```json
+"links": {
+  "action": "open",
+  "identifier": { "keys": ["DEMO"] },
+  "urls": { "origin": "https://tasks.example.com", "identifier": "key-number", "item": ["/tasks/{id}"] }
+}
+```
+
+- `identifier.keys` は最大 8 個の大文字の固定キーです。`DEMO` は `DEMO-12` を単語全体として現れたときだけ認識します。コード、リンク、パス、`XDEMO-1` のような語、`DEMO-1.5` のようなバージョンはテキストのままです。
+- `urls` は 1 つの https オリジン上のリンクを認識し、オリジンは完全一致で照合されます。`item` はトラッカー自身のリンク形式で書くリンクテンプレートです。`{id}` はパス内か `?name={id}` として 1 回だけ使い、変わる部分には `{segment}` または `{segments+}` を使います。`identifier` は `{id}` の形を示し、`key-number`、`number`、`short-code` のいずれかです。正規表現を書く必要はなく、OpenChamber がテンプレートをコンパイルします。
+- `action: "open"` は `ready.item`(または `onItem`)を `{ kind: "link", identifier, url? }` にして拡張機能を開きます。`attach` が `"dialog"` ならあなたのダイアログで、それ以外はレールのパネルで開きます。型は `isGuestLinkItem` で絞り込みます。`panel.entry` が必要です。`url` はクリックされたリンクから、フラグメントと、テンプレート自身のもの以外のクエリパラメーターを除いたものです。`{segment}` を含まないテンプレートがあり、識別子が `urls.identifier` で宣言した形をしていれば、テキスト内の識別子にはそのうち最初のテンプレートが示すリンクが入ります（`DEMO-12` が `number` に当てはまることはありません）。
+- `action: "attach"` は代わりに識別子のチップをチャット欄に追加します。チップが自分のリンクを示せるよう、`{segment}` や `{segments+}` を含まないテンプレートが必要です。`identifier.keys` を使う場合、`urls.identifier` を `number` にすることはできません。
+
+認識はエージェントの返信とユーザー自身のメッセージで行われ、推論、ツールの出力、Files ビューでは行われません。メッセージをコピーすると、書かれたままのテキストがコピーされます。OpenChamber が自分で読み取るリンク、つまりトラッカーの項目、リポジトリの issue や pull request、コミットは通常どおりに動作し、修飾キーを押しながらのクリックはブラウザー本来の動作になります。`links` を宣言すると `links` 権限が追加されます。承認ダイアログにはキーとオリジン、クリックで何が起きるかが表示され、そのいずれかを変えるバージョンでは再び承認が求められます。`examples/tasks-demo` は `DEMO-2` と `https://example.com/tasks/DEMO-2` を認識します。
 
 ## テキストを生成する
 

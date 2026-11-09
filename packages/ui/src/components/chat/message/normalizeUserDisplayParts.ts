@@ -100,7 +100,8 @@ const linkAttachmentPart = (part: TextPart, descriptorOf: SourceControlDescripto
                 ...identity,
                 type: 'file',
                 mime: 'application/vnd.openchamber.guest-issue-link',
-                filename: `${payload.id}: ${payload.title}`,
+                // A link's chip has no title of its own (`contributes.links`): its identifier once.
+                filename: payload.title === payload.id ? payload.id : `${payload.id}: ${payload.title}`,
                 url: payload.url,
             };
         case 'guest-pr':

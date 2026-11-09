@@ -346,6 +346,25 @@ server does not allow to the Android app. There is no pinch zoom, and PDFs that
 need pdf.js's CMap, standard font or wasm data (CJK text without embedded
 fonts, JPEG 2000 images) may lose that text or image.
 
+### Why table, data and office previews load on first use
+
+`TableArtifact`, `DataFileArtifact` and `OfficeArtifact` are `React.lazy` in
+`FilesView`, each under its own error boundary keyed by the file, and the
+export reads `delimitedText.ts` with a dynamic import. Imported statically,
+their modules sat in a chunk `FilesView` loaded with itself, so a single
+missing file (Windows Defender quarantined that chunk in 2.7.0, #6630) failed
+the whole `FilesView` import and the app-wide boundary replaced the window
+with "Something went wrong". Now such a failure shows "Preview unavailable" in
+that file's pane, and the tree, the text editor and other previews keep
+working. `FilesView` uses plain `React.lazy` here, not `lazyWithChunkRecovery`:
+that helper reloads the window, which drops the user's place and cannot bring
+back a quarantined file. `React.lazy` keeps a failed import, so these previews
+stay unavailable until the window reloads; on the web that includes a tab left
+open across a server update, which needs the reload anyway. Swapping in a
+fresh `React.lazy` when the import fails made React retry at once and spin in
+the loading state while the file was missing. The VS Code webview inlines
+dynamic imports, so there nothing changes.
+
 ### Office documents
 
 `OfficeArtifact` reads the file's bytes through `runtimeFetch`, so it works on

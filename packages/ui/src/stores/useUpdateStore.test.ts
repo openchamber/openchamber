@@ -111,6 +111,17 @@ describe('parseUpdateCheckResponse', () => {
     expect(parseUpdateCheckResponse({ available: true, installBlocked: 'desktop-host' }).installBlocked).toBe('desktop-host')
     expect(parseUpdateCheckResponse({ available: true, installBlocked: 'something-else' }).installBlocked).toBeUndefined()
   })
+
+  test('keeps an OpenCode block only with both versions it names', () => {
+    expect(parseUpdateCheckResponse({
+      available: true,
+      installBlocked: 'opencode-version',
+      requiredOpenCodeVersion: '2.3.0',
+      openCodeVersion: '2.2.6',
+    })).toMatchObject({ installBlocked: 'opencode-version', requiredOpenCodeVersion: '2.3.0', openCodeVersion: '2.2.6' })
+    expect(parseUpdateCheckResponse({ available: true, installBlocked: 'opencode-version', openCodeVersion: '2.2.6' }))
+      .toMatchObject({ installBlocked: undefined, requiredOpenCodeVersion: undefined, openCodeVersion: undefined })
+  })
 })
 
 describe('useUpdateStore checkForUpdates', () => {

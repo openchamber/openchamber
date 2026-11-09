@@ -547,6 +547,30 @@ describe('MCP OAuth sign-in', () => {
       expect(opencode.completed).toHaveLength(1);
     });
 
+    const fromPlainHttp = (app) => request(app).post(START).set('Host', '192.168.1.20:3000').send({});
+
+    it('starts a sign-in to paste for a browser on another machine over plain http', async () => {
+      const { app, config, opencode } = await build({ entry: remoteEntry() });
+      opencode.paste = true;
+
+      const response = await fromPlainHttp(app).expect(200);
+
+      expect(response.body.data.paste).toBe(true);
+      expect(new URL(response.body.data.url).searchParams.get('redirect_uri')).toMatch(/^http:\/\/127\.0\.0\.1:/);
+      expect(config.updates).toEqual([]);
+    });
+
+    it('generates an http redirect for a plain-http browser when OpenCode cannot take a pasted address', async () => {
+      const { app, config, opencode } = await build({ entry: remoteEntry() });
+
+      const response = await fromPlainHttp(app).expect(200);
+
+      expect(opencode.cancelled).toEqual(['attempt-1']);
+      expect(config.updates).toHaveLength(1);
+      expect(new URL(response.body.data.url).searchParams.get('redirect_uri'))
+        .toBe('http://192.168.1.20:3000/api/mcp/oauth/docs/callback');
+    });
+
     it.each([
       ['a remote browser', (app) => startFromRemote(app)],
       ['a browser on loopback', (app) => request(app).post(START).set('Host', 'localhost:3000').send({})],

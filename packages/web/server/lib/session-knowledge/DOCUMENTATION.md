@@ -73,7 +73,7 @@ some context; a failed send costs the user their message. `sync` never throws:
 it resolves `false` and the message goes out. One entry that fails to write does
 not hold back the others.
 
-While memory is on, every session is told when to save, even with an empty
+While memory is on, every session with the tool is told when to save, even with an empty
 store. The tool description alone is read only when the agent already means to
 call it, so agents told nothing here saved only when the user said "remember".
 The session hears "nothing is stored yet" only when both scopes loaded.
@@ -240,6 +240,12 @@ cases only, which is the honest expectation.
 there is no tool, the routes answer "disabled", sessions get no index, and the
 panel has no tab. It defaults to off, so nobody gets a store written about them
 without turning it on.
+
+Sessions get the index only while their agent has the tool
+(`isMemoryToolAvailable`): the switch is on and OpenChamber launched OpenCode.
+An OpenCode selected with `OPENCODE_HOST` or skip-start never gets the plugin,
+so its sessions are told nothing about memory. The panel and the routes still
+follow the switch alone, since the store is there either way.
 
 Pinned notes and plans are unaffected by the memory switch and remain scoped to
 the session that pinned them.

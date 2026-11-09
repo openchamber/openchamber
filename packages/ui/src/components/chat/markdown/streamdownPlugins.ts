@@ -45,7 +45,7 @@ const schema: NonNullable<Parameters<typeof rehypeSanitize>[0]> = {
   strip: ['script', 'style', 'iframe', 'object', 'embed', 'svg', 'math', 'form'],
   attributes: {
     '*': ['align', 'alt', 'checked', 'colSpan', 'height', 'media', 'open', 'rowSpan', 'start', 'title', 'width'],
-    a: ['href', 'id', 'ariaDescribedBy', 'ariaLabel', 'dataFootnoteRef', 'dataFootnoteBackref', 'dataOcLinkSource', 'dataOcReference'],
+    a: ['href', 'id', 'ariaDescribedBy', 'ariaLabel', 'dataFootnoteRef', 'dataFootnoteBackref', 'dataOcLinkSource', 'dataOcReference', 'dataOcGuestLink'],
     // `:` for GitLab's suggestion fences (`suggestion:-0+2`).
     code: [['className', /^language-[\w#+.:-]+$/, 'math-inline', 'math-display'], 'metastring'],
     img: ['src', 'srcSet', 'alt', 'dataOcMediaSource'],

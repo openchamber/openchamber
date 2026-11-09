@@ -394,3 +394,20 @@ describe('tracker scopes', () => {
     }
   });
 });
+
+describe('links scopes', () => {
+  test('round-trips the links scope, with and without link templates', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-guest-persist-'));
+    const file = extensionsPersistPath(dir);
+    try {
+      const scope = { links: { action: 'open', keys: ['DEMO'], origin: 'https://tasks.example.com', identifier: 'key-number', urls: ['/tasks/{id}'] } };
+      await writeExtensionStore(file, { paths: ['/a'], sources: {}, gitOrigins: {}, capabilityGrants: { alpha: ['links'] }, capabilityScopes: { alpha: scope } });
+      expect((await readExtensionStore(file)).capabilityScopes).toEqual({ alpha: scope });
+      const textOnly = { links: { action: 'open', keys: ['DEMO'], origin: null, identifier: null, urls: [] } };
+      await writeExtensionStore(file, { paths: ['/a'], sources: {}, gitOrigins: {}, capabilityGrants: { alpha: ['links'] }, capabilityScopes: { alpha: textOnly } });
+      expect((await readExtensionStore(file)).capabilityScopes).toEqual({ alpha: textOnly });
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+});

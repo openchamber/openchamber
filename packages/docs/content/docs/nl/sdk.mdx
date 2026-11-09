@@ -108,7 +108,7 @@ Een paneel tonen en de huidige sessie lezen vereist geen toestemming. Voor hande
 | `files` | bestanden in het geopende project lezen en schrijven via `readFile`, `writeFile`, `listDir` en `stat` met een relatief pad |
 | `model` | eenmalig tekst genereren met het Small Model via `generate`, buiten een sessie |
 
-Elf rechten worden automatisch toegevoegd: `network` bij een `integration`, `service` bij een `service`, `filesystem` bij `filesystem`-patronen, `origins` bij `origins`, `conversation` als een sessieactie berichten opvraagt, `transcript` als `sessionEvents` of `sessionControl` om `content` vraagt, `sessionControl` als uw service op sessies inwerkt, `sessionAnswers` als die namens de gebruiker de toestemmingsverzoeken en formulieren van de agent beantwoordt (`sessionControl: { answers: true }`), `instructions` als die aanvult wat agents lezen, en `skills` als u `contributes.skills` opgeeft, een map in het pakket met skills die elke agent bereiken zolang de extensie aanstaat. Zie [Acties, opdrachten en de badge](#acties-opdrachten-en-de-badge), [Sessiegebeurtenissen](/nl/sdk/host/#sessiegebeurtenissen) en [OpenChamber aanroepen](/nl/sdk/host/#openchamber-aanroepen-vanuit-uw-service). En `opencodePlugin` wanneer u `contributes.opencodePlugin` declareert (zie hieronder).
+Twaalf rechten worden automatisch toegevoegd: `network` bij een `integration`, `service` bij een `service`, `filesystem` bij `filesystem`-patronen, `origins` bij `origins`, `conversation` als een sessieactie berichten opvraagt, `transcript` als `sessionEvents` of `sessionControl` om `content` vraagt, `sessionControl` als uw service op sessies inwerkt, `sessionAnswers` als die namens de gebruiker de toestemmingsverzoeken en formulieren van de agent beantwoordt (`sessionControl: { answers: true }`), `instructions` als die aanvult wat agents lezen, en `skills` als u `contributes.skills` opgeeft, een map in het pakket met skills die elke agent bereiken zolang de extensie aanstaat. Zie [Acties, opdrachten en de badge](#acties-opdrachten-en-de-badge), [Sessiegebeurtenissen](/nl/sdk/host/#sessiegebeurtenissen) en [OpenChamber aanroepen](/nl/sdk/host/#openchamber-aanroepen-vanuit-uw-service). Verder `opencodePlugin` wanneer u `contributes.opencodePlugin` declareert (zie hieronder) en `links` wanneer u `contributes.links` declareert (zie [Links in chatberichten](#links-in-chatberichten)).
 
 Bij installatie ziet de gebruiker de volledige lijst en kan die goedkeuren of de extensie verwijderen. Vraagt een nieuwe versie meer, dan verschijnt het venster opnieuw. Een aanroep waarvoor een nog niet goedgekeurd recht nodig is, faalt met `NOT_GRANTED`.
 
@@ -130,6 +130,25 @@ Het goedkeuringsvenster krijgt een regel erbij, **Een plugin toevoegen aan OpenC
 Waar dat bestand OpenCode niet bereikt, zegt het scherm van de extensie dat en biedt het **Toevoegen aan globale configuratie** aan, wat uw map in de globale OpenCode-configuratie van de gebruiker schrijft als een vermelding die vanaf dan van de gebruiker is. Dat gebeurt wanneer OpenChamber de OpenCode waarmee het praat niet heeft gestart, of wanneer de omgeving van de server een eigen `OPENCODE_CONFIG` instelt (de plugin laadt dan bij de volgende start van OpenCode). Een OpenCode op een andere machine kan geen map van deze machine laden; het scherm zegt dat en biedt niets aan. Een plugin die niet laadt, meldt OpenCode onder Instellingen → Plugins zodra er een vermelding is; uw extensie blijft hoe dan ook werken. De installatie weigert een pakket waarvan de pluginmap ontbreekt of waarvan de `package.json` geen entry-bestand noemt.
 
 VS Code en de mobiele apps laden geen extensies, dus daar komt geen plugin aan. Een sessie in een geïsoleerde space draait zijn eigen OpenCode, dat de configuratie van de host nooit leest. De bedrijfsmodus behandelt de plugin als een lokale service: hij installeert alleen vanuit een repository die de beheerder heeft toegestaan. De SDK heeft een werkend voorbeeld, `examples/opencode-plugin`.
+
+## Links in chatberichten
+
+Een extensie kan zijn ID's en links in chatberichten klikbaar maken, zodat `DEMO-12` in een antwoord van een agent die taak in uw extensie opent in plaats van in een browsertabblad. Geef op wat herkend wordt en wat een klik doet:
+
+```json
+"links": {
+  "action": "open",
+  "identifier": { "keys": ["DEMO"] },
+  "urls": { "origin": "https://tasks.example.com", "identifier": "key-number", "item": ["/tasks/{id}"] }
+}
+```
+
+- `identifier.keys` zijn maximaal 8 letterlijke sleutels in hoofdletters. `DEMO` herkent `DEMO-12` alleen als heel woord; code, links, paden, woorden als `XDEMO-1` en versies als `DEMO-1.5` blijven tekst.
+- `urls` herkent links op één https-origin, die exact moet overeenkomen. `item` zijn linksjablonen in de vorm die de tracker zelf gebruikt: `{id}` één keer, in het pad of als `?name={id}`, en `{segment}` of `{segments+}` voor delen die variëren. `identifier` zegt hoe `{id}` eruitziet: `key-number`, `number` of `short-code`. U schrijft nooit een reguliere expressie; OpenChamber compileert de sjablonen.
+- `action: "open"` opent uw extensie met `ready.item` (of `onItem`) ingesteld op `{ kind: "link", identifier, url? }`: in uw dialoogvenster als `attach` `"dialog"` is, anders in het paneel in de balk. Vernauw het type met `isGuestLinkItem`. Hiervoor is `panel.entry` nodig. `url` is de aangeklikte link zonder fragment en zonder queryparameters behalve die van het sjabloon zelf; voor een ID in tekst is het de link die uw eerste sjabloon zonder `{segment}` oplevert, als u er een hebt en de ID de vorm heeft die `urls.identifier` opgeeft (`DEMO-12` vult nooit een `number`).
+- `action: "attach"` zet in plaats daarvan een chip met de ID in het invoerveld, en heeft een sjabloon zonder `{segment}` of `{segments+}` nodig, zodat de chip zijn link kan noemen; met `identifier.keys` kan `urls.identifier` geen `number` zijn.
+
+Herkenning werkt in antwoorden van de agent en in de eigen berichten van de gebruiker, niet in redeneringen, tooluitvoer of de Files-weergave, en een gekopieerd bericht houdt zijn tekst zoals die geschreven is. Een link die OpenChamber zelf leest, zoals een tracker-item, een issue of pull request van een repository of een commit, werkt zoals gewoonlijk, en een klik met een modificatietoets doet wat de browser er normaal mee doet. Met `links` komt het recht `links` erbij: het goedkeuringsvenster toont uw sleutels en origin en zegt wat een klik doet, en een versie die daar iets aan verandert, vraagt opnieuw om toestemming. `examples/tasks-demo` herkent `DEMO-2` en `https://example.com/tasks/DEMO-2`.
 
 ## Tekst genereren
 

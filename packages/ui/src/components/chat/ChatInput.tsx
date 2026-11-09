@@ -100,7 +100,10 @@ import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { MobileSheetRow } from '@/components/ui/MobileSheetList';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { ReferencePickerDialog } from '@/components/references/ReferencePickerDialog';
-import { useAttachReferences } from '@/components/references/useAttachReferences';
+import { useAttachReferences, useReadReferenceLink } from '@/components/references/useAttachReferences';
+import { trackerItemLabel } from '@/components/sourceBoard/openTrackerItem';
+import { useRepositoryUrlMatcher } from '@/lib/source-control/repositoryUrlMatcher';
+import { useTrackerUrlMatcher } from '@/lib/trackers/matchTrackerUrl';
 import { useRepositoryReferenceProvider } from '@/components/references/referenceSources';
 import {
     composerReferenceKey,
@@ -110,6 +113,7 @@ import {
     withoutComposerReference,
     type ComposerReference,
 } from './composer/composerReferences';
+import { findReferenceLinks, findWebLinks, referenceLinkChip, referenceLinksInText, withReferencesFromText } from './composer/referenceLinks';
 import {
     loadSessionLinkReference,
     sessionLinkText,
@@ -136,8 +140,8 @@ import { DraftPresetChips } from './DraftPresetChips';
 import type { ResolvedStarter } from './useDraftStarters';
 import { useChatSearchDirectory } from '@/hooks/useChatSearchDirectory';
 import { useGuestAttachItems, useGuestCommands } from '@/hooks/useGuestSurfaces';
-import { useGuestDialogStore } from '@/lib/guests/dialog-store';
-import { useGuestItemStore } from '@/lib/guests/item-store';
+import { guestAttachContextText } from '@/lib/guests/attach-text';
+import { openGuestWithItem, useGuestDialogStore } from '@/lib/guests/dialog-store';
 import { runGuestCommand } from '@/lib/guests/run-command';
 import { useGuestsStore } from '@/lib/guests/store';
 import { isGuestActive } from '@/lib/guests/capabilities';
@@ -152,6 +156,7 @@ import { selectAvailableSkillsForDirectory, useSkillsStore } from '@/stores/useS
 import { selectCommandsForComposer, useCommandsStore } from '@/stores/useCommandsStore';
 import { useComposerConfigDirectory } from '@/hooks/useComposerConfigDirectory';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
+import { useRetryModelPick } from '@/hooks/useRetryModelPick';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { usePermissionStore } from '@/stores/permissionStore';
 import { cyclePermissionMode } from './permissionAutoAccept';
@@ -605,6 +610,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         ? btwPendingComposerKey(currentSessionId)
         : btwSessionId;
     const isBtwActive = Boolean(btwComposerSessionId) && !btwPanel.collapsed;
+    useRetryModelPick(
+        isBtwActive ? btwSessionId : currentSessionId,
+        (isBtwActive ? btwDirectory : null) ?? currentSessionDirectoryForSync ?? currentDirectory ?? undefined,
+    );
     const isBtwPanelVisible = btwHoldsDock(btwPanel, hasPendingForm);
     const immediateBtwSubmitRef = React.useRef<{ identity: ChatDraftIdentity; text: string } | null>(null);
     const draftCaretModeRef = React.useRef({ btw: isBtwActive, atEnd: isBtwActive });
@@ -1094,16 +1103,19 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     // Read before a send consumes anything: a second Enter while the read is
     // out does nothing, and a link the read cannot resolve goes as the text it is.
     const sessionMentionReadRef = React.useRef(false);
+    // Pasted issue and PR links being read, by the link: a send waits for them too.
+    const referenceLinkReadsRef = React.useRef(new Map<string, Promise<unknown>>());
     const readSessionMentionsBeforeSend = React.useCallback(async (text: string): Promise<boolean> => {
         if (isVSCodeRuntime()) return true;
         const pending = findSessionLinks(text, sessionLinkOrigins)
             .map((range) => range.target)
             .filter((target) => !sessionMentionsRef.current.has(sessionLinkKey(target)));
-        if (pending.length === 0) return true;
+        const linkReads = findWebLinks(text).flatMap(({ link }) => referenceLinkReadsRef.current.get(link) ?? []);
+        if (pending.length === 0 && linkReads.length === 0) return true;
         if (sessionMentionReadRef.current) return false;
         sessionMentionReadRef.current = true;
         try {
-            await resolveSessionLinks(pending, true);
+            await Promise.all([pending.length > 0 ? resolveSessionLinks(pending, true) : null, ...linkReads]);
         } finally {
             sessionMentionReadRef.current = false;
         }
@@ -1134,6 +1146,54 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         return [key, { label: chip.label, title: chip.title, iconHref: `#oc-${chip.icon}` }] as const;
     })), [sessionMentions]);
 
+    // Issues, change requests and tracker items linked in the text, by the
+    // link as written. A pasted link is read like the picker's choice; the
+    // text decides what is sent, as with session links.
+    const referencePickerDirectory = currentSessionDirectoryForSync ?? currentDirectory ?? null;
+    const repositoryUrls = useRepositoryUrlMatcher();
+    const trackerUrls = useTrackerUrlMatcher();
+    const readReferenceLink = useReadReferenceLink(referencePickerDirectory);
+    const [referenceLinks, setReferenceLinks] = React.useState<ReadonlyMap<string, ComposerReference>>(() => new Map());
+    const referenceLinksRef = React.useRef(referenceLinks);
+    React.useLayoutEffect(() => {
+        referenceLinksRef.current = referenceLinks;
+    }, [referenceLinks]);
+    // The ref moves at once, so a send right after a read sees what it found.
+    const rememberReferenceLinks = React.useCallback((entries: ReadonlyArray<readonly [string, ComposerReference]>) => {
+        if (entries.length === 0) return;
+        const next = new Map(referenceLinksRef.current);
+        for (const [link, reference] of entries) next.set(link, reference);
+        referenceLinksRef.current = next;
+        setReferenceLinks(next);
+    }, []);
+    // Each paste reads afresh, as the picker does. One that cannot be read
+    // stays a plain link, and the toast says why.
+    const readPastedReferenceLinks = useStableHandler(async (text: string) => {
+        const pending = findReferenceLinks(text, repositoryUrls, trackerUrls);
+        if (pending.length === 0) return;
+        const reads = referenceLinkReadsRef.current;
+        const read = Promise.allSettled(pending.map(({ target }) => readReferenceLink(target)));
+        for (const { link } of pending) reads.set(link, read);
+        const results = await read;
+        for (const { link } of pending) if (reads.get(link) === read) reads.delete(link);
+        rememberReferenceLinks(results.flatMap((result, index) => (
+            result.status === 'fulfilled' ? [[pending[index].link, result.value] as const] : []
+        )));
+        const failed = results.flatMap((result, index) => (result.status === 'rejected' ? [{ index, reason: result.reason }] : []));
+        if (failed.length > 0) {
+            toast.error(t('references.picker.error.attachFailed', {
+                items: failed.map(({ index }) => trackerItemLabel(pending[index].link, repositoryUrls, trackerUrls) ?? pending[index].link).join(', '),
+                error: failed[0].reason instanceof Error ? failed[0].reason.message : String(failed[0].reason),
+            }));
+        }
+    });
+    const referenceLinksIn = React.useCallback((text: string): ComposerReference[] => (
+        isVSCodeRuntime() ? [] : referenceLinksInText(text, referenceLinksRef.current)
+    ), []);
+    const referenceLinkChips = React.useMemo(() => new Map([...referenceLinks].map(([link, reference]) => (
+        [link, referenceLinkChip(reference, repositoryUrls)] as const
+    ))), [referenceLinks, repositoryUrls]);
+
     /**
      * Everything the prompt language needs to resolve references. Rebuilt only
      * when a registry changes, so typing does not churn the tokenizer input.
@@ -1158,7 +1218,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         fileIconVariant: currentTheme.metadata.variant === 'light' ? 'light' : 'dark',
         sessionLinkChips,
         sessionLinkOrigins,
-    }), [attachmentFilenames, confirmedMentionsRevision, currentTheme.metadata.variant, inputMode, knownAgentNames, knownSkillNames, knownSlashNamesWithGuests, knownSnippetTriggers, mentionDismissal, sessionLinkChips, sessionLinkOrigins]);
+        referenceLinkChips,
+    }), [attachmentFilenames, confirmedMentionsRevision, currentTheme.metadata.variant, inputMode, knownAgentNames, knownSkillNames, knownSlashNamesWithGuests, knownSnippetTriggers, mentionDismissal, referenceLinkChips, sessionLinkChips, sessionLinkOrigins]);
 
     const sanitizeAttachmentsForSend = React.useCallback(
         (files: readonly AttachedFile[] | undefined): AttachedFile[] => [...(files ?? [])]
@@ -1794,12 +1855,14 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         const draftTarget = inlineDraftTarget;
         const drafts = draftTarget ? consumeDrafts(draftTarget) : [];
         const linked = linkedReferences;
+        // The chips and the items the text links; only the chips come back on a failure, the text brings its links.
+        const linkedToQueue = withReferencesFromText(linked, referenceLinksIn(messageToQueue));
         // Queued context is delivered as captured, so comment snippets expand now.
         const expandedDrafts = await expandCommentSnippets(drafts, useSnippetsStore.getState().expandText);
         const context = buildComposerContext({
             inlineComments: expandedDrafts,
             syntheticTexts: syntheticParts.map((part) => part.text),
-            references: [...linked.map(toContextReference), ...sessionMentionsIn(messageToQueue)],
+            references: [...linkedToQueue.map(toContextReference), ...sessionMentionsIn(messageToQueue)],
         }, skillInstruction);
         const attachmentsToQueue = [...composerAttachments, ...mentionAttachments];
         // An armed goal belongs to this message: it leaves with it and starts
@@ -1878,11 +1941,11 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         }
         if (inputMode !== 'shell') settleModelPick();
         void resumeAfterQueue().catch(console.warn);
-        recordLinkedReferences(queueSessionId, queueTarget.directory, linked);
-    }, [getCurrentInputSnapshot, currentSessionId, messageQueueTarget, inputMode, hasDrafts, guestCommands, attachedFiles, sanitizeAttachmentsForSend, prepareReadOnSendMentions, extractInlineFileMentions, mentionableAgents, availableSkills, consumePendingSyntheticParts, mailboxTarget, inlineDraftTarget, consumeDrafts, linkedReferences, scrollToLatest, clearAttachedFiles, chatDraftIdentity, setLinkedReferencesFor, updateLinkedReferencesFor, isMobile, isMobileCommentOpen, addToQueue, currentProviderId, currentModelId, currentAgentName, currentVariant, t, readSessionMentionsBeforeSend, sessionMentionsIn]);
+        recordLinkedReferences(queueSessionId, queueTarget.directory, linkedToQueue);
+    }, [getCurrentInputSnapshot, currentSessionId, messageQueueTarget, inputMode, hasDrafts, guestCommands, attachedFiles, sanitizeAttachmentsForSend, prepareReadOnSendMentions, extractInlineFileMentions, mentionableAgents, availableSkills, consumePendingSyntheticParts, mailboxTarget, inlineDraftTarget, consumeDrafts, linkedReferences, scrollToLatest, clearAttachedFiles, chatDraftIdentity, setLinkedReferencesFor, updateLinkedReferencesFor, isMobile, isMobileCommentOpen, addToQueue, currentProviderId, currentModelId, currentAgentName, currentVariant, t, readSessionMentionsBeforeSend, sessionMentionsIn, referenceLinksIn]);
 
     /** Put the context a queued message was captured with back on the composer chips. */
-    const restoreQueuedContext = React.useCallback((context: readonly QueuedContextPart[]) => {
+    const restoreQueuedContext = React.useCallback((context: readonly QueuedContextPart[], content: string) => {
         const synthetic: SyntheticContextPart[] = [];
         const restored: ComposerReference[] = [];
         const mentions: SessionReference[] = [];
@@ -1960,15 +2023,19 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                 }
             }
         }
-        if (restored.length > 0) {
-            updateLinkedReferences((current) => withComposerReferences(current, restored));
+        // An item the text links goes back as that link's chip, the rest above the text.
+        const textLinks = new Set(findWebLinks(content).map(({ link }) => link));
+        const chips = restored.filter((reference) => !textLinks.has(reference.url));
+        if (chips.length > 0) {
+            updateLinkedReferences((current) => withComposerReferences(current, chips));
         }
+        rememberReferenceLinks(restored.flatMap((reference) => (textLinks.has(reference.url) ? [[reference.url, reference] as const] : [])));
         rememberSessionMentions(mentions);
         if (synthetic.length > 0) {
             const pending = useInputStore.getState().getPendingSyntheticParts(mailboxTarget) ?? [];
             useInputStore.getState().setPendingSyntheticParts([...pending, ...synthetic], mailboxTarget);
         }
-    }, [inlineDraftTarget, mailboxTarget, rememberSessionMentions, updateLinkedReferences]);
+    }, [inlineDraftTarget, mailboxTarget, rememberReferenceLinks, rememberSessionMentions, updateLinkedReferences]);
 
     // Editing takes the message out of the queue, so sending it again queues
     // one message, not a copy.
@@ -1985,7 +2052,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             setMessage(queued.content);
             // Back in the composer, the message is armed again as it was queued.
             if (queued.goal) useSessionGoalArmStore.getState().setArmed(true, queued.goal.objective ?? null);
-            restoreQueuedContext(queued.context ?? []);
+            restoreQueuedContext(queued.context ?? [], queued.content);
             setTimeout(() => {
                 composerRef.current?.focus();
             }, 0);
@@ -2007,7 +2074,6 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     const openGitHubPicker = React.useCallback(() => {
         setReferencePicker({ source: 'repository' });
     }, []);
-    const referencePickerDirectory = currentSessionDirectoryForSync ?? currentDirectory ?? null;
     const repositoryProvider = useRepositoryReferenceProvider(isVSCodeRuntime() ? null : referencePickerDirectory);
     const repositoryDescriptor = useSourceControlProvider(repositoryProvider);
     const descriptorOf = useSourceControlDescriptorOf();
@@ -2447,6 +2513,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         // below skips, so their own words expand here.
         const expandedDrafts = await expandCommentSnippets(drafts, useSnippetsStore.getState().expandText);
 
+        // The chips, then the items the text links that are not chips already.
+        const sentComposerText = !queuedOnly && inputSnapshot.hasContent ? inputSnapshot.message : '';
+        const linkedReferencesToSend = withReferencesFromText(linkedReferences, referenceLinksIn(sentComposerText));
+
         const outgoing = buildOutgoingMessage({
             queued: queuedMessagesToSend,
             composerText: !queuedOnly && inputSnapshot.hasContent ? inputSnapshot.message : null,
@@ -2456,7 +2526,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                 ...buildBtwSyntheticTexts({ isBtwActive, isPromotedBtwSession }),
                 ...(syntheticParts?.map((part) => part.text) ?? []),
             ],
-            references: isBtwActive ? [] : linkedReferences.map(toContextReference).concat(
+            references: isBtwActive ? [] : linkedReferencesToSend.map(toContextReference).concat(
                 !queuedOnly && inputSnapshot.hasContent ? sessionMentionsIn(inputSnapshot.message) : [],
             ),
         }, {
@@ -2682,13 +2752,13 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                     ?? (linkTargetSessionId ? sessionState.getDirectoryForSession(linkTargetSessionId) : null)
                     ?? currentDirectory;
             if (linkTargetSessionId) {
-                recordLinkedReferences(linkTargetSessionId, linkTargetDirectory, linkedReferences);
+                recordLinkedReferences(linkTargetSessionId, linkTargetDirectory, linkedReferencesToSend);
             }
             // A session that starts with a tracker item attached reports itself
             // on that item (the tracker's Session comments, where it has them),
             // however it was started: a draft, a worktree made from the item.
             if (!currentSessionId && linkTargetSessionId) {
-                for (const reference of linkedReferences) {
+                for (const reference of linkedReferencesToSend) {
                     if (reference.kind !== 'tracker-item') continue;
                     void postTrackerSessionStarted(runtimeTrackers, reference.provider, {
                         sessionId: linkTargetSessionId,
@@ -3581,6 +3651,11 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             const links = findSessionLinks(e.clipboardData.getData('text'), sessionLinkOrigins);
             if (links.length > 0) void resolveSessionLinks(links.map((range) => range.target), true);
         }
+        // Issue and PR links are read only when the text lands in the composer,
+        // not when a large paste goes as a file.
+        const readLinksOfPaste = (text: string) => {
+            if (!isVSCodeRuntime() && inputMode === 'normal' && !isBtwActive) void readPastedReferenceLinks(text);
+        };
 
         // Pasting a URL over a selection wraps it as a markdown link:
         // [selected text](pasted url).
@@ -3659,6 +3734,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                 }
                 const sessionId = !isVSCodeRuntime() && inputMode === 'normal' ? bareSessionId(pastedText) : null;
                 if (sessionId) pastedSessionIds.expect(sessionId);
+                readLinksOfPaste(pastedText);
                 return;
             }
 
@@ -3673,6 +3749,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                     pastedText,
                     getFileMentionInputSourceForInsertedText(pastedText),
                 );
+                readLinksOfPaste(pastedText);
             };
 
             const attachAsFile = async (candidate: LargeTextPasteCandidate | null = null) => {
@@ -3792,7 +3869,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
 
         e.preventDefault();
         await attachFilesWithCitation([...imageFiles, ...otherFiles], pastedText);
-    }, [addAttachedFile, attachFilesWithCitation, currentSessionId, inputMode, largeTextPasteBehavior, largeTextPasteGesture, readLargeTextPasteSnapshot, markFileMentionPasteSuppression, message, mobileShell, newSessionDraftOpen, insertTextAtSelection, setMessage, t, updateAutocompleteState, resolveSessionLinks, sessionLinkOrigins, pastedSessionIds]);
+    }, [addAttachedFile, attachFilesWithCitation, currentSessionId, inputMode, largeTextPasteBehavior, largeTextPasteGesture, readLargeTextPasteSnapshot, markFileMentionPasteSuppression, message, mobileShell, newSessionDraftOpen, insertTextAtSelection, setMessage, t, updateAutocompleteState, resolveSessionLinks, sessionLinkOrigins, pastedSessionIds, isBtwActive, readPastedReferenceLinks]);
 
     // Android commits an image through the IME instead of the page (see nativeImagePaste).
     React.useEffect(() => {
@@ -4326,9 +4403,12 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         const guest = guestAttachItems.find((entry) => entry.id === issue.providerId);
         // Only an extension that declared a dialog gets one; everything else
         // (panel mode, no attach declared) opens the rail with the item.
+        // The panel opens and stays open; a second chip click on an open panel
+        // must not toggle it closed with the item still parked.
         if (guest?.mode !== 'dialog') {
-            useGuestItemStore.getState().setPendingItem(issue.providerId, issue);
-            useUIStore.getState().openContextSurface(currentDirectory || '', pluginModeFromId(issue.providerId));
+            if (!openGuestWithItem({ id: issue.providerId, attach: undefined }, issue, currentDirectory)) {
+                toast.info(t('chat.guestLink.noProject', { name: installed.name }));
+            }
             return;
         }
         setAttachDialogItem(issue);
@@ -4336,8 +4416,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     }, [currentDirectory, guestAttachItems, t]);
     const handleGuestAttach = React.useCallback((issue: AttachIssueRequest) => {
         if (isBtwActive) return;
-        const contextText = issue.text
-            ?? `Attached ${issue.providerId} ${issue.id}: ${issue.title}\n${issue.url}`;
+        const contextText = guestAttachContextText(issue);
         const reference: ComposerReference = {
             kind: 'guest',
             providerId: issue.providerId,

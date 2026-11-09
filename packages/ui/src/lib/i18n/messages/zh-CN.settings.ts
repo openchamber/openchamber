@@ -1104,7 +1104,7 @@ export const settingsDict = {
   'settings.openchamber.messageSearch.actions.delete': '删除索引',
   'settings.openchamber.messageSearch.actions.working': '处理中…',
   'settings.openchamber.sessionWork.title': '进行中的会话',
-  'settings.openchamber.sessionWork.info': '侧边栏中位于聊天下方的区块，用于显示正在处理的会话。发送消息后，会话就会显示在这里。默认情况下，会话只显示在此区块中。若要同时在所属项目下显示，请在侧边栏菜单中开启“在项目下也显示进行中的工作”。VS Code 始终会在项目下显示会话。点击对勾或使用会话菜单可将会话标记为完成。当某一轮看起来像工作的结尾时，对勾会变灰作为提示。',
+  'settings.openchamber.sessionWork.info': '侧边栏中位于聊天下方的区块，用于显示正在处理的会话。发送消息后，会话就会显示在这里。默认情况下，会话只显示在此区块中。若要同时在所属项目下显示，请在侧边栏菜单中打开“自定义分区…”，并在“进行中”一行开启“也在项目中”。在手机上，请在侧边栏菜单中开启“在项目下也显示进行中的工作”。VS Code 始终会在项目下显示会话。点击对勾或使用会话菜单可将会话标记为完成。当某一轮看起来像工作的结尾时，对勾会变灰作为提示。',
   'settings.openchamber.sessionWork.field.enabled': '显示进行中的会话',
   'settings.openchamber.sessionRetention.archivedTooltip': '删除超过保留期限的已归档会话。保留最近归档的 5 个会话、当前打开的会话、运行中的会话和已置顶的会话。如果删除父会话会同时删除受保护的子会话，则保留父会话。',
   'settings.openchamber.sessionRetention.tooltip': '根据最后活动时间归档或删除未归档的会话。保留最近 5 个会话、当前打开的会话、运行中的会话和已置顶的会话。“进行中”区块里的会话也会保留，除非你选择包含它们。已归档的会话会保留。如果删除父会话会同时删除受保护的子会话，则保留父会话。',

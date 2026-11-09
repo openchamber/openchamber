@@ -51,6 +51,7 @@ Showing a panel and reading which project and session are open needs no permissi
 - **Start sessions and send messages on its own**: its local service does this with no window open, which costs tokens and can run tools.
 - **Add to what agents read**: text in the instructions of your sessions, and skills offered to every agent while the extension is on.
 - **Add a plugin to OpenCode**: the package's plugin is loaded into your OpenCode while the extension is on. Plugin code runs inside OpenCode with your full access, like a local service, so allow it only if you trust the author.
+- **Recognise its links in chats**: identifiers like `DEMO-12` and links to the extension's site become clickable in your chat messages. The dialog lists which ones and says whether a click opens them in the extension or attaches them to your message. Links OpenChamber already knows, such as GitHub pull requests and Linear issues, keep their usual behavior.
 
 A local service can also keep running while OpenChamber runs, or wake on a schedule. The dialog says so under **Run a local service**, and it says when what you type after `@` goes to the service. An extension can add its own rows to the `@` menu and its own blocks to agent replies. Pausing the extension takes all of this away.
 

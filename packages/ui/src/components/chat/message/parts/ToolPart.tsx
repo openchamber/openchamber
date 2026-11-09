@@ -61,6 +61,7 @@ import {
     readTaskSessionIdFromRecord,
     resolveRunningTaskChildSessionId,
 } from './taskToolModel';
+import { fenceUiBlocks } from '../../uiBlocks/taggedBlocks';
 import { areRenderRelevantPartsEqual } from '../renderCompare';
 import { HoverTooltip } from '@/components/ui/row-tooltip';
 import { useI18n } from '@/lib/i18n';
@@ -1449,7 +1450,8 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
         if (isSubagentTool(part.tool) && hasStringOutput) {
             return renderScrollableBlock(
                 <div className="w-full min-w-0">
-                    <SimpleMarkdownRenderer content={prepareTaskToolOutput(outputString)} singleTilde={false} variant="tool" onShowPopup={onShowPopup} />
+                    {/* The subagent's reply: its UI blocks draw as in a reply, with nothing to answer. */}
+                    <SimpleMarkdownRenderer content={fenceUiBlocks(prepareTaskToolOutput(outputString))} singleTilde={false} variant="tool" onShowPopup={onShowPopup} uiBlocks />
                 </div>
             );
         }

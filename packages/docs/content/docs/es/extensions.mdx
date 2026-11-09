@@ -55,6 +55,7 @@ Mostrar un panel y leer qué proyecto y sesión están abiertos no necesita perm
 - **Iniciar sesiones y enviar mensajes por sí sola**: su servicio local lo hace sin ninguna ventana abierta, lo que gasta tokens y puede ejecutar herramientas.
 - **Añadir a lo que leen los agentes**: texto en las instrucciones de tus sesiones y skills que se ofrecen a todos los agentes mientras la extensión esté activa.
 - **Añadir un plugin a OpenCode**: el plugin del paquete se carga en tu OpenCode mientras la extensión esté activa. El código del plugin se ejecuta dentro de OpenCode con todo tu acceso, como un servicio local, así que permítelo solo si confías en el autor.
+- **Reconocer sus enlaces en los chats**: identificadores como `DEMO-12` y enlaces al sitio de la extensión se vuelven clicables en tus mensajes del chat. El diálogo indica cuáles y dice si un clic los abre en la extensión o los adjunta a tu mensaje. Los enlaces que OpenChamber ya conoce, como los pull requests de GitHub y las incidencias de Linear, mantienen su comportamiento habitual.
 
 Un servicio local también puede seguir funcionando mientras OpenChamber esté en marcha, o activarse según un horario. El diálogo lo dice bajo **Ejecutar un servicio local**, e indica cuándo lo que escribes después de `@` va al servicio. Una extensión puede añadir sus propias filas al menú `@` y sus propios bloques a las respuestas del agente. Pausar la extensión quita todo esto.
 
