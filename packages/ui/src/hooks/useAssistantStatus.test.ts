@@ -312,6 +312,16 @@ describe('createParsedStatus', () => {
             expect(english(statusOf([script('linear_list_issues')]).status)).toBe('using linear list issues');
             expect(english(statusOf([tool('1', 'jev-route')]).status)).toBe('using jev route');
         });
+
+        test('a secret run waits on the user only while its card waits, then runs its command', () => {
+            const run: Part = {
+                id: '1', sessionID: 'ses_1', messageID: 'msg_1', type: 'tool', callID: 'call_1', tool: 'openchamber_secret',
+                state: { status: 'running', input: { action: 'secret.run', parameters: { program: 'sh' } }, time: { start: 1 } },
+            };
+            const statusWhile = (waiting: string[]) => english(createParsedStatus([run], 'ses_1:msg_1', [], new Set(waiting)).status);
+            expect(statusWhile(['call_1'])).toBe(english({ key: 'chat.agentStatus.waitingAnswer' }));
+            expect(statusWhile([])).toBe('running a command with secrets');
+        });
     });
 });
 

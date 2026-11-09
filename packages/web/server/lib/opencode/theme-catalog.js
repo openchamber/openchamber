@@ -8,16 +8,21 @@ const identifier = z.string().min(1).max(160).regex(/^[\w-]+$/);
 const version = z.string().min(1).max(80).regex(/^[\w.+-]+$/);
 const settings = z.object({ foreground: z.string().optional() });
 const tokenRules = z.array(z.object({ scope: z.union([z.string(), z.array(z.string())]).optional(), settings }));
+const colorValue = z.string().nullable();
 const sourceSchema = z.object({
   name: z.string().optional(), type: z.string().optional(), include: z.string().optional(),
-  colors: z.record(z.string(), z.string().nullable()).default({}),
+  // VS Code ignores a color it cannot read (GitHub Theme ships an array for one);
+  // such entries are dropped so the rest of the theme still loads.
+  colors: z.record(z.string(), z.unknown()).default({}).transform((colors) => Object.fromEntries(
+    Object.entries(colors).filter(([, value]) => colorValue.safeParse(value).success),
+  )),
   tokenColors: z.union([z.string(), tokenRules]).optional(),
   semanticHighlighting: z.boolean().optional(),
   semanticTokenColors: z.record(z.string(), z.union([z.string(), settings])).optional(),
 });
 const extensionSchema = z.object({
   namespace: identifier, name: identifier, version,
-  displayName: z.string().optional(), files: z.object({ icon: z.string().optional() }),
+  displayName: z.string().optional(), description: z.string().nullish(), files: z.object({ icon: z.string().optional() }),
 });
 const detailSchema = extensionSchema.extend({ files: z.object({ download: z.string(), sha256: z.string() }) });
 const manifestSchema = z.object({
@@ -27,7 +32,22 @@ const manifestSchema = z.object({
     uiTheme: z.enum(['vs', 'vs-dark', 'hc-black', 'hc-light']).optional(),
   })).min(1).max(40) }),
 });
-const querySchema = z.object({ query: z.string().trim().min(1).max(160) });
+// An empty query asks for the most downloaded themes, which the catalog opens with.
+const querySchema = z.object({ query: z.string().trim().max(160) });
+const POPULAR_FETCH_SIZE = 60;
+const RESULT_SIZE = 24;
+// The Themes category also holds what is not a color theme to pick: icon and
+// product-icon themes, VS Code's own built-ins, and tools that ship a theme on
+// the side (PowerShell). A popular entry names an icon nowhere and says it is
+// a theme or speaks of colors.
+const iconThemeName = /\bicons?\b/i;
+const colorThemeWords = /theme|colou?r|palette|\bdark\b|\blight\b/i;
+const isPopularColorTheme = (extension) => {
+  const name = extension.displayName || extension.name;
+  return extension.namespace !== 'vscode'
+    && !iconThemeName.test(name)
+    && colorThemeWords.test(`${name} ${extension.description ?? ''}`);
+};
 const packageSchema = z.object({ namespace: identifier, name: identifier, version });
 const hosts = new Set(['open-vsx.org', 'openvsx.eclipsecontent.org']);
 
@@ -87,10 +107,15 @@ export function createThemeCatalog({ fetchImpl = fetch } = {}) {
   const search = async (input, signal = AbortSignal.timeout(15000)) => {
     const { query } = querySchema.parse(input);
     const url = new URL('https://open-vsx.org/api/-/search');
-    url.search = new URLSearchParams({ query, category: 'Themes', size: '24', sortBy: 'relevance' }).toString();
+    url.search = new URLSearchParams(query
+      ? { query, category: 'Themes', size: String(RESULT_SIZE), sortBy: 'relevance' }
+      : { category: 'Themes', size: String(POPULAR_FETCH_SIZE), sortBy: 'downloadCount', sortOrder: 'desc' }).toString();
     const bytes = await download(url.href, 1024 * 1024, signal, fetchImpl);
-    const result = z.object({ extensions: z.array(extensionSchema).max(24) }).parse(JSON.parse(bytes.toString('utf8')));
-    return result.extensions.map((extension) => ({
+    const result = z.object({ extensions: z.array(extensionSchema).max(POPULAR_FETCH_SIZE) }).parse(JSON.parse(bytes.toString('utf8')));
+    const extensions = query
+      ? result.extensions
+      : result.extensions.filter(isPopularColorTheme).slice(0, RESULT_SIZE);
+    return extensions.map((extension) => ({
       namespace: extension.namespace, name: extension.name, version: extension.version,
       label: extension.displayName || extension.name,
       icon: extension.files.icon && URL.canParse(extension.files.icon) && hosts.has(new URL(extension.files.icon).hostname)

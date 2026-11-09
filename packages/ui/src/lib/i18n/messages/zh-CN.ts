@@ -16,6 +16,8 @@ import { htmlRenderI18n } from './html-render.i18n';
 import { documentToolbarI18n } from './document-toolbar.i18n';
 import { uiBlocksI18n } from './ui-blocks.i18n';
 import { updateDialogCanaryI18n } from './update-dialog-canary.i18n';
+import { aboutReleaseNotesI18n } from './about-release-notes.i18n';
+import { updateCheckErrorsI18n } from './update-check-errors.i18n';
 import { secretRequestI18n } from './secret-request.i18n';
 import { sessionNoticesI18n } from './session-notices.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
@@ -26,6 +28,7 @@ import { heapSnapshotI18n } from './heap-snapshot.i18n';
 import { consoleBudgetsI18n } from './console-budgets.i18n';
 import { imageToolI18n } from './image-tool.i18n';
 import { usageToolI18n } from './usage-tool.i18n';
+import { openchamberToolsLayoutI18n } from './openchamber-tools-layout.i18n';
 import { openchamberToolOutputI18n } from './openchamber-tool-output.i18n';
 import { opencodeToolOutputI18n } from './opencode-tool-output.i18n';
 import { agentStatusI18n } from './agent-status.i18n';
@@ -194,6 +197,8 @@ export const dict: Record<I18nKey, string> = {
   ...documentToolbarI18n['zh-CN'],
   ...uiBlocksI18n['zh-CN'],
   ...updateDialogCanaryI18n['zh-CN'],
+  ...aboutReleaseNotesI18n['zh-CN'],
+  ...updateCheckErrorsI18n['zh-CN'],
   ...secretRequestI18n['zh-CN'],
   ...sessionNoticesI18n['zh-CN'],
   ...usageStatsI18n['zh-CN'],
@@ -204,6 +209,7 @@ export const dict: Record<I18nKey, string> = {
   ...consoleBudgetsI18n['zh-CN'],
   ...imageToolI18n['zh-CN'],
   ...usageToolI18n['zh-CN'],
+  ...openchamberToolsLayoutI18n['zh-CN'],
   ...openchamberToolOutputI18n['zh-CN'],
   ...opencodeToolOutputI18n['zh-CN'],
   ...agentStatusI18n['zh-CN'],
@@ -3714,6 +3720,9 @@ export const dict: Record<I18nKey, string> = {
   'chat.workStatus.breakdown.skillCountPlural': '{count} 个技能',
   'chat.workStatus.breakdown.mcpCountSingle': '{count} 个 MCP',
   'chat.workStatus.breakdown.mcpCountPlural': '{count} 个 MCP',
+  'chat.workStatus.breakdown.planCountSingle': '{count} 个计划',
+  'chat.workStatus.breakdown.planCountPlural': '{count} 个计划',
+  'chat.workStatus.linkedPlans.open': '打开计划 {title}',
   'chat.workStatus.sections.open': '选择板块',
   'chat.workStatus.sections.dialogTitle': '面板板块',
   'chat.workStatus.sections.reorder': '拖动 {label} 以重新排序',

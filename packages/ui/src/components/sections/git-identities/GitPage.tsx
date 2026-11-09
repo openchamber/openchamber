@@ -125,6 +125,7 @@ export const GitPage: React.FC = () => {
       <SettingsPageLayout
         title={t('settings.page.git.title')}
         showSaveStatus
+        namedBySidebar
         className="px-4 @xl:px-6 @3xl:px-12"
       >
         <SettingsSection
@@ -340,7 +341,7 @@ const IdentityRow: React.FC<IdentityRowProps> = ({
           <Button
             size="icon"
             variant="ghost"
-            className={cn('shrink-0 opacity-100 transition-opacity', isMobile ? 'size-9' : 'h-6 w-6 md:opacity-0 md:group-hover:opacity-100')}
+            className={cn('shrink-0 opacity-100 transition-opacity pointer-fine:hidden', isMobile ? 'size-9' : 'h-6 w-6 md:opacity-0 md:group-hover:opacity-100')}
             onClick={(e) => e.stopPropagation()}
           >
             <Icon name="more" className={isMobile ? 'size-4' : 'h-3.5 w-3.5'} />

@@ -433,7 +433,7 @@ const DebugPanel: React.FC<DebugPanelProps> = ({ onClose }) => {
                   }}
                 >
                   <div className="flex min-w-0 flex-1 items-center gap-2">
-                    <span className="truncate text-[var(--surface-foreground)]">{stat.title}</span>
+                    <span dir="auto" className="truncate text-[var(--surface-foreground)]">{stat.title}</span>
                     {stat.isStreaming ? <StreamingIcon /> : null}
                     {stat.isZombie ? <span className="text-[var(--status-warning)]">!</span> : null}
                   </div>

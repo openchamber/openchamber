@@ -369,19 +369,32 @@ export function useOrientation(): Orientation {
 }
 
 /**
- * Width below which the workspace cannot become a side panel: the sessions
- * sidebar (~320) plus the panel (~380) plus a chat column that is still worth
- * reading. Unfolded book foldables land under this even "landscape", so they
- * keep the full-cover drawer in both orientations — which is the whole point,
- * their wide side is barely wider than a tablet's narrow one.
+ * Width from which both side panels fit at once: the sessions sidebar (~320)
+ * plus the workspace panel (~380) plus a chat column that is still worth
+ * reading.
  */
 const WORKSPACE_PANEL_MIN_WIDTH_PX = 1000;
+
+/**
+ * Width from which ONE side panel fits beside a readable chat: an unfolded
+ * iPhone Duo (951), a 13-inch iPad in portrait (1032), a wide book foldable.
+ * Narrower tablets (an iPad mini, Air or 11-inch Pro in portrait, 744 to 834)
+ * would leave the chat under ~510 with a panel open, so they keep the sidebar
+ * as a guest and the workspace as a full-cover drawer.
+ */
+const ONE_PANEL_MIN_WIDTH_PX = 900;
 
 export interface TabletLayout {
   /** Sessions become a persistent sidebar, dropdowns become anchored popovers. */
   enabled: boolean;
   /** There is room for the workspace beside the chat instead of over it. */
   roomyForPanels: boolean;
+  /**
+   * There is room for one side panel at a time: the sessions sidebar stays
+   * and the workspace is a side panel too, but opening one puts the other away.
+   * False where `roomyForPanels` is true.
+   */
+  roomyForOnePanel: boolean;
 }
 
 /**
@@ -405,22 +418,26 @@ let keyboardFreeLayout: TabletLayout | null = null;
 const keyboardIsUp = (): boolean => {
   const doc = globalThis.document;
   if (!doc) return false;
+  // SAFETY: activeElement is an Element, and every element that can hold the
+  // soft keyboard here is an HTMLElement, which is where these flags live.
+  const active = doc.activeElement as HTMLElement | null;
+  const editing = active !== null
+    && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.isContentEditable);
+  // No focused field, no keyboard. The class can outlive the keyboard when it
+  // goes away without the hide event (seen when a foldable switched screens),
+  // and trusting it alone held a tablet layout on the folded phone.
+  if (!editing) return false;
   if (doc.documentElement.classList.contains('oc-keyboard-open')) return true;
   // The bridge event that adds that class and the native resize race each
   // other, so a focused field whose viewport just shrank in the shell is the
   // same keyboard. Outside the shell the layout viewport never shrinks for a
   // keyboard, so this cannot mistake a browser window resize for one.
   if (!isCapacitorApp()) return false;
-  // SAFETY: activeElement is an Element, and every element that can hold the
-  // soft keyboard here is an HTMLElement, which is where these flags live.
-  const active = doc.activeElement as HTMLElement | null;
-  const editing = active !== null
-    && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.isContentEditable);
-  return editing && keyboardFreeHeight !== null && window.innerHeight < keyboardFreeHeight;
+  return keyboardFreeHeight !== null && window.innerHeight < keyboardFreeHeight;
 };
 
 export const readTabletLayout = (): TabletLayout => {
-  if (typeof window === 'undefined') return { enabled: false, roomyForPanels: false };
+  if (typeof window === 'undefined') return { enabled: false, roomyForPanels: false, roomyForOnePanel: false };
   if (keyboardFreeLayout && keyboardIsUp()) return keyboardFreeLayout;
   const width = window.innerWidth;
   const height = window.innerHeight;
@@ -429,9 +446,11 @@ export const readTabletLayout = (): TabletLayout => {
   // Over / Split View, and a device we KNOW is a tablet should not flip to the
   // phone layout because it was given a narrow slice.
   const enabled = isIPadApp() || Math.min(width, height) >= TABLET_LAYOUT_MIN_SHORT_SIDE_PX;
+  const roomyForPanels = enabled && width > height && width >= WORKSPACE_PANEL_MIN_WIDTH_PX;
   keyboardFreeLayout = {
     enabled,
-    roomyForPanels: enabled && width > height && width >= WORKSPACE_PANEL_MIN_WIDTH_PX,
+    roomyForPanels,
+    roomyForOnePanel: enabled && !roomyForPanels && width >= ONE_PANEL_MIN_WIDTH_PX,
   };
   return keyboardFreeLayout;
 };
@@ -454,7 +473,9 @@ export function useTabletLayout(): TabletLayout {
       frame = undefined;
       const next = readTabletLayout();
       setLayout((current) => (
-        current.enabled === next.enabled && current.roomyForPanels === next.roomyForPanels
+        current.enabled === next.enabled
+          && current.roomyForPanels === next.roomyForPanels
+          && current.roomyForOnePanel === next.roomyForOnePanel
           ? current
           : next
       ));

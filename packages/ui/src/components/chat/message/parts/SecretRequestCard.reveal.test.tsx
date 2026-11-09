@@ -23,9 +23,11 @@ Object.assign(globalThis, {
 
 mock.module('@/lib/i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }));
 mock.module('@/sync/sync-context', () => ({ useSessionDirectory: () => '/project' }));
-mock.module('@/lib/secretRequestAnswer', () => ({ answerSecretRequest: async () => undefined }));
+mock.module('@/lib/secretRequestAnswer', () => ({ answerSecretRequest: async () => undefined, readSecretRunFields: async () => null }));
 mock.module('@/components/ui', () => ({ toast: { error: () => undefined } }));
 mock.module('@/components/chat/lib/scroll/timelineScrollIntent', () => ({ dispatchPageWaiting: () => undefined }));
+mock.module('@/stores/useUIStore', () => ({ useUIStore: () => false }));
+mock.module('./ToolPart', () => ({ default: () => null }));
 
 const { createRoot } = await import('react-dom/client');
 const { SecretRequestCard } = await import('./SecretRequestCard');
@@ -43,7 +45,7 @@ test('the eye reveals the typed value and hides it again', async () => {
     callID: 'call-1',
     state: { status: 'pending', input: {}, raw: '' },
   };
-  const request: RequestedSecret = { label: 'API key', reason: 'Needed for the test run', placeholder: undefined, state: 'waiting' };
+  const request: RequestedSecret = { label: 'API key', reason: 'Needed for the test run', placeholder: undefined };
 
   try {
     await act(async () => root.render(<SecretRequestCard part={part} request={request} />));

@@ -220,7 +220,9 @@ jobs:
   ios-testflight:
     name: iOS TestFlight upload
     if: inputs.build_ios
-    runs-on: blacksmith-6vcpu-macos-26
+    # The macOS 27 image is the one with a final Xcode 27.1; the iPhone Duo
+    # simulator needs iOS 27.1, and so does its full-screen support.
+    runs-on: blacksmith-6vcpu-macos-27
     needs: resolve-version
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -228,24 +230,29 @@ jobs:
           ref: ${{ inputs.ref }}
 
       # iOS 27 shows an app built with an older SDK as a phone-sized window on large
-      # screens such as the unfolded iPhone Duo, and the runner's default Xcode still
-      # ships the iOS 26 SDK. Pick the newest installed Xcode 27; beta builds are
-      # skipped because TestFlight rejects them, and a final release wins over a
-      # release candidate of the same version.
+      # screens such as the unfolded iPhone Duo, and the runner's default Xcode is
+      # older than the newest one installed. Pick the newest installed Xcode 27 by
+      # its build number, not its folder: the image names a beta `Xcode_27.2.app`.
+      # A final build has no trailing letter (27A9275). TestFlight rejects betas
+      # (27B5038j), so a lettered build is taken only from a release candidate
+      # folder, and only where no final Xcode 27 is installed.
       - name: Select Xcode 27
         shell: bash
         run: |
           set -euo pipefail
           xcode_app="$(
             for app in /Applications/Xcode*.app; do
-              [[ "$app" == *[Bb]eta* ]] && continue
               version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist" 2>/dev/null || true)"
-              final=1
-              [[ "$app" == *Release_Candidate* ]] && final=0
-              if [[ "$version" == 27* ]]; then
-                echo "$version $final $app"
+              build="$(/usr/libexec/PlistBuddy -c 'Print :ProductBuildVersion' "$app/Contents/version.plist" 2>/dev/null || true)"
+              [[ "$version" == 27* && -n "$build" ]] || continue
+              if [[ "$build" =~ [a-z]$ ]]; then
+                [[ "$app" == *Release_Candidate* ]] || continue
+                rank=0
+              else
+                rank=1
               fi
-            done | sort -V | tail -n 1 | cut -d' ' -f3-
+              echo "$rank $version $app"
+            done | sort -k1,1n -k2,2V | tail -n 1 | cut -d' ' -f3-
           )"
           if [[ -z "$xcode_app" ]]; then
             echo "No Xcode 27 is installed on this runner. Installed:"
@@ -303,7 +310,15 @@ jobs:
           security set-keychain-settings -lut 21600 "$keychain_path"
           security unlock-keychain -p "$RUNNER_TEMP" "$keychain_path"
           security import "$cert_path" -P "$IOS_DISTRIBUTION_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$keychain_path"
+          # The macOS 27 runner image lacks the intermediate that issued the
+          # distribution certificate, and codesign then fails with
+          # errSecInternalComponent. Bring it into the signing keychain, pinned.
+          wwdr_path="$RUNNER_TEMP/AppleWWDRCAG3.cer"
+          curl -fsSL --retry 3 -o "$wwdr_path" https://www.apple.com/certificateauthority/AppleWWDRCAG3.cer
+          echo "dcf21878c77f4198e4b4614f03d696d89c66c66008d4244e1b99161aac91601f  $wwdr_path" | shasum -a 256 -c -
+          security import "$wwdr_path" -t cert -f x509 -k "$keychain_path"
           security list-keychain -d user -s "$keychain_path"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$RUNNER_TEMP" "$keychain_path" >/dev/null
 
           app_profile="$RUNNER_TEMP/openchamber-app.mobileprovision"
           widget_profile="$RUNNER_TEMP/openchamber-widget.mobileprovision"
@@ -327,6 +342,11 @@ jobs:
           install_profile "$app_profile" IOS_APP_PROFILE_UUID
           install_profile "$widget_profile" IOS_WIDGET_PROFILE_UUID
           install_profile "$nse_profile" IOS_NSE_PROFILE_UUID
+
+      # cap sync installs the iOS pods; a runner image is not guaranteed to
+      # ship CocoaPods.
+      - name: Ensure CocoaPods
+        run: command -v pod >/dev/null || brew install cocoapods
 
       - name: Prepare mobile assets
         run: bun run mobile:sync

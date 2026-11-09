@@ -1,15 +1,41 @@
 import * as React from 'react';
+import { z } from 'zod';
 
 import { Icon } from '@/components/icon/Icon';
 import { UsageProgressBar } from '@/components/sections/usage/UsageProgressBar';
 import { formatSchedule } from '@/components/session/scheduledTaskSchedule';
-import type { ToolInput, ToolPart } from '@/lib/opencode/model';
+import type { JsonValue, ToolInput, ToolPart } from '@/lib/opencode/model';
+import { workflowRunSchema, type WorkflowRun } from '@/lib/workflows/model';
+import { openWorkflowRunInPanel } from '@/lib/workflows/panel';
+import { useWorkflowRun } from '@/lib/workflows/store';
+import { workflowRunLook } from '../../workflows/workflowRunPresentation';
 import { useI18n } from '@/lib/i18n';
 import { formatQuotaResetLabel, formatWindowLabel } from '@/lib/quota';
 import { useQuotaStore } from '@/stores/useQuotaStore';
 import { useUIStore } from '@/stores/useUIStore';
+import { useChatColumnActions } from '../../chatColumnSession';
 import {
     dispatchedSchema,
+    workflowSavedSchema,
+    workflowStoppedSchema,
+    workflowResultSchema,
+    workflowListedSchema,
+    workflowCheckedSchema,
+    browserResizedSchema,
+    browserInspectedSchema,
+    browserNavigatedSchema,
+    browserScrolledSchema,
+    browserSelectedSchema,
+    browserTypedSchema,
+    browserClickedSchema,
+    browserSnapshotSchema,
+    scheduleRanSchema,
+    fileOpenedSchema,
+    workNamedSchema,
+    prWatchedSchema,
+    sessionMessagesSchema,
+    sessionStatusSchema,
+    memoryReadSchema,
     knowledgeListedSchema,
     knowledgeSavedSchema,
     linkedSchema,
@@ -32,7 +58,7 @@ import {
 } from './openChamberToolEnvelope';
 import { GeneratedImages } from './GeneratedImages';
 import { RawToggleContext, usePanelsAvailable } from './toolResultContext';
-import { Actions, Field, List, ListRow, Section, SessionLinkRow, Warning, WebLinkRow } from './ToolResultParts';
+import { Actions, Field, List, ListRow, Section, SessionLinkRow, Warning, WebLinkRow, type OpenActionInput } from './ToolResultParts';
 import type { ToolPopupContent } from '../types';
 
 /**
@@ -87,13 +113,9 @@ const MovedBody: React.FC<{ data: unknown; call: OpenChamberCallInput }> = ({ da
     );
 };
 
-const MemorySavedBody: React.FC<{ data: unknown; call: OpenChamberCallInput; directory: string; isMobile: boolean }> = ({ data, call, directory, isMobile }) => {
+const useMemoryKind = () => {
     const { t } = useI18n();
-    const panels = usePanelsAvailable(isMobile);
-    const parsed = memorySavedSchema.safeParse(data);
-    if (!parsed.success) return null;
-    const { memory, replaced, warning } = parsed.data;
-    const kind = [
+    return (memory: { type?: 'fact' | 'preference' | 'reference'; scope?: 'global' | 'project' }, replaced?: boolean) => [
         memory.type === 'fact' ? t('chat.toolPart.openchamber.memory.type.fact')
             : memory.type === 'preference' ? t('chat.toolPart.openchamber.memory.type.preference')
                 : memory.type === 'reference' ? t('chat.toolPart.openchamber.memory.type.reference') : undefined,
@@ -101,18 +123,34 @@ const MemorySavedBody: React.FC<{ data: unknown; call: OpenChamberCallInput; dir
             : memory.scope === 'project' ? t('chat.toolPart.openchamber.memory.scope.project') : undefined,
         replaced ? t('chat.toolPart.openchamber.memory.replaced') : undefined,
     ].filter(Boolean).join(' · ');
-    const body = call.body;
-    const open = () => {
-        const store = useUIStore.getState();
-        store.setProjectContextTab('memory');
-        store.openContextPanelTab(directory, { mode: 'notes' });
-    };
+};
+
+const openMemory = (directory: string) => {
+    const store = useUIStore.getState();
+    store.setProjectContextTab('memory');
+    store.openContextPanelTab(directory, { mode: 'notes' });
+};
+
+const openKnowledge = (directory: string, tab: 'todos' | 'notes' | 'plans') => {
+    const store = useUIStore.getState();
+    store.setProjectContextTab(tab);
+    store.openContextPanelTab(directory, { mode: 'notes' });
+};
+
+const MemorySavedBody: React.FC<{ data: unknown; call: OpenChamberCallInput; directory: string; isMobile: boolean }> = ({ data, call, directory, isMobile }) => {
+    const { t } = useI18n();
+    const panels = usePanelsAvailable(isMobile);
+    const describeKind = useMemoryKind();
+    const parsed = memorySavedSchema.safeParse(data);
+    if (!parsed.success) return null;
+    const { memory, replaced, warning } = parsed.data;
+    const kind = describeKind(memory, replaced);
     return (
         <>
             {kind ? <div className="typography-meta text-muted-foreground">{kind}</div> : null}
-            {body ? <div className="typography-meta whitespace-pre-wrap break-words text-foreground">{body}</div> : null}
+            {call.body ? <div className="typography-meta whitespace-pre-wrap break-words text-foreground">{call.body}</div> : null}
             <Warning text={warning} />
-            <Actions open={panels && directory ? { label: t('chat.toolPart.openchamber.open.memory'), icon: 'brain', onOpen: open } : null} />
+            <Actions open={panels && directory ? { label: t('chat.toolPart.openchamber.open.memory'), icon: 'brain', onOpen: () => openMemory(directory) } : null} />
         </>
     );
 };
@@ -250,7 +288,7 @@ const SessionsListedBody: React.FC<{ data: unknown }> = ({ data }) => {
         <>
             <List count={sessions.length}>
                 {sessions.map((session) => {
-                    const directory = session.location?.directory;
+                    const { directory } = session;
                     return (
                         <li key={session.id} className="min-w-0">
                             <SessionLinkRow
@@ -444,6 +482,388 @@ const ScreenshotBody: React.FC<{ data: unknown; part: ToolPart; onShowPopup?: (c
     );
 };
 
+/** A memory the agent read: what kind it is, its title and its text. */
+const MemoryReadBody: React.FC<{ data: unknown; directory: string; isMobile: boolean }> = ({ data, directory, isMobile }) => {
+    const { t } = useI18n();
+    const panels = usePanelsAvailable(isMobile);
+    const describeKind = useMemoryKind();
+    const parsed = memoryReadSchema.safeParse(data);
+    if (!parsed.success) return null;
+    const { memory } = parsed.data;
+    const kind = describeKind(memory);
+    return (
+        <>
+            {kind ? <div className="typography-meta text-muted-foreground">{kind}</div> : null}
+            {memory.title ? <div className="typography-meta font-medium text-foreground break-words">{memory.title}</div> : null}
+            {memory.body ? <div className="typography-meta whitespace-pre-wrap break-words text-foreground">{memory.body}</div> : null}
+            <Actions open={panels && directory ? { label: t('chat.toolPart.openchamber.open.memory'), icon: 'brain', onOpen: () => openMemory(directory) } : null} />
+        </>
+    );
+};
+
+/** A call whose description already says what it did: only where to look next. */
+const MemoryDeletedBody: React.FC<{ directory: string; isMobile: boolean }> = ({ directory, isMobile }) => {
+    const { t } = useI18n();
+    const panels = usePanelsAvailable(isMobile);
+    return <Actions open={panels && directory ? { label: t('chat.toolPart.openchamber.open.memory'), icon: 'brain', onOpen: () => openMemory(directory) } : null} />;
+};
+
+const KnowledgeTouchedBody: React.FC<{ call: OpenChamberCallInput; directory: string; isMobile: boolean; tab: 'todos' | 'notes' | 'plans' }> = ({ call, directory, isMobile, tab }) => {
+    const { t } = useI18n();
+    const panels = usePanelsAvailable(isMobile) && isOwnProject(call, directory);
+    return <Actions open={panels && directory ? { label: t('chat.toolPart.openchamber.open.knowledge'), icon: 'sticky-note', onOpen: () => openKnowledge(directory, tab) } : null} />;
+};
+
+const SESSION_STATE_KEYS = {
+    idle: 'chat.toolPart.openchamber.session.state.idle',
+    busy: 'chat.toolPart.openchamber.session.state.busy',
+    waiting: 'chat.toolPart.openchamber.session.state.waiting',
+} as const;
+
+const SessionStatusBody: React.FC<{ data: unknown }> = ({ data }) => {
+    const { t } = useI18n();
+    const { openSession } = useChatColumnActions();
+    const parsed = sessionStatusSchema.safeParse(data);
+    if (!parsed.success) return null;
+    const { sessionId, directory, sessionStatus } = parsed.data;
+    return (
+        <>
+            <Field label={t('chat.toolPart.openchamber.field.state')}>{t(SESSION_STATE_KEYS[sessionStatus.type])}</Field>
+            <Actions open={directory ? { label: t('chat.toolPart.openchamber.open.session'), icon: 'chat-3', onOpen: () => openSession(sessionId, directory) } : null} />
+        </>
+    );
+};
+
+/** The messages the agent read from another session, oldest first, each shortened to a few lines. */
+const SessionMessagesBody: React.FC<{ data: unknown }> = ({ data }) => {
+    const { t } = useI18n();
+    const { openSession } = useChatColumnActions();
+    const parsed = sessionMessagesSchema.safeParse(data);
+    if (!parsed.success) return null;
+    const { sessionId, directory, messages } = parsed.data;
+    return (
+        <>
+            {messages.length === 0 ? <List count={0}>{null}</List> : (
+                <div className="min-w-0 space-y-2">
+                    {messages.map((message) => (
+                        <div key={message.id} className="min-w-0 space-y-0.5">
+                            <div className="flex min-w-0 items-center gap-1.5 typography-micro text-muted-foreground">
+                                <Icon name={message.role === 'user' ? 'user-3' : 'robot-2'} className="size-3 shrink-0" />
+                                <span className="truncate">
+                                    {[message.role === 'user' ? t('chat.toolPart.openchamber.session.role.user') : t('chat.toolPart.openchamber.session.role.assistant'), message.model].filter(Boolean).join(' · ')}
+                                </span>
+                            </div>
+                            <div className="typography-meta line-clamp-4 whitespace-pre-wrap break-words text-foreground" title={message.text}>{message.text}</div>
+                        </div>
+                    ))}
+                </div>
+            )}
+            <Actions open={directory ? { label: t('chat.toolPart.openchamber.open.session'), icon: 'chat-3', onOpen: () => openSession(sessionId, directory) } : null} />
+        </>
+    );
+};
+
+const PR_STATUS_KEYS = {
+    waking: 'chat.toolPart.openchamber.pr.status.waking',
+    unknown: 'chat.toolPart.openchamber.pr.status.unknown',
+    pending: 'chat.toolPart.openchamber.pr.status.pending',
+    passed: 'chat.toolPart.openchamber.pr.status.passed',
+    failed: 'chat.toolPart.openchamber.pr.status.failed',
+    open: 'chat.toolPart.openchamber.pr.status.open',
+} as const;
+
+const PrWatchedBody: React.FC<{ data: unknown }> = ({ data }) => {
+    const { t } = useI18n();
+    const parsed = prWatchedSchema.safeParse(data);
+    if (!parsed.success) return null;
+    const { url, number, title, status } = parsed.data.watching;
+    const label = [number ? `#${number}` : undefined, title || undefined].filter(Boolean).join(' ');
+    return (
+        <>
+            <WebLinkRow url={url} icon="git-pull-request" primary={label || url} secondary={status ? t(PR_STATUS_KEYS[status]) : undefined} />
+            <Actions />
+        </>
+    );
+};
+
+const WorkNamedBody: React.FC<{ data: unknown }> = ({ data }) => {
+    const { t } = useI18n();
+    const parsed = workNamedSchema.safeParse(data);
+    if (!parsed.success) return null;
+    const { title, branch, named } = parsed.data;
+    return (
+        <>
+            {title ? <Field label={t('chat.toolPart.openchamber.field.title')}>{title}</Field> : null}
+            {branch ? <Field label={t('chat.toolPart.openchamber.field.branch')}>{branch}</Field> : null}
+            {/* The task kept the name it had: the user's own, or the session's title. */}
+            {!named ? <div className="typography-meta text-muted-foreground">{t('chat.toolPart.openchamber.work.kept')}</div> : null}
+            <Actions />
+        </>
+    );
+};
+
+const FileOpenedBody: React.FC<{ data: unknown }> = ({ data }) => {
+    const parsed = fileOpenedSchema.safeParse(data);
+    if (!parsed.success) return null;
+    const { path } = parsed.data;
+    return (
+        <>
+            <ul><ListRow icon={<Icon name="file-text" className="size-3.5 shrink-0 text-muted-foreground" />} primary={path.split(/[\\/]/).pop() ?? path} secondary={path} title={path} /></ul>
+            <Actions />
+        </>
+    );
+};
+
+const ScheduleRanBody: React.FC<{ data: unknown }> = ({ data }) => {
+    const parsed = scheduleRanSchema.safeParse(data);
+    if (!parsed.success) return null;
+    const { task, sessionId, directory, persistError } = parsed.data;
+    return (
+        <>
+            <SessionLinkRow sessionId={sessionId} directory={directory} title={task.name} />
+            <Warning text={persistError} />
+            <Actions />
+        </>
+    );
+};
+
+const ScheduleDeletedBody: React.FC<{ call: OpenChamberCallInput; directory: string; isMobile: boolean }> = ({ call, directory, isMobile }) => {
+    const { t } = useI18n();
+    const panels = usePanelsAvailable(isMobile) && isOwnProject(call, directory);
+    return <Actions open={panels ? { label: t('chat.toolPart.openchamber.open.scheduled'), icon: 'calendar-schedule', onOpen: () => useUIStore.getState().setScheduledTasksDialogOpen(true) } : null} />;
+};
+
+const viewportText = (viewport: { width: number | null; height: number | null } | undefined, fill: string): string | undefined => {
+    if (!viewport) return undefined;
+    return viewport.width && viewport.height ? `${viewport.width} \u00d7 ${viewport.height}` : fill;
+};
+
+const BrowserSnapshotBody: React.FC<{ data: unknown }> = ({ data }) => {
+    const { t } = useI18n();
+    const parsed = browserSnapshotSchema.safeParse(data);
+    if (!parsed.success) return null;
+    const { url, title, elements, viewport, consoleProblems } = parsed.data;
+    const size = viewportText(viewport, t('chat.toolPart.openchamber.browser.viewportFill'));
+    return (
+        <>
+            {url ? <PageLink url={url} title={title} /> : null}
+            {size ? <Field label={t('chat.toolPart.openchamber.field.viewport')}>{size}</Field> : null}
+            <Field label={t('chat.toolPart.openchamber.field.elements')}>{elements.length}</Field>
+            {consoleProblems && consoleProblems.length > 0 ? (
+                <Section label={t('chat.toolPart.openchamber.browser.console')}>
+                    {consoleProblems.map((problem, index) => (
+                        <div
+                            key={index}
+                            className="typography-meta break-words"
+                            style={{ color: problem.level === 'error' ? 'var(--status-error)' : 'var(--status-warning)' }}
+                        >
+                            {problem.message}
+                        </div>
+                    ))}
+                </Section>
+            ) : null}
+            <Actions />
+        </>
+    );
+};
+
+/** A browser action on one element: what it acted on, then the page it left. */
+const BrowserElementBody: React.FC<{ label: string; target: string | undefined; url: string | undefined }> = ({ label, target, url }) => (
+    <>
+        {target ? <Field label={label}>{target}</Field> : null}
+        {url ? <PageLink url={url} title={undefined} /> : null}
+        <Actions />
+    </>
+);
+
+const BrowserScrolledBody: React.FC<{ data: unknown }> = ({ data }) => {
+    const { t } = useI18n();
+    const parsed = browserScrolledSchema.safeParse(data);
+    if (!parsed.success) return null;
+    const { scrollY, maxScrollY, atTop, atBottom } = parsed.data;
+    const position = atTop ? t('chat.toolPart.openchamber.browser.atTop')
+        : atBottom ? t('chat.toolPart.openchamber.browser.atBottom')
+            : t('chat.toolPart.openchamber.browser.scrollPosition', { position: Math.round(scrollY), max: Math.round(maxScrollY) });
+    return (
+        <>
+            <Field label={t('chat.toolPart.openchamber.field.position')}>{position}</Field>
+            <Actions />
+        </>
+    );
+};
+
+const BrowserInspectedBody: React.FC<{ data: unknown }> = ({ data }) => {
+    const { t } = useI18n();
+    const parsed = browserInspectedSchema.safeParse(data);
+    if (!parsed.success) return null;
+    const { selector, tag, label, styles } = parsed.data;
+    const entries = Object.entries(styles);
+    return (
+        <>
+            <Field label={t('chat.toolPart.openchamber.field.element')}>{[tag, label].filter(Boolean).join(' · ') || selector}</Field>
+            <Field label={t('chat.toolPart.openchamber.field.selector')}><code className="typography-code break-all">{selector}</code></Field>
+            {entries.length > 0 ? (
+                <Section label={t('chat.toolPart.openchamber.browser.styles')}>
+                    <ul className="min-w-0 space-y-0.5">
+                        {entries.map(([property, value]) => <ListRow key={property} primary={property} secondary={value} />)}
+                    </ul>
+                </Section>
+            ) : null}
+            <Actions />
+        </>
+    );
+};
+
+/** What a workflow left, as text: an answer that is not text reads as its JSON. */
+const answerText = (value: JsonValue | undefined): string | undefined => {
+    if (value === undefined) return undefined;
+    const plain = z.string().safeParse(value);
+    return plain.success ? plain.data : JSON.stringify(value, null, 2);
+};
+
+/** A run's state as the workflow card and the Workflows panel show it. */
+const WorkflowRunState: React.FC<{ state: WorkflowRun['state'] }> = ({ state }) => {
+    const { t } = useI18n();
+    const look = workflowRunLook(state);
+    return (
+        <span className="inline-flex items-center gap-1" style={look.color ? { color: look.color } : undefined}>
+            <Icon name={look.icon} className="size-3.5 shrink-0" />
+            {t(look.labelKey)}
+        </span>
+    );
+};
+
+/**
+ * Opens a run in the Workflows panel, where it is live; only where that panel
+ * opens beside the chat. The panel shows a project's runs, so the run's own
+ * folder decides which one: a session moved since keeps its old runs there.
+ * A run the store does not hold yet gets no link.
+ */
+const useOpenWorkflowRun = (isMobile: boolean, sessionId: string, runId: string | undefined): OpenActionInput | null => {
+    const { t } = useI18n();
+    const panels = usePanelsAvailable(isMobile);
+    const directory = useWorkflowRun(sessionId, runId ?? '')?.directory;
+    return panels && directory && runId
+        ? { label: t('chat.toolPart.openchamber.open.workflow'), icon: 'flow-chart', onOpen: () => openWorkflowRunInPanel(directory, sessionId, runId) }
+        : null;
+};
+
+const WorkflowCheckedBody: React.FC<{ data: unknown }> = ({ data }) => {
+    const { t } = useI18n();
+    const parsed = workflowCheckedSchema.safeParse(data);
+    if (!parsed.success) return null;
+    const { name, description, phases } = parsed.data;
+    return (
+        <>
+            <div className="typography-meta font-medium text-foreground break-words">{name}</div>
+            {description ? <div className="typography-meta break-words text-muted-foreground">{description}</div> : null}
+            {phases.length > 0 ? (
+                <Section label={t('chat.toolPart.openchamber.field.phases')}>
+                    <ol className="min-w-0 space-y-0.5">
+                        {phases.map((phase, index) => <ListRow key={phase} primary={`${index + 1}. ${phase}`} />)}
+                    </ol>
+                </Section>
+            ) : null}
+            <Actions />
+        </>
+    );
+};
+
+const WorkflowStatusBody: React.FC<{ data: unknown; isMobile: boolean }> = ({ data, isMobile }) => {
+    const { t } = useI18n();
+    const parsed = workflowRunSchema.safeParse(data);
+    const run = parsed.success ? parsed.data : null;
+    const open = useOpenWorkflowRun(isMobile, run?.parentSessionId ?? '', run?.id);
+    if (!run) return null;
+    const done = run.agents.filter((agent) => agent.state === 'completed').length;
+    return (
+        <>
+            <div className="typography-meta font-medium text-foreground break-words">{run.name}</div>
+            <Field label={t('chat.toolPart.openchamber.field.state')}><WorkflowRunState state={run.state} /></Field>
+            {run.currentPhase ? <Field label={t('chat.toolPart.openchamber.field.phase')}>{run.currentPhase}</Field> : null}
+            {run.agents.length > 0 ? (
+                <Field label={t('chat.toolPart.openchamber.field.agents')}>{t('chat.toolPart.openchamber.workflow.agentsDone', { done, count: run.agents.length })}</Field>
+            ) : null}
+            {run.error ? <div className="typography-meta break-words" style={{ color: 'var(--status-error)' }}>{run.error}</div> : null}
+            {run.resultPreview ? <div className="typography-meta line-clamp-6 whitespace-pre-wrap break-words text-foreground">{run.resultPreview}</div> : null}
+            <Actions open={open} />
+        </>
+    );
+};
+
+const WorkflowResultBody: React.FC<{ data: unknown; part: ToolPart; isMobile: boolean }> = ({ data, part, isMobile }) => {
+    const { t } = useI18n();
+    const parsed = workflowResultSchema.safeParse(data);
+    const open = useOpenWorkflowRun(isMobile, part.sessionID, parsed.success ? parsed.data.runId : undefined);
+    if (!parsed.success) return null;
+    const answer = parsed.data;
+    const text = answerText('agent' in answer ? answer.agent.result : answer.result);
+    const error = 'agent' in answer ? answer.agent.error : answer.error;
+    return (
+        <>
+            {'agent' in answer ? <Field label={t('chat.toolPart.openchamber.field.agent')}>{answer.agent.label}</Field> : null}
+            {'state' in answer ? <Field label={t('chat.toolPart.openchamber.field.state')}><WorkflowRunState state={answer.state} /></Field> : null}
+            {error ? <div className="typography-meta break-words" style={{ color: 'var(--status-error)' }}>{error}</div> : null}
+            {text ? <div className="typography-meta whitespace-pre-wrap break-words text-foreground">{text}</div> : null}
+            <Actions open={open} />
+        </>
+    );
+};
+
+const WorkflowListedBody: React.FC<{ data: unknown }> = ({ data }) => {
+    const { t } = useI18n();
+    const parsed = workflowListedSchema.safeParse(data);
+    if (!parsed.success) return null;
+    const { workflows, runs } = parsed.data;
+    return (
+        <>
+            {workflows.length + runs.length === 0 ? <List count={0}>{null}</List> : null}
+            {workflows.length > 0 ? (
+                <Section label={t('chat.toolPart.openchamber.workflow.saved')}>
+                    <List count={workflows.length}>
+                        {workflows.map((workflow) => <ListRow key={workflow.name} primary={workflow.name} secondary={workflow.error ?? workflow.description} />)}
+                    </List>
+                </Section>
+            ) : null}
+            {runs.length > 0 ? (
+                <Section label={t('chat.toolPart.openchamber.workflow.runs')}>
+                    <List count={runs.length}>
+                        {runs.map((run) => <ListRow key={run.runId} primary={run.name} secondary={run.state ? <WorkflowRunState state={run.state} /> : undefined} />)}
+                    </List>
+                </Section>
+            ) : null}
+            <Actions />
+        </>
+    );
+};
+
+const WorkflowChangedBody: React.FC<{ data: unknown; part: ToolPart; isMobile: boolean }> = ({ data, part, isMobile }) => {
+    const { t } = useI18n();
+    const parsed = workflowStoppedSchema.safeParse(data);
+    const open = useOpenWorkflowRun(isMobile, part.sessionID, parsed.success ? parsed.data.runId : undefined);
+    if (!parsed.success) return null;
+    const { reused } = parsed.data;
+    return (
+        <>
+            {reused ? <div className="typography-meta text-muted-foreground">{t('chat.toolPart.openchamber.workflow.reused', { count: reused })}</div> : null}
+            <Actions open={open} />
+        </>
+    );
+};
+
+const WorkflowSavedBody: React.FC<{ data: unknown }> = ({ data }) => {
+    const { t } = useI18n();
+    const parsed = workflowSavedSchema.safeParse(data);
+    if (!parsed.success) return null;
+    return (
+        <>
+            <div className="typography-meta font-medium text-foreground break-words">{parsed.data.name}</div>
+            <Field label={t('chat.toolPart.openchamber.field.file')}>{parsed.data.path}</Field>
+            <Actions />
+        </>
+    );
+};
+
 /**
  * What one of OpenChamber's own tools did, in its own terms: the pull
  * request it linked, the session it started, the memory it saved. `null`
@@ -473,6 +893,7 @@ const OpenChamberView: React.FC<{
     isMobile: boolean;
     onShowPopup?: (content: ToolPopupContent) => void;
 }> = ({ envelope, part, input, directory, isMobile, onShowPopup }) => {
+    const { t } = useI18n();
     const { data, action } = envelope;
     const call = readOpenChamberCallInput(input);
     switch (action) {
@@ -485,10 +906,57 @@ const OpenChamberView: React.FC<{
         case 'schedule.list': return <ScheduleListedBody data={data} call={call} directory={directory} isMobile={isMobile} />;
         case 'browser.open': return <PageOpenedBody data={data} />;
         case 'browser.capture': return <ScreenshotBody data={data} part={part} onShowPopup={onShowPopup} />;
+        case 'memory.read': return <MemoryReadBody data={data} directory={directory} isMobile={isMobile} />;
+        case 'memory.delete': return <MemoryDeletedBody directory={directory} isMobile={isMobile} />;
+        case 'knowledge.show': return <KnowledgeTouchedBody call={call} directory={directory} isMobile={isMobile} tab="plans" />;
+        case 'knowledge.delete': return <KnowledgeTouchedBody call={call} directory={directory} isMobile={isMobile} tab={call.kind === 'note' ? 'notes' : call.kind === 'plan' ? 'plans' : 'todos'} />;
+        case 'session.status': return <SessionStatusBody data={data} />;
+        case 'session.messages': return <SessionMessagesBody data={data} />;
+        case 'pr.watch': return <PrWatchedBody data={data} />;
+        case 'pr.unwatch':
+        case 'browser.close': return <Actions />;
+        case 'work.name': return <WorkNamedBody data={data} />;
+        case 'file.open': return <FileOpenedBody data={data} />;
+        case 'schedule.run': return <ScheduleRanBody data={data} />;
+        case 'schedule.delete': return <ScheduleDeletedBody call={call} directory={directory} isMobile={isMobile} />;
+        case 'schedule.toggle': return <ScheduledBody data={data} call={call} directory={directory} isMobile={isMobile} />;
+        case 'browser.snapshot': return <BrowserSnapshotBody data={data} />;
+        case 'browser.click': {
+            const parsed = browserClickedSchema.safeParse(data);
+            return parsed.success ? <BrowserElementBody label={t('chat.toolPart.openchamber.field.clicked')} target={parsed.data.label ?? parsed.data.clicked} url={parsed.data.url} /> : null;
+        }
+        case 'browser.type': {
+            const parsed = browserTypedSchema.safeParse(data);
+            return parsed.success ? <BrowserElementBody label={t('chat.toolPart.openchamber.field.typedInto')} target={parsed.data.selector} url={parsed.data.url} /> : null;
+        }
+        case 'browser.select': {
+            const parsed = browserSelectedSchema.safeParse(data);
+            return parsed.success ? <BrowserElementBody label={t('chat.toolPart.openchamber.field.selected')} target={parsed.data.label ?? parsed.data.value} url={parsed.data.url} /> : null;
+        }
+        case 'browser.scroll': return <BrowserScrolledBody data={data} />;
+        case 'browser.back':
+        case 'browser.forward': {
+            const parsed = browserNavigatedSchema.safeParse(data);
+            return parsed.success ? <BrowserElementBody label={t('chat.toolPart.openchamber.field.page')} target={parsed.data.title || undefined} url={undefined} /> : null;
+        }
+        case 'browser.inspect': return <BrowserInspectedBody data={data} />;
+        case 'workflow.check': return <WorkflowCheckedBody data={data} />;
+        case 'workflow.status': return <WorkflowStatusBody data={data} isMobile={isMobile} />;
+        case 'workflow.result': return <WorkflowResultBody data={data} part={part} isMobile={isMobile} />;
+        case 'workflow.list': return <WorkflowListedBody data={data} />;
+        case 'workflow.stop':
+        case 'workflow.resume': return <WorkflowChangedBody data={data} part={part} isMobile={isMobile} />;
+        case 'workflow.save': return <WorkflowSavedBody data={data} />;
+        case 'browser.resize': {
+            const parsed = browserResizedSchema.safeParse(data);
+            return parsed.success ? <BrowserElementBody label={t('chat.toolPart.openchamber.field.viewport')} target={viewportText(parsed.data.viewport, t('chat.toolPart.openchamber.browser.viewportFill'))} url={undefined} /> : null;
+        }
         case 'session.link': return <LinkedBody data={data} />;
         case 'session.create':
         case 'session.send':
-        case 'session.fork': return <DispatchedBody data={data} />;
+        case 'session.fork':
+        case 'session.markDone':
+        case 'session.track': return <DispatchedBody data={data} />;
         case 'session.moveToWorktree': return <MovedBody data={data} call={call} />;
         case 'memory.save': return <MemorySavedBody data={data} call={call} directory={directory} isMobile={isMobile} />;
         case 'knowledge.save': return <KnowledgeSavedBody data={data} call={call} directory={directory} isMobile={isMobile} />;

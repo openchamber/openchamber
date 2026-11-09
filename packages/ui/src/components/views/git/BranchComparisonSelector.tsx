@@ -92,7 +92,7 @@ export function BranchComparisonSelector({ branches, currentBranch, base, onSele
               onSelect(branch.ref);
               changeOpen(false);
             }}>
-              <span className="min-w-0 flex-1 truncate" title={branch.ref}>{branch.label}</span>
+              <span dir="ltr" className="oc-ui-start-align min-w-0 flex-1 truncate" title={branch.ref}>{branch.label}</span>
               {!automatic && (branch.ref === base || branch.label === base) && <Icon name="check" className="size-3.5" />}
             </CommandItem>
           ))}

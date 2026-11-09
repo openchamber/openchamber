@@ -114,7 +114,11 @@ describe('settings search', () => {
         t,
         getPageTitle: (page) => page,
       });
-      expect(results.find((result) => result.id === 'appearance.scrollbars')?.page).toBe('appearance');
+      // General's Panels section holds it; VS Code has no such section and keeps it on Appearance.
+      const expected = context.isVSCode
+        ? { id: 'appearance.scrollbars-vscode', page: 'appearance' }
+        : { id: 'appearance.scrollbars', page: 'general' };
+      expect(results.find((result) => result.id === expected.id)?.page).toBe(expected.page);
     }
   });
 
