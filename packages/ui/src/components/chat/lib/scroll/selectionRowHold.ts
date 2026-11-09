@@ -9,6 +9,9 @@ const elementOf = (end: SelectionEnd): Element | null => (end.node instanceof El
 
 // Where `end` is on screen.
 const caretRect = (end: SelectionEnd): DOMRect | undefined => {
+    // A streamed text can shrink in place under a remembered end.
+    const length = end.node instanceof CharacterData ? end.node.length : end.node.childNodes.length;
+    if (end.offset > length) return undefined;
     const range = document.createRange();
     range.setStart(end.node, end.offset);
     return range.getClientRects()[0] ?? elementOf(end)?.getBoundingClientRect();
