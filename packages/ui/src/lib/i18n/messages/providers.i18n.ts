@@ -1,7 +1,6 @@
 /** Providers settings strings (card grid, provider accounts) — merged into each locale's main dictionary. */
 export const providersI18n = {
   en: {
-    'settings.providers.grid.description': 'Model providers OpenCode can use. Open one to manage its accounts and models.',
     'settings.providers.enterpriseTitle': 'Enterprise mode',
     'settings.providers.enterpriseManagedBy': 'Managed by {organization}.',
     'settings.providers.enterprisePolicyUnreadable': 'The machine policy file could not be read, so enterprise mode stays on. Ask your administrator to check it.',
@@ -89,7 +88,6 @@ export const providersI18n = {
     'settings.providers.enterprisePolicyMissing': 'OpenCode heeft nog geen providerbeleid en kan dus nog elke bekende provider gebruiken, inclusief sleutels uit omgevingsvariabelen en ingebouwde providers.',
     'settings.providers.enterprisePolicyConsole': 'Providerregels kunnen ook uit uw OpenCode Console-werkruimte komen. OpenChamber kan die niet lezen.',
     'settings.providers.enterprisePolicyLink': 'Providers beperken met beleid',
-    'settings.providers.grid.description': 'Modelproviders die OpenCode kan gebruiken. Open er een om de accounts en modellen te beheren.',
     'settings.providers.grid.searchPlaceholder': 'Providers zoeken',
     'settings.providers.grid.connect': 'Provider verbinden',
     'settings.providers.disabled.title': 'Uitgeschakelde providers',
@@ -163,7 +161,6 @@ export const providersI18n = {
     'settings.providers.accounts.toast.renameFailed': 'Kan het account niet hernoemen',
   },
   uk: {
-    'settings.providers.grid.description': 'Провайдери моделей, якими може користуватися OpenCode. Відкрийте провайдера, щоб керувати його акаунтами й моделями.',
     'settings.providers.enterpriseTitle': 'Режим enterprise',
     'settings.providers.enterpriseManagedBy': 'Керує {organization}.',
     'settings.providers.enterprisePolicyUnreadable': 'Не вдалося прочитати файл політики на цьому комп’ютері, тому режим enterprise лишається увімкненим. Попросіть адміністратора його перевірити.',
@@ -244,7 +241,6 @@ export const providersI18n = {
     'settings.providers.accounts.toast.renameFailed': 'Не вдалося перейменувати акаунт',
   },
   de: {
-    'settings.providers.grid.description': 'Modellanbieter, die OpenCode nutzen kann. Öffne einen, um seine Konten und Modelle zu verwalten.',
     'settings.providers.enterpriseTitle': 'Enterprise-Modus',
     'settings.providers.enterpriseManagedBy': 'Verwaltet von {organization}.',
     'settings.providers.enterprisePolicyUnreadable': 'Die Richtliniendatei dieses Rechners ließ sich nicht lesen, daher bleibt der Enterprise-Modus an. Bitte deinen Administrator, sie zu prüfen.',
@@ -325,7 +321,6 @@ export const providersI18n = {
     'settings.providers.accounts.toast.renameFailed': 'Konto konnte nicht umbenannt werden',
   },
   es: {
-    'settings.providers.grid.description': 'Proveedores de modelos que OpenCode puede usar. Abre uno para gestionar sus cuentas y modelos.',
     'settings.providers.enterpriseTitle': 'Modo empresa',
     'settings.providers.enterpriseManagedBy': 'Gestionado por {organization}.',
     'settings.providers.enterprisePolicyUnreadable': 'No se pudo leer el archivo de políticas del equipo, así que el modo empresa sigue activo. Pide a tu administrador que lo revise.',
@@ -406,7 +401,6 @@ export const providersI18n = {
     'settings.providers.accounts.toast.renameFailed': 'No se pudo renombrar la cuenta',
   },
   fr: {
-    'settings.providers.grid.description': 'Les fournisseurs de modèles qu’OpenCode peut utiliser. Ouvrez-en un pour gérer ses comptes et ses modèles.',
     'settings.providers.enterpriseTitle': 'Mode entreprise',
     'settings.providers.enterpriseManagedBy': 'Géré par {organization}.',
     'settings.providers.enterprisePolicyUnreadable': 'Le fichier de stratégie de cette machine est illisible, le mode entreprise reste donc actif. Demandez à votre administrateur de le vérifier.',
@@ -487,7 +481,6 @@ export const providersI18n = {
     'settings.providers.accounts.toast.renameFailed': 'Impossible de renommer le compte',
   },
   ja: {
-    'settings.providers.grid.description': 'OpenCode が使えるモデルプロバイダーです。開くとアカウントとモデルを管理できます。',
     'settings.providers.enterpriseTitle': 'エンタープライズモード',
     'settings.providers.enterpriseManagedBy': '{organization} が管理しています。',
     'settings.providers.enterprisePolicyUnreadable': 'このマシンのポリシーファイルを読み込めなかったため、エンタープライズモードは有効のままです。管理者に確認を依頼してください。',
@@ -568,7 +561,6 @@ export const providersI18n = {
     'settings.providers.accounts.toast.renameFailed': 'アカウント名を変更できませんでした',
   },
   ko: {
-    'settings.providers.grid.description': 'OpenCode가 사용할 수 있는 모델 제공자입니다. 열어서 계정과 모델을 관리하세요.',
     'settings.providers.enterpriseTitle': '엔터프라이즈 모드',
     'settings.providers.enterpriseManagedBy': '{organization}에서 관리합니다.',
     'settings.providers.enterprisePolicyUnreadable': '이 컴퓨터의 정책 파일을 읽을 수 없어 엔터프라이즈 모드가 켜진 상태로 유지됩니다. 관리자에게 확인을 요청하세요.',
@@ -649,7 +641,6 @@ export const providersI18n = {
     'settings.providers.accounts.toast.renameFailed': '계정 이름을 변경하지 못했습니다',
   },
   pl: {
-    'settings.providers.grid.description': 'Dostawcy modeli, z których może korzystać OpenCode. Otwórz dostawcę, aby zarządzać jego kontami i modelami.',
     'settings.providers.enterpriseTitle': 'Tryb enterprise',
     'settings.providers.enterpriseManagedBy': 'Zarządzane przez {organization}.',
     'settings.providers.enterprisePolicyUnreadable': 'Nie udało się odczytać pliku zasad na tym komputerze, więc tryb enterprise pozostaje włączony. Poproś administratora o sprawdzenie go.',
@@ -730,7 +721,6 @@ export const providersI18n = {
     'settings.providers.accounts.toast.renameFailed': 'Nie udało się zmienić nazwy konta',
   },
   'pt-BR': {
-    'settings.providers.grid.description': 'Provedores de modelos que o OpenCode pode usar. Abra um para gerenciar suas contas e modelos.',
     'settings.providers.enterpriseTitle': 'Modo empresarial',
     'settings.providers.enterpriseManagedBy': 'Gerenciado por {organization}.',
     'settings.providers.enterprisePolicyUnreadable': 'Não foi possível ler o arquivo de política desta máquina, então o modo empresarial continua ativo. Peça ao seu administrador para verificá-lo.',
@@ -811,7 +801,6 @@ export const providersI18n = {
     'settings.providers.accounts.toast.renameFailed': 'Não foi possível renomear a conta',
   },
   tr: {
-    'settings.providers.grid.description': 'OpenCode’un kullanabileceği model sağlayıcıları. Hesaplarını ve modellerini yönetmek için birini açın.',
     'settings.providers.enterpriseTitle': 'Kurumsal mod',
     'settings.providers.enterpriseManagedBy': '{organization} tarafından yönetiliyor.',
     'settings.providers.enterprisePolicyUnreadable': 'Bu bilgisayardaki politika dosyası okunamadı, bu yüzden kurumsal mod açık kalıyor. Yöneticinizden dosyayı kontrol etmesini isteyin.',
@@ -892,7 +881,6 @@ export const providersI18n = {
     'settings.providers.accounts.toast.renameFailed': 'Hesap yeniden adlandırılamadı',
   },
   'zh-CN': {
-    'settings.providers.grid.description': 'OpenCode 可以使用的模型提供商。打开一个即可管理它的账号和模型。',
     'settings.providers.enterpriseTitle': '企业模式',
     'settings.providers.enterpriseManagedBy': '由 {organization} 管理。',
     'settings.providers.enterprisePolicyUnreadable': '无法读取本机的策略文件，因此企业模式保持开启。请联系管理员检查该文件。',
@@ -973,7 +961,6 @@ export const providersI18n = {
     'settings.providers.accounts.toast.renameFailed': '无法重命名账号',
   },
   'zh-TW': {
-    'settings.providers.grid.description': 'OpenCode 可以使用的模型供應商。開啟一個即可管理它的帳號和模型。',
     'settings.providers.enterpriseTitle': '企業模式',
     'settings.providers.enterpriseManagedBy': '由 {organization} 管理。',
     'settings.providers.enterprisePolicyUnreadable': '無法讀取本機的原則檔案，因此企業模式維持開啟。請聯絡管理員檢查該檔案。',
@@ -1054,7 +1041,6 @@ export const providersI18n = {
     'settings.providers.accounts.toast.renameFailed': '無法重新命名帳號',
   },
   ar: {
-    'settings.providers.grid.description': 'موفرو النماذج الذين يمكن لـ OpenCode استخدامهم. افتح أحدهم لإدارة حساباته ونماذجه.',
     'settings.providers.enterpriseTitle': 'وضع المؤسسات',
     'settings.providers.enterpriseManagedBy': 'تديره {organization}.',
     'settings.providers.enterprisePolicyUnreadable': 'تعذّرت قراءة ملف سياسة الجهاز، لذا يبقى وضع المؤسسات مفعّلًا. اطلب من المسؤول التحقق منه.',
@@ -1135,7 +1121,6 @@ export const providersI18n = {
     'settings.providers.accounts.toast.renameFailed': 'تعذّرت إعادة تسمية الحساب',
   },
   he: {
-    'settings.providers.grid.description': 'ספקי מודלים ש-OpenCode יכול להשתמש בהם. אפשר לפתוח ספק כדי לנהל את החשבונות והמודלים שלו.',
     'settings.providers.enterpriseTitle': 'מצב ארגוני',
     'settings.providers.enterpriseManagedBy': 'מנוהל על ידי {organization}.',
     'settings.providers.enterprisePolicyUnreadable': 'לא ניתן היה לקרוא את קובץ המדיניות של המחשב, ולכן המצב הארגוני נשאר פעיל. כדאי לבקש ממנהל המערכת לבדוק אותו.',

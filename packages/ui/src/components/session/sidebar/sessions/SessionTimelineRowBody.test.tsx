@@ -69,6 +69,27 @@ test('an empty detailed line disappears and returns when metadata arrives', asyn
   expect(document.querySelector('div.h-4')).not.toBeNull();
 });
 
+test('a branch name opens its line without an icon, and the chevron sits over it on hover', async () => {
+  const toggle = <button data-toggle>Expand</button>;
+  for (const withProject of [false, true]) {
+    await act(async () => renderRow(false, withProject, { branchLabel: 'main' }));
+    expect(document.querySelector('[href="#oc-git-branch"]')).toBeNull();
+  }
+  // Pointer layouts: the chevron overlays the name's start, which fades under it.
+  await act(async () => renderRow(false, false, { branchLabel: 'main', leadToggle: toggle, leadMaskClassName: 'mask-on-hover' }));
+  const name = Array.from(document.querySelectorAll('span')).find((node) => node.textContent === 'main');
+  expect(name?.className).toContain('mask-on-hover');
+  expect(document.querySelector('[data-toggle]')?.parentElement?.className).toContain('absolute');
+  // Touch layouts show the chevron always, so it takes its own place before the name.
+  await act(async () => renderRow(false, false, { branchLabel: 'main', leadToggle: toggle }));
+  expect(Array.from(document.querySelectorAll('span')).find((node) => node.textContent === 'main')?.className).not.toContain('mask-on-hover');
+  expect(document.querySelector('[data-toggle]')?.parentElement?.className).not.toContain('absolute');
+  // A space keeps its mark, and the chevron stands on it.
+  await act(async () => renderRow(false, false, { branchLabel: 'Fix login', spaceMark: 'Space', leadToggle: toggle, leadMaskClassName: 'mask-on-hover' }));
+  expect(document.querySelector('[href="#oc-instance"]')).not.toBeNull();
+  expect(Array.from(document.querySelectorAll('span')).find((node) => node.textContent === 'Fix login')?.className).not.toContain('mask-on-hover');
+});
+
 test('the phone omits an empty line but keeps metadata and its expansion control', async () => {
   for (const [secondLine, chevron, visible] of [
     [null, null, false],

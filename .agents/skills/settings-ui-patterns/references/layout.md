@@ -9,7 +9,7 @@ All primitives and class constants below live in
 ```tsx
 <SettingsPageLayout
   title={t('settings.page.x.title')}
-  description={t('settings.page.x.description')}
+  namedBySidebar
   showSaveStatus
 >
   <SettingsSection title={t('...sectionA')} divider={false}>…</SettingsSection>
@@ -18,6 +18,7 @@ All primitives and class constants below live in
 ```
 
 - `SettingsPageLayout` owns scrolling, page padding, the `@container` context, and the quiet save indicator (`showSaveStatus`).
+- A page opened from the settings sidebar passes `namedBySidebar` and no `description`: the sidebar already names it, so the title stays only for screen readers and focus, and only `headerEnd` actions show. A detail page (one agent, provider, server) keeps its visible title. A line the user must read (a consequence, a warning) goes into the content, not the page description.
 - Sections separate with a top border (`divider`, default true); the first section under the page header passes `divider={false}`.
 - Section titles are real headers (L2). Do not nest an umbrella section around a list of `SettingsControlGroup`s when each group deserves its own header — promote groups to sections instead (see the Chat page precedent).
 

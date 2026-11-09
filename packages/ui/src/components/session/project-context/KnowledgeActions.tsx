@@ -7,6 +7,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from '@/components/ui/context-menu';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { KNOWLEDGE_ICON_BUTTON_CLASS, useKnowledgeRevealClass } from './knowledgeRowStyle';
@@ -39,7 +40,7 @@ export const KnowledgePinToggle: React.FC<{
   );
 };
 
-type KnowledgeMenuItem = {
+export type KnowledgeMenuItem = {
   id: string;
   label: string;
   /** A longer explanation shown as the item's tooltip. */
@@ -57,7 +58,9 @@ export const KnowledgeMenu: React.FC<{
 }> = ({ items, disabled, alwaysVisible = false }) => {
   const { t } = useI18n();
   const hoverReveal = useKnowledgeRevealClass();
-  const reveal = alwaysVisible ? '' : hoverReveal;
+  // A list row's menu is its right click with a mouse (`KnowledgeRowContextMenu`),
+  // so its ⋯ shows on touch screens only. An opened entry keeps its toolbar ⋯.
+  const reveal = alwaysVisible ? '' : cn(hoverReveal, 'pointer-fine:hidden');
   const label = t('rightSidebar.contextNotesTodo.actions.more');
   return (
     <DropdownMenu>
@@ -88,3 +91,31 @@ export const KnowledgeMenu: React.FC<{
     </DropdownMenu>
   );
 };
+
+/**
+ * A list row's right-click menu: the same items as its ⋯ menu. `render` is the
+ * row element itself, so a list item stays the list's direct child.
+ */
+export const KnowledgeRowContextMenu: React.FC<{
+  items: KnowledgeMenuItem[];
+  disabled?: boolean;
+  render: React.ReactElement;
+  children: React.ReactNode;
+}> = ({ items, disabled, render, children }) => (
+  <ContextMenu disabled={disabled}>
+    <ContextMenuTrigger render={render}>{children}</ContextMenuTrigger>
+    <ContextMenuContent className="min-w-48">
+      {items.map((item) => (
+        <ContextMenuItem
+          key={item.id}
+          className={item.destructive ? 'text-destructive focus:text-destructive' : undefined}
+          disabled={item.disabled}
+          title={item.hint}
+          onClick={item.onSelect}
+        >
+          {item.label}
+        </ContextMenuItem>
+      ))}
+    </ContextMenuContent>
+  </ContextMenu>
+);

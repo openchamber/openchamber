@@ -6,7 +6,7 @@
  * when nothing changes, so the store can decide against the record as it is
  * at write time.
  *
- * The rule the patches keep: sending a message opens, the user alone closes.
+ * The rule the patches keep: sending a message opens, only the user closes.
  * A message reopens a session the user closed, but only one sent after the
  * user closed it.
  */
@@ -36,6 +36,19 @@ export const openPatch = (metadata, { requestAt, now }) => {
   // Closed after this message was sent: the user's decision stands.
   if (work?.state === 'done' && Number.isFinite(requestAt) && (work.doneAt ?? 0) >= requestAt) return null;
   return patchOf({ state: 'open', openedAt: now, openedBy: 'auto', doneAt: null, suggestDoneAt: null });
+};
+
+/**
+ * The user put the session in work (`open`, Track) or marked it done, in the
+ * app or through an agent on their word. Done keeps when and by whom the work
+ * was opened; both drop Jev's hint. The same record the UI writes
+ * (`withSessionWorkState` in packages/ui).
+ */
+export const userStatePatch = (metadata, { state, now }) => {
+  if (readWork(metadata)?.state === state) return null;
+  return patchOf(state === 'open'
+    ? { state: 'open', openedAt: now, openedBy: 'user', doneAt: null, suggestDoneAt: null }
+    : { state: 'done', doneAt: now, suggestDoneAt: null });
 };
 
 /** The turn that just ended looks like the end of the work. */

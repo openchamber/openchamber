@@ -480,6 +480,35 @@
   --oc-app-bottom-safe: max(16px, calc(var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)) * 0.5));
 }
 
+/* Side insets for the mobile shell and the surfaces that cover the screen from
+   outside it (drawers, pushed pages, the panels under the header). The PWA's
+   .main-content-safe-area padding is gated behind display-mode: standalone,
+   which the Capacitor WebView does not match, so the native app ran content
+   under whatever the system puts on a side: the notch of a phone in landscape,
+   or the status bar column on the right of iPhone Duo. The tokens are 0
+   wherever the screen has no side insets. */
+.oc-side-safe-area {
+  padding-left: var(--oc-safe-area-left, 0px);
+  padding-right: var(--oc-safe-area-right, 0px);
+}
+
+/* Phone toasts between their two side offsets. Sonner's narrow-screen CSS sizes
+   the toast as the viewport minus twice the left offset, so it cannot keep
+   clear of an inset on one side only, such as the status bar column of
+   iPhone Duo (MobileToaster passes the insets in its offsets). With equal
+   offsets this is the geometry sonner already drew, in both directions. */
+@media (max-width: 600px) {
+  [data-sonner-toaster][data-x-position='center'] {
+    left: var(--mobile-offset-left) !important;
+    right: var(--mobile-offset-right) !important;
+    width: auto !important;
+  }
+
+  [data-sonner-toaster][data-x-position='center'] [data-sonner-toast] {
+    width: 100% !important;
+  }
+}
+
 /* Android native safe areas. Every --oc-safe-area-* definition above is gated
    behind -webkit-touch-callout (iOS) or display-mode: standalone, neither of
    which matches the Capacitor Android WebView — so the Android app used to rely
@@ -604,6 +633,26 @@
      inset cancels it out (the home indicator is hidden and the composer should sit
      flush above the keyboard). The shell keeps its own bg behind this padding. */
   padding-bottom: max(0px, calc(var(--oc-app-bottom-safe, 0px) - var(--oc-kb-layout, 0px)));
+}
+
+/* A screen that gives no top and no left inset still has rounded corners: the
+   inner screen of iPhone Duo puts its status bar on the right, so a button in
+   the top row sat in the top-left curve (radius ~55pt). Such a screen gets
+   12px over the top row, enough to clear the curve. A top inset (a phone in
+   portrait, an iPad) or a left one (a phone in landscape) already clears it,
+   and the min() then goes negative and the max() keeps the real inset. */
+:root.oc-capacitor-app:not(.oc-platform-android) {
+  --oc-corner-clearance: max(0px, min(12px, calc(12px - (env(safe-area-inset-top, 0px) + env(safe-area-inset-left, 0px)) * 1000)));
+  --oc-safe-area-top: max(env(safe-area-inset-top, 0px), var(--oc-corner-clearance));
+}
+
+/* The iPad sidebar sits in that shell, so its footer has the bottom room
+   already; clearing the inset again put it far above the composer beside it.
+   Its buttons end where the composer does, and on a screen with bare corners
+   (above) the first one steps in from the bottom-left curve. */
+:root.oc-capacitor-app .oc-ipad-sidebar .oc-sessions-footer {
+  padding-bottom: 0 !important;
+  padding-left: calc(0.75rem + var(--oc-corner-clearance, 0px) * 0.7);
 }
 
 /* Portal surfaces (drawers, dialogs, overlay panels, the comment bar) render
@@ -916,7 +965,9 @@
    (the command palette) where they are. */
 [data-slot="dialog-layer"][data-sheet] {
   align-items: flex-end;
-  padding: max(0.75rem, env(safe-area-inset-top)) 0 0;
+  /* Sides clear the screen's insets: a landscape notch, the status bar column
+     of iPhone Duo. */
+  padding: max(0.75rem, env(safe-area-inset-top)) var(--oc-safe-area-right, 0px) 0 var(--oc-safe-area-left, 0px);
 }
 
 [data-slot="dialog-layer"][data-sheet] > [data-slot="dialog-content"] {
