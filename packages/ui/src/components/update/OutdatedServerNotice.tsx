@@ -53,7 +53,15 @@ export function OutdatedServerNotice({ version }: { version: string }) {
             <p className="typography-meta text-[var(--status-error)]">{t('startup.serverOutdated.noUpdate')}</p>
           )}
           {manual.error && <p dir="auto" className="typography-meta text-muted-foreground">{manual.error}</p>}
-          {manual.info?.installBlocked === 'desktop-host' ? (
+          {manual.info?.installBlocked === 'opencode-version' ? (
+            <p className="typography-meta text-[var(--status-warning)]">
+              {t('updateDialog.openCodeTooOld', {
+                version: manual.info.version || '',
+                required: manual.info.requiredOpenCodeVersion || '',
+                current: manual.info.openCodeVersion || '',
+              })}
+            </p>
+          ) : manual.info?.installBlocked === 'desktop-host' ? (
             <p className="typography-meta text-muted-foreground">
               {t('updateDialog.desktopHostInstall', { version: manual.info.version || '' })}
             </p>

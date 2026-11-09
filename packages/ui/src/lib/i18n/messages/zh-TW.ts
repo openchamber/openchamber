@@ -3421,6 +3421,7 @@ export const dict: Record<I18nKey, string> = {
   'updateDialog.status.autoReloadHint': '更新完成後頁面將自動重新載入。',
   'updateDialog.fallback.updateViaTerminal': '或透過終端機更新：',
   'updateDialog.desktopHostInstall': 'OpenChamber {version} 已可用。請在執行它的電腦上更新。',
+  'updateDialog.openCodeTooOld': 'OpenChamber {version} 需要 OpenCode {required}。此伺服器為 {current}。請先更新 OpenCode。',
   'updateDialog.actions.copyCommand': '複製命令',
   'updateDialog.actions.copied': '已複製！',
   'updateDialog.status.downloadingPayload': '正在下載更新包...',

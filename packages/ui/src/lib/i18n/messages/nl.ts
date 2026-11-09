@@ -3459,6 +3459,7 @@ export const dict = {
   'updateDialog.status.autoReloadHint': 'De pagina wordt automatisch herladen zodra de update voltooid is.',
   'updateDialog.fallback.updateViaTerminal': 'Of werk bij via de terminal:',
   'updateDialog.desktopHostInstall': 'OpenChamber {version} is beschikbaar. Werk het bij op de computer waarop het draait.',
+  'updateDialog.openCodeTooOld': 'OpenChamber {version} heeft OpenCode {required} nodig. Deze server heeft {current}. Werk eerst OpenCode bij.',
   'updateDialog.actions.copyCommand': 'Opdracht kopiëren',
   'updateDialog.actions.copied': 'Gekopieerd!',
   'updateDialog.status.downloadingPayload': 'Update-payload downloaden...',
