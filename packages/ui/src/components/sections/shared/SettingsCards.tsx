@@ -106,12 +106,18 @@ export const SettingsCard: React.FC<SettingsCardProps> = ({ icon, title, subtitl
           <div className="mt-1 line-clamp-2 typography-micro text-muted-foreground">{description}</div>
         ) : null}
       </div>
-      <div className={cn('mt-auto flex min-w-0 items-center gap-2 pt-3 typography-micro text-muted-foreground', hasControl ? 'pe-24' : hasActions && 'pe-8')}>
+      {/* The ⋯ button shows on touch screens only; with a mouse the card's
+          menu is its right click, so the footer keeps no room for it there. */}
+      <div className={cn('mt-auto flex min-w-0 items-center gap-2 pt-3 typography-micro text-muted-foreground', hasControl ? 'pe-24' : hasActions && 'pe-8 pointer-fine:pe-0')}>
         {footer}
-        {onOpen && !hasActions ? (
+        {onOpen ? (
           <Icon
             name="arrow-right-s"
-            className="ms-auto size-4 shrink-0 opacity-0 transition-opacity duration-150 group-hover:opacity-70 group-focus-visible:opacity-70"
+            className={cn(
+              'ms-auto size-4 shrink-0 opacity-0 transition-opacity duration-150 group-hover:opacity-70 group-focus-visible:opacity-70',
+              hasActions && !hasControl && 'hidden pointer-fine:block',
+              hasActions && hasControl && 'hidden',
+            )}
             aria-hidden
           />
         ) : null}
@@ -149,7 +155,7 @@ export const SettingsCard: React.FC<SettingsCardProps> = ({ icon, title, subtitl
                 <Button
                   variant="ghost"
                   size="icon"
-                  className="h-7 w-7 text-muted-foreground opacity-100 transition-opacity md:opacity-0 md:group-hover:opacity-100 md:focus-visible:opacity-100 data-[state=open]:opacity-100"
+                  className="h-7 w-7 text-muted-foreground opacity-100 transition-opacity md:opacity-0 md:group-hover:opacity-100 md:focus-visible:opacity-100 data-[state=open]:opacity-100 pointer-fine:hidden"
                   aria-label={actionsLabel}
                   title={actionsLabel}
                 >

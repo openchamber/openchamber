@@ -289,7 +289,9 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
   // from 28px.
   const showWorktreeAction = showCreateButtons && isRepo && !hideDirectoryControls && Boolean(onNewWorktreeSession);
   // With a mouse the project's menu is its right-click menu (Shift+F10 from
-  // the keyboard); the ⋯ button stays on touch layouts, which have no right click.
+  // the keyboard); the ⋯ button shows on touch only: always in touch layouts,
+  // on hover for a touch screen elsewhere. Hover reserves count it only where
+  // it always shows.
   const showMenuButton = !hideDirectoryControls && alwaysShowActions;
   const groupedHeaderActionCount = (showWorktreeAction ? 1 : 0) + (showMenuButton ? 1 : 0);
   const headerActionsReserveClass = groupedHeaderActionCount === 2
@@ -455,7 +457,7 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
                   </Tooltip>
                 ) : null}
 
-                {showMenuButton ? (
+                {!hideDirectoryControls ? (
                 <DropdownMenu
                   open={isMenuOpen}
                   onOpenChange={handleMenuOpenChange}
@@ -465,6 +467,7 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
                         type="button"
                         className={cn(
                           'inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring hover:text-foreground',
+                          !showMenuButton && 'pointer-fine:hidden',
                           isMenuOpen
                             ? 'opacity-100 pointer-events-auto'
                             : alwaysShowActions

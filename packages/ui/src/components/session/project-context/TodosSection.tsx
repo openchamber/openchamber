@@ -24,7 +24,7 @@ import { PROJECT_TODO_TEXT_MAX_LENGTH, type ProjectTodoChange, type ProjectTodoI
 import { cn } from '@/lib/utils';
 import { KnowledgeComposer } from './KnowledgeComposer';
 import { KNOWLEDGE_ICON_BUTTON_CLASS, useKnowledgeRevealClass } from './knowledgeRowStyle';
-import { KnowledgeMenu } from './KnowledgeActions';
+import { KnowledgeMenu, KnowledgeRowContextMenu } from './KnowledgeActions';
 import { ButtonTooltip } from '@/components/ui/action-toolbar';
 
 const createTodoId = (): string => {
@@ -226,10 +226,19 @@ export const TodosSection: React.FC<{
               <ul className="divide-y divide-edge">
                 {visibleTodos.map((todo) => {
                   const isExpandedTodo = expandedTodoIds.has(todo.id);
+                  const menuItems = [{
+                    id: 'delete',
+                    label: t('rightSidebar.contextNotesTodo.todo.menu.delete'),
+                    destructive: true,
+                    onSelect: () => handleDeleteTodo(todo.id),
+                  }];
                   return (
                     <SortableTodoItem key={todo.id} id={todo.id}>
                       {(dragHandleProps) => (
-                        <div className={cn('group/knowledge flex gap-1.5 px-2.5 py-1.5', isExpandedTodo ? 'items-start' : 'items-center')}>
+                        <KnowledgeRowContextMenu
+                          items={menuItems}
+                          render={<div className={cn('group/knowledge flex gap-1.5 px-2.5 py-1.5', isExpandedTodo ? 'items-start' : 'items-center')} />}
+                        >
                           <button
                             type="button"
                             ref={dragHandleProps.setActivatorNodeRef}
@@ -301,16 +310,9 @@ export const TodosSection: React.FC<{
                                 </DropdownMenuItem>
                               </DropdownMenuContent>
                             </DropdownMenu>
-                            <KnowledgeMenu
-                              items={[{
-                                id: 'delete',
-                                label: t('rightSidebar.contextNotesTodo.todo.menu.delete'),
-                                destructive: true,
-                                onSelect: () => handleDeleteTodo(todo.id),
-                              }]}
-                            />
+                            <KnowledgeMenu items={menuItems} />
                           </div>
-                        </div>
+                        </KnowledgeRowContextMenu>
                       )}
                     </SortableTodoItem>
                   );

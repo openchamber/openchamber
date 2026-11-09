@@ -167,7 +167,9 @@ function RunSidebarRowComponent({
   );
 
   // With a mouse the run's menu is its right-click menu (Shift+F10 from the
-  // keyboard); the ⋯ button stays on touch layouts, which have no right click.
+  // keyboard); the ⋯ button shows on touch only: always in touch layouts, on
+  // hover for a touch screen elsewhere. Hover reserves count it only where it
+  // always shows.
   const showMenuButton = alwaysShowActions;
   const hoverButtons = (sessionWorkEnabled ? 1 : 0) + (showMenuButton ? 1 : 0);
   const hoverOut = alwaysShowActions || hoverButtons === 0 ? undefined : 'group-hover/run:opacity-0 group-has-[:focus-visible]/run:opacity-0';
@@ -340,25 +342,23 @@ function RunSidebarRowComponent({
                   </TooltipContent>
                 </Tooltip>
               ) : null}
-              {showMenuButton ? (
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <button
-                      type="button"
-                      className={actionButtonClass}
-                      aria-label={t('sessions.sidebar.work.menu.label', { label: run.title })}
-                      onPointerDown={(event) => event.stopPropagation()}
-                      onClick={(event) => event.stopPropagation()}
-                      onKeyDown={(event) => event.stopPropagation()}
-                    >
-                      <Icon name="more-2" className="h-3.5 w-3.5" />
-                    </button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end" className="min-w-[180px]">
-                    {renderMenuItems(DROPDOWN_SLOTS)}
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              ) : null}
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    type="button"
+                    className={cn(actionButtonClass, !showMenuButton && 'pointer-fine:hidden')}
+                    aria-label={t('sessions.sidebar.work.menu.label', { label: run.title })}
+                    onPointerDown={(event) => event.stopPropagation()}
+                    onClick={(event) => event.stopPropagation()}
+                    onKeyDown={(event) => event.stopPropagation()}
+                  >
+                    <Icon name="more-2" className={alwaysShowActions ? 'h-3.5 w-3.5' : 'h-2.5 w-2.5'} />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="min-w-[180px]">
+                  {renderMenuItems(DROPDOWN_SLOTS)}
+                </DropdownMenuContent>
+              </DropdownMenu>
             </TooltipProvider>
           </div>
         </div>

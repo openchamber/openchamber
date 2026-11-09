@@ -328,7 +328,9 @@ export function WorktreeWorkRow(props: Props): React.ReactNode {
   // tail fades under them (`oc-actions-mask`), so nothing moves.
   const hasWorkAction = workAction;
   // With a mouse the work's menu is its right-click menu (Shift+F10 from the
-  // keyboard); the ⋯ button stays on touch layouts, which have no right click.
+  // keyboard); the ⋯ button shows on touch only: always in touch layouts, on
+  // hover for a touch screen elsewhere. Hover reserves count it only where it
+  // always shows.
   const showMenuButton = alwaysShowActions;
   const hoverButtons = (hasWorkAction ? 1 : 0) + (shiftArchive || canNewChat ? 1 : 0) + (showMenuButton ? 1 : 0);
   const actionsReserve = [undefined, '[--oc-actions-reserve:0.625rem]', '[--oc-actions-reserve:1.75rem]', '[--oc-actions-reserve:2.875rem]'][hoverButtons];
@@ -634,12 +636,12 @@ export function WorktreeWorkRow(props: Props): React.ReactNode {
                 <TooltipContent side="top" sideOffset={6}>{t('sessions.sidebar.project.actions.newDraftSession')}</TooltipContent>
               </Tooltip>
             ) : null}
-            {showMenuButton ? (
+            {(
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <button
                     type="button"
-                    className={actionButtonClass}
+                    className={cn(actionButtonClass, !showMenuButton && 'pointer-fine:hidden')}
                     aria-label={t('sessions.sidebar.work.menu.label', { label })}
                     onPointerDown={(event) => event.stopPropagation()}
                     onClick={(event) => event.stopPropagation()}
@@ -652,7 +654,7 @@ export function WorktreeWorkRow(props: Props): React.ReactNode {
                   {renderMenuItems(DROPDOWN_SLOTS)}
                 </DropdownMenuContent>
               </DropdownMenu>
-            ) : null}
+            )}
           </TooltipProvider>
         </div>
       </div>

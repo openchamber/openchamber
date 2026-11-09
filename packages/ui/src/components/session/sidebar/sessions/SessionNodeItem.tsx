@@ -379,8 +379,9 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
   // Code open-in-editor.
   const extraHoverActions = (showWorkAction ? 1 : 0) + (showQuickArchiveAction ? 1 : 0) + (showOpenInEditorAction ? 1 : 0);
   // With a mouse the row's menu is its right-click menu (Shift+F10 from the
-  // keyboard), so the ⋯ button stays only where there is no right click:
-  // touch layouts.
+  // keyboard), so the ⋯ button shows on touch only: always in touch layouts,
+  // and on hover for a touch screen elsewhere (`pointer-fine:hidden`). Hover
+  // reserves are for a mouse, so they count it only where it always shows.
   const showMenuButton = alwaysShowActions;
   const hoverButtons = extraHoverActions + (showMenuButton ? 1 : 0);
   // VS Code reveals its permanent-size actions on hover, so the title makes
@@ -1977,7 +1978,6 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
                 </TooltipContent>
               </Tooltip>
             ) : null}
-            {showMenuButton ? (
             <DropdownMenu open={isMenuOpen} onOpenChange={handleMenuOpenChange} onOpenChangeComplete={handleMenuOpenChangeComplete}>
               <DropdownMenuTrigger asChild>
                 <button
@@ -1985,7 +1985,7 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
                   className={cn(
                     'inline-flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
                     !alwaysShowActions
-                      ? (isSessionMenuOpen
+                      ? cn('pointer-fine:hidden', isSessionMenuOpen
                           ? 'h-4 w-4 opacity-100'
                           : cn('h-4 w-4 opacity-0', revealOnHoverClass))
                       : 'h-6 w-6 opacity-100',
@@ -2001,7 +2001,6 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
               </DropdownMenuTrigger>
               {sessionMenuContent}
             </DropdownMenu>
-            ) : null}
             </TooltipProvider>
           </div>
           </ContextMenu.Trigger>

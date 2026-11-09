@@ -603,7 +603,7 @@ const AgentListItem: React.FC<AgentListItemProps> = ({
           <DropdownMenuTrigger asChild>
             <Button size="sm"
               variant="ghost"
-              className="h-6 w-6 px-0 flex-shrink-0 -me-1 opacity-100 transition-opacity md:opacity-0 md:group-hover:opacity-100"
+              className="h-6 w-6 px-0 flex-shrink-0 -me-1 opacity-100 transition-opacity md:opacity-0 md:group-hover:opacity-100 pointer-fine:hidden"
             >
               <Icon name="more" className="h-3.5 w-3.5" />
             </Button>

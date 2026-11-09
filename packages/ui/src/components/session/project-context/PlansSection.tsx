@@ -19,7 +19,7 @@ import { cn } from '@/lib/utils';
 import { useProjectContextStore } from '@/stores/useProjectContextStore';
 import { KnowledgeComposer } from './KnowledgeComposer';
 import { KNOWLEDGE_ICON_BUTTON_CLASS } from './knowledgeRowStyle';
-import { KnowledgeMenu, KnowledgePinToggle } from './KnowledgeActions';
+import { KnowledgeMenu, KnowledgePinToggle, KnowledgeRowContextMenu } from './KnowledgeActions';
 import { ButtonTooltip } from '@/components/ui/action-toolbar';
 import { formatKnowledgeDate } from './knowledgeFormat';
 import { planDeleteKey, scheduleKnowledgeDelete, usePendingKnowledgeDeletes } from './pendingKnowledgeDeletes';
@@ -292,12 +292,36 @@ export const PlansSection: React.FC<{
               const pinned = pinnedPlanIds.has(plan.id);
               const shared = plan.source === 'shared';
               const sessionId = plan.session?.sessionId;
+              const menuItems = [
+                {
+                  id: 'move',
+                  label: shared
+                    ? t('rightSidebar.contextNotesTodo.plans.menu.makePersonal')
+                    : t('rightSidebar.contextNotesTodo.plans.menu.share'),
+                  hint: shared
+                    ? t('rightSidebar.contextNotesTodo.plans.makePersonal')
+                    : t('rightSidebar.contextNotesTodo.plans.share'),
+                  onSelect: () => void handleMovePlan(plan),
+                },
+                {
+                  id: 'delete',
+                  label: t('rightSidebar.contextNotesTodo.plans.deletePlan'),
+                  destructive: true,
+                  onSelect: () => handleDeletePlan(plan.id),
+                },
+              ];
               return (
-                <li
+                <KnowledgeRowContextMenu
                   key={plan.id}
-                  data-knowledge-entry-id={plan.id}
-                  aria-current={plan.id === selectedPlanId ? 'true' : undefined}
-                  className={cn('group/knowledge flex items-center gap-1 py-1 pe-1.5 ps-1', plan.id === selectedPlanId && 'bg-interactive-selection/40')}
+                  items={menuItems}
+                  disabled={movingPlanId === plan.id}
+                  render={(
+                    <li
+                      data-knowledge-entry-id={plan.id}
+                      aria-current={plan.id === selectedPlanId ? 'true' : undefined}
+                      className={cn('group/knowledge flex items-center gap-1 py-1 pe-1.5 ps-1', plan.id === selectedPlanId && 'bg-interactive-selection/40')}
+                    />
+                  )}
                 >
                   <button
                     type="button"
@@ -330,28 +354,8 @@ export const PlansSection: React.FC<{
                     pinned={pinned}
                     onToggle={() => void handleTogglePinned(plan.id, !pinned)}
                   />
-                  <KnowledgeMenu
-                    disabled={movingPlanId === plan.id}
-                    items={[
-                      {
-                        id: 'move',
-                        label: shared
-                          ? t('rightSidebar.contextNotesTodo.plans.menu.makePersonal')
-                          : t('rightSidebar.contextNotesTodo.plans.menu.share'),
-                        hint: shared
-                          ? t('rightSidebar.contextNotesTodo.plans.makePersonal')
-                          : t('rightSidebar.contextNotesTodo.plans.share'),
-                        onSelect: () => void handleMovePlan(plan),
-                      },
-                      {
-                        id: 'delete',
-                        label: t('rightSidebar.contextNotesTodo.plans.deletePlan'),
-                        destructive: true,
-                        onSelect: () => handleDeletePlan(plan.id),
-                      },
-                    ]}
-                  />
-                </li>
+                  <KnowledgeMenu disabled={movingPlanId === plan.id} items={menuItems} />
+                </KnowledgeRowContextMenu>
               );
             })}
           </ul>

@@ -79,6 +79,12 @@ const NoteCard: React.FC<{
   const { t } = useI18n();
   const { title, rest } = React.useMemo(() => splitNoteTitle(note.body), [note.body]);
   const fadePreview = rest.length > PREVIEW_FADE_MIN_CHARS || rest.split('\n').length > PREVIEW_FADE_MIN_LINES;
+  const menuItems = [{
+    id: 'delete',
+    label: t('rightSidebar.contextNotesTodo.notes.actions.delete'),
+    destructive: true,
+    onSelect: onDelete,
+  }];
 
   return (
     <KnowledgeCard
@@ -94,16 +100,10 @@ const NoteCard: React.FC<{
       actions={(
         <>
           <KnowledgePinToggle pinned={pinned} onToggle={onTogglePinned} />
-          <KnowledgeMenu
-            items={[{
-              id: 'delete',
-              label: t('rightSidebar.contextNotesTodo.notes.actions.delete'),
-              destructive: true,
-              onSelect: onDelete,
-            }]}
-          />
+          <KnowledgeMenu items={menuItems} />
         </>
       )}
+      menuItems={menuItems}
       footer={<NoteMeta note={note} pinned={pinned} />}
     >
       {rest ? (
