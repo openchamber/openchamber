@@ -564,6 +564,8 @@ export const dict = {
   'header.sessionTabs.closeOtherTabs': 'Fermer les autres onglets',
   'sessions.switcher.empty': 'Aucune session récente',
   'sessions.switcher.draftTitle': 'Nouvelle session',
+  'sessions.switcher.search.placeholder': 'Rechercher des sessions…',
+  'sessions.switcher.search.noResults': 'Aucune session correspondante',
   'sessions.sidebar.updateCheck.errorTitle': 'Échec de la vérification des mises à jour',
   'sessions.sidebar.updateCheck.latestVersion': 'Vous êtes sur la dernière version',
   'sessions.sidebar.directory.errorAddProjectTitle': 'Échec de l\'ajout du projet',

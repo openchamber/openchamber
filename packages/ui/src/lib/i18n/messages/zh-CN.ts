@@ -732,6 +732,8 @@ export const dict: Record<I18nKey, string> = {
   'header.sessionTabs.closeOtherTabs': '关闭其他标签页',
   'sessions.switcher.empty': '没有最近会话',
   'sessions.switcher.draftTitle': '新会话',
+  'sessions.switcher.search.placeholder': '搜索会话…',
+  'sessions.switcher.search.noResults': '没有匹配的会话',
   'sessions.sidebar.updateCheck.errorTitle': '检查更新失败',
   'sessions.sidebar.updateCheck.latestVersion': '你已是最新版本',
   'sessions.sidebar.directory.errorAddProjectTitle': '添加项目失败',

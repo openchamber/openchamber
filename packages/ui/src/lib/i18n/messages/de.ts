@@ -653,6 +653,8 @@ export const dict = {
   'header.sessionTabs.closeOtherTabs': 'Andere Tabs schließen',
   'sessions.switcher.empty': 'Keine kürzlichen Sitzungen',
   'sessions.switcher.draftTitle': 'Neue Sitzung',
+  'sessions.switcher.search.placeholder': 'Sitzungen durchsuchen…',
+  'sessions.switcher.search.noResults': 'Keine passenden Sitzungen',
   'sessions.sidebar.updateCheck.errorTitle': 'Fehler beim Prüfen auf Aktualisierungen',
   'sessions.sidebar.updateCheck.latestVersion': 'Sie verwenden die neueste Version',
   'sessions.sidebar.directory.errorAddProjectTitle': 'Fehler beim Hinzufügen des Projekts',

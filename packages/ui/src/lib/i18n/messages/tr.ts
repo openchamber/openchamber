@@ -644,6 +644,8 @@ export const dict = {
   'sessions.switcher.openAria': 'Session değiştiriciyi aç',
   'sessions.switcher.empty': 'Son kullanılan session yok',
   'sessions.switcher.draftTitle': 'Yeni session',
+  'sessions.switcher.search.placeholder': 'Oturumlarda ara…',
+  'sessions.switcher.search.noResults': 'Eşleşen oturum yok',
   'sessions.sidebar.updateCheck.errorTitle': 'Güncellemeler kontrol edilemedi',
   'sessions.sidebar.updateCheck.latestVersion': 'En son sürümü kullanıyorsunuz',
   'sessions.sidebar.directory.errorAddProjectTitle': 'Proje eklenemedi',

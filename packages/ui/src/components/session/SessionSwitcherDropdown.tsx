@@ -26,11 +26,21 @@ import type { SessionNode } from './sidebar/types';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
+import { Input } from '@/components/ui/input';
 
 type SecondaryMeta = SwitcherItem['secondaryMeta'];
 
 type SwitcherVariant = 'default' | 'compact';
 const NEW_SESSION_SWITCHER_TARGET = 'new-session';
+
+/** Searching looks past the handful of parents the dropdown shows by default. */
+const SWITCHER_SEARCH_MAX_PARENTS = 200;
+
+/** A parent stays visible when only a child matches, so a match is never hidden. */
+function switcherNodeMatches(node: SessionNode, query: string): boolean {
+  const haystack = `${node.session.title} ${node.session.id}`.toLowerCase();
+  return haystack.includes(query) || node.children.some((child) => switcherNodeMatches(child, query));
+}
 
 type SessionSwitcherDropdownProps = {
   children: React.ReactNode;
@@ -80,7 +90,19 @@ type SwitcherContentProps = {
 function SwitcherContent({ onSelect, variant, scopeProjectId }: SwitcherContentProps): React.ReactElement {
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
   const isNewSessionDraftOpen = useSessionUIStore((state) => state.newSessionDraft.open === true);
-  const items = useSwitcherItems(true, { scopeProjectId, currentSessionId });
+  const [query, setQuery] = React.useState('');
+  const normalizedQuery = React.useMemo(() => query.trim().toLowerCase(), [query]);
+  const hasQuery = normalizedQuery.length > 0;
+  const items = useSwitcherItems(true, {
+    scopeProjectId,
+    currentSessionId,
+    // The closed dropdown only needs a handful of rows; a search needs the list.
+    maxParents: hasQuery ? SWITCHER_SEARCH_MAX_PARENTS : undefined,
+  });
+  const visibleItems = React.useMemo(
+    () => (hasQuery ? items.filter((item) => switcherNodeMatches(item.node, normalizedQuery)) : items),
+    [hasQuery, items, normalizedQuery],
+  );
   const openNewSessionDraft = useSessionUIStore((state) => state.openNewSessionDraft);
   const { t } = useI18n();
 
@@ -91,6 +113,7 @@ function SwitcherContent({ onSelect, variant, scopeProjectId }: SwitcherContentP
 
   const [expandedParents, setExpandedParents] = React.useState<Set<string>>(new Set());
   const contentRef = React.useRef<HTMLElement>(null);
+  const searchInputRef = React.useRef<HTMLInputElement>(null);
   const initialFocusCompleteRef = React.useRef(false);
   const initialTarget = isNewSessionDraftOpen ? NEW_SESSION_SWITCHER_TARGET : currentSessionId;
   const toggleParent = React.useCallback((sessionId: string) => {
@@ -104,6 +127,17 @@ function SwitcherContent({ onSelect, variant, scopeProjectId }: SwitcherContentP
       return next;
     });
   }, []);
+
+  React.useEffect(() => {
+    if (!hasQuery) return;
+    setExpandedParents((previous) => {
+      const next = new Set(previous);
+      for (const item of visibleItems) {
+        if (item.node.children.length > 0) next.add(item.node.session.id);
+      }
+      return next;
+    });
+  }, [hasQuery, visibleItems]);
 
   React.useLayoutEffect(() => {
     if (initialFocusCompleteRef.current || !initialTarget) return;
@@ -123,7 +157,7 @@ function SwitcherContent({ onSelect, variant, scopeProjectId }: SwitcherContentP
         contentRef.current?.querySelectorAll<HTMLElement>('[data-switcher-item-id]') ?? [],
       ).find((element) => element.dataset.switcherItemId === initialTarget);
       if (!item) return;
-      item.focus();
+      searchInputRef.current?.focus();
       item.scrollIntoView({ block: 'nearest' });
       initialFocusCompleteRef.current = true;
     });
@@ -131,31 +165,62 @@ function SwitcherContent({ onSelect, variant, scopeProjectId }: SwitcherContentP
   }, [expandedParents, initialTarget, items]);
 
   return (
-    <ScrollableOverlay
-      ref={contentRef}
-      outerClassName="max-h-[60vh]"
-      disableHorizontal
-    >
-      <div className="space-y-0.5">
-        <BaseMenu.Item
-          data-switcher-item-id={NEW_SESSION_SWITCHER_TARGET}
-          onClick={handleNewSession}
-          className={cn(
-            'group relative flex w-full cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 outline-hidden select-none',
-            'data-[highlighted]:bg-interactive-hover hover:bg-interactive-hover',
-          )}
-        >
-          <Icon name="chat-new" className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
-          <span className="truncate typography-ui-label font-normal leading-tight text-foreground">
-            {t('sessions.sidebar.header.actions.newSession')}
-          </span>
-        </BaseMenu.Item>
-        {items.length === 0 ? (
+    <div className="flex flex-col">
+      <div className="px-1 pb-1">
+        <div className="relative">
+          <Icon
+            name="search"
+            className="pointer-events-none absolute inset-s-2 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
+          />
+          <Input
+            ref={searchInputRef}
+            value={query}
+            autoFocus
+            aria-label={t('sessions.switcher.search.placeholder')}
+            placeholder={t('sessions.switcher.search.placeholder')}
+            className="h-8 w-full rounded-md border border-border bg-transparent ps-8 typography-ui-label text-foreground"
+            onChange={(event) => setQuery(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Escape') {
+                event.stopPropagation();
+                setQuery('');
+                return;
+              }
+              if (event.key === 'ArrowDown') {
+                event.preventDefault();
+                contentRef.current?.querySelector<HTMLElement>('[data-switcher-item-id]')?.focus();
+              }
+            }}
+          />
+        </div>
+      </div>
+      <ScrollableOverlay
+        ref={contentRef}
+        outerClassName="max-h-[60vh]"
+        disableHorizontal
+      >
+        <div className="space-y-0.5">
+          {hasQuery ? null : (
+          <BaseMenu.Item
+            data-switcher-item-id={NEW_SESSION_SWITCHER_TARGET}
+            onClick={handleNewSession}
+            className={cn(
+              'group relative flex w-full cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 outline-hidden select-none',
+              'data-[highlighted]:bg-interactive-hover hover:bg-interactive-hover',
+            )}
+          >
+            <Icon name="chat-new" className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
+            <span className="truncate typography-ui-label font-normal leading-tight text-foreground">
+              {t('sessions.sidebar.header.actions.newSession')}
+            </span>
+          </BaseMenu.Item>
+        )}
+        {visibleItems.length === 0 ? (
           <div className="px-3 py-4 text-center typography-meta text-muted-foreground">
-            {t('sessions.switcher.empty')}
+            {hasQuery ? t('sessions.switcher.search.noResults') : t('sessions.switcher.empty')}
           </div>
         ) : (
-          items.map((item) => (
+          visibleItems.map((item) => (
             <SwitcherNode
               key={item.node.session.id}
               item={item}
@@ -167,8 +232,9 @@ function SwitcherContent({ onSelect, variant, scopeProjectId }: SwitcherContentP
             />
           ))
         )}
-      </div>
-    </ScrollableOverlay>
+        </div>
+      </ScrollableOverlay>
+    </div>
   );
 }
 

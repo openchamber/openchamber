@@ -570,6 +570,8 @@ export const dict: Record<I18nKey, string> = {
   'header.sessionTabs.closeOtherTabs': 'Zamknij pozostałe karty',
   'sessions.switcher.empty': 'Brak ostatnich sesji',
   'sessions.switcher.draftTitle': 'Nowa sesja',
+  'sessions.switcher.search.placeholder': 'Szukaj sesji…',
+  'sessions.switcher.search.noResults': 'Brak pasujących sesji',
   'sessions.sidebar.updateCheck.errorTitle': 'Nie udało się sprawdzić aktualizacji',
   'sessions.sidebar.updateCheck.latestVersion': 'Masz najnowszą wersję',
   'sessions.sidebar.directory.errorAddProjectTitle': 'Nie udało się dodać projektu',

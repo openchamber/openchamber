@@ -736,6 +736,8 @@ export const dict: Record<I18nKey, string> = {
   "header.sessionTabs.closeOtherTabs": "Fechar outras abas",
   "sessions.switcher.empty": "Nenhuma sessão recente",
   "sessions.switcher.draftTitle": "Nova sessão",
+  "sessions.switcher.search.placeholder": "Pesquisar sessões…",
+  "sessions.switcher.search.noResults": "Nenhuma sessão correspondente",
   "sessions.sidebar.updateCheck.errorTitle": "Não foi possível verificar atualizações",
   "sessions.sidebar.updateCheck.latestVersion": "Você está na versão mais recente",
   "sessions.sidebar.directory.errorAddProjectTitle": "Não foi possível adicionar o projeto",

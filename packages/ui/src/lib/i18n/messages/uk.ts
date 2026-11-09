@@ -736,6 +736,8 @@ export const dict: Record<I18nKey, string> = {
   "header.sessionTabs.closeOtherTabs": "Закрити інші вкладки",
   "sessions.switcher.empty": "Немає недавніх сесій",
   "sessions.switcher.draftTitle": "Нова сесія",
+  "sessions.switcher.search.placeholder": "Пошук сесій…",
+  "sessions.switcher.search.noResults": "Немає відповідних сесій",
   "sessions.sidebar.updateCheck.errorTitle": "Не вдалося перейти на наявність оновлень",
   "sessions.sidebar.updateCheck.latestVersion": "Ви використовуєте останню версію",
   "sessions.sidebar.directory.errorAddProjectTitle": "Не вдалося додати проєкт",

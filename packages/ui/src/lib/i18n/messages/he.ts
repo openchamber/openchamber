@@ -661,6 +661,8 @@ export const dict = {
   'header.sessionTabs.closeOtherTabs': 'סגור כרטיסיות אחרות',
   'sessions.switcher.empty': 'אין הפעלות אחרונות',
   'sessions.switcher.draftTitle': 'הפעלה חדשה',
+  'sessions.switcher.search.placeholder': 'חיפוש הפעלות…',
+  'sessions.switcher.search.noResults': 'אין הפעלות מתאימות',
   'sessions.sidebar.updateCheck.errorTitle': 'לא ניתן היה לבדוק אם יש עדכונים',
   'sessions.sidebar.updateCheck.latestVersion': 'מותקנת הגרסה העדכנית ביותר',
   'sessions.sidebar.directory.errorAddProjectTitle': 'לא ניתן היה להוסיף את הפרויקט',

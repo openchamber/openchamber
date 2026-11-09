@@ -736,6 +736,8 @@ export const dict: Record<I18nKey, string> = {
   "header.sessionTabs.closeOtherTabs": "Cerrar las demás pestañas",
   "sessions.switcher.empty": "No hay sesiones recientes",
   "sessions.switcher.draftTitle": "Nueva sesión",
+  "sessions.switcher.search.placeholder": "Buscar sesiones…",
+  "sessions.switcher.search.noResults": "Ninguna sesión coincide",
   "sessions.sidebar.updateCheck.errorTitle": "No se pudo comprobar actualizaciones",
   "sessions.sidebar.updateCheck.latestVersion": "Estás en la última versión",
   "sessions.sidebar.directory.errorAddProjectTitle": "No se pudo añadir el proyecto",

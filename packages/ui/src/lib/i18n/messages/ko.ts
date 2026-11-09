@@ -732,6 +732,8 @@ export const dict: Record<I18nKey, string> = {
   'header.sessionTabs.closeOtherTabs': '다른 탭 닫기',
   'sessions.switcher.empty': '최근 세션 없음',
   'sessions.switcher.draftTitle': '새 세션',
+  'sessions.switcher.search.placeholder': '세션 검색…',
+  'sessions.switcher.search.noResults': '일치하는 세션이 없습니다',
   'sessions.sidebar.updateCheck.errorTitle': '업데이트 확인 실패',
   'sessions.sidebar.updateCheck.latestVersion': '최신 버전을 사용 중입니다',
   'sessions.sidebar.directory.errorAddProjectTitle': '프로젝트 추가 실패',

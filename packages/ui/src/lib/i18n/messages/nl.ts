@@ -726,6 +726,8 @@ export const dict = {
   'header.sessionTabs.closeOtherTabs': 'Andere tabbladen sluiten',
   'sessions.switcher.empty': 'Geen recente sessies',
   'sessions.switcher.draftTitle': 'Nieuwe sessie',
+  'sessions.switcher.search.placeholder': 'Sessies zoeken…',
+  'sessions.switcher.search.noResults': 'Geen overeenkomende sessies',
   'sessions.sidebar.updateCheck.errorTitle': 'Kan niet op updates controleren',
   'sessions.sidebar.updateCheck.latestVersion': 'U hebt de nieuwste versie',
   'sessions.sidebar.directory.errorAddProjectTitle': 'Kan project niet toevoegen',

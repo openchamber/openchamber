@@ -731,6 +731,8 @@ export const dict = {
   'header.sessionTabs.closeOtherTabs': 'Close other tabs',
   'sessions.switcher.empty': 'No recent sessions',
   'sessions.switcher.draftTitle': 'New session',
+  'sessions.switcher.search.placeholder': 'Search sessions…',
+  'sessions.switcher.search.noResults': 'No matching sessions',
   'sessions.sidebar.updateCheck.errorTitle': 'Failed to check for updates',
   'sessions.sidebar.updateCheck.latestVersion': 'You are on the latest version',
   'sessions.sidebar.directory.errorAddProjectTitle': 'Failed to add project',

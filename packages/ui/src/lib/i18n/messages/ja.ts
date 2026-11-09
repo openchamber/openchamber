@@ -732,6 +732,8 @@ export const dict: Record<I18nKey, string> = {
   'header.sessionTabs.closeOtherTabs': '他のタブを閉じる',
   'sessions.switcher.empty': '最近のセッションはありません',
   'sessions.switcher.draftTitle': '新しいセッション',
+  'sessions.switcher.search.placeholder': 'セッションを検索…',
+  'sessions.switcher.search.noResults': '一致するセッションはありません',
   'sessions.sidebar.updateCheck.errorTitle': '更新の確認に失敗しました',
   'sessions.sidebar.updateCheck.latestVersion': '最新バージョンです',
   'sessions.sidebar.directory.errorAddProjectTitle': 'プロジェクトの追加に失敗しました',

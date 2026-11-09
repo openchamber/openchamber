@@ -752,6 +752,8 @@ export const dict: Record<I18nKey, string> = {
   'header.sessionTabs.closeOtherTabs': '關閉其他分頁',
   'sessions.switcher.empty': '沒有最近會話',
   'sessions.switcher.draftTitle': '新會話',
+  'sessions.switcher.search.placeholder': '搜尋工作階段…',
+  'sessions.switcher.search.noResults': '沒有符合的工作階段',
   'sessions.sidebar.updateCheck.errorTitle': '檢查更新失敗',
   'sessions.sidebar.updateCheck.latestVersion': '你已是最新版本',
   'sessions.sidebar.directory.errorAddProjectTitle': '新增專案失敗',

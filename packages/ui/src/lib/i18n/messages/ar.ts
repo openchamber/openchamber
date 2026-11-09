@@ -661,6 +661,8 @@ export const dict = {
   'header.sessionTabs.closeOtherTabs': 'إغلاق علامات التبويب الأخرى',
   'sessions.switcher.empty': 'لا توجد جلسات حديثة',
   'sessions.switcher.draftTitle': 'جلسة جديدة',
+  'sessions.switcher.search.placeholder': 'بحث في الجلسات…',
+  'sessions.switcher.search.noResults': 'لا توجد جلسات مطابقة',
   'sessions.sidebar.updateCheck.errorTitle': 'تعذّر التحقق من وجود تحديثات',
   'sessions.sidebar.updateCheck.latestVersion': 'لديك أحدث إصدار',
   'sessions.sidebar.directory.errorAddProjectTitle': 'تعذّرت إضافة المشروع',
