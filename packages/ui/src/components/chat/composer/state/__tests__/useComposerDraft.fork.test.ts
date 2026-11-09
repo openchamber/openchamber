@@ -7,6 +7,8 @@ import { clearChatDraft, readChatDraft, writeChatDraft, type ChatDraftIdentity }
 import { getDeferredSafeStorage } from '@/stores/utils/safeStorage';
 import { useInputStore } from '@/sync/input-store';
 import { useComposerDraft } from '../useComposerDraft';
+import { buildOutgoingMessage } from '../../submit/buildOutgoingMessage';
+import { getAttachmentsToRestore } from '../../submit/attachmentRecovery';
 
 const source: ChatDraftIdentity = { runtimeKey: 'runtime-a', directory: '/repo', sessionId: 'source' };
 const fork: ChatDraftIdentity = { ...source, sessionId: 'fork' };
@@ -70,6 +72,46 @@ beforeEach(() => {
 });
 
 describe('fork composer restoration', () => {
+    test('failed-send recovery keeps new files without carrying inline files into the next send', async () => {
+        const composer = renderComposer();
+        try {
+            const input = useInputStore.getState();
+            input.addRestoredAttachment(replayFile);
+            const original = useInputStore.getState().attachedFiles;
+            const derived = { ...original[0], id: 'derived', filename: 'missing.ps1', serverPath: 'C:/missing.ps1' };
+            const outgoing = buildOutgoingMessage({
+                queued: [], composerText: '@missing.ps1', composerAttachments: original,
+                inlineComments: [], syntheticTexts: [], references: [],
+            }, {
+                parseAgentMention: (text) => ({ text }),
+                extractFileMentions: (text) => ({ text, attachments: [derived] }),
+                sanitizeAttachments: (files) => [...(files ?? [])], collectSkillNames: () => [],
+            });
+            input.clearAttachedFiles(source);
+            input.addRestoredAttachment({ ...replayFile, filename: 'new.txt' });
+            const added = useInputStore.getState().attachedFiles;
+            await Promise.reject(new Error('session.prompt failed (400)')).catch(() => {
+                input.restoreAttachedFiles(getAttachmentsToRestore(original, outgoing.primaryAttachments, [], (files) => [...files]), source);
+            });
+            input.restoreAttachedFiles(getAttachmentsToRestore(original, outgoing.primaryAttachments, [], (files) => [...files]), source);
+            expect(useInputStore.getState().attachedFiles).toEqual([...added, ...original]);
+            const retry = buildOutgoingMessage({
+                queued: [], composerText: 'hello', composerAttachments: useInputStore.getState().attachedFiles,
+                inlineComments: [], syntheticTexts: [], references: [],
+            }, {
+                parseAgentMention: (text) => ({ text }), extractFileMentions: (text) => ({ text, attachments: [] }),
+                sanitizeAttachments: (files) => [...(files ?? [])], collectSkillNames: () => [],
+            });
+            expect(retry.primaryText).toBe('hello');
+            expect(retry.primaryAttachments.map((file) => file.filename)).toEqual(['new.txt', 'replay.txt']);
+            expect(retry.primaryAttachments.some((file) => file.serverPath === derived.serverPath)).toBe(false);
+            input.removeAttachedFile(original[0].id);
+            expect(useInputStore.getState().attachedFiles).toEqual(added);
+        } finally {
+            composer.teardown();
+        }
+    });
+
     {
         test('waits for the rendered fork and preserves the source', () => {
             writeChatDraft(fork, 'previous fork draft @old.ts', ['old.ts']);
