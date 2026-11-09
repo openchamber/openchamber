@@ -15,6 +15,8 @@ import { unwrapOpenCodeResponse } from './response-envelope.js';
 import { z } from 'zod';
 
 const CHILDREN_PAGE_SIZE = 50;
+/** OpenCode's 30-minute image timeout, plus a minute. */
+const IMAGE_JOB_LIFETIME_MS = 31 * 60 * 1000;
 const CHILDREN_MAX_PAGES = 8;
 const MAX_SUBAGENT_DEPTH = 8;
 const sessionLineageSchema = z.object({ id: z.string().min(1), parentID: z.string().min(1).nullish() });
@@ -22,6 +24,13 @@ const runningShellsSchema = z.array(z.object({
   status: z.string(),
   command: z.string(),
   metadata: z.record(z.string(), z.unknown()).nullish(),
+  time: z.object({ started: z.number() }),
+}));
+const backgroundJobsSchema = z.array(z.object({
+  kind: z.string(),
+  sessionID: z.string(),
+  status: z.string(),
+  command: z.string().optional(),
   time: z.object({ started: z.number() }),
 }));
 
@@ -151,5 +160,44 @@ export const createSessionActivityProbe = ({ buildOpenCodeUrl, getOpenCodeAuthHe
     });
   };
 
-  return { fetchActiveSessionStatuses, fetchChildSessionIds, hasWorkingChildren, hasWorkingDescendants, fetchRunningShells };
+  /**
+   * Background work still running for a session and every subagent under it:
+   * subagents, shell commands and image generations, each with the session
+   * that owns it. OpenCode's `job.list` (2.2.6+) is global, so it starts no
+   * folder. `undefined` when this OpenCode has no such route (an unknown route
+   * answers a bare 404), so the caller keeps its older reads; `null` when
+   * OpenCode could not be asked or no longer has the session.
+   */
+  const fetchRunningBackgroundJobs = async (sessionId) => {
+    const base = buildOpenCodeUrl('/api/experimental/job', '');
+    const search = new URLSearchParams({ sessionID: sessionId, descendants: 'true', status: 'running' });
+    const response = await fetchImpl(`${base}?${search}`, {
+      method: 'GET',
+      headers: { Accept: 'application/json', ...getOpenCodeAuthHeaders() },
+      signal: requestSignal(),
+    }).catch(() => null);
+    if (!response) return null;
+    const body = await response.json().catch(() => null);
+    if (response.status === 404 && !body?._tag) return undefined;
+    if (!response.ok) return null;
+    const parsed = backgroundJobsSchema.safeParse(unwrapOpenCodeResponse(body));
+    if (!parsed.success) return null;
+    const now = Date.now();
+    return parsed.data
+      .filter((job) => job.status === 'running')
+      // OpenCode gives up on an image after 30 minutes; one listed as running
+      // past that was left by an OpenCode that stopped mid-generation (2.2.6
+      // keeps it in the list after a restart), and would hold a goal forever.
+      .filter((job) => job.kind !== 'image' || now - job.time.started <= IMAGE_JOB_LIFETIME_MS)
+      .map((job) => ({ kind: job.kind, sessionID: job.sessionID, command: job.command, startedAt: job.time.started }));
+  };
+
+  return {
+    fetchActiveSessionStatuses,
+    fetchChildSessionIds,
+    hasWorkingChildren,
+    hasWorkingDescendants,
+    fetchRunningShells,
+    fetchRunningBackgroundJobs,
+  };
 };

@@ -15,6 +15,8 @@ import { htmlRenderI18n } from './html-render.i18n';
 import { documentToolbarI18n } from './document-toolbar.i18n';
 import { uiBlocksI18n } from './ui-blocks.i18n';
 import { updateDialogCanaryI18n } from './update-dialog-canary.i18n';
+import { aboutReleaseNotesI18n } from './about-release-notes.i18n';
+import { updateCheckErrorsI18n } from './update-check-errors.i18n';
 import { secretRequestI18n } from './secret-request.i18n';
 import { sessionNoticesI18n } from './session-notices.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
@@ -24,6 +26,10 @@ import { compactionSettingsI18n } from './compaction-settings.i18n';
 import { heapSnapshotI18n } from './heap-snapshot.i18n';
 import { consoleBudgetsI18n } from './console-budgets.i18n';
 import { imageToolI18n } from './image-tool.i18n';
+import { usageToolI18n } from './usage-tool.i18n';
+import { openchamberToolsLayoutI18n } from './openchamber-tools-layout.i18n';
+import { openchamberToolOutputI18n } from './openchamber-tool-output.i18n';
+import { opencodeToolOutputI18n } from './opencode-tool-output.i18n';
 import { agentStatusI18n } from './agent-status.i18n';
 import { selectionApprovalI18n } from './selection-approval.i18n';
 import { snippetsI18n } from './snippets.i18n';
@@ -716,6 +722,9 @@ export const dict = {
   'chat.backgroundShells.stopAll': 'עצור הכול',
   'chat.backgroundShells.stopAria': 'עצור את {command}',
   'chat.backgroundShells.elapsed': 'פועלת כבר {duration}',
+  'chat.backgroundWork.aria': 'עבודה ברקע',
+  'chat.backgroundWork.count': 'ברקע: {count}',
+  'chat.backgroundImages.generating': 'יוצר תמונה',
   'sessions.sidebar.session.menu.share': 'שתף',
   'sessions.sidebar.session.menu.copied': 'הועתק',
   'sessions.sidebar.session.menu.copyLink': 'העתק קישור',
@@ -755,6 +764,7 @@ export const dict = {
   'sessions.sidebar.session.status.unread': 'עדכונים שלא נקראו',
   'sessions.sidebar.session.status.backgroundSubagent': 'סוכן משנה פועל ברקע',
   'sessions.sidebar.session.status.backgroundCommand': 'פקודה פועלת ברקע',
+  'sessions.sidebar.session.status.backgroundImage': 'תמונה נוצרת ברקע',
   'sessions.sidebar.session.status.waitingOnPullRequest': 'ממתין לבדיקות או לסקירה',
   'sessions.sidebar.session.status.pinned': 'הפעלה מוצמדת',
   'sessions.sidebar.session.status.movingToWorktree': 'ההפעלה מועברת לעץ עבודה חדש',
@@ -1192,6 +1202,9 @@ export const dict = {
   'magicPrompts.toast.loadFailed': 'לא ניתן לטעון את הנחיות הקסם. דבר לא נשלח.',
   'gitView.empty.notGitRepository': 'התיקייה הזו אינה מאגר Git',
   'gitView.empty.notGitRepositoryDescription': 'אפשר לאתחל Git בתיקייה הזו או לפתוח מאגר.',
+  'gitView.empty.repositoryUnreadable': 'Git לא הצליח לקרוא את התיקייה הזו',
+  'gitView.empty.repositoryUnreadableDescription': 'זה מה ש-Git אמר. אפשר לתקן ולנסות שוב.',
+  'gitView.empty.repositoryUnreadableRetry': 'לנסות שוב',
   'gitView.empty.selectSessionOrDirectory': 'יש לבחור הפעלה או תיקייה כדי לראות את מצב Git',
   'gitView.empty.worktreeFeaturesUnavailable': 'תכונות עץ העבודה לא זמינות במצב סביבת העבודה הזה.',
   'gitView.empty.worktreeSetupDescription': 'מסיים את הגדרת עץ העבודה ומכין את מצב המאגר.',
@@ -1768,6 +1781,7 @@ export const dict = {
   'contextSidebar.empty.openSession': 'יש לפתוח הפעלה כדי לבדוק את ההקשר.',
   'contextSidebar.section.context': 'הקשר',
   'contextSidebar.section.lastAssistantMessage': 'ההודעה האחרונה של העוזר',
+  'contextSidebar.section.sessionTotals': 'סיכום ההפעלה',
   'contextSidebar.section.rawMessages': 'הודעות גולמיות',
   'contextSidebar.context.percentUsed': '{percent}% בשימוש',
   'contextSidebar.breakdown.user': 'משתמש',
@@ -2163,6 +2177,7 @@ export const dict = {
   'directoryExplorerDialog.browse.retry': 'נסה שוב',
   'directoryExplorerDialog.browse.parentDirectory': 'תיקיית האב',
   'directoryExplorerDialog.browse.addedBadge': 'נוסף',
+  'directoryExplorerDialog.browse.linkTarget': 'קישור אל {path}',
   'directoryExplorerDialog.browse.quickAdd': 'הוסף',
   'directoryExplorerDialog.browse.selectForAdd': 'בחר להוספה',
   'directoryExplorerDialog.footer.navigate': 'ניווט',
@@ -2478,6 +2493,8 @@ export const dict = {
   'sessions.sidebar.group.empty.loadingSessions': 'טוען הפעלות…',
   'sessions.sidebar.group.empty.loadFailed': 'לא ניתן היה לרענן את ההפעלות.',
   'sessions.sidebar.group.empty.initializationFailed': 'לא ניתן היה לאתחל את סביבת העבודה.',
+  'sessions.sidebar.group.empty.trustPaused': 'הסוכנים מושהים עד שתסמכו על התיקייה הזו.',
+  'sessions.sidebar.group.empty.reviewTrust': 'לבדוק ולסמוך',
   'sessions.search.submitHint': 'יש ללחוץ Enter כדי לחפש',
   'sessions.sidebar.group.empty.retry': 'נסה שוב',
   'sessions.sidebar.group.empty.permissionDenied': 'נדרשת גישה לתיקייה.',
@@ -3357,6 +3374,7 @@ export const dict = {
   'updateDialog.status.autoReloadHint': 'הדף ייטען מחדש אוטומטית כשהעדכון יסתיים.',
   'updateDialog.fallback.updateViaTerminal': 'או לעדכן דרך המסוף:',
   'updateDialog.desktopHostInstall': 'OpenChamber {version} זמין. יש לעדכן אותו במחשב שבו הוא פועל.',
+  'updateDialog.openCodeTooOld': 'OpenChamber {version} דורש OpenCode {required}. בשרת הזה מותקנת גרסה {current}. יש לעדכן קודם את OpenCode.',
   'updateDialog.actions.copyCommand': 'העתק פקודה',
   'updateDialog.actions.copied': 'הועתק!',
   'updateDialog.status.downloadingPayload': 'מוריד את חבילת העדכון…',
@@ -3618,6 +3636,9 @@ export const dict = {
   'chat.workStatus.breakdown.skillCountPlural': '{count} מיומנויות',
   'chat.workStatus.breakdown.mcpCountSingle': 'MCP {count}',
   'chat.workStatus.breakdown.mcpCountPlural': '{count} שרתי MCP',
+  'chat.workStatus.breakdown.planCountSingle': 'תוכנית {count}',
+  'chat.workStatus.breakdown.planCountPlural': '{count} תוכניות',
+  'chat.workStatus.linkedPlans.open': 'פתיחת התוכנית {title}',
   'chat.workStatus.sections.open': 'בחר מקטעים',
   'chat.workStatus.sections.dialogTitle': 'מקטעי החלונית',
   'chat.workStatus.sections.reorder': 'גרור את {label} כדי לשנות את הסדר',
@@ -3877,6 +3898,8 @@ export const dict = {
   'sessions.moveSession.failed': 'לא ניתן להעביר את הסשן',
   'chat.folderMissing.text': 'התיקייה {name} כבר לא קיימת',
   'chat.folderMissing.action': 'העברת הסשן',
+  'chat.trustPaused.text': 'סוכנים לא יכולים לעבוד ב-{name} עד שתסמכו על התוספים והפקודות שלה.',
+  'chat.trustPaused.action': 'לבדוק ולסמוך',
   'chat.worktreeSetup.running': 'מכין את עץ העבודה: מריץ את פקודות ההכנה של הפרויקט…',
   'chat.draft.creatingSession': 'יוצר הפעלה…',
   'desktopHostSwitcher.startup.fellBackToLocal': 'החיבור אליו לא נפתח, ולכן OpenChamber הופעל על המופע המקומי. אפשר להתחבר אליו ממחליף המופעים כשהוא יהיה זמין.',
@@ -3908,6 +3931,8 @@ export const dict = {
   ...documentToolbarI18n.he,
   ...uiBlocksI18n.he,
   ...updateDialogCanaryI18n.he,
+  ...aboutReleaseNotesI18n.he,
+  ...updateCheckErrorsI18n.he,
   ...secretRequestI18n.he,
   ...sessionNoticesI18n.he,
   ...usageStatsI18n.he,
@@ -3917,6 +3942,10 @@ export const dict = {
   ...heapSnapshotI18n.he,
   ...consoleBudgetsI18n.he,
   ...imageToolI18n.he,
+  ...usageToolI18n.he,
+  ...openchamberToolsLayoutI18n.he,
+  ...openchamberToolOutputI18n.he,
+  ...opencodeToolOutputI18n.he,
   ...agentStatusI18n.he,
   ...snippetsI18n.he,
   ...sidebarWorkI18n.he,

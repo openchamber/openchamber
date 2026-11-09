@@ -2,6 +2,7 @@ import React from 'react';
 import { Icon } from "@/components/icon/Icon";
 import { GuestIcon } from '@/components/layout/GuestRailIcon';
 import { resolveGuestToolIcon } from '@/lib/guests/icon';
+import { opencodeNamespaceTool } from '@/lib/opencode/tools';
 import type { GuestToolRule } from '@/lib/guests/tool-presentation';
 import { getRuntimeUrlResolver } from '@/lib/runtime-url';
 
@@ -20,6 +21,10 @@ export const getToolIcon = (toolName: string, presentation?: GuestToolRule | nul
         return <GuestIcon icon={guestIcon.icon} iconSrc={guestIcon.iconSrc} className={iconClass} />;
     }
     const tool = toolName.toLowerCase();
+    // OpenCode managing itself: sessions, worktrees, models, schedules, artifacts.
+    if (tool === 'opencode' || opencodeNamespaceTool(tool)) {
+        return <Icon name="opencode" className={iconClass} />;
+    }
 
     if (tool === 'reasoning') {
         return <Icon name="brain-ai-3" className={iconClass} />;
@@ -95,6 +100,9 @@ export const getToolIcon = (toolName: string, presentation?: GuestToolRule | nul
     }
     if (tool === 'openchamber_notify') {
         return <Icon name="notification-3" className={iconClass} />;
+    }
+    if (tool === 'openchamber_usage') {
+        return <Icon name="bar-chart-2" className={iconClass} />;
     }
     if (tool === 'openchamber_render') {
         return <Icon name="bar-chart-box" className={iconClass} />;

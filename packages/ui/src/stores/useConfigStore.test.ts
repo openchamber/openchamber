@@ -206,6 +206,13 @@ mock.module('@/lib/opencode/client', () => ({
   },
 }));
 
+let trustPendingDirectories = new Set<string>();
+const opencodeTrustModule = await import('@/lib/opencodeTrust');
+mock.module('@/lib/opencodeTrust', () => ({
+  ...opencodeTrustModule,
+  isOpenCodeTrustPending: async (directory: string) => trustPendingDirectories.has(directory),
+}));
+
 mock.module('@/contexts/runtimeAPIRegistry', () => ({
   getRegisteredRuntimeAPIs: mock(() => null),
 }));
@@ -296,6 +303,7 @@ describe('useConfigStore provider persistence', () => {
     liveAgents = [];
     listAgentsImpl = null;
     getProvidersForConfigImpl = null;
+    trustPendingDirectories = new Set<string>();
     withDirectoryCalls = [];
     currentFetchDirectory = DIRECTORY;
     clientDirectory = DIRECTORY;
@@ -2006,6 +2014,27 @@ describe('useConfigStore provider persistence', () => {
 
     expect(useConfigStore.getState().isInitialized).toBe(true);
     expect(useConfigStore.getState().lastInitFailure).toBeNull();
+  }, 10_000);
+
+  test('a project the user has not trusted does not block startup', async () => {
+    listAgentsImpl = async () => {
+      throw Object.assign(new Error('agent.list failed (403): unexpected status'), { status: 403 });
+    };
+    trustPendingDirectories = new Set([DIRECTORY]);
+    await useConfigStore.getState().initializeApp();
+
+    expect(useConfigStore.getState().isInitialized).toBe(true);
+    expect(useConfigStore.getState().lastInitFailure).toBeNull();
+  }, 10_000);
+
+  test('a 403 from a trusted project still fails startup', async () => {
+    listAgentsImpl = async () => {
+      throw Object.assign(new Error('agent.list failed (403): unexpected status'), { status: 403 });
+    };
+    await useConfigStore.getState().initializeApp();
+
+    expect(useConfigStore.getState().isInitialized).toBe(false);
+    expect(useConfigStore.getState().lastInitFailure?.step).toBe('loadAgents');
   }, 10_000);
 
   test('a failed agent load records its error text, and a later success clears it', async () => {

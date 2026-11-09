@@ -88,7 +88,14 @@ const startFakeOpenCode = async ({ config, servers }) => {
     authorization.searchParams.set('redirect_uri', redirect);
     authorization.searchParams.set('state', state);
     return res.end(JSON.stringify({
-      data: { attemptID, url: authorization.toString(), mode: 'auto', instructions: 'go', time: { created: 1, expires: opencode.expires ?? Date.now() + 60_000 } },
+      data: {
+        attemptID,
+        url: authorization.toString(),
+        mode: 'auto',
+        instructions: 'go',
+        paste: opencode.paste,
+        time: { created: 1, expires: opencode.expires ?? Date.now() + 60_000 },
+      },
     }));
   });
   servers.push(server);
@@ -499,13 +506,27 @@ describe('MCP OAuth sign-in', () => {
     });
   });
 
-  describe('refusals before consent', () => {
+  describe('sign-ins finished by a pasted address', () => {
     const fromRelay = (app) => request(app)
       .post(START)
       .set('x-openchamber-relay-connection', 'connection-1')
       .send({});
 
-    it('refuses a relay-only sign-in', async () => {
+    it('starts a relay-only sign-in on OpenCode\'s own redirect for the user to paste', async () => {
+      const { app, config, opencode } = await build({ entry: remoteEntry() });
+      opencode.paste = true;
+
+      const response = await fromRelay(app).expect(200);
+
+      expect(response.body.data).toMatchObject({ attemptID: 'attempt-1', paste: true });
+      expect(config.updates).toEqual([]);
+      expect(opencode.cancelled).toEqual([]);
+      // Nothing was bound, so no browser can finish it through OpenChamber.
+      await request(app).get(`${CALLBACK}?code=c&state=state-1`).expect(400);
+      expect(opencode.listenerHits).toBe(0);
+    });
+
+    it('refuses a relay-only sign-in when OpenCode cannot take a pasted address', async () => {
       const { app, config, opencode } = await build({ entry: remoteEntry() });
 
       const response = await fromRelay(app).expect(400);
@@ -513,7 +534,7 @@ describe('MCP OAuth sign-in', () => {
       expect(response.body).toMatchObject({ _tag: 'InvalidRequestError' });
       expect(response.body.message).toMatch(/private relay/);
       expect(config.updates).toEqual([]);
-      expect(opencode.starts).toBe(0);
+      expect(opencode.cancelled).toEqual(['attempt-1']);
     });
 
     it('lets a relay client use a redirect already generated for a direct address', async () => {
@@ -526,30 +547,65 @@ describe('MCP OAuth sign-in', () => {
       expect(opencode.completed).toHaveLength(1);
     });
 
+    const fromPlainHttp = (app) => request(app).post(START).set('Host', '192.168.1.20:3000').send({});
+
+    it('starts a sign-in to paste for a browser on another machine over plain http', async () => {
+      const { app, config, opencode } = await build({ entry: remoteEntry() });
+      opencode.paste = true;
+
+      const response = await fromPlainHttp(app).expect(200);
+
+      expect(response.body.data.paste).toBe(true);
+      expect(new URL(response.body.data.url).searchParams.get('redirect_uri')).toMatch(/^http:\/\/127\.0\.0\.1:/);
+      expect(config.updates).toEqual([]);
+    });
+
+    it('generates an http redirect for a plain-http browser when OpenCode cannot take a pasted address', async () => {
+      const { app, config, opencode } = await build({ entry: remoteEntry() });
+
+      const response = await fromPlainHttp(app).expect(200);
+
+      expect(opencode.cancelled).toEqual(['attempt-1']);
+      expect(config.updates).toHaveLength(1);
+      expect(new URL(response.body.data.url).searchParams.get('redirect_uri'))
+        .toBe('http://192.168.1.20:3000/api/mcp/oauth/docs/callback');
+    });
+
     it.each([
       ['a remote browser', (app) => startFromRemote(app)],
       ['a browser on loopback', (app) => request(app).post(START).set('Host', 'localhost:3000').send({})],
       ['a relay client', fromRelay],
-    ])('refuses %s when OpenCode runs on another machine', async (_label, send) => {
+    ])('starts a sign-in to paste for %s when OpenCode runs on another machine', async (_label, send) => {
+      const { app, config, opencode } = await build({ entry: remoteEntry(), baseUrl: OFF_MACHINE_URL });
+      opencode.paste = true;
+
+      const response = await send(app).expect(200);
+
+      expect(response.body.data.paste).toBe(true);
+      expect(config.updates).toEqual([]);
+    });
+
+    it('refuses an off-machine sign-in when OpenCode cannot take a pasted address', async () => {
       const { app, config, opencode } = await build({ entry: remoteEntry(), baseUrl: OFF_MACHINE_URL });
 
-      const response = await send(app).expect(400);
+      const response = await startFromRemote(app).expect(400);
 
       expect(response.body.message).toMatch(/another machine/);
       expect(config.updates).toEqual([]);
-      expect(opencode.starts).toBe(0);
+      expect(opencode.cancelled).toEqual(['attempt-1']);
     });
 
-    it('refuses a generated redirect once OpenCode moved to another machine', async () => {
-      const { app, opencode } = await build({
-        entry: remoteEntry({ redirect_uri: OWN_REDIRECT, callback_port: 45558 }),
-        baseUrl: OFF_MACHINE_URL,
-      });
+    it('leaves a generated redirect alone once OpenCode moved to another machine', async () => {
+      const entry = remoteEntry({ redirect_uri: OWN_REDIRECT, callback_port: 45558 });
+      const { app, config, opencode } = await build({ entry, baseUrl: OFF_MACHINE_URL });
       writeAssignments({ 45558: { name: 'docs', redirectUri: OWN_REDIRECT } });
+      opencode.paste = true;
 
-      await startFromRemote(app).expect(400);
+      await startFromRemote(app).expect(200);
 
-      expect(opencode.starts).toBe(0);
+      expect(config.updates).toEqual([]);
+      await request(app).get(`${CALLBACK}?code=c&state=state-1`).expect(400);
+      expect(opencode.listenerHits).toBe(0);
     });
 
     it('keeps a route a person configured for an off-machine OpenCode', async () => {

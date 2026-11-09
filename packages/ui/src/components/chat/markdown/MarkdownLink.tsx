@@ -25,6 +25,9 @@ import { activateMarkdownFile, resolveMarkdownFile, useOpenMarkdownFile, useOpen
 import { localPathFromFileUrl } from '../fileReferenceParser';
 import { MarkdownMediaLinkContext, useMarkdownMedia } from './markdown-media-context';
 import { openMarkdownDocumentLink } from '@/components/views/files/previews/useMarkdownLocalAssets';
+import { claimGuestIdentifier, claimGuestUrl } from '@/lib/guests/links';
+import { useGuestsStore } from '@/lib/guests/store';
+import { isBuiltInLink, runGuestLink } from './guestLinkClick';
 
 function useConfirmedInlineFile(raw: string, inputKind: FileReferenceSource = 'path'): string | null {
   const { directory, fileReferences, confirmFile } = useMarkdownPresentation();
@@ -115,7 +118,49 @@ const textOf = (node: ExtraProps['node']): string => {
   return text.trim();
 };
 
+const modified = (event: React.MouseEvent | React.KeyboardEvent): boolean => event.metaKey || event.ctrlKey || event.shiftKey || event.altKey;
+
+/**
+ * An identifier an active extension claims (`remarkGuestLinks`): drawn as a
+ * link with no address, so copying keeps the plain identifier and no file,
+ * anchor or browser route sees it; a click does what the extension declared.
+ * Text again once the extension stops claiming it.
+ */
+function GuestIdentifierLink({ identifier, className, children }: { identifier: string; className?: string; children: React.ReactNode }) {
+  const { guestLinks, directory } = useMarkdownPresentation();
+  const { t } = useI18n();
+  const claim = guestLinks ? claimGuestIdentifier(guestLinks, identifier) : null;
+  const name = useGuestsStore((state) => (claim ? state.guests.find((guest) => guest.id === claim.guestId)?.name : undefined));
+  if (!claim || !name) return <>{children}</>;
+  const activate = (event: React.MouseEvent | React.KeyboardEvent) => {
+    if ('key' in event && event.key !== 'Enter' && event.key !== ' ') return;
+    event.preventDefault();
+    event.stopPropagation();
+    runGuestLink(claim, 'identifier', directory, t);
+  };
+  const label = claim.action === 'open'
+    ? t('chat.guestLink.open', { identifier, name })
+    : t('chat.guestLink.attach', { identifier, name });
+  return (
+    <a
+      role="button"
+      tabIndex={0}
+      className={className ? `${className} cursor-pointer` : 'cursor-pointer'}
+      data-oc-guest-link={claim.guestId}
+      title={label}
+      aria-label={label}
+      onClick={activate}
+      onKeyDown={activate}
+    >
+      {children}
+    </a>
+  );
+}
+
 function ScreenMarkdownLink({ href, children: originalChildren, node, ...props }: React.ComponentProps<'a'> & ExtraProps) {
+  if (node?.properties.dataOcGuestLink !== undefined) {
+    return <GuestIdentifierLink identifier={textOf(node)} className={props.className}>{originalChildren}</GuestIdentifierLink>;
+  }
   // The policy dropped an unsafe or unsupported URL: the anchor stays inert,
   // as the old sanitizer left it, instead of opening the app in a new window.
   if (!href) {
@@ -161,6 +206,10 @@ function ScreenMarkdownHref({ href, children: originalChildren, node, ...props }
   const favicon = external && !path && !reference ? getExternalFaviconUrl(href) : null;
   const showPreview = presentation.loopbackPreview && isLoopbackHttpUrl(href) && directory
     && !(isDesktopShell() && openLinksInBrowserPanel);
+  // A link an active extension claims, unless the app already reads it as something of its own.
+  const guestClaim = presentation.guestLinks && external && !session && !app && !file && !folder && !textFile && !skill && !agent && !attachment && !extensionInstall
+    ? claimGuestUrl(presentation.guestLinks, href)
+    : null;
   const handleClick = (event: React.MouseEvent<HTMLAnchorElement>) => {
     if (media?.documentAssets && openMarkdownDocumentLink(event, media.documentAssets)) return;
     if (textFile && path) {
@@ -198,7 +247,14 @@ function ScreenMarkdownHref({ href, children: originalChildren, node, ...props }
       target?.scrollIntoView({ block: 'nearest' });
       return;
     }
-    if (external && !presentation.disableLinkSafety && !(event.metaKey || event.ctrlKey || event.shiftKey || event.altKey)) {
+    // Before the browser routes, and for the user's own messages too; a modified click keeps the browser's meaning.
+    if (guestClaim && !modified(event) && !isBuiltInLink(href)
+      && runGuestLink(guestClaim, 'link', directory, t)) {
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
+    if (external && !presentation.disableLinkSafety && !modified(event)) {
       event.preventDefault();
       event.stopPropagation();
       openChatLink(href);

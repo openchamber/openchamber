@@ -513,8 +513,8 @@ it replaced (`resolveSidebarGrouping`: List sorted by time keeps the list by
 time, everything else groups by project); the phone follows the same
 setting, and VS Code always groups by project. The display menu opens with Select sessions, then Grouping, then
 (grouped by project) the project sort and project display,
-then Sections…, which opens the sections manager beside the sidebar (the order,
-each section's visibility, "Also show in work under projects" under In work
+then Customize sections…, which opens the sections manager beside the sidebar (the order,
+each section's visibility, the "Also in projects" chip on In work
 (`keepWorkInPlace`, `sidebarKeepWorkInPlace`, off by default) and the user's
 own sections), Detailed rows, "Name worktrees by branch", then Collapse all /
 Expand all, and last Mark all as read, which marks every unread session the
@@ -706,8 +706,8 @@ A folder of the project root can hold whole worktrees: the member id is
 the folder store and the server file it with the same assign and unassign
 changes as a session. A filed worktree renders inside its folder, one level
 deeper, and nowhere else under the project; filed into a folder that is gone,
-it stays under the project. The work row's menu (the "⋯" button and a right-click on the row show the
-same items) files it (Move to folder), a new folder included;
+it stays under the project. The work row's menu (a right-click on the row, and the "⋯" button on
+touch layouts, show the same items) files it (Move to folder), a new folder included;
 dragging a worktree onto a folder is not offered.
 
 ### Where a work files
@@ -774,7 +774,16 @@ chevron, while its saved collapse stays and its delete dialog counts the members
   icon on hover. Under a project that line names the branch (the project
   root's, passed as `secondaryMeta`) but not the project, which its header
   already does; in a zone it opens with the project's icon. A worktree's
-  first icon there is the worktree mark tinted by its PR; a draft's line
+  first icon there is the worktree mark tinted by its PR. In a zone, after the
+  project's icon, a plain session's branch has no icon of its own, since the
+  name reads as a branch there; a worktree's branch carries the worktree mark,
+  which is what tells the work from a session, and a space's name its
+  instance mark. Under a project a session's line opens with the branch name
+  itself, with no icon; the hover chevron then sits over the name's start,
+  which fades under it (`oc-lead-mask`), and sits above the name, whose mask
+  makes it a layer that would otherwise take the chevron's clicks. Touch
+  layouts show the chevron always, so there it takes its own place before
+  the name. A draft's line
   opens with a pen and names the branch its session will go to once that
   directory's git status is known. A draft without a project icon, branch or
   attachment mark uses one line.
@@ -1095,6 +1104,7 @@ matching and ordering. Search does not fetch sessions or broaden list membership
 - Directory permission failures remain visible even when stale sessions are retained. Flat groups inspect every represented root/worktree directory; local Desktop may open the native picker for the exact failed directory, while other runtimes keep the ordinary Retry action.
 - Pins and folder assignments are not pruned from the first startup snapshot or from optimistic mutations. Confirmed local deletion and routed external deletion clean immediately; a later authoritative omission after an established baseline covers missed external delete events.
 - Pending-permission/question row badges ride in the meta cluster at the row's end with the time and status, and hide with it on hover or while the row menu is open, except on non-VS Code always-visible-actions rows, which reserve permanent padding and keep the cluster shown. VS Code hover-reveals its actions over the row's right edge even under `alwaysShowActions`, so its cluster keeps hiding.
+- A row's menu (session, worktree, run, project header) is its right-click menu. With a mouse there is no "⋯" button for it: it only repeated the right click and took room the title fades under. Touch screens keep the button: always shown in touch layouts (`alwaysShowActions`: the phone surface and tablets), and revealed like the other row actions on a touch screen elsewhere, such as the desktop app on a touch laptop (`pointer-fine:hidden` hides it for a mouse). The hover reserves count it only where it always shows, since a hover comes from a mouse. VS Code's webview leaves the right click to the page, so it has no button either. From the keyboard, Shift+F10 on a focused row opens the same menu under it (`components/ui/contextMenuKeyboard.ts`, wired into `ContextMenuTrigger`); Mac browsers do not turn that key into a right click themselves. The reserve the hover actions take is counted from the buttons actually shown.
 - Hover-revealed actions on session rows, worktree headers and project headers swap in over the row's end (the right, or the left in a right-to-left layout) at once, without a fade; they do not re-lay the row out. What they cover (date, branch, badges, indicators) hides in the same step, and the title or label's tail fades away under them through the `oc-actions-mask` utility (`index.css`): the row's text line is an `@container`, `--oc-actions-reserve` says how far the actions reach in from its end edge, `--oc-actions-inset` how far the masked text starts from its start edge. A title whose own direction differs from the interface (`dir="auto"`) starts under the actions, so it takes `padding-inline-start` of the reserve instead of the fade. Reserves, insets and the mask's own gradient stops are rem so they track the interface font size, and the mask multiplies reserves and insets by `--padding-scale` because the buttons and offsets they describe are spacing tokens that grow with the density setting; a pixel reserve would stop short of the buttons at larger sizes and let the title show through. Change a reserve whenever an action's size, count or offset changes. Only permanently shown actions (`alwaysShowActions`) take layout room.
 - Tooltips that list PRs or issues (session rows, timeline PR badges, worktree headers) render them as links through `sessions/SidebarRefLinks.tsx`. A link into a repository that is none of the project's names it after the number (`#118826 · dotnet/runtime · Completed`), since numbers are per repository; the repository is the part that truncates, and it is asked only while the tooltip is open. The chat's Context sources rows name it the same way (`useOutsideRepository`), where the title is what truncates. The PR badge and header tooltips close 750 ms after the pointer leaves, so the pointer can travel in; the whole-row tooltip closes at once and relies on the popup staying open while the pointer heads into it. The row and header action buttons sit in their own `TooltipProvider`: the pointer crosses them on the way, and a same-group tooltip would replace the open one at once. Every row but VS Code's has the whole-row tooltip, opening to the right (title, time, project, branch, links, recap); every other tooltip on a row, a header's folder name included, opens above its element (`sessions/RowMarkTooltip.tsx` for status marks), so it never covers the neighbouring marks and actions. A session menu item that opens a submenu explains itself only while disabled: the hint would cover the open submenu.
 
@@ -1147,6 +1157,31 @@ they fell under the resting titles they contain in every light palette.
 The actions and what they cover swap in one step. A fade on every pointer
 pass over a list reads as lag, and the mask under the title already keeps the
 swap from jumping.
+
+### Why the session menu takes no new items
+
+A session row's menu is already as long as it should be. A new session-level
+action goes where actions of its kind already live, such as the chat's
+work-status panel (`components/chat/work-status/`), and not into the row menu;
+a "Link PR" entry there was turned down for this reason. Keep warm is the one
+item added since, because the maintainer asked for that placement. Add a menu
+item only when the maintainer asks for that placement.
+
+### Hierarchy ideas that were tried and rejected
+
+These came up while making the list read less cluttered, and the maintainer
+turned each down. Propose one again only with a reason that is new.
+
+- A "main" header over the project root's sessions: a level of hierarchy that
+  made the list more complex. Root sessions sit directly under the project
+  header.
+- Project and zone headers as full-width tinted bands with hairlines, as
+  collapsible sections look in other apps: tried in the running app and
+  reverted. Headers are set apart by space and label weight (see "One view").
+- Grouping In work by state (running, waiting, idle): the lifecycle order
+  already lifts a work when a turn starts and when it finishes.
+- Naming a worktree row after one of its sessions: see "Works", a worktree is
+  named by its task or branch.
 
 ### Why every project list follows the sidebar's sort and has no sort of its own
 

@@ -6,6 +6,7 @@ import { isPermissionMode } from '../permission-auto-accept/modes.js';
 import { asNonEmptyString } from '../shared/guards.js';
 import { idleStopSchema } from '../spaces/idle-stop.js';
 import { sshHostSchema } from '../spaces/places/ssh-host.js';
+import { PROVIDER_LOGO_MIMES } from './provider-logo-routes.js';
 
 // Generated from packages/ui/src/lib/settings/registry.ts by
 // `bun run settings-registry:generate`; `registry.test.ts` fails when stale.
@@ -131,6 +132,27 @@ const sanitizeCustomProviderIcons = (value) => {
   const result = {};
   for (const [providerID, icon] of Object.entries(record.data).slice(0, CUSTOM_PROVIDER_ICONS_MAX)) {
     const entry = customProviderIconsSchema.safeParse({ [providerID]: icon });
+    if (entry.success) Object.assign(result, entry.data);
+  }
+  return result;
+};
+
+// What `provider-logo-routes.js` stores for an uploaded logo; the bytes stay in its folder.
+const customProviderLogosSchema = z.record(
+  z.string().trim().min(1).max(128),
+  z.object({
+    mime: z.enum(PROVIDER_LOGO_MIMES),
+    updatedAt: z.number().int().positive(),
+  }),
+);
+
+/** Provider id -> `{ mime, updatedAt }`; malformed entries are dropped one by one. */
+const sanitizeCustomProviderLogos = (value) => {
+  const record = z.record(z.string(), z.unknown()).safeParse(value);
+  if (!record.success) return undefined;
+  const result = {};
+  for (const [providerID, logo] of Object.entries(record.data).slice(0, CUSTOM_PROVIDER_ICONS_MAX)) {
+    const entry = customProviderLogosSchema.safeParse({ [providerID]: logo });
     if (entry.success) Object.assign(result, entry.data);
   }
   return result;
@@ -933,8 +955,8 @@ export const createSettingsHelpers = (dependencies) => {
     if (candidate.agentSecretToolEnabled === true || candidate.agentSecretToolEnabled === false) {
       result.agentSecretToolEnabled = candidate.agentSecretToolEnabled;
     }
-    if (typeof candidate.agentToolsCodeMode === 'boolean') {
-      result.agentToolsCodeMode = candidate.agentToolsCodeMode;
+    if (candidate.agentUsageToolEnabled === true || candidate.agentUsageToolEnabled === false) {
+      result.agentUsageToolEnabled = candidate.agentUsageToolEnabled;
     }
     if (typeof candidate.isolatedSpacesEnabled === 'boolean') {
       result.isolatedSpacesEnabled = candidate.isolatedSpacesEnabled;
@@ -1075,6 +1097,11 @@ export const createSettingsHelpers = (dependencies) => {
     const customProviderIcons = sanitizeCustomProviderIcons(candidate.customProviderIcons);
     if (customProviderIcons) {
       result.customProviderIcons = customProviderIcons;
+    }
+
+    const customProviderLogos = sanitizeCustomProviderLogos(candidate.customProviderLogos);
+    if (customProviderLogos) {
+      result.customProviderLogos = customProviderLogos;
     }
 
     if (Array.isArray(candidate.recentAgents)) {

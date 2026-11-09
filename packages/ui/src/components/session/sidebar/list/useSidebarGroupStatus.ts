@@ -1,6 +1,7 @@
 import React from 'react';
 import type { ChildStoreManager } from '@/sync/child-store';
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
+import { isOpenCodeTrustPaused, subscribeOpenCodeTrust } from '@/lib/opencodeTrust';
 import { normalizePath } from '../utils';
 import type { SessionGroup } from '../types';
 import type { ProjectSection } from '../projects/sessionProjectRender';
@@ -37,11 +38,24 @@ export const useSidebarGroupStatus = ({
     )).join('\u0001'), [childStores, directories]),
     React.useCallback(() => '', []),
   );
+  const pausedSnapshot = React.useSyncExternalStore(
+    subscribeOpenCodeTrust,
+    React.useCallback(() => directories.filter((directory) => isOpenCodeTrustPaused(directory)).join('\u0001'), [directories]),
+    React.useCallback(() => '', []),
+  );
   const groupStatusByKey = React.useMemo(() => {
     // The snapshot invalidates these reads; the directory stores own their state.
     void bootstrapSnapshot;
+    const pausedDirectories = new Set(pausedSnapshot ? pausedSnapshot.split('\u0001') : []);
     const statuses = new Map<string, SessionSidebarGroupStatus>();
     for (const { key, archived, directories: groupDirectories } of groups) {
+      // A folder the user declined to trust lists its sessions but runs no
+      // agent; that says more than whatever its load failed with.
+      const pausedDirectory = groupDirectories.find((directory) => pausedDirectories.has(directory));
+      if (pausedDirectory) {
+        statuses.set(key, { state: 'trust-paused', directory: pausedDirectory, canGrantAccess: false });
+        continue;
+      }
       const failedDirectory = groupDirectories.find((directory) => (
         childStores.getBootstrapState(directory) === 'failed' || childStores.getInitializationState(directory) === 'failed'
       ));
@@ -67,6 +81,6 @@ export const useSidebarGroupStatus = ({
       }
     }
     return statuses;
-  }, [bootstrapSnapshot, canGrantAccess, childStores, groups, globalStatus, hasLoadedGlobalSessions]);
+  }, [bootstrapSnapshot, canGrantAccess, childStores, groups, globalStatus, hasLoadedGlobalSessions, pausedSnapshot]);
   return { groupStatusByKey, bootstrapSnapshot };
 };

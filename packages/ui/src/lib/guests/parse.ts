@@ -10,6 +10,9 @@ import {
   GUEST_FILE_EDITORS_MAX,
   GUEST_FILE_EDITOR_PATTERNS_MAX,
   GUEST_FILE_EDITOR_TITLE_MAX,
+  GUEST_LINK_ACTIONS,
+  GUEST_LINK_KEY,
+  GUEST_LINK_KEYS_MAX,
   GUEST_SERVICE_PROVIDES,
   GUEST_SESSION_EVENT_TYPES,
   GUEST_STATUS_SECTION_HEIGHT_MAX,
@@ -21,8 +24,12 @@ import {
   GUEST_TOOLS_MAX,
   GUEST_TOOL_MATCH,
   GUEST_TOOL_OUTPUTS,
+  TRACKER_URL_TEMPLATES_MAX,
+  isBuildableLinkTemplate,
   isFileEditorPattern,
+  isGuestProviderLogoPath,
   isGuestRequestPath,
+  isOpenCodeProviderId,
 } from '@openchamber/sdk';
 import { z } from 'zod';
 
@@ -177,6 +184,22 @@ export const guestUpdateSchema = z.object({
   version: z.string().trim().min(1).max(64),
 });
 
+// `contributes.links` as the server compiled it (`guests/links.js`): literal
+// keys, and link patterns the UI only runs, never a template it compiles.
+const publicLinksSchema = z.object({
+  action: z.enum(GUEST_LINK_ACTIONS),
+  keys: z.array(z.string().regex(GUEST_LINK_KEY)).max(GUEST_LINK_KEYS_MAX),
+  urls: z.object({
+    origin: z.string().refine((value) => URL.canParse(value) && new URL(value).protocol === 'https:' && new URL(value).origin === value),
+    identifierPattern: z.string().min(1),
+    patterns: z.array(z.object({
+      path: z.string().min(1),
+      query: z.object({ name: z.string().min(1) }).optional(),
+    })).min(1).max(TRACKER_URL_TEMPLATES_MAX),
+    itemTemplate: z.string().refine(isBuildableLinkTemplate).nullable(),
+  }).nullable(),
+}).refine((links) => links.keys.length > 0 || links.urls !== null);
+
 const installedGuestSchema = z.object({
   id: z.string().regex(PANEL_ID),
   storageId: z.string().min(1).max(128).regex(STORAGE_ID).optional(),
@@ -216,11 +239,14 @@ const installedGuestSchema = z.object({
   skills: z.literal(true).optional().catch(undefined),
   opencodePlugin: z.literal(true).optional().catch(undefined),
   mentions: z.object({ label: z.string().trim().min(1) }).optional().catch(undefined),
+  links: publicLinksSchema.optional().catch(undefined),
   needsConfiguration: z.string().trim().min(1).optional().catch(undefined),
   blocks: z.array(guestBlockSchema).max(GUEST_BLOCKS_MAX).optional(),
   actions: z.array(guestActionSchema).max(GUEST_ACTIONS_MAX).optional(),
   commands: z.array(guestCommandSchema).max(GUEST_COMMANDS_MAX).optional(),
   tools: z.array(guestToolSchema).max(GUEST_TOOLS_MAX).optional(),
+  // A row with logos this build cannot read keeps the rest of the extension.
+  providerLogos: z.record(z.string().refine(isOpenCodeProviderId), z.string().refine(isGuestProviderLogoPath)).optional().catch(undefined),
   fileEditors: z.array(guestFileEditorSchema).max(GUEST_FILE_EDITORS_MAX).optional(),
   capabilities: z.object({
     requested: z.array(z.enum(GUEST_CAPABILITIES)),

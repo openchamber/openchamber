@@ -26,6 +26,7 @@ import { ContextPanelHeaderToolbar } from './contextPanelHeaderSlot';
 import { useInContextPanelHeader } from './contextPanelHeaderSlotContext';
 import { toolContentShellChars } from '@/lib/opencode/toolContentShells';
 import { composeContextBreakdown, type ContextBuckets } from './contextBreakdown';
+import { computeSessionTokenTotals } from '@/components/chat/work-status/contextUsage';
 
 type SessionMessage = { info: Message; parts: Part[] };
 
@@ -207,6 +208,23 @@ const deriveRoleBucket = (message: SessionMessage): 'user' | 'assistant' | 'tool
   return 'other';
 };
 
+// Keyed by the message record, which the sync layer replaces whenever the
+// message or its parts change: a streamed delta re-measures one message, and
+// records that leave the session are collected with the map entry.
+const messageCharsCache = new WeakMap<SessionMessage, ContextBuckets>();
+
+const messageChars = (message: SessionMessage): ContextBuckets => {
+  const cached = messageCharsCache.get(message);
+  if (cached) return cached;
+  const role = deriveRoleBucket(message);
+  let bucket = { ...EMPTY_BUCKETS };
+  for (const part of message.parts) {
+    bucket = addBuckets(bucket, estimatePartChars(part, role));
+  }
+  messageCharsCache.set(message, bucket);
+  return bucket;
+};
+
 const computeContextBreakdown = (
   sessionMessages: SessionMessage[],
   systemPrompt: string,
@@ -215,14 +233,10 @@ const computeContextBreakdown = (
     return { ...EMPTY_BUCKETS };
   }
 
-  const totalChars = sessionMessages.reduce<ContextBuckets>((acc, message) => {
-    const role = deriveRoleBucket(message);
-    let bucket = { ...EMPTY_BUCKETS };
-    for (const part of message.parts) {
-      bucket = addBuckets(bucket, estimatePartChars(part, role));
-    }
-    return addBuckets(acc, bucket);
-  }, { ...EMPTY_BUCKETS });
+  const totalChars = sessionMessages.reduce<ContextBuckets>(
+    (acc, message) => addBuckets(acc, messageChars(message)),
+    { ...EMPTY_BUCKETS },
+  );
 
   totalChars.user += systemPrompt.length;
 
@@ -262,6 +276,164 @@ const resolveProviderAndModel = (
   };
 };
 
+type TokenFigures = {
+  /** Every prompt token, cached or not; the cache cells beside it split it up. */
+  prompt: number;
+  output: number;
+  reasoning: number;
+  cacheRead: number;
+  cacheWrite: number;
+  cacheHitPercent: number | null;
+};
+
+/** Six token figures under a title; `null` figures, not yet known, read as dashes. */
+const TokenFiguresCard: React.FC<{ title: string; figures: TokenFigures | null }> = ({ title, figures }) => {
+  const { t } = useI18n();
+  const items = [
+    { label: t('contextSidebar.tokens.input'), value: figures?.prompt ?? null, format: 'count' },
+    { label: t('contextSidebar.tokens.output'), value: figures?.output ?? null, format: 'count' },
+    { label: t('contextSidebar.tokens.reasoning'), value: figures?.reasoning ?? null, format: 'count' },
+    { label: t('contextSidebar.tokens.cacheRead'), value: figures?.cacheRead ?? null, format: 'count' },
+    { label: t('contextSidebar.tokens.cacheWrite'), value: figures?.cacheWrite ?? null, format: 'count' },
+    { label: t('contextSidebar.tokens.cacheHit'), value: figures?.cacheHitPercent ?? null, format: 'percent' },
+  ] as const;
+
+  return (
+    <div className="mb-5 rounded-lg bg-[var(--surface-elevated)]/70 px-4 py-3.5">
+      <div className="typography-micro text-muted-foreground mb-2.5">{title}</div>
+      <div className="grid grid-cols-3 gap-x-4 gap-y-2.5">
+        {items.map((item) => (
+          <div key={item.label}>
+            <div className="typography-micro text-muted-foreground">{item.label}</div>
+            <div className="mt-0.5 typography-ui-label tabular-nums text-foreground">
+              {item.value === null
+                ? '—'
+                : item.format === 'percent'
+                  ? `${item.value.toFixed(1)}%`
+                  : formatNumber(item.value)}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
+
+type RawMessageRowProps = {
+  message: SessionMessage;
+  isExpanded: boolean;
+  isCopied: boolean;
+  timeFormatPreference: TimeFormatPreference;
+  onToggle: (messageId: string) => void;
+  onCopy: (messageId: string, value: string) => void;
+};
+
+// Memoized on the message record, which the sync layer keeps by reference
+// while the message is unchanged: a streamed delta re-renders only the row of
+// the message it touched, not one row per message of the session.
+const RawMessageRow = React.memo(function RawMessageRow({
+  message,
+  isExpanded,
+  isCopied,
+  timeFormatPreference,
+  onToggle,
+  onCopy,
+}: RawMessageRowProps) {
+  const { t } = useI18n();
+  const role = message.info.role;
+  const isAssistant = role === 'assistant';
+  const isUser = role === 'user';
+  const messageCreatedAt = (message.info.time?.created ?? null) as number | null;
+  const partsLabel = derivePartsLabel(message.parts);
+  const tokens = isAssistant ? extractTokenBreakdown(message) : null;
+  const userSnippet = isUser ? deriveUserSnippet(message.parts) : '';
+  const previewTime = formatMessagePreviewTime(messageCreatedAt, timeFormatPreference);
+  // Keep token/time columns stable; the message label owns all
+  // remaining space and truncates before it can push metrics.
+  const assistantLeft = partsLabel || '—';
+  const assistantMiddle = tokens
+    ? formatAssistantTokens(tokens.input, tokens.output, formatNumber)
+    : '';
+  const otherLeft = role || 'unknown';
+  const otherLabel = partsLabel ? `${otherLeft}: ${partsLabel}` : otherLeft;
+
+  const jsonValue = isExpanded
+    ? JSON.stringify({ info: message.info, parts: message.parts }, null, 2)
+    : '';
+
+  return (
+    <div className="overflow-hidden rounded-lg bg-[var(--surface-elevated)]/70">
+      <button
+        type="button"
+        className="w-full cursor-pointer px-3 py-1.5 text-start hover:bg-[var(--interactive-hover)]"
+        aria-expanded={isExpanded}
+        onClick={() => onToggle(message.info.id)}
+      >
+        <div
+          className="grid items-center gap-x-2 whitespace-nowrap typography-micro"
+          style={{ gridTemplateColumns: isAssistant ? 'minmax(0, 1fr) 7.5rem max-content' : 'minmax(0, 1fr) max-content' }}
+        >
+          {isUser ? (
+            <span className="min-w-0 truncate text-muted-foreground">
+              <span className="typography-ui-label text-foreground">user:</span>{' '}
+              {userSnippet}
+            </span>
+          ) : (
+            <>
+              <span className="min-w-0 truncate text-muted-foreground">
+                {isAssistant ? assistantLeft : otherLabel}
+              </span>
+              {isAssistant && (
+                <span className="text-end text-muted-foreground tabular-nums">
+                  {assistantMiddle}
+                </span>
+              )}
+            </>
+          )}
+          <span className="text-end text-muted-foreground">{previewTime}</span>
+        </div>
+      </button>
+
+      {isExpanded && (
+        <div className="border-t border-[var(--surface-subtle)] p-0">
+          <ScrollableOverlay outerClassName="max-h-[26rem] bg-[var(--surface-background)]" className="group relative" disableHorizontal>
+            <div className="absolute top-1 inset-e-2 z-10 opacity-0 transition-opacity group-hover:opacity-100">
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    className="rounded p-1 text-muted-foreground transition-colors hover:bg-interactive-hover/60 hover:text-foreground"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onCopy(message.info.id, jsonValue);
+                    }}
+                    aria-label={isCopied ? t('contextSidebar.actions.copied') : t('contextSidebar.actions.copyJson')}
+                  >
+                    {isCopied ? <Icon name="check" className="size-3.5" /> : <Icon name="file-copy" className="size-3.5" />}
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent sideOffset={6}>{isCopied ? t('contextSidebar.actions.copied') : t('contextSidebar.actions.copyJson')}</TooltipContent>
+              </Tooltip>
+            </div>
+            <WorkerHighlightedCode
+              language="json"
+              code={jsonValue}
+              style={{
+                margin: 0,
+                padding: '0.75rem',
+                background: 'transparent',
+                fontSize: 'var(--text-micro)',
+                lineHeight: '1.35',
+              }}
+              wrap
+            />
+          </ScrollableOverlay>
+        </div>
+      )}
+    </div>
+  );
+});
+
 export const ContextPanelContent: React.FC = () => {
   const { t } = useI18n();
   const inPanelHeader = useInContextPanelHeader();
@@ -294,6 +466,13 @@ export const ContextPanelContent: React.FC = () => {
         copyResetTimeoutRef.current = null;
       }
     };
+  }, []);
+
+  const handleToggleRawMessage = React.useCallback((messageId: string) => {
+    setExpandedRawMessages((prev) => ({
+      ...prev,
+      [messageId]: !(prev[messageId] === true),
+    }));
   }, []);
 
   const handleCopyRawMessage = React.useCallback(async (messageId: string, value: string) => {
@@ -385,6 +564,7 @@ export const ContextPanelContent: React.FC = () => {
 
     return {
       sessionTitle: currentSession?.title || t('contextSidebar.session.untitled'),
+      sessionTotals: computeSessionTokenTotals(currentSession),
       messagesCount: sessionMessages.length,
       userMessagesCount: userMessages.length,
       assistantMessagesCount: assistantMessages.length,
@@ -487,35 +667,19 @@ export const ContextPanelContent: React.FC = () => {
           ))}
         </div>
 
-        {/* ── Last turn tokens ── */}
-        <div className="mb-5 rounded-lg bg-[var(--surface-elevated)]/70 px-4 py-3.5">
-          <div className="typography-micro text-muted-foreground mb-2.5">{t('contextSidebar.section.lastAssistantMessage')}</div>
-          <div className="grid grid-cols-3 gap-x-4 gap-y-2.5">
-            {([
-              { label: t('contextSidebar.tokens.input'), value: viewModel.tokenBreakdown.input, format: 'count' },
-              { label: t('contextSidebar.tokens.output'), value: viewModel.tokenBreakdown.output, format: 'count' },
-              { label: t('contextSidebar.tokens.reasoning'), value: viewModel.tokenBreakdown.reasoning, format: 'count' },
-              { label: t('contextSidebar.tokens.cacheRead'), value: viewModel.tokenBreakdown.cacheRead, format: 'count' },
-              { label: t('contextSidebar.tokens.cacheWrite'), value: viewModel.tokenBreakdown.cacheWrite, format: 'count' },
-              {
-                label: t('contextSidebar.tokens.cacheHit'),
-                value: viewModel.cacheHitRate.hasInput ? viewModel.cacheHitRate.percent : null,
-                format: 'percent',
-              },
-            ] as const).map((item) => (
-              <div key={item.label}>
-                <div className="typography-micro text-muted-foreground">{item.label}</div>
-                <div className="mt-0.5 typography-ui-label tabular-nums text-foreground">
-                  {item.value !== null && item.value !== undefined
-                    ? item.format === 'percent'
-                      ? `${item.value.toFixed(1)}%`
-                      : formatNumber(item.value)
-                    : '—'}
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
+        {/* ── Whole-session tokens, then the last turn's, in the same columns ── */}
+        <TokenFiguresCard
+          title={t('contextSidebar.section.sessionTotals')}
+          figures={viewModel.sessionTotals}
+        />
+        <TokenFiguresCard
+          title={t('contextSidebar.section.lastAssistantMessage')}
+          figures={{
+            ...viewModel.tokenBreakdown,
+            prompt: viewModel.tokenBreakdown.input + viewModel.tokenBreakdown.cacheRead + viewModel.tokenBreakdown.cacheWrite,
+            cacheHitPercent: viewModel.cacheHitRate.hasInput ? viewModel.cacheHitRate.percent : null,
+          }}
+        />
 
         {/* ── Context breakdown ── */}
         <div className="mb-6">
@@ -552,118 +716,17 @@ export const ContextPanelContent: React.FC = () => {
         <div>
           <div className="typography-micro text-muted-foreground">{t('contextSidebar.section.rawMessages')}</div>
           <div className="mt-2.5 space-y-1">
-            {[...sessionMessages].reverse().map((message) => {
-              const role = message.info.role;
-              const isAssistant = role === 'assistant';
-              const isUser = role === 'user';
-              const isExpanded = expandedRawMessages[message.info.id] === true;
-              const isCopied = copiedRawMessageId === message.info.id;
-              const messageCreatedAt = (message.info.time?.created ?? null) as number | null;
-              const partsLabel = derivePartsLabel(message.parts);
-              const tokens = isAssistant ? extractTokenBreakdown({ info: message.info, parts: message.parts }) : null;
-              const userSnippet = isUser ? deriveUserSnippet(message.parts) : '';
-              const previewTime = formatMessagePreviewTime(messageCreatedAt, timeFormatPreference);
-              // Keep token/time columns stable; the message label owns all
-              // remaining space and truncates before it can push metrics.
-              const assistantLeft = partsLabel || '\u2014';
-              const assistantMiddle = tokens
-                ? formatAssistantTokens(tokens.input, tokens.output, formatNumber)
-                : '';
-              const otherLeft = role || 'unknown';
-              const otherLabel = partsLabel ? `${otherLeft}: ${partsLabel}` : otherLeft;
-
-              const jsonValue = isExpanded
-                ? JSON.stringify({ info: message.info, parts: message.parts }, null, 2)
-                : '';
-
-              return (
-                <div
-                  key={message.info.id}
-                  className="overflow-hidden rounded-lg bg-[var(--surface-elevated)]/70"
-                >
-                  <button
-                    type="button"
-                    className="w-full cursor-pointer px-3 py-1.5 text-start hover:bg-[var(--interactive-hover)]"
-                    aria-expanded={isExpanded}
-                    onClick={() => {
-                      setExpandedRawMessages((prev) => ({
-                        ...prev,
-                        [message.info.id]: !(prev[message.info.id] === true),
-                      }));
-                    }}
-                  >
-                    <div
-                      className="grid items-center gap-x-2 whitespace-nowrap typography-micro"
-                      style={{ gridTemplateColumns: isAssistant ? 'minmax(0, 1fr) 7.5rem max-content' : 'minmax(0, 1fr) max-content' }}
-                    >
-                      {isUser ? (
-                        <span
-                          className="min-w-0 truncate text-muted-foreground"
-                        >
-                          <span className="typography-ui-label text-foreground">user:</span>{' '}
-                          {userSnippet}
-                        </span>
-                      ) : (
-                        <>
-                          <span
-                            className={
-                              isAssistant
-                                ? 'min-w-0 truncate text-muted-foreground'
-                                : 'min-w-0 truncate text-muted-foreground'
-                            }
-                          >
-                            {isAssistant ? assistantLeft : otherLabel}
-                          </span>
-                          {isAssistant && (
-                            <span className="text-end text-muted-foreground tabular-nums">
-                              {assistantMiddle}
-                            </span>
-                          )}
-                        </>
-                      )}
-                      <span className="text-end text-muted-foreground">{previewTime}</span>
-                    </div>
-                  </button>
-
-                  {isExpanded && (
-                    <div className="border-t border-[var(--surface-subtle)] p-0">
-                      <ScrollableOverlay outerClassName="max-h-[26rem] bg-[var(--surface-background)]" className="group relative" disableHorizontal>
-                        <div className="absolute top-1 inset-e-2 z-10 opacity-0 transition-opacity group-hover:opacity-100">
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <button
-                                type="button"
-                                className="rounded p-1 text-muted-foreground transition-colors hover:bg-interactive-hover/60 hover:text-foreground"
-                                onClick={(event) => {
-                                  event.stopPropagation();
-                                  void handleCopyRawMessage(message.info.id, jsonValue);
-                                }}
-                                aria-label={isCopied ? t('contextSidebar.actions.copied') : t('contextSidebar.actions.copyJson')}
-                              >
-                                {isCopied ? <Icon name="check" className="size-3.5" /> : <Icon name="file-copy" className="size-3.5" />}
-                              </button>
-                            </TooltipTrigger>
-                            <TooltipContent sideOffset={6}>{isCopied ? t('contextSidebar.actions.copied') : t('contextSidebar.actions.copyJson')}</TooltipContent>
-                          </Tooltip>
-                        </div>
-                        <WorkerHighlightedCode
-                          language="json"
-                          code={jsonValue}
-                          style={{
-                            margin: 0,
-                            padding: '0.75rem',
-                            background: 'transparent',
-                            fontSize: 'var(--text-micro)',
-                            lineHeight: '1.35',
-                          }}
-                          wrap
-                        />
-                      </ScrollableOverlay>
-                    </div>
-                  )}
-                </div>
-              );
-            })}
+            {[...sessionMessages].reverse().map((message) => (
+              <RawMessageRow
+                key={message.info.id}
+                message={message}
+                isExpanded={expandedRawMessages[message.info.id] === true}
+                isCopied={copiedRawMessageId === message.info.id}
+                timeFormatPreference={timeFormatPreference}
+                onToggle={handleToggleRawMessage}
+                onCopy={handleCopyRawMessage}
+              />
+            ))}
           </div>
         </div>
       </div>

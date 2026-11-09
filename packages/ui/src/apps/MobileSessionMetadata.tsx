@@ -214,7 +214,7 @@ const SessionMetadataOverlay: React.FC<{
         role="dialog"
         aria-label={t('mobile.header.openMetadataAria')}
         className={cn(
-          'oc-surface-elevated overflow-y-auto overscroll-contain rounded-[20px] border border-edge bg-surface-elevated p-2 shadow-[0_12px_32px_rgb(0_0_0_/_0.2)] will-change-transform',
+          'oc-surface-elevated overflow-y-auto overscroll-contain rounded-[20px] border border-edge bg-surface-elevated p-2 shadow-[0_4px_12px_rgb(0_0_0_/_0.08)] will-change-transform',
           isPopover ? 'absolute origin-top-left' : 'mx-3 mt-2',
           isExiting ? 'pointer-events-none' : 'pointer-events-auto',
         )}

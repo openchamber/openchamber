@@ -108,7 +108,7 @@ export function SessionDraftRow({ draft, depth, detailed: detailedRequested, mix
         <div className="flex h-4 w-full min-w-0 items-center gap-1">
           {project ? <TimelineProjectIcon project={project} label={formatProjectLabel(project.label?.trim() || project.path)} /> : null}
           <Icon name="edit" className="h-3 w-3 flex-shrink-0 text-muted-foreground" />
-          {branch ? <span className="min-w-0 truncate typography-micro text-muted-foreground">{branch}</span> : null}
+          {branch ? <span dir="ltr" className="min-w-0 truncate typography-micro text-muted-foreground">{branch}</span> : null}
           {firstLine && attachmentCount > 0 ? <Icon name="attachment-2" className="ms-auto h-3 w-3 flex-shrink-0 text-muted-foreground" /> : null}
         </div>
       ) : null}

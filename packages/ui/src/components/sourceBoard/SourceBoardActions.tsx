@@ -435,7 +435,7 @@ export const SourceBoardActions: React.FC<{
                                 </DropdownMenuItem>
                                 {worktreeAvailable ? (
                                     <DropdownMenuItem onSelect={() => onStartWorktree(project, selectionOf(item))}>
-                                        <Icon name="git-branch" className="size-4 shrink-0" />
+                                        <Icon name="worktree" className="size-4 shrink-0" />
                                         {t(pull ? 'sourceBoard.actions.checkoutWorktree' : 'sourceBoard.actions.newWorktreeSession')}
                                     </DropdownMenuItem>
                                 ) : null}

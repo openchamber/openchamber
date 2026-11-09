@@ -6,7 +6,7 @@
  * when nothing changes, so the store can decide against the record as it is
  * at write time.
  *
- * The rule the patches keep: sending a message opens, the user alone closes.
+ * The rule the patches keep: sending a message opens, only the user closes.
  * A message reopens a session the user closed, but only one sent after the
  * user closed it.
  */
@@ -38,10 +38,28 @@ export const openPatch = (metadata, { requestAt, now }) => {
   return patchOf({ state: 'open', openedAt: now, openedBy: 'auto', doneAt: null, suggestDoneAt: null });
 };
 
-/** The turn that just ended looks like the end of the work. */
+/**
+ * The user put the session in work (`open`, Track) or marked it done, in the
+ * app or through an agent on their word. Done keeps when and by whom the work
+ * was opened; both drop Jev's hint. The same record the UI writes
+ * (`withSessionWorkState` in packages/ui).
+ */
+export const userStatePatch = (metadata, { state, now }) => {
+  if (readWork(metadata)?.state === state) return null;
+  return patchOf(state === 'open'
+    ? { state: 'open', openedAt: now, openedBy: 'user', doneAt: null, suggestDoneAt: null }
+    : { state: 'done', doneAt: now, suggestDoneAt: null });
+};
+
+/**
+ * The turn that ended looks like the end of the work, and the user stayed
+ * quiet since. It replaces a review offer from the same turn.
+ */
 export const suggestDonePatch = (metadata, { now }) => {
   if (readWork(metadata)?.state !== 'open') return null;
-  return patchOf({ suggestDoneAt: now });
+  const patch = patchOf({ suggestDoneAt: now });
+  if (reviewOfferSchema.safeParse(metadata).success) patch.openchamber.reviewOffer = null;
+  return patch;
 };
 
 /** The turn that just ended handed over changes worth a look; any session. */

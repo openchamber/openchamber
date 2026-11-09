@@ -114,9 +114,26 @@ describe('settings search', () => {
         t,
         getPageTitle: (page) => page,
       });
-      expect(results.find((result) => result.id === 'appearance.scrollbars')?.page).toBe('appearance');
+      // General's Panels section holds it; VS Code has no such section and keeps it on Appearance.
+      const expected = context.isVSCode
+        ? { id: 'appearance.scrollbars-vscode', page: 'appearance' }
+        : { id: 'appearance.scrollbars', page: 'general' };
+      expect(results.find((result) => result.id === expected.id)?.page).toBe(expected.page);
     }
   });
+
+  test('finds the provider logo wherever it can be uploaded', () => {
+    for (const context of [runtimeCtx, { ...runtimeCtx, isDesktop: true }, { ...runtimeCtx, isMobile: true }, { ...runtimeCtx, isVSCode: true }]) {
+      const results = buildSettingsSearchResults({
+        query: 'logo',
+        runtimeCtx: context,
+        t,
+        getPageTitle: (page) => page,
+      });
+      expect(results.find((result) => result.id === 'providers.logo')?.page).toBe(context.isVSCode ? undefined : 'providers');
+    }
+  });
+
   test('finds Linear connect on the integrations page when the server serves Linear', () => {
     const results = buildSettingsSearchResults({
       query: 'linear',

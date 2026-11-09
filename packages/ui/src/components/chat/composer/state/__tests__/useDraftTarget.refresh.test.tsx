@@ -55,6 +55,7 @@ describe('useDraftTarget refresh', () => {
     useGitStore.setState({
       directories: new Map([[PROJECT.path, {
         isGitRepo: true,
+        repoUnreadable: null,
         status: null,
         branches: { all: ['main'], current: 'main', branches: {} },
         log: null,
@@ -151,6 +152,7 @@ describe('useDraftTarget refresh', () => {
     useGitStore.setState({
       directories: new Map([[PROJECT.path, {
         isGitRepo: true,
+        repoUnreadable: null,
         status: null,
         branches: { all: ['main'], current: 'main', branches: {} },
         log: null,

@@ -15,8 +15,13 @@ import {
   isWebTool,
   normalizeToolName,
   openChamberToolCall,
+  soleNamedCall,
+  executeNamespace,
   renderedPage,
   requestedSecret,
+  requestedSecretRun,
+  openChamberCallSummary,
+  secretRunCommandLine,
   subagentSessionId,
   toolDescription,
   toolFileDiffs,
@@ -93,6 +98,10 @@ describe("tool row description", () => {
       .toEqual({ kind: "text", value: "browser.snapshot" })
     expect(toolDescription("openchamber_notify", { title: "Review ready" }, undefined))
       .toEqual({ kind: "text", value: "Review ready" })
+    expect(toolDescription("openchamber_usage", { action: "usage.read", parameters: { providerId: "claude" } }, undefined))
+      .toEqual({ kind: "text", value: "usage.read · claude" })
+    expect(toolDescription("openchamber_usage", { action: "usage.read", parameters: {} }, undefined))
+      .toEqual({ kind: "text", value: "usage.read" })
   })
 
   test("shell shows the first line of the command", () => {
@@ -145,8 +154,13 @@ describe("tool row description", () => {
       .toEqual({ kind: "text", value: "Fix the dock" })
     expect(toolDescription("opencode.session_move", { directory: "~/projects/app" }, undefined))
       .toEqual({ kind: "path", value: "~/projects/app" })
-    expect(toolDescription("opencode.models", { search: "haiku" }, undefined))
+    expect(toolDescription("opencode.models", { query: "haiku" }, undefined))
       .toEqual({ kind: "text", value: "haiku" })
+    expect(toolDescription("opencode.worktree_create", { name: "fix-login" }, undefined)).toEqual({ kind: "text", value: "fix-login" })
+    expect(toolDescription("opencode_read_mcp_resource", { server: "docs", uri: "docs://readme" }, undefined)).toEqual({ kind: "text", value: "docs://readme" })
+    expect(toolDescription("opencode.schedule_create", { prompt: "Check CI\nthen report", when: { every: "1 hour" } }, undefined)).toEqual({ kind: "text", value: "Check CI" })
+    expect(toolDescription("opencode.worktree_remove", { directory: "/repo/wt" }, undefined)).toEqual({ kind: "path", value: "/repo/wt" })
+    expect(toolDescription("opencode.artifact_create", { title: "Report", files: {} }, undefined)).toEqual({ kind: "text", value: "Report" })
     expect(toolDescription("opencode.models", { provider: "anthropic" }, undefined))
       .toEqual({ kind: "text", value: "anthropic" })
   })
@@ -178,7 +192,16 @@ describe("tool row description", () => {
       ],
     })).toEqual({
       kind: "tools",
-      calls: [{ name: "linear.list_issues", count: 3 }, { name: "linear.get_workspace", count: 1 }],
+      calls: [{ name: "linear.list_issues", count: 3, completed: false, actions: [] }, { name: "linear.get_workspace", count: 1, completed: true, actions: [] }],
+      overflow: 0,
+    })
+  })
+
+  test("execute keeps the actions OpenChamber calls ran, counted per tool", () => {
+    const web = (action: string) => ({ tool: "openchamber_web", status: "completed", input: { action, parameters: {} } })
+    expect(toolDescription("execute", {}, { toolCalls: [web("browser.open"), web("browser.click"), web("browser.click")] })).toEqual({
+      kind: "tools",
+      calls: [{ name: "openchamber_web", count: 3, completed: true, actions: [{ action: "browser.open", count: 1 }, { action: "browser.click", count: 2 }] }],
       overflow: 0,
     })
   })
@@ -188,10 +211,10 @@ describe("tool row description", () => {
     expect(toolDescription("execute", {}, { toolCalls })).toEqual({
       kind: "tools",
       calls: [
-        { name: "a", count: 1 },
-        { name: "b", count: 1 },
-        { name: "c", count: 1 },
-        { name: "d", count: 1 },
+        { name: "a", count: 1, completed: true, actions: [] },
+        { name: "b", count: 1, completed: true, actions: [] },
+        { name: "c", count: 1, completed: true, actions: [] },
+        { name: "d", count: 1, completed: true, actions: [] },
       ],
       overflow: 2,
     })
@@ -339,20 +362,18 @@ describe("requestedSecret", () => {
   const input = { action: "secret.request", parameters: { label: "Cloudflare API token", reason: "To deploy the worker.", placeholder: "cf-..." } }
   const request = { label: "Cloudflare API token", reason: "To deploy the worker.", placeholder: "cf-..." }
 
-  test("asks while its call runs and folds to how it ended", () => {
-    expect(requestedSecret("openchamber_secret", running(input))).toEqual({ ...request, state: "waiting" })
-    expect(requestedSecret("openchamber_secret", completed(input, { openchamber: { ok: true, answer: { status: "saved", file: "/data/secrets/abc" } } }))?.state).toBe("saved")
-    expect(requestedSecret("openchamber_secret", completed(input, { openchamber: { ok: true, answer: { status: "declined" } } }))?.state).toBe("declined")
-    expect(requestedSecret("openchamber_secret", completed(input, { openchamber: { ok: true, answer: { answered: false, reason: "chat" } } }))?.state).toBe("not-given")
-    expect(requestedSecret("openchamber_secret", { status: "error", input, error: "aborted", time: { start: 1, end: 2 } })?.state).toBe("not-given")
+  test("asks while its call runs, and leaves an answered request to its tool row", () => {
+    expect(requestedSecret("openchamber_secret", running(input))).toEqual(request)
     // Beside the action, as the plugin also accepts it.
     expect(requestedSecret("openchamber_secret", running({ action: "secret.request", label: "Key", reason: "Why" })))
-      .toEqual({ label: "Key", reason: "Why", placeholder: undefined, state: "waiting" })
+      .toEqual({ label: "Key", reason: "Why", placeholder: undefined })
+    const saved = completed(input, { openchamber: { ok: true, answer: { status: "saved" } } })
+    expect(requestedSecret("openchamber_secret", saved)).toBeNull()
+    expect(isShownInPlace("openchamber_secret", saved)).toBe(false)
+    expect(openChamberCallSummary("openchamber_secret", input)).toEqual({ action: "secret.request", detail: "Cloudflare API token" })
   })
 
   test("leaves a refused, incomplete or foreign call to its tool row", () => {
-    expect(requestedSecret("openchamber_secret", completed(input, { openchamber: { ok: false } }))).toBeNull()
-    expect(requestedSecret("openchamber_secret", completed(input))).toBeNull()
     expect(requestedSecret("openchamber_secret", running({ action: "secret.request", parameters: { label: "Key" } }))).toBeNull()
     expect(requestedSecret("openchamber_render", running(input))).toBeNull()
   })
@@ -360,6 +381,42 @@ describe("requestedSecret", () => {
   test("is shown in place and always counts as waiting for the user", () => {
     expect(isShownInPlace("openchamber_secret", running(input))).toBe(true)
     expect(openChamberToolCall("openchamber_secret", input)?.awaitsAnswer).toBe(true)
+    expect(openChamberToolCall("openchamber_secret", { action: "secret.forget" })?.awaitsAnswer).toBe(false)
+  })
+})
+
+describe("requestedSecretRun", () => {
+  const input = {
+    action: "secret.run",
+    parameters: { program: "wrangler", args: ["deploy", "my worker"], reason: "To deploy.", inputs: [{ env: "CF_TOKEN", label: "Cloudflare token" }, { env: "CF_ACCOUNT", label: "Account id" }] },
+  }
+  const running = (metadata?: Metadata): ToolState => ({ status: "running", input, metadata, time: { start: 1 } })
+  const completed = (metadata?: Metadata): ToolState => ({ status: "completed", input, output: "", metadata, time: { start: 1, end: 2 } })
+
+  test("draws the card while the call runs, and leaves a finished run to its tool row", () => {
+    expect(requestedSecretRun("openchamber_secret", running())).toEqual({
+      reason: "To deploy.",
+      program: "wrangler",
+      command: "wrangler deploy 'my worker'",
+      fields: [{ env: "CF_TOKEN", label: "Cloudflare token", placeholder: undefined }, { env: "CF_ACCOUNT", label: "Account id", placeholder: undefined }],
+    })
+    expect(isShownInPlace("openchamber_secret", running())).toBe(true)
+    const finished = completed({ openchamber: { ok: true, answer: { status: "ran", outcome: "exited", exitCode: 0 } } })
+    expect(requestedSecretRun("openchamber_secret", finished)).toBeNull()
+    expect(isShownInPlace("openchamber_secret", finished)).toBe(false)
+    // The row names the command it ran.
+    expect(openChamberCallSummary("openchamber_secret", input)).toEqual({ action: "secret.run", detail: "wrangler deploy 'my worker'" })
+  })
+
+  test("leaves a refused call and other actions to their own rendering", () => {
+    expect(requestedSecretRun("openchamber_secret", completed({ openchamber: { ok: false } }))).toBeNull()
+    expect(requestedSecretRun("openchamber_secret", { status: "running", input: { action: "secret.request", label: "Key", reason: "Why" }, time: { start: 1 } })).toBeNull()
+    // A run is not drawn as a file request, even when it carries a label.
+    expect(requestedSecret("openchamber_secret", { status: "running", input: { ...input, parameters: { ...input.parameters, label: "x" } }, time: { start: 1 } })).toBeNull()
+  })
+
+  test("shows characters that would hide or reorder the command line", () => {
+    expect(secretRunCommandLine("echo", [`a${String.fromCharCode(0x202e)}b`])).toBe("echo 'a\\u{202E}b'")
   })
 })
 
@@ -422,5 +479,41 @@ describe("openChamberToolCall", () => {
     expect(openChamberToolCall("openchamber_render", { action: "render.page", awaitAnswer: "true" })?.action).toBe("render.page")
     // An explicit parameters object wins on a conflict, as it does in the plugin.
     expect(openChamberToolCall("openchamber_render", { action: "render.page", awaitAnswer: "true", parameters: { awaitAnswer: "false" } })?.awaitsAnswer).toBe(false)
+  })
+})
+
+describe("executeNamespace", () => {
+  const calls = (...tools: string[]) => ({ toolCalls: tools.map((tool) => ({ tool, status: "completed" })) })
+
+  test("is the one namespace every call went to", () => {
+    expect(executeNamespace(calls("opencode.worktree_list", "opencode_session_rename"))).toBe("opencode")
+    expect(executeNamespace(calls("linear.list_issues", "linear.get_workspace"))).toBe("linear")
+    expect(executeNamespace(calls("openchamber_web", "openchamber_web"))).toBe("openchamber_web")
+  })
+
+  test("is nothing for mixed namespaces, bare names, or no calls", () => {
+    expect(executeNamespace(calls("linear.list_issues", "opencode.models"))).toBeUndefined()
+    expect(executeNamespace(calls("openchamber_web", "openchamber_memory"))).toBeUndefined()
+    expect(executeNamespace(calls("custom_tool"))).toBeUndefined()
+    expect(executeNamespace({})).toBeUndefined()
+  })
+})
+
+describe("soleNamedCall", () => {
+  test("is the one OpenChamber call of a script, and nothing for any other script", () => {
+    const call = (tool: string) => ({ tool, status: "completed", input: { action: "memory.save", parameters: { title: "Uses bun" } } })
+    expect(soleNamedCall({ toolCalls: [call("openchamber_memory")] })).toEqual({ tool: "openchamber_memory", input: { action: "memory.save", parameters: { title: "Uses bun" } }, status: "completed" })
+    expect(soleNamedCall({ toolCalls: [{ tool: "openchamber", status: "completed" }] })).toEqual({ tool: "openchamber", input: {}, status: "completed" })
+    expect(soleNamedCall({ toolCalls: [call("openchamber_memory"), call("openchamber_notify")] })).toBeUndefined()
+    expect(soleNamedCall({ toolCalls: [call("cloud_dns_record_list")] })).toBeUndefined()
+    expect(soleNamedCall({ toolCalls: [] })).toBeUndefined()
+    expect(soleNamedCall(undefined)).toBeUndefined()
+  })
+
+  test("is the one call to OpenCode's own namespace, in either spelling, with the call's status", () => {
+    expect(soleNamedCall({ toolCalls: [{ tool: "opencode.session_rename", status: "completed", input: { title: "Voice models" } }] }))
+      .toEqual({ tool: "opencode.session_rename", input: { title: "Voice models" }, status: "completed" })
+    expect(soleNamedCall({ toolCalls: [{ tool: "opencode_worktree_create", status: "error", input: { name: "fix" } }] }))
+      .toEqual({ tool: "opencode.worktree_create", input: { name: "fix" }, status: "error" })
   })
 })

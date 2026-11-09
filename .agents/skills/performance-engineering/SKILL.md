@@ -27,6 +27,8 @@ Define before editing:
 
 Do not optimize against a toy fixture when the report provides production scale.
 
+Once the mechanism is understood (cost that grows with history, a missing window, unbounded memory), fix it so the cost stops depending on scale rather than sizing the fix to one report. Choose test scales from what the code keys on (multiples of the cold-open window), because the reporter's hardware is not yours and the same count is heavy on one machine and nothing on another. Ask a reporter only for what would change the fix.
+
 ## Workflow
 
 Complete the numbered workflow in order. An optimization is complete only when the exact measured scenario meets its budget and separate correctness checks preserve every applicable state, identity, layout, and lifecycle transition.
@@ -113,7 +115,9 @@ paint, and raster, and reserve the sampler for attributing application code.
 effect is invisible below its threshold, and a development workspace is usually
 below it. When a report will not reproduce, compare the reporter's scale
 against yours on the specific dimension the code keys on before concluding the
-bug is absent.
+bug is absent. When the stand's synthetic sessions do not show it, import the
+user's own session into the stand (`scripts/perf/DOCUMENTATION.md`, *A Real
+Session In The Stand*).
 
 Profiling identifies where time is spent; it does not prove behavioral equivalence. Separately verify the applicable state, identity, layout, and lifecycle transitions for every structural optimization.
 
@@ -204,6 +208,7 @@ Prefer indexes keyed by stable IDs. Keep high-frequency runtime state out of met
 - Distinguish viewport resize from content growth and avoid fighting browser scroll anchoring.
 - Avoid textarea auto-size shrink/expand cycles when content only grows.
 - Freeze structural ordering during high-frequency updates and reorder at an explicit lifecycle edge.
+- React Compiler coverage is not a lever. The compiler skips much of the chat and sidebar hot path (`try`/`finally`, refs read during render), and measured with `--render-probe` under 4× CPU throttle the render bodies of all skipped hot-path components came to about 1% of streaming main-thread time; reconcile, commit and native layout/style/paint carry the rest. Do not restructure a component only so the compiler accepts it.
 
 ## Virtualization Contracts
 
@@ -241,7 +246,7 @@ A cache inside an `O(consumers × entities × candidates)` loop is a mitigation,
 - **On-demand surfaces load through `useOnDemandComponent`** (`hooks/useOnDemandComponent.ts`): import first, then render. A `React.lazy` component behind `Suspense` holds its real content at least 300 ms after the fallback shows (React's fallback throttle), whatever the CPU.
 - **A whole-UI freeze with a fast server and no event-loop lag is browser connection-pool starvation.** Server timing starts when Express receives a request; the browser's queue is invisible there. Background fan-out goes through the `lib/background-network.ts` gate (a cap, not `priority: 'low'`, which changes nothing), and slow third-party reads get a cap and a timeout.
 - **Freshness comes from signals, never idle traffic.** Relay bytes are paid, so nothing polls or streams while nothing happens: refresh from events the client already gets (agent tool calls, git status, own operations), only for what is visible, batched (the Files tree re-lists at most once per 2 s per surface and never auto-re-lists a folder whose last listing had over 1000 entries).
-- **A repeated read asks for what it needs.** Before a timer reads a list, check the OpenCode route for a filter. `parentID` returns child sessions without paging through the directory's full session list. To measure what the installed app sends, see `references/loopback-traffic.md`.
+- **A repeated read asks for what it needs.** Before a timer reads a list, check the OpenCode route for a filter. `parentID` returns child sessions without paging through the directory's full session list. To measure what the installed app sends, or trace which code keeps waking an OpenCode location, see `references/loopback-traffic.md`.
 - **An inherited custom property on a transcript ancestor restyles the whole transcript.** Write `--scroll-shadow-*`, `--chat-composer-*`, and `--oc-titlebar-controls-width` on the elements that read them (`composer/state/composerInsetReaders.ts`) or register them with `@property` and `inherits: false`.
 - **Hidden-state flips beside the transcript cost a frame when an accessibility client is on.** Changing `aria-hidden` or `inert` on the sidebar column re-serializes the transcript. Flip them on a small subtree inside it (`Sidebar.tsx` hides only its content, with `inert`). Measure with `--force-accessibility` (`scripts/perf/DOCUMENTATION.md`, "When An Accessibility Client Is On").
 - **Focus and inherited flips on a large subtree restyle all of it.** Tailwind's group variants compile to `:is(:where(.group):focus-visible *)`, so a focus change on an element restyles its whole subtree. `inert`, `pointer-events` and `user-select` flips have the same cost. Measure on a real repository, because the small perf fixture hides costs that scale with rows.
@@ -249,6 +254,7 @@ A cache inside an `O(consumers × entities × candidates)` loop is a mitigation,
 - **Whole-record session hooks re-render on every streamed step.** `useSession` and `useSessionMessages` change identity on each `session.updated` and flush; components that show one field read it through the leaf selectors in `sync/sync-context.tsx` (rule in `sync/DOCUMENTATION.md`).
 - **LegendList state lags the DOM by a frame.** `getState()` sizes come from estimates until rows are measured and from the footer a beat later; read `scrollHeight` when choosing a scroll target, and list state only to skip work mid-glide. See the bun patch in `message/parts/DOCUMENTATION.md`.
 - **The iOS app runs a different WebKit.** Focus, compositor motion, frame rate and scrolling cost there what they do not in Chrome, and only a device measures it. Read `references/ios-webkit.md` before measuring the iOS app or writing motion, keyboard or focus code that runs in it.
+- **Desktop RAM is mostly the window's JS heap.** Read the running app with `footprint -p <pid>` per process; `ps` RSS understates it several times. In renderer processes `App-Specific Tag 16` is V8 (the JS heap), `Tag 14` PartitionAlloc (DOM, strings), `Tag 13` Blink GC; the GPU helper is mostly IOSurface. The main window's V8 heap dominates, so it shrinks only by holding less in the UI, not by another webview shell.
 - **Count processes on server Git paths.** Look for a git spawn per item, the same read repeated within one operation, and network calls (`ls-remote`, `fetch`) where local refs answer. Batch into one read (`git remote -v`, not `get-url` per remote), keep a fallback when the batched read fails, prove the output matches the old method, and parse with `/\r?\n/`: Git for Windows may print CRLF, and spawns cost more there.
 
 ## Motion That Stays On Screen

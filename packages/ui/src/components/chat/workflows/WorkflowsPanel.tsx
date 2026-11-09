@@ -118,7 +118,7 @@ const ResultView: React.FC<{ run: WorkflowRun; detail: WorkflowRunDetail | null;
   const { t } = useI18n();
   if (run.error && (run.state === 'failed' || run.state === 'stopped')) {
     return (
-      <p className="px-4 py-6 typography-meta" style={{ color: run.state === 'failed' ? 'var(--status-error)' : undefined }}>
+      <p dir="auto" className="px-4 py-6 typography-meta" style={{ color: run.state === 'failed' ? 'var(--status-error)' : undefined }}>
         {run.error}
       </p>
     );

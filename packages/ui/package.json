@@ -1,6 +1,6 @@
 {
   "name": "@openchamber/ui",
-  "version": "2.6.1",
+  "version": "2.7.0",
   "private": true,
   "type": "module",
   "main": "src/main.tsx",
@@ -50,8 +50,8 @@
     "@legendapp/list": "3.7.1",
     "@lezer/highlight": "^1.2.3",
     "@openchamber/sdk": "workspace:*",
-    "@opencode/client": "2.2.5",
-    "@opencode/schema": "2.2.5",
+    "@opencode/client": "2.2.6",
+    "@opencode/schema": "2.2.6",
     "@openuidev/lang-core": "1.0.2",
     "@pierre/diffs": "1.6.2",
     "@pierre/highlights": "0.2.0",

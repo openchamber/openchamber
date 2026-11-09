@@ -89,6 +89,7 @@ import {
   useGitLoadingStatus,
 } from '@/stores/useGitStore';
 import { NestedRepoResolutionStates } from '@/components/views/git/NestedRepoResolutionStates';
+import { GitRepositoryUnreadableState } from '@/components/views/git/GitRepositoryUnreadableState';
 import { NestedRepoPicker } from '@/components/views/git/NestedRepoPicker';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { BoundGitNetworkOperationError, GitOperationResultError, runBoundGitNetworkOperation, describeGitSyncOutcome, type GitSyncOutcome } from '@/lib/boundGitNetworkOperation';
@@ -1201,6 +1202,12 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
 
   if (!currentDirectory) {
     return renderListState(<MobileChangesState message={t('gitView.empty.selectSessionOrDirectory')} />);
+  }
+
+  if (repository.unreadable) {
+    return renderListState(
+      <GitRepositoryUnreadableState directory={repository.unreadable.directory} message={repository.unreadable.message} />,
+    );
   }
 
   // Non-repo root: surface nested-repository resolution while the operating

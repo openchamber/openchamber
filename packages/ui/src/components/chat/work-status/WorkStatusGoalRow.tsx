@@ -52,6 +52,7 @@ export const WorkStatusGoalRow: React.FC<Props> = ({ sessionId, directory }) => 
           />
         )}
         label={objective}
+        labelDir="auto"
         onClick={() => setDialogOpen(true)}
         ariaLabel={t('chat.workStatus.goal.open')}
         value={canPause || canResume ? (

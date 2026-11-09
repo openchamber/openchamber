@@ -6,6 +6,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from '@/components/ui/context-menu';
 import { Icon } from "@/components/icon/Icon";
 import type { IconName } from "@/components/icon/icons";
 import { cn } from '@/lib/utils';
@@ -32,7 +33,7 @@ interface SettingsSidebarItemProps {
   onSelect: () => void;
   /** Optional icon to show before title */
   icon?: React.ReactNode;
-  /** Actions shown in dropdown menu. If empty/undefined, no dropdown is shown. */
+  /** Actions of the row's right-click menu, and of its ⋯ menu on touch screens. If empty/undefined, the row has no menu. */
   actions?: SettingsSidebarItemAction[];
   /** Additional className for the outer container */
   className?: string;
@@ -65,17 +66,28 @@ export const SettingsSidebarItem: React.FC<SettingsSidebarItemProps> = ({
   className,
 }) => {
   const hasActions = actions && actions.length > 0;
-
-  return (
-    <div
-      className={cn(
-        'group relative flex items-center rounded-md px-1.5 py-0.5 transition-all duration-200',
-        selected
-          ? 'bg-interactive-selection'
-          : 'hover:bg-interactive-hover',
-        className
-      )}
+  const rowClassName = cn(
+    'group relative flex items-center rounded-md px-1.5 py-0.5 transition-all duration-200',
+    selected
+      ? 'bg-interactive-selection'
+      : 'hover:bg-interactive-hover',
+    className
+  );
+  const renderActionItems = (Item: typeof DropdownMenuItem | typeof ContextMenuItem) => actions?.map((action) => (
+    <Item
+      key={action.label}
+      onClick={(e: React.MouseEvent) => {
+        e.stopPropagation();
+        action.onClick();
+      }}
+      className={cn(action.destructive && 'text-destructive focus:text-destructive')}
     >
+      {action.icon && <Icon name={action.icon} className="h-4 w-4 me-px" />}
+      {action.label}
+    </Item>
+  ));
+
+  const content = (
       <div className="flex min-w-0 flex-1 items-center">
         <button
           onClick={onSelect}
@@ -96,40 +108,37 @@ export const SettingsSidebarItem: React.FC<SettingsSidebarItemProps> = ({
           )}
         </button>
 
+        {/* Touch screens only: with a mouse the menu is the row's right
+            click (Shift+F10 from the keyboard). */}
         {hasActions && (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button
                 size="icon"
                 variant="ghost"
-                className="h-6 w-6 flex-shrink-0 -me-1 opacity-100 transition-opacity md:opacity-0 md:group-hover:opacity-100"
+                className="h-6 w-6 flex-shrink-0 -me-1 opacity-100 transition-opacity md:opacity-0 md:group-hover:opacity-100 pointer-fine:hidden"
               >
                 <Icon name="more" className="h-3.5 w-3.5" />
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-fit min-w-20">
-              {actions.map((action) => {
-                const iconName = action.icon;
-                return (
-                  <DropdownMenuItem
-                    key={action.label}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      action.onClick();
-                    }}
-                    className={cn(
-                      action.destructive && 'text-destructive focus:text-destructive'
-                    )}
-                  >
-                    {iconName && <Icon name={iconName} className="h-4 w-4 me-px" />}
-                    {action.label}
-                  </DropdownMenuItem>
-                );
-              })}
+              {renderActionItems(DropdownMenuItem)}
             </DropdownMenuContent>
           </DropdownMenu>
         )}
       </div>
-    </div>
+  );
+
+  if (!hasActions) return <div className={rowClassName}>{content}</div>;
+
+  return (
+    <ContextMenu>
+      <ContextMenuTrigger render={<div className={rowClassName} />}>
+        {content}
+      </ContextMenuTrigger>
+      <ContextMenuContent className="w-fit min-w-20">
+        {renderActionItems(ContextMenuItem)}
+      </ContextMenuContent>
+    </ContextMenu>
   );
 };

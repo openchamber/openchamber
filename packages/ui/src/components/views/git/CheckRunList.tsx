@@ -33,10 +33,10 @@ const CheckRunDetails: React.FC<{
       </div>
 
       {run.output?.title ? (
-        <div className="typography-micro text-foreground">{run.output.title}</div>
+        <div dir="auto" className="typography-micro text-foreground">{run.output.title}</div>
       ) : null}
       {run.output?.summary ? (
-        <div className="typography-micro text-muted-foreground whitespace-pre-wrap break-words">
+        <div dir="auto" className="typography-micro text-muted-foreground whitespace-pre-wrap break-words">
           {run.output.summary}
         </div>
       ) : null}
@@ -62,11 +62,11 @@ const CheckRunDetails: React.FC<{
                   {annotation.startLine !== undefined ? `:${annotation.startLine}` : ''}
                   {annotation.endLine !== undefined && annotation.endLine !== annotation.startLine ? `-${annotation.endLine}` : ''}
                 </div>
-                <div className="typography-micro text-foreground whitespace-pre-wrap break-words mt-1">
+                <div dir="auto" className="typography-micro text-foreground whitespace-pre-wrap break-words mt-1">
                   {annotation.message}
                 </div>
                 {annotation.rawDetails ? (
-                  <div className="typography-micro text-muted-foreground whitespace-pre-wrap break-words mt-1">
+                  <div dir="auto" className="typography-micro text-muted-foreground whitespace-pre-wrap break-words mt-1">
                     {annotation.rawDetails}
                   </div>
                 ) : null}
@@ -166,7 +166,7 @@ export const CheckRunList: React.FC<{
             ) : (
               <Icon name="checkbox-circle" className="size-4 shrink-0 text-[var(--status-success)]" />
             )}
-            <span className="min-w-0 flex-1 truncate typography-ui-label text-foreground">
+            <span dir="auto" className="oc-ui-start-align min-w-0 flex-1 truncate typography-ui-label text-foreground">
               {workflowName && workflowName !== run.name ? `${workflowName} / ${run.name}` : run.name}
             </span>
             {durationLabel ? (

@@ -33,7 +33,7 @@ import type { ContextPartMetadata } from "@/lib/messages/contextParts"
 import { getRuntimeUrlResolver } from "@/lib/runtime-url"
 import { runtimeFetch } from "@/lib/runtime-fetch"
 import { captureRuntimeCleanup } from "@/lib/runtime-cleanup"
-import { forgetOpenCodeTrustDeclines, isDeliberateOpenCodeRequest, openCodeTrustRefusalDirectory, requestOpenCodeTrust } from "@/lib/opencodeTrust"
+import { clearOpenCodeTrustPause, forgetOpenCodeTrustDeclines, isDeliberateOpenCodeRequest, openCodeTrustRefusalDirectory, requestOpenCodeTrust } from "@/lib/opencodeTrust"
 import { isRelayModeActive } from "@/lib/relay/runtime-tunnel"
 import { isSpaceDirectory, spaceIdOfDirectory } from "@/lib/spaces/space-route"
 import { getSpaceMark, spaceMarkSchema, type SpaceMark } from "@/lib/spaces/spaces-store"
@@ -71,6 +71,7 @@ import {
 } from "./model"
 import { ascendingId } from "./ids"
 import { runningShellFromWire, shellCancellationNote, type RunningShell, type ShellToStop } from "./background-shell"
+import { runningImageJobFromWire, type RunningImageJob } from "./background-image"
 import { subagentCancellationNote } from "./subagent-run"
 import { toJsonRecord } from "./json"
 import { readMessageThroughAncestors } from "./message-ownership"
@@ -97,6 +98,8 @@ const OPENCODE_HEALTH_TIMEOUT_MS = 4_000
 const DEFAULT_SESSION_PAGE_LIMIT = 100
 /** How much of a running command's output the live view starts with. */
 const SHELL_OUTPUT_TAIL_BYTES = 64 * 1024
+/** Reads that open their folder in OpenCode; matched at the end for a base path. */
+const OPENS_LOCATION = /\/api\/(?:agent|provider|config)$/
 
 // ---------------------------------------------------------------------------
 // Errors
@@ -449,10 +452,16 @@ export const createRuntimeOpencodeClient = (config: RuntimeOpencodeClientConfig)
     fetch: async (input: string | URL | Request, init?: RequestInit) => {
       const retryInput = input instanceof Request ? input.clone() : input
       const response = await send(input, init)
+      // These reads open the folder in OpenCode, which the server allows only
+      // once it is trusted, so an answer lifts a pause, also one ended by trust
+      // saved in another window. Session lists pass for a paused folder too.
+      if (response.ok && config.directory && OPENS_LOCATION.test(requestUrlOf(input).pathname)) {
+        clearOpenCodeTrustPause(config.directory)
+      }
       const directory = await openCodeTrustRefusalDirectory(response)
       if (!directory) return response
       const deliberate = isDeliberateOpenCodeRequest(requestMethodOf(input, init), requestUrlOf(input).pathname)
-      const trusted = await requestOpenCodeTrust(directory, { deliberate })
+      const trusted = await requestOpenCodeTrust(directory, { deliberate, alias: config.directory })
       if (!trusted) return response
       void response.body?.cancel().catch(() => undefined)
       return send(retryInput, init)
@@ -563,6 +572,7 @@ const directoryStatsSchema = z.object({
     path: z.string(),
     isDirectory: z.boolean().optional(),
     reason: z.string().optional(),
+    realPath: z.string().optional(),
   })).optional(),
 })
 
@@ -1060,6 +1070,35 @@ class OpencodeService {
       return "unknown"
     }
     return readDirectoryAvailability(normalized)
+  }
+
+  /**
+   * Where each directory really is once links are followed, from the same
+   * `/api/fs/directory-stats` probe. A path the server could not resolve, and
+   * every path on a runtime without the route (VS Code), is left out of the map.
+   */
+  async getDirectoryRealPaths(paths: string[]): Promise<Map<string, string>> {
+    const realPaths = new Map<string, string>()
+    const chunks: string[][] = []
+    for (let index = 0; index < paths.length; index += DIRECTORY_AVAILABILITY_BATCH_MAX_PATHS) {
+      chunks.push(paths.slice(index, index + DIRECTORY_AVAILABILITY_BATCH_MAX_PATHS))
+    }
+    await Promise.all(chunks.map(async (chunk) => {
+      try {
+        const response = await runtimeFetch("/api/fs/directory-stats", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ paths: chunk }),
+        })
+        const body = directoryStatsSchema.safeParse(await response.json().catch(() => null)).data
+        for (const entry of body?.results ?? []) {
+          if (entry.realPath) realPaths.set(entry.path, normalizeFsPath(entry.realPath))
+        }
+      } catch {
+        // Transport failure: this chunk's paths stay unresolved.
+      }
+    }))
+    return realPaths
   }
 
   /**
@@ -1998,6 +2037,21 @@ class OpencodeService {
    * the directory OpenCode resolved it to (symlinks resolved), which is the
    * directory its shell events carry. Throws on fetch failure.
    */
+  /**
+   * Images OpenCode is generating in the background, for every session. The
+   * job list (OpenCode 2.2.6+) is global, so it names no directory. Null when
+   * this OpenCode has no job list. Throws on fetch failure.
+   */
+  async listRunningImageJobs(): Promise<RunningImageJob[] | null> {
+    try {
+      const jobs = await call("job.list", () => this.client.experimental.job.list({ kind: "image", status: "running" }))
+      return jobs.flatMap((job) => runningImageJobFromWire(job) ?? [])
+    } catch (error) {
+      if (isOpencodeNotFound(error)) return null
+      throw error
+    }
+  }
+
   async listRunningShells(directory: string): Promise<{ directory: string; shells: RunningShell[] }> {
     const response = await call("shell.list", () => this.clientFor(directory).shell.list())
     return {

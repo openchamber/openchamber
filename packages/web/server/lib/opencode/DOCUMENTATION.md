@@ -81,6 +81,11 @@ in that user's sessions. On the fallback path the same rules are merged into
 - `packages/web/server/lib/opencode/model-discovery.js`: bounded custom-provider `/models` discovery and optional models.dev enrichment. It accepts only http(s), does not follow redirects, filters transport headers, never returns credentials, and treats models.dev failure as unenriched success. Edit requests may name the provider so the host can fall back to a stored credential when the form leaves the key blank — the key from OpenCode's credential store or, failing that, the provider's stored config entry (`settings.apiKey`, else the first `env` variable name that is set in the server environment) — but only while the form's base URL still matches the saved one, so a changed URL never receives the stored credential; an explicitly entered replacement key wins.
 - `packages/web/server/lib/opencode/pwa-manifest-routes.js`: PWA manifest route registration with recent-session shortcut resolution and short-lived caching.
 - `packages/web/server/lib/opencode/project-icon-routes.js`: project icon upload/read/discovery route registration and icon storage orchestration.
+- `packages/web/server/lib/opencode/provider-logo-routes.js`: a provider's uploaded logo, `GET/PUT/DELETE /api/provider/:providerId/logo`. PUT takes `{ dataUrl }` (PNG, JPEG, WebP or SVG, at most 1 MB decoded; anything else is 400) and writes `<data-dir>/provider-logos/provider-<sha1 of id>-<updatedAt>.<ext>`; the profile setting `customProviderLogos` holds only `{ mime, updatedAt }` per provider ID, written through `persistResolvedSettings`, and that pair names the file. The new file is written first, then the setting, then the provider's other files are removed. A settings write that fails, or resolves without the key because `preferences.json` is unreadable, removes the new file and answers 500, and the previous logo stays served: its file is never rewritten. DELETE drops the setting first, then the files, and answers 200 when nothing was stored. Uploads and removals for one provider run one at a time, so two clients saving at once cannot delete the file the other's setting names. GET serves the file the setting names with the same inert-image headers as project icons (`INERT_IMAGE_CSP`, `nosniff`, an immutable cache the client versions with `v=<updatedAt>`); for an SVG, `theme=light|dark` sets its CSS colour so `currentColor` reads on either background. The routes sit under `/api/provider`, which isolated spaces treat as host-only. Enterprise mode does not gate them: the bytes stay on this machine and no provider, key or endpoint is added.
+
+  ### Why the logo is kept by provider ID and not removed with the provider
+
+  The logo is keyed by provider ID like a chosen icon (`customProviderIcons`), and OpenChamber has no "remove provider" flow: a provider leaves when someone edits the OpenCode config, which OpenChamber does not watch for this. Deleting logos from a config diff would need a complete, authoritative provider list per directory; keeping them costs one small file, and a provider added again under the same ID gets its logo back. The logo goes when the user removes it, on the provider's page or with Remove in the custom-provider form before Save; an untouched form keeps it.
 - `packages/web/server/lib/opencode/skill-routes.js`: route registration for skill config CRUD, supporting files, and skills catalog scan/install flows.
 - `packages/web/server/lib/opencode/settings-runtime.js`: Settings persistence runtime (disk IO, migrations, normalization, project validation, and persisted update serialization). With no project stored, the legacy migration turns a stored `lastDirectory` into the first project, except a folder inside the chats roots (`chatRoots` dep, compared lexically and by realpath): with no project open the UI's last directory is usually a chat's, and a chat belongs to no project.
 - `packages/web/server/lib/opencode/settings-helpers.js`: Settings payload sanitization/format helpers runtime for response shaping and persisted merge prep. `lastDirectory: ''` is kept as written: the UI sends it when the last project is removed, and every reader (the warm-up, the legacy last-directory-to-project migration, request directory resolution) treats it as unset.
@@ -110,6 +115,11 @@ in that user's sessions. On the fallback path the same rules are merged into
   `theme-catalog.js` owns POST catalog search/package routes under
   `/api/config/themes/catalog/`. It fetches only Open VSX and its Eclipse CDN over
   HTTPS, validates redirects and checksums, and verifies packaged identity.
+  An empty search query returns the most downloaded color themes; the catalog
+  opens on them. The Themes category also holds icon themes, VS Code's built-ins
+  and tools that ship a theme on the side, so the popular list keeps entries
+  outside the `vscode` namespace whose name has no "icon" and whose name or
+  description speaks of a theme or colors.
   `theme-archive.js` reads selected JSON entries in memory with bounded decompression.
   JSON includes and token references stay inside the package. Each failed variant
   is reported separately so valid siblings remain available. No extension code runs.
@@ -355,7 +365,7 @@ Installer output is discarded, not forwarded to clients or logs.
 
 ## Public exports (session-activity.js)
 - `hasWorkingDescendants(id, statuses)` is the queue delivery check returned by the probe. It follows the running sessions' parent links through at most 8 ancestors. Reads share one timeout and each session record is read once per check. Failed or malformed records and cycles return `null` unless another chain proves a running descendant; a chain deeper than 8 counts as unrelated, matching the UI's `MAX_SUBAGENT_DEPTH`. Parent links are refreshed on the next check. The direct-child check used by other consumers keeps its existing behavior.
-- `createSessionActivityProbe({ buildOpenCodeUrl, getOpenCodeAuthHeaders, timeoutMs, signal? })`: whether a session's turn really ended. A parent goes idle while a background subagent works and runs again when OpenCode hands the result back. `fetchActiveSessionStatuses()` reads `/api/session/active`, `fetchChildSessionIds(id)` pages `GET /api/session?parentID=`, `hasWorkingChildren(id, statuses)` combines them. Every read answers `null` when OpenCode could not be asked. An optional caller signal is combined with each read's timeout, including lineage walks and running-shell checks. Used by the goal loop (waits), the notification runtime (stays silent on the pause), and scheduled cleanup (cancels its outstanding reads on timeout or stop).
+- `createSessionActivityProbe({ buildOpenCodeUrl, getOpenCodeAuthHeaders, timeoutMs, signal? })`: whether a session's turn really ended. A parent goes idle while a background subagent works and runs again when OpenCode hands the result back. `fetchActiveSessionStatuses()` reads `/api/session/active`, `fetchChildSessionIds(id)` pages `GET /api/session?parentID=`, `hasWorkingChildren(id, statuses)` combines them. `fetchRunningBackgroundJobs(id)` reads OpenCode's global `job.list` (2.2.6+) for the running subagents, shells and images of the session and every subagent under it; it answers `undefined` on an OpenCode without the route (a bare 404, so callers keep the reads above) and `null` on a 404 that names an error, such as a missing session. Every read answers `null` when OpenCode could not be asked. An optional caller signal is combined with each read's timeout, including lineage walks and running-shell checks. Used by the goal loop (waits), the notification runtime (stays silent on the pause), and scheduled cleanup (cancels its outstanding reads on timeout or stop).
 
 ## Public exports (turn-start.js)
 - `createTurnStartReader({ buildOpenCodeUrl, getOpenCodeAuthHeaders, timeoutMs?, fetchImpl? })` returns `readTurnStart(sessionId)`: the running turn's start read back from `GET /api/session/:id/message`, newest first. OpenCode 2 writes an `idle` record when a turn ends, so the turn began with the first message after the last one; settings records (`agent-switched`, `model-switched`, `location-switched`) are skipped because the user makes them while idle. Null when the read fails, the latest record ends a turn, or no `idle` record appears within 10 pages of 50.
@@ -563,7 +573,7 @@ ConPTY or Console Window Host behavior.
   - `sanitizeSkillCatalogs(input)`
   - `sanitizeProjects(input)`
 
-Persistence path normalization (`normalizePathForPersistence` / `normalizeSettingsPaths` / `sanitizeProjects`, reached via the `readSettingsFromDiskMigrated` migration and `persistSettings`) resolves symlinks with `realpathSync` and, on case-insensitive filesystems (`win32`, `darwin`), also recovers the on-disk casing of each path component via `readdirSync` (exact-name match preferred so case-sensitive volumes are never rewritten). `realpathSync` alone does not report on-disk casing on these volumes, so without the readdir step a project stored with the wrong case would never match the real-case `directory` opencode reports for its sessions (issue #1913). A corrected path is flagged `changed` and written back to `settings.json`. A path `realpathSync` cannot resolve (missing, no permission) is kept exactly as stored, so case recovery can never swap in a different existing sibling. On macOS only `/` separates components; a backslash is a legal name character.
+Persistence path normalization (`normalizePathForPersistence` / `normalizeSettingsPaths` / `sanitizeProjects`, reached via the `readSettingsFromDiskMigrated` migration and `persistSettings`) resolves symlinks with `realpathSync` and, on case-insensitive filesystems (`win32`, `darwin`), also recovers the on-disk casing of each path component via `readdirSync` (exact-name match preferred so case-sensitive volumes are never rewritten). `realpathSync` alone does not report on-disk casing on these volumes, so without the readdir step a project stored with the wrong case would never match the real-case `directory` opencode reports for its sessions (issue #1913). A corrected path is flagged `changed` and written back to `settings.json`. A path `realpathSync` cannot resolve (missing, no permission) is kept exactly as stored, so case recovery can never swap in a different existing sibling. On macOS only `/` separates components; a backslash is a legal name character. Every settings read runs `sanitizeProjects` three times, so one pass over the project list reads each directory at most once: projects share their ancestors, and reading `/`, `/Users` and the rest again per project made a 71-project settings read about 1,280 synchronous readdirs (#6084). The listings live only for that one synchronous pass, so a later read always sees the disk as it is; a longer-lived cache would need invalidation on a case rename and was not needed once a pass reads each folder once.
 
 ## Public exports (theme-runtime.js)
 - `createThemeRuntime(dependencies)`: creates custom theme runtime for on-disk theme discovery and JSON normalization/validation.
@@ -661,9 +671,11 @@ OpenCode's MCP client listens on `127.0.0.1` and, without configuration, registe
 a loopback redirect. That is correct when the browser runs on the OpenCode
 machine, and wrong when OpenChamber is opened from another one: the provider
 sends the browser to the viewer's own `127.0.0.1`, and nothing reaches the
-listener. The supported path is a browser with a direct connection to
-OpenChamber and an OpenCode on the same machine as OpenChamber, managed or
-external.
+listener. A browser on loopback or with a direct https connection to
+OpenChamber, with an OpenCode on the same machine as OpenChamber, finishes on
+its own. Everywhere else the
+user pastes the address the browser landed on into the waiting sign-in, which
+OpenCode accepts since 2.2.6 (an attempt marked `paste`).
 
 The work happens at the start of a sign-in (`mcp-oauth.js`, wired in
 `proxy.js`), so an existing entry needs no edit and an entry nobody signs in to
@@ -674,10 +686,12 @@ name from OpenCode's integration and then takes one of these paths:
 | --- | --- |
 | `oauth: false`, a local server, or a server with no config entry here | Forwarded untouched. |
 | `redirect_uri` or `callback_port` written by a person | Forwarded untouched, whatever the origin and whatever OpenCode runs. It is that person's route. |
-| OpenCode on another machine, nothing configured | Refused with a 400 naming the problem, before consent. |
-| Relay client, nothing configured | Refused with a 400 naming the problem, before consent. |
+| OpenCode on another machine, nothing configured or a generated redirect | Started on OpenCode's own redirect, unbound and with the config unchanged, for the user to paste. |
+| Relay client, nothing configured | Started on OpenCode's own redirect, unbound, for the user to paste. |
+| Either of the two above, OpenCode without `paste` | The attempt is cancelled and the start answers 400 naming the problem, before consent. |
 | Browser on loopback, nothing generated | Forwarded untouched, so CIMD and the ephemeral listener stay. This includes an SSH-forwarded address. |
-| Browser on another machine | `oauth.redirect_uri` becomes `<origin>/api/mcp/oauth/<name>/callback` and `oauth.callback_port` a free loopback port. The attempt is then bound. |
+| Browser on another machine over plain http, nothing generated | Started on OpenCode's own redirect, unbound and with the config unchanged, for the user to paste. OpenCode without `paste` gets the generated redirect of the next row instead, which works with a provider that accepts http. |
+| Browser on another machine over https | `oauth.redirect_uri` becomes `<origin>/api/mcp/oauth/<name>/callback` and `oauth.callback_port` a free loopback port. The attempt is then bound. |
 | Generated redirect already in place, any browser | The attempt is bound, so a loopback or relay browser follows the address generated last. |
 
 Same-machine is decided from the address OpenChamber connects to: loopback or
@@ -685,10 +699,31 @@ one of this machine's interface addresses. A hostname that resolves here counts
 as another machine, because the mistake then is a clear error and the other way
 round is a callback sent to the wrong listener.
 
+A plain-http origin on another machine gets no generated redirect. The MCP
+authorization spec allows http redirects only on loopback, and Linear rejects
+`http://192.168.x.x/...` at client registration, before consent. OpenCode's
+own redirect is loopback, which those providers accept, so the browser lands
+on a page that does not open and the user pastes its address. A redirect
+generated earlier for that entry stays bound, as for the relay.
+
 The relay is detected by `x-openchamber-relay-connection`, which the dispatcher
 sets on every request it forwards. Its requests arrive with a loopback `host`,
-so the origin alone would read as a local browser. The refusal stands until the
-relay can give the provider an address that reaches a NAT-hidden server.
+so the origin alone would read as a local browser. The relay cannot give the
+provider an address that reaches a NAT-hidden server, so a relay sign-in ends
+with a paste.
+
+### Why a pasted address and not a refusal where the redirect cannot return
+
+Refusing before consent was the only honest answer while OpenCode could take
+nothing but its listener's redirect: a started sign-in would wait for a
+callback that never comes. Since 2.2.6 OpenCode validates a pasted redirect
+address against the attempt's state, so these starts go through and the
+waiting sign-in shows a paste field. The start checks `paste` on the attempt
+OpenCode returns, which keeps the refusal for an older OpenCode without a
+version probe. The automatic routes stay where they work, because they ask
+the user for nothing. The callback route's error page tells the user to paste
+its address, since a generated redirect that outlived its OpenCode lands
+there.
 
 **Ownership.** `mcp-oauth-assignments.json` in the data directory records each
 generated redirect by port. Only an entry whose `redirect_uri` and
@@ -1184,8 +1219,29 @@ within a ten-minute overall deadline.
       channel through `checkForUpdates`. The desktop app keeps its own
       `desktopUpdateChannel`. The Android app ships only as Canary until it
       has a store release: every Android build, an APK from an earlier release
-      included, is offered the newest APK of the `canary` GitHub pre-release. Other app types stay on releases.
+      included, is offered the newest APK of the `canary` GitHub pre-release, downloaded from the R2 mirror (`downloads.openchamber.dev/desktop/canary/`) once canary.yml put it there. Other app types stay on releases.
+  - `GET /api/openchamber/release-notes?version=&since=`
+    - Settings → About shows these. The answer is the releases of `version` as data, `{ releases: [{ version, date, title, intro, groups: [{ key, bullets }] }] }`,
+      read from the website API's `/v1/changelog/full`, which keeps the last
+      good copy through a GitHub outage, else from `changelog/index.json` on
+      `main`; a Canary version reads the Canary nights
+      (`lib/changelog/update-notes.js`). With an older `since`
+      it lists what an update brings, `(since, version]`; otherwise `version`
+      alone. An empty list means the changelog has no notes for it; 502 means
+      no source could be read, so the page never shows an outage as "no notes".
   - `POST /api/openchamber/update-install`
+    - A release that needs a newer OpenCode than this server runs answers 409
+      `OPENCODE_TOO_OLD` before any command runs, and the update check marks
+      it `installBlocked: 'opencode-version'` with `requiredOpenCodeVersion`
+      and `openCodeVersion`, ahead of the other blocks; clients keep the Update
+      button disabled with the reason under it. The new build would refuse to
+      start against that OpenCode, and an external one cannot be updated from
+      the app. The requirement is `engines.opencode` (`>=2.2.4`) in the
+      release's published `package.json`, which repeats
+      `MINIMUM_OPENCODE_VERSION` (a test keeps the two equal). A release
+      without the field, a registry that cannot be read, or an OpenCode
+      version that cannot be read blocks nothing. Desktop-managed hosts update
+      through `electron-updater`, whose feed carries no requirement.
     - A copy no package manager installed answers 409 before any command
       runs: a global install would add a second copy and leave the running
       one as it is. Detection reports such a copy as `unmanaged-install` when
@@ -1224,6 +1280,15 @@ within a ten-minute overall deadline.
       in use" and the update ended with no server.
   - `GET /api/openchamber/models-metadata`
   - `GET /api/zen/models`
+
+### Why the OpenCode requirement rides in `package.json` and not in the update check's answer
+
+The running build cannot know what a later release needs, so the release has to
+say it. The npm server installs that release from the registry, so
+`engines.opencode` in the published `package.json` reaches the check through
+`bun publish`, with no change to the website API, the R2 mirror or the release
+workflows. npm (even with `engine-strict`) and bun install a package whose
+`engines` names OpenCode.
 
 ## Public exports (pwa-manifest-routes.js)
 - `registerPwaManifestRoute(app, dependencies)`: registers PWA manifest endpoint with dynamic app-name resolution and recent-session shortcuts:
@@ -1270,7 +1335,7 @@ Discovery already reads each skill's frontmatter and body. Source lookup uses th
   - Session message forwarder: `POST /api/session/:sessionId/message`
   - Session list and detail: `GET /api/session`, `GET /api/session/:sessionID`
     - Both are sanitized to an allowlist of `SessionInfo` fields, then get the entries of `lib/openchamber-sessions/archive-store.js` folded in (archive state OpenChamber kept before OpenCode held it, until the migration pushes it, see `session-archive.js`), plus any `metadata` entry `lib/openchamber-sessions/session-metadata-store.js` has not migrated from the legacy file yet, plus the unread baseline (`lib/openchamber-sessions/unread-baseline.js`): a turn that ended before it is served with `time.viewed` up to its `time.idle`, so sessions that finished before OpenChamber read OpenCode's unread state do not all show as unread. An unknown answer from any of them leaves the upstream record untouched rather than reporting a session as un-archived, dropping its metadata, or marking turns seen.
-  - Shelled message pages: `GET /api/session/:sessionID/message` with `x-openchamber-part-shells: v1[,<tool>…]` returns the page with finished tool results replaced by an `openchamberContentShell` metadata marker and with fields no client reads dropped (`message-shells.js`); without the header the request reaches OpenCode untouched. `GET /api/session/:sessionID/message/:messageID` is never shelled, so clients complete a call from it. `/health` and `/api/version` list `api.message-part-shells.v1` so clients send the header only to servers that honour it.
+  - Shelled message pages: `GET /api/session/:sessionID/message` with `x-openchamber-part-shells: v1[,<tool>…]` returns the page with finished tool results replaced by an `openchamberContentShell` metadata marker and with fields no client reads dropped (`message-shells.js`); a result that was an OpenChamber tool envelope, from the tool itself or from an `execute` script, keeps `{ ok, action }` in the marker for the collapsed row; without the header the request reaches OpenCode untouched. `GET /api/session/:sessionID/message/:messageID` is never shelled, so clients complete a call from it. `/health` and `/api/version` list `api.message-part-shells.v1` so clients send the header only to servers that honour it.
   - Upstream bound for the session routes: `GET /api/session`, `GET /api/session/:sessionID` and the shelled `GET /api/session/:sessionID/message` read OpenCode with the generic proxy's deadline (`SESSION_UPSTREAM_TIMEOUT_MS` overrides it in tests) and cancel that read when the client hangs up. Cancelling on hang-up is what stops abandoned reads from piling up when the UI retries; a budget shorter than the UI's own 30s wait would turn a slow but working session open into a retry loop of 504s. The budget starts before the path canonicalization, so a client that leaves during that wait cancels the read too. A read that ran out of time answers `504 OpenCode upstream timed out`, the same answer the generic proxy gives; a client that hung up gets nothing, because there is nobody left to answer. These routes read OpenCode themselves instead of reaching the generic proxy, so they apply its deadline explicitly.
   - Upstream paths are the request paths. OpenCode 2.x serves everything under `/api/*` itself, so the mount prefix Express strips is put back instead of being rewritten away.
   - There is no interactive OAuth forwarder any more: v2 connects providers through `/api/integration/*`, whose OAuth steps return immediately and are polled, so no route needs a longer deadline than the ordinary one.
@@ -1320,6 +1385,17 @@ folder's project identity and config, and sessions created after a repair
 would keep them. Keeping only location-starting requests out leaves the
 recovery path (session list, binding reads, Download again, archive) working
 without that risk.
+
+### Why the proxy drops browser fetch metadata and not adds origins to OpenCode's CORS list
+
+Since 2.2.6 OpenCode answers 403 to an `/api` request whose `Sec-Fetch-Site`
+is `cross-site` or `same-site` unless its `Origin` is on OpenCode's CORS list.
+Packaged clients reach this server cross-site (`openchamber-ui://app`,
+`capacitor://localhost`, `https://localhost`), so every proxied call failed.
+OpenChamber vets its own clients before proxying, and to OpenCode the request
+comes from this server, so both forwarding paths drop `sec-fetch-*`
+(`proxy-headers.js`). Passing `--cors` for each packaged origin was weighed and
+rejected: it fails for an external OpenCode OpenChamber does not launch.
 
 ### Why the proxy deadline is configurable
 
@@ -1418,7 +1494,7 @@ under a running child.
   a tool switched on later then reaches a process that can already call back.
 - `persistSettings` rewrites the file (temp + rename) whenever
   `agentControlToolEnabled`, `agentScheduleToolEnabled`, `agentWebToolEnabled`, `agentMemoryToolEnabled`,
-  `agentKnowledgeToolEnabled`, `agentNotifyToolEnabled`, `agentRenderToolEnabled`, `agentSecretToolEnabled`, `agentWorkflowToolEnabled` or `agentToolsCodeMode` changes, and the guest change listener rewrites it after an extension is installed, approved, paused, resumed, updated or removed. Plugin directories are written before the
+  `agentKnowledgeToolEnabled`, `agentNotifyToolEnabled`, `agentRenderToolEnabled`, `agentSecretToolEnabled`, `agentUsageToolEnabled` or `agentWorkflowToolEnabled` changes, and the guest change listener rewrites it after an extension is installed, approved, paused, resumed, updated or removed. Plugin directories are written before the
   file names them, and a disabled plugin is removed from the list. OpenCode
   reloads within a couple of seconds; no restart is involved. Writes run one at
   a time: the catalog is read before the file is written, so two refreshes

@@ -57,6 +57,7 @@ import { useWalkthroughReview } from './useWalkthroughReview';
 import { useToolbarFit } from '@/components/views/useDiffToolbarFit';
 import { useRepositoryBinding } from '@/lib/source-control/repository-binding';
 import { NestedRepoResolutionStates } from '@/components/views/git/NestedRepoResolutionStates';
+import { GitRepositoryUnreadableState } from '@/components/views/git/GitRepositoryUnreadableState';
 import { NestedRepoPicker } from '@/components/views/git/NestedRepoPicker';
 import { revisionSuffix } from '@/lib/diff/pullRequestDiff';
 import { ContextPanelHeaderToolbar } from '@/components/layout/contextPanelHeaderSlot';
@@ -112,7 +113,7 @@ export const WalkthroughView = ({ directory: rootDirectory, visible = true }: Wa
 
   // The walkthrough documents one repository: the one picked from the picker,
   // or the root when nothing is picked. Everything below keys off `directory`.
-  const { rootIsGitRepo, gitDirectory, nestedRepos, repositoryOptions } = useNestedGitDirectory(rootDirectory || null, { enabled: visible, recheckOnOpen: true });
+  const { rootIsGitRepo, gitDirectory, nestedRepos, repositoryOptions, unreadable } = useNestedGitDirectory(rootDirectory || null, { enabled: visible, recheckOnOpen: true });
   const directory = gitDirectory ?? rootDirectory;
 
   // Panel width, not viewport width: this surface is resizable independently of
@@ -351,6 +352,9 @@ export const WalkthroughView = ({ directory: rootDirectory, visible = true }: Wa
   const isGitRepo = useIsGitRepo(gitDirectory || null);
   const ensureNestedRepos = useGitStore((state) => state.ensureNestedRepos);
   const selectNestedRepo = useGitStore((state) => state.selectNestedRepo);
+  if (unreadable) {
+    return <GitRepositoryUnreadableState directory={unreadable.directory} message={unreadable.message} />;
+  }
   // Non-repo root: surface nested-repository resolution while the operating
   // directory has not proven to be a repository (discovering, failed,
   // unsupported, none found, or settling on the auto-selected one).

@@ -161,7 +161,8 @@ export function publicProviderDescriptor(descriptor, order, extension) {
   };
   // Optional fields are left out, not sent empty, where a provider has none.
   if (legacyFlow) published.instances.legacyFlow = { instance: legacyFlow.instance, kind: legacyFlow.kind };
-  if (cli) published.auth.cliName = cli.tool;
+  if (cli?.tool) published.auth.cliName = cli.tool;
+  if (cli?.kind === 'service') published.auth.login = { kind: cli.kind, hint: cli.hint };
   if (presentation.token) {
     published.auth.token = { scopes: [...presentation.token.scopes] };
     if (presentation.token.createPath) published.auth.token.createPath = presentation.token.createPath;

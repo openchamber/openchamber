@@ -14,6 +14,7 @@ import { getDeferredSafeStorage } from '@/stores/utils/safeStorage';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { GitDirectoriesUnsupportedError, listGitDirectories } from '@/lib/gitApiHttp';
 import { notifyGitStatusInvalidated, subscribeGitStatusInvalidations } from '@/lib/gitStatusInvalidation';
+import { GitRepositoryUnreadableError } from '@/lib/gitRepositoryUnreadable';
 import { getWorktreeBootstrapState } from '@/lib/worktrees/worktreeBootstrap';
 
 const LOG_STALE_THRESHOLD = 10000;
@@ -55,6 +56,11 @@ type CachedGitDiffEntry = CachedGitDiff & { fetchedAt: number; sizeBytes: number
 
 interface DirectoryGitState {
   isGitRepo: boolean | null;
+  /**
+   * Git's message when it could not tell whether the directory is a
+   * repository (`GIT_REPOSITORY_UNREADABLE`); `isGitRepo` stays unknown then.
+   */
+  repoUnreadable: string | null;
   status: GitStatus | null;
   branches: GitBranch | null;
   log: GitLogResponse | null;
@@ -167,6 +173,9 @@ const inFlightDiffFetchesByDirectory = new Map<string, Set<string>>();
 const diffFetchGenerationByDirectory = new Map<string, number>();
 const inFlightStatusFetches = new Map<string, { promise: Promise<boolean>; statusMutationRevision: number }>();
 const inFlightEnsureAllByDirectory = new Map<string, Promise<void>>();
+// Reads in a row that Git could not answer, per runtime and directory; any
+// answer from Git resets it (see `repoUnreadable`).
+const unreadableReadsInARow = new Map<string, number>();
 const directoriesAskingRemotes = new Set<string>();
 const inFlightNestedRepoDiscovery = new Map<string, Promise<void>>();
 const requestGenerationByChannel = new Map<string, number>();
@@ -255,6 +264,7 @@ const getInFlightDiffs = (directory: string): Set<string> => {
 
 const createEmptyDirectoryState = (): DirectoryGitState => ({
   isGitRepo: null,
+  repoUnreadable: null,
   status: null,
   branches: null,
   log: null,
@@ -745,6 +755,7 @@ export const useGitStore = create<GitStore>()(
         inFlightEnsureAllByDirectory.clear();
         directoriesAskingRemotes.clear();
         inFlightNestedRepoDiscovery.clear();
+        unreadableReadsInARow.clear();
         // Outstanding transports still consume capacity on their captured
         // runtime, even after its visible cache has been reset.
         for (const [key, requests] of inFlightDiffFetchesByDirectory) {
@@ -841,11 +852,13 @@ export const useGitStore = create<GitStore>()(
             }
 
             if (!isRepo) {
+              unreadableReadsInARow.delete(runtimeDirectoryKey(getRuntimeKey(), directory));
               const newDirectories = new Map(get().directories);
               const currentDirState = newDirectories.get(directory) ?? dirState;
               newDirectories.set(directory, {
                 ...currentDirState,
                 isGitRepo: false,
+                repoUnreadable: null,
                 status: null,
                 isLoadingStatus: false,
                 lastRepoCheckAt: now,
@@ -862,6 +875,7 @@ export const useGitStore = create<GitStore>()(
               if (options.force) statusOptions.fresh = true;
             }
             const newStatus = await git.getGitStatus(directory, statusOptions);
+            unreadableReadsInARow.delete(runtimeDirectoryKey(getRuntimeKey(), directory));
             if (!isRequestCurrent(token, directory)) return false;
             // A request admitted before worktree creation must not publish a
             // transient --no-checkout/reset snapshot after bootstrap begins.
@@ -914,6 +928,7 @@ export const useGitStore = create<GitStore>()(
               newDirectories.set(directory, {
                 ...currentDirState,
                 isGitRepo: true,
+                repoUnreadable: null,
                 status: mergedStatus,
                 diffCache: nextDiffCache,
                 indexRevision: indexStatusChanged ? currentDirState.indexRevision + 1 : currentDirState.indexRevision,
@@ -929,6 +944,7 @@ export const useGitStore = create<GitStore>()(
               newDirectories.set(directory, {
                 ...currentDirState,
                 isGitRepo: true,
+                repoUnreadable: null,
                 lastRepoCheckAt: shouldProbeRepository ? now : currentDirState.lastRepoCheckAt,
                 lastStatusFetch: Date.now(),
                 lastStatusChange: currentDirState.lastStatusChange,
@@ -937,6 +953,23 @@ export const useGitStore = create<GitStore>()(
             }
           } catch (error) {
             console.error('Failed to fetch git status:', error);
+            // Git could not answer: say so instead of probing forever. A
+            // repository whose status is on screen keeps it through one such
+            // read (a timeout under load); the next one in a row shows Git's
+            // message. One known only from a cache, with no status yet, shows it
+            // at once, or it would wait forever.
+            const unreadable = error instanceof GitRepositoryUnreadableError ? error.message : null;
+            if (unreadable !== null && isRequestCurrent(token, directory)) {
+              const strikeKey = runtimeDirectoryKey(getRuntimeKey(), directory);
+              const readsInARow = (unreadableReadsInARow.get(strikeKey) ?? 0) + 1;
+              unreadableReadsInARow.set(strikeKey, readsInARow);
+              const currentDirState = get().directories.get(directory) ?? createEmptyDirectoryState();
+              if (currentDirState.isGitRepo !== true || !currentDirState.status || readsInARow > 1) {
+                const newDirectories = new Map(get().directories);
+                newDirectories.set(directory, { ...currentDirState, isGitRepo: null, repoUnreadable: unreadable, status: null });
+                set({ directories: newDirectories });
+              }
+            }
             if (options.throwOnError) {
               throw error;
             }
@@ -1597,6 +1630,11 @@ export const useGitIdentity = (directory: string | null) => {
     if (!directory) return null;
     return state.directories.get(directory)?.identity ?? null;
   });
+};
+
+/** Git's message when it could not tell whether `directory` is a repository, else null. */
+export const useGitRepoUnreadable = (directory: string | null) => {
+  return useGitStore((state) => (directory ? state.directories.get(directory)?.repoUnreadable ?? null : null));
 };
 
 export const useIsGitRepo = (directory: string | null) => {

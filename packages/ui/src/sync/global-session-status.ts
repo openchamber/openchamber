@@ -14,6 +14,7 @@ import {
 } from './session-activity-timing';
 import { countSyncPerformance } from './performance-diagnostics';
 import { hasRunningShell, useBackgroundShellsStore } from './background-shells';
+import { hasRunningImage, useBackgroundImagesStore } from './background-images';
 import { useWorkflowActivityStore } from './workflow-activity';
 import { usePrWatchStore } from './pr-watch';
 
@@ -121,8 +122,8 @@ export const hasActiveSubagent = (sessionId: string, activeSessionIds: ReadonlyS
 
 /**
  * Active sessions plus every session whose turn they keep open: ancestors of
- * running subagents, and sessions waiting on a background command or a pull
- * request.
+ * running subagents, and sessions waiting on a background command, an image
+ * or a pull request.
  */
 const withBackgroundWork = (activeSessionIds: ReadonlySet<string>): ReadonlySet<string> => {
   let extended: Set<string> | null = null;
@@ -133,6 +134,7 @@ const withBackgroundWork = (activeSessionIds: ReadonlySet<string>): ReadonlySet<
   };
   for (const activeId of activeSessionIds) forEachAncestorId(activeId, add);
   for (const sessionId of useBackgroundShellsStore.getState().sessionIds) add(sessionId);
+  for (const sessionId of useBackgroundImagesStore.getState().sessionIds) add(sessionId);
   for (const sessionId of usePrWatchStore.getState().bySession.keys()) add(sessionId);
   return extended ?? activeSessionIds;
 };
@@ -141,24 +143,25 @@ const withBackgroundWork = (activeSessionIds: ReadonlySet<string>): ReadonlySet<
 export const hasBackgroundWork = (sessionId: string, activeSessionIds: ReadonlySet<string>): boolean => (
   hasActiveSubagent(sessionId, activeSessionIds)
   || hasRunningShell(sessionId)
+  || hasRunningImage(sessionId)
   || usePrWatchStore.getState().bySession.has(sessionId)
 );
 
 /**
  * What keeps the session's turn open, or null when nothing does: the session
  * runs itself, or it idles while a workflow run it proposed runs, or while a
- * subagent below it runs, or while a command it started in the background
- * runs, or while it waits on its pull request. The session's own run wins; a workflow comes next, because its agents
+ * subagent below it runs, or while a command or an image it started in the
+ * background runs, or while it waits on its pull request. The session's own run wins; a workflow comes next, because its agents
  * are subagents too and the run says what they are doing; then a subagent.
  * The workflow state is the run's own (the OpenChamber server's runs, kept by
  * its events, see `workflow-activity.ts`), so it holds between phases when no
  * agent happens to be busy.
  */
-type SessionTurnActivity = 'running' | 'workflow' | 'subagent' | 'shell' | 'pullRequest';
+type SessionTurnActivity = 'running' | 'workflow' | 'subagent' | 'shell' | 'image' | 'pullRequest';
 
 /**
  * The order above: the session's own run, a workflow, a subagent, a command,
- * and last an agent waiting on its pull request (`pr-watch.ts`): the server
+ * an image, and last an agent waiting on its pull request (`pr-watch.ts`): the server
  * wakes it, as a background subagent's result does.
  */
 export const resolveSessionTurnActivity = (
@@ -166,11 +169,13 @@ export const resolveSessionTurnActivity = (
   workflowRunning: boolean,
   waitingOnShell: boolean,
   waitingOnPullRequest = false,
+  waitingOnImage = false,
 ): SessionTurnActivity | null => {
   if (status === 'running') return status;
   if (workflowRunning) return 'workflow';
   if (status) return status;
   if (waitingOnShell) return 'shell';
+  if (waitingOnImage) return 'image';
   return waitingOnPullRequest ? 'pullRequest' : null;
 };
 
@@ -181,8 +186,9 @@ export const useSessionTurnActivity = (sessionId: string): SessionTurnActivity |
   });
   const workflowRunning = useWorkflowActivityStore((state) => state.runningSessionIds.has(sessionId));
   const waitingOnShell = useBackgroundShellsStore((state) => state.sessionIds.has(sessionId));
+  const waitingOnImage = useBackgroundImagesStore((state) => state.sessionIds.has(sessionId));
   const waitingOnPullRequest = usePrWatchStore((state) => state.bySession.has(sessionId));
-  return resolveSessionTurnActivity(status, workflowRunning, waitingOnShell, waitingOnPullRequest);
+  return resolveSessionTurnActivity(status, workflowRunning, waitingOnShell, waitingOnPullRequest, waitingOnImage);
 };
 
 /** The first of the sessions `useSessionTurnActivity` reads as working, or null. */
@@ -192,8 +198,9 @@ export const useFirstSessionWithOpenTurn = (sessionIds: readonly string[]): stri
   ));
   const inWorkflow = useWorkflowActivityStore((state) => sessionIds.find((id) => state.runningSessionIds.has(id)) ?? null);
   const onShell = useBackgroundShellsStore((state) => sessionIds.find((id) => state.sessionIds.has(id)) ?? null);
+  const onImage = useBackgroundImagesStore((state) => sessionIds.find((id) => state.sessionIds.has(id)) ?? null);
   const onPullRequest = usePrWatchStore((state) => sessionIds.find((id) => state.bySession.has(id)) ?? null);
-  return inTurn ?? inWorkflow ?? onShell ?? onPullRequest;
+  return inTurn ?? inWorkflow ?? onShell ?? onImage ?? onPullRequest;
 };
 
 /**
@@ -228,6 +235,11 @@ const settleSessionsWithoutBackgroundWork = (sessionIds: Iterable<string>, still
 };
 
 useBackgroundShellsStore.subscribe((state, previous) => {
+  if (state.sessionIds === previous.sessionIds) return;
+  settleSessionsWithoutBackgroundWork(previous.sessionIds, (sessionId) => state.sessionIds.has(sessionId));
+});
+
+useBackgroundImagesStore.subscribe((state, previous) => {
   if (state.sessionIds === previous.sessionIds) return;
   settleSessionsWithoutBackgroundWork(previous.sessionIds, (sessionId) => state.sessionIds.has(sessionId));
 });

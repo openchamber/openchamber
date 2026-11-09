@@ -89,7 +89,7 @@ También puedes añadir un `.zip` local o un enlace https a un repositorio de gi
 
 `ctx.surface` es `panel`, `dialog`, `page`, `status` o `block`. Al pulsar un elemento adjunto, `ctx.item` contiene sus datos; en los demás casos es `null`.
 
-`contributes.page: true` ofrece el panel a pantalla completa en el menú Páginas de extensiones, encima de las sesiones. `{ "entry": "panel/page.html", "title": "Board" }` usa otro HTML y un título opcional. Sigue necesitando `panel.entry` y usa el mismo aislamiento y permisos. Solo el usuario abre la página. Se cierra al recargar, pausar, eliminar o cambiar de servidor.
+`contributes.page: true` ofrece el panel a pantalla completa en el menú Páginas de extensiones, encima de las sesiones. `{ "entry": "panel/page.html", "title": "Board" }` usa otro HTML y un título opcional. `true` reutiliza `panel.entry`; una página con su propio `entry` no necesita panel en la barra lateral, así que una extensión puede ser solo una página a pantalla completa. Usa el mismo aislamiento y permisos. Solo el usuario abre la página. Se cierra al recargar, pausar, eliminar o cambiar de servidor.
 
 Para un tablero, usa `host.storage` y las listas de proyectos, worktrees y sesiones con estados en directo. `startSession` puede apuntar a otro proyecto sin cerrar el tablero. Consulta [Host API](/sdk/host/).
 
@@ -108,7 +108,7 @@ Dibujar un panel y leer la sesión actual no requiere permisos. Todo lo que act�
 | `files` | leer y escribir archivos dentro del proyecto abierto (`readFile`, `writeFile`, `listDir`, `stat` con una ruta relativa) |
 | `model` | generación de texto puntual con el Small Model del usuario (`generate`), fuera de cualquier sesión |
 
-Otras diez se añaden por ti: `network` cuando declaras una `integration`, `service` cuando declaras un `service`, `filesystem` cuando declaras patrones `filesystem`, `origins` cuando declaras `origins`, `conversation` cuando una acción de sesión pide los mensajes (ver [Acciones, comandos y la insignia](#acciones-comandos-y-la-insignia)), `transcript` cuando `sessionEvents` o `sessionControl` piden `content` (ver [Eventos de sesión](/sdk/host/#eventos-de-sesión)), `sessionControl` cuando tu servicio actúa sobre sesiones (ver [Llamar a OpenChamber](/sdk/host/#llamar-a-openchamber-desde-tu-servicio)), `instructions` cuando añade contenido a lo que leen los agentes, y `skills` cuando declaras `contributes.skills`, una carpeta del paquete con skills que llegan a todos los agentes mientras la extensión está activa, y `opencodePlugin` cuando declaras `contributes.opencodePlugin` (ver más abajo).
+Otras doce se añaden por ti: `network` cuando declaras una `integration`, `service` cuando declaras un `service`, `filesystem` cuando declaras patrones `filesystem`, `origins` cuando declaras `origins`, `conversation` cuando una acción de sesión pide los mensajes (ver [Acciones, comandos y la insignia](#acciones-comandos-y-la-insignia)), `transcript` cuando `sessionEvents` o `sessionControl` piden `content` (ver [Eventos de sesión](/sdk/host/#eventos-de-sesión)), `sessionControl` cuando tu servicio actúa sobre sesiones (ver [Llamar a OpenChamber](/sdk/host/#llamar-a-openchamber-desde-tu-servicio)), `sessionAnswers` cuando responde en nombre del usuario a las solicitudes de permiso y los formularios del agente (`sessionControl: { answers: true }`), `instructions` cuando añade contenido a lo que leen los agentes, `skills` cuando declaras `contributes.skills`, una carpeta del paquete con skills que llegan a todos los agentes mientras la extensión está activa, `opencodePlugin` cuando declaras `contributes.opencodePlugin` (ver más abajo), y `links` cuando declaras `contributes.links` (ver [Enlaces en los mensajes del chat](#enlaces-en-los-mensajes-del-chat)).
 
 El usuario ve la lista completa una vez, al instalar la extensión, y la aprueba o quita la extensión. Si una versión nueva pide más, el diálogo vuelve a aparecer. Una llamada que necesita una capacidad que el usuario no ha aprobado falla con `NOT_GRANTED`.
 
@@ -130,6 +130,25 @@ El diálogo de aprobación recibe una fila más, **Añadir un plugin a OpenCode*
 Cuando ese archivo no llega a OpenCode, la pantalla de la extensión lo dice y ofrece **Añadir a la configuración global**, que escribe tu carpeta en la configuración global de OpenCode del usuario como una entrada que desde entonces es suya. Eso ocurre cuando OpenChamber no inició el OpenCode con el que habla, o cuando el entorno del servidor define su propio `OPENCODE_CONFIG` (el plugin se carga entonces en el siguiente arranque de OpenCode). Un OpenCode en otra máquina no puede cargar una carpeta de esta; la pantalla lo dice y no ofrece nada. Un plugin que no carga lo informa OpenCode en Ajustes → Plugins cuando tiene una entrada allí; tu extensión sigue funcionando en cualquier caso. La instalación rechaza un paquete cuya carpeta del plugin falta o cuyo `package.json` no indica un archivo de entrada.
 
 VS Code y las apps móviles no cargan extensiones, así que ningún plugin llega a ellas. Una sesión dentro de un espacio aislado ejecuta su propio OpenCode, que nunca lee la configuración del host. El modo empresa trata el plugin como un servicio local: solo se instala desde un repositorio aprobado por el administrador. El SDK tiene un ejemplo funcional, `examples/opencode-plugin`.
+
+## Enlaces en los mensajes del chat
+
+Una extensión puede hacer clicables sus identificadores y enlaces en los mensajes del chat, de modo que `DEMO-12` en la respuesta de un agente abra esa tarea en tu extensión en vez de en una pestaña del navegador. Declara qué se reconoce y qué hace un clic:
+
+```json
+"links": {
+  "action": "open",
+  "identifier": { "keys": ["DEMO"] },
+  "urls": { "origin": "https://tasks.example.com", "identifier": "key-number", "item": ["/tasks/{id}"] }
+}
+```
+
+- `identifier.keys` son hasta 8 claves literales en mayúsculas. `DEMO` reconoce `DEMO-12` solo como palabra completa; el código, los enlaces, las rutas, palabras como `XDEMO-1` y versiones como `DEMO-1.5` siguen siendo texto.
+- `urls` reconoce enlaces de un único origen https, con coincidencia exacta. `item` son plantillas de enlace con la forma que usa el propio gestor de incidencias: `{id}` una vez, en la ruta o como `?name={id}`, y `{segment}` o `{segments+}` para las partes que varían. `identifier` indica cómo es `{id}`: `key-number`, `number` o `short-code`. Nunca escribes una expresión regular; OpenChamber compila las plantillas.
+- `action: "open"` abre tu extensión con `ready.item` (o `onItem`) igual a `{ kind: "link", identifier, url? }`: en tu diálogo cuando `attach` es `"dialog"` y, si no, en el panel de la barra lateral. Acota el tipo con `isGuestLinkItem`. Necesita `panel.entry`. `url` es el enlace pulsado sin su fragmento y sin parámetros de consulta distintos de los de la propia plantilla; para un identificador en el texto es el enlace que forma tu primera plantilla sin `{segment}`, si tienes una y el identificador tiene la forma que declara `urls.identifier` (`DEMO-12` nunca rellena un `number`).
+- `action: "attach"` pone en cambio un chip con el identificador en el cuadro de chat, y necesita una plantilla sin `{segment}` ni `{segments+}` para que el chip pueda nombrar su enlace; con `identifier.keys`, `urls.identifier` no puede ser `number`.
+
+El reconocimiento funciona en las respuestas del agente y en los propios mensajes del usuario, no en el razonamiento, la salida de herramientas ni la vista Files, y al copiar un mensaje su texto se mantiene tal como se escribió. Un enlace que OpenChamber ya lee por su cuenta, como un elemento de un gestor de incidencias, una incidencia o pull request de un repositorio o un commit, sigue su ruta habitual, y un clic con una tecla modificadora hace lo que el navegador hace normalmente. Declarar `links` añade la capacidad `links`: el diálogo de aprobación muestra tus claves y tu origen y dice qué hace un clic, y una versión que cambie cualquiera de ellos vuelve a preguntar. `examples/tasks-demo` reconoce `DEMO-2` y `https://example.com/tasks/DEMO-2`.
 
 ## Generar texto
 
@@ -209,7 +228,7 @@ Las escrituras son atómicas: OpenChamber escribe un archivo temporal y lo renom
 - `title` sustituye el nombre del panel en el encabezado de la sección, hasta 60 caracteres.
 - `height` es la altura inicial en píxeles, de 24 a 480 (120 por defecto). Llama a [`host.setHeight()`](/sdk/host/) cuando cambie el tamaño de tu contenido.
 
-Tu página ve `ctx.surface` como `status`. OpenChamber la carga solo mientras el panel Work Status está visible y tu sección está desplegada, y la descarga cuando el usuario la pliega, así que no guardes ahí nada que no puedas reconstruir. Una extensión que solo tiene la sección puede usar permisos, un servicio, una integración y archivos, pero no `page`, `attach`, `actions` ni `commands`. Solo web y escritorio. El ejemplo `git-graph-status` es una sección completa.
+Tu página ve `ctx.surface` como `status`. OpenChamber la carga solo mientras el panel Work Status está visible y tu sección está desplegada, y la descarga cuando el usuario la pliega, así que no guardes ahí nada que no puedas reconstruir. Una extensión que solo tiene la sección puede usar permisos, un servicio, una integración, archivos y una página con su propio `entry`, pero no `page: true`, `attach`, `actions` ni `commands`. Solo web y escritorio. El ejemplo `git-graph-status` es una sección completa.
 
 ## Un editor para tu tipo de archivo
 
@@ -266,7 +285,7 @@ host.onFileSnapshot(() => ({ bytes: currentBytes(), version: versionOf(currentBy
 
 Un editor binario puede quedarse con cualquier archivo que coincida con sus patrones, incluidos los que OpenChamber previsualiza por sí mismo, como imágenes y PDF. No tiene vista de código fuente, y cuando el usuario lo lleva a pantalla completa o lo saca de ella con cambios sin guardar, OpenChamber los guarda primero. Leer y escribir el formato le toca a tu editor: OpenChamber escribe exactamente los bytes que devuelves.
 
-Tu página ve `ctx.surface` como `file`. OpenChamber la recarga, volviendo a pasarle el archivo, cuando el archivo cambia en disco, el usuario descarta los cambios o el editor entra o sale de pantalla completa. Gana la primera extensión activada cuyo patrón coincida, por delante de las vistas previas propias de OpenChamber. Una extensión que solo tiene el editor puede usar permisos, un servicio, una integración y archivos, pero no `page`, `attach`, `actions` ni `commands`. Solo web y escritorio. El ejemplo `checklist-editor` es un editor completo.
+Tu página ve `ctx.surface` como `file`. OpenChamber la recarga, volviendo a pasarle el archivo, cuando el archivo cambia en disco, el usuario descarta los cambios o el editor entra o sale de pantalla completa. Gana la primera extensión activada cuyo patrón coincida, por delante de las vistas previas propias de OpenChamber. Una extensión que solo tiene el editor puede usar permisos, un servicio, una integración, archivos y una página con su propio `entry`, pero no `page: true`, `attach`, `actions` ni `commands`. Solo web y escritorio. El ejemplo `checklist-editor` es un editor completo.
 
 ## Acciones, comandos y la insignia
 
@@ -322,7 +341,19 @@ Cuando tu plugin de OpenCode o servidor MCP añade una herramienta, el chat mues
 
 `match` es el nombre de la herramienta tal como lo reporta OpenCode; un `*` final coincide con un prefijo. `icon` es un nombre de Remixicon o un archivo `.svg` en tu paquete, como `panel.icon`. `title` y `subtitle` son plantillas sobre `input`, `output` y `metadata` de la llamada. `output` elige cómo se renderiza el cuerpo: `text`, `json` (un árbol), `markdown`, `code` con un `language`, `table` con `columns` (las filas vienen del array de salida o de `output.items`) o `auto` para el comportamiento por defecto. Un `match` exacto gana a un comodín, y en caso de empate gana la primera extensión instalada. No hace falta ningún permiso: esto solo cambia cómo se dibujan datos que ya están en el chat.
 
-Una extensión que solo da estilo a herramientas no necesita página: omite `panel.entry` y no tendrá icono en la barra lateral, solo una tarjeta en Ajustes → Extensiones. Sin página puede declarar `tools` y nada más. La otra excepción es una sección de Work Status o un editor de archivos con su propio `entry`, ver arriba.
+Una extensión que solo da estilo a herramientas no necesita página: omite `panel.entry` y no tendrá icono en la barra lateral, solo una tarjeta en Ajustes → Extensiones. Sin página puede declarar `tools` y `providerLogos`, y nada más. La otra excepción es una sección de Work Status, un editor de archivos o una página a pantalla completa con su propio `entry`, ver arriba.
+
+## El logo de tu proveedor
+
+Cuando tu plugin de OpenCode registra un proveedor de modelos, los selectores de modelo y los Ajustes suelen dibujar una marca genérica. Incluye el logo en tu paquete y nombra al proveedor, sin código:
+
+```json
+"providerLogos": {
+  "acme-cloud": "assets/acme-cloud.svg"
+}
+```
+
+La clave es el ID del proveedor tal como lo informa OpenCode. El valor es un `.svg` o `.png` de tu paquete, de hasta 1 MB. Si el archivo falta, está vacío o pesa más, la instalación falla. Un paquete nombra hasta 256 proveedores, y dos ID pueden apuntar al mismo archivo. El logo conserva sus colores, y `currentColor` en un SVG sigue el tema claro u oscuro. Reemplaza el logo que la app ya incluye para ese ID. Lo que el usuario haya configurado para ese proveedor va primero, y en un empate gana la extensión instalada primero. No hace falta ningún permiso. VS Code y el teléfono no cargan extensiones, así que no muestran estos logos.
 
 ## Primeras líneas en el panel
 

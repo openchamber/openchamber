@@ -1,6 +1,6 @@
 ---
 name: triage-issues
-description: Load when asked to triage, clean up, batch-process, or work through the issue backlog — covers the mechanical sweep (stale-fixed, dead needs-info, duplicates), fan-out assessment, and approved batch actions.
+description: Load when asked to triage, clean up, batch-process, or work through the issue backlog — covers the mechanical sweep (stale-fixed, dead needs-info, duplicates), fan-out assessment, and approved batch actions. Also load to draft or publish a security advisory (GHSA) for a vulnerability report.
 ---
 
 Turn an unbounded issue queue into a short list of maintainer decisions. Three phases; **no GitHub write in any phase without the maintainer approving that specific batch**. Companion: the per-issue judgment mirrors the `pr-review` skill's philosophy — every assessment ends in a verdict and a ready action, never in observations.
@@ -76,6 +76,24 @@ For the surviving pool, fan out subagents (~15 issues each) that read the issue,
 Feature requests (`enhancement`) go to the `explore` subagent instead: write each batch's full issue text and comments to a file outside the repository, and tell it to follow `.agents/skills/triage-issues/references/feature-facts.md` for that file. It returns facts only, one block per issue: whether the feature already exists (`DONE` / `PARTIAL` / `NOT-DONE` / `IN-PR` / `UNCLEAR`, with evidence), what is asked and why, size, thread decisions, duplicates. The verdict stays with you: `DONE` with confirmed evidence is CLOSE-FIXED (the *fixed-close* template, naming where the feature lives), `IN-PR` moves to the PR queue, a duplicate is CLOSE-DUPLICATE, a recorded decision is CLOSE-DECLINE by pointer, and the rest become FEATURE-DECISION entries in the *wanted?* block, with `PARTIAL` naming the missing part as the question.
 
 Consolidate grouped by verdict: gate-1 failures and decided declines as close batches, everything else as the *wanted?* block in pull order. Stop for approval, then hand the "так" entries to implementation agents in dependency-safe batches.
+
+### Idea rounds
+
+The maintainer decides feature ideas on openui-lang cards (the `openchamber_render` tool's `ui` with `awaitAnswer`), a few per round; the question tool is too narrow for them. One card per issue:
+
+- **Title** with the issue link; **badges**: status, votes, creation date, and "author ready to build" when the reporter offered to implement it.
+- **Text blocks**, in Ukrainian and in this order: *Що це таке*, *Що просять*, *Що є зараз*, *Що це нам коштує*, *Моя думка*.
+- **Buttons** *Хочемо* / *Ні* / *Не зараз*, each with the issue as its value; the recommended one is primary.
+
+The maintainer has not read these issues, so each card explains the feature in plain words with a concrete example, spells out any term the maintainer may not know, and says what it costs us. Research an unfamiliar technology before writing its card. *Що є зараз* comes from the code and the whole UI, not one file: the feature may already sit somewhere unexpected (a Settings page, another runtime), and a wrong line there sends the decision the wrong way.
+
+## Linear tickets
+
+Linear tickets (team Openchamber, `OPE-*`) hold only the core team's own work. An issue an outside contributor is building (an open PR, or a claim in the thread) stays out of tickets, grouped ones included; when their PR is accepted, remove the issue from any ticket that holds it. The maintainer's own items go in assigned to the maintainer.
+
+## Security advisories
+
+A confirmed vulnerability is published as a GitHub security advisory by the agent; follow [`references/security-advisory.md`](references/security-advisory.md).
 
 ## Message templates
 

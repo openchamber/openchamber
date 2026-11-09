@@ -16,6 +16,8 @@ import { htmlRenderI18n } from './html-render.i18n';
 import { documentToolbarI18n } from './document-toolbar.i18n';
 import { uiBlocksI18n } from './ui-blocks.i18n';
 import { updateDialogCanaryI18n } from './update-dialog-canary.i18n';
+import { aboutReleaseNotesI18n } from './about-release-notes.i18n';
+import { updateCheckErrorsI18n } from './update-check-errors.i18n';
 import { secretRequestI18n } from './secret-request.i18n';
 import { sessionNoticesI18n } from './session-notices.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
@@ -25,6 +27,10 @@ import { compactionSettingsI18n } from './compaction-settings.i18n';
 import { heapSnapshotI18n } from './heap-snapshot.i18n';
 import { consoleBudgetsI18n } from './console-budgets.i18n';
 import { imageToolI18n } from './image-tool.i18n';
+import { usageToolI18n } from './usage-tool.i18n';
+import { openchamberToolsLayoutI18n } from './openchamber-tools-layout.i18n';
+import { openchamberToolOutputI18n } from './openchamber-tool-output.i18n';
+import { opencodeToolOutputI18n } from './opencode-tool-output.i18n';
 import { agentStatusI18n } from './agent-status.i18n';
 import { selectionApprovalI18n } from './selection-approval.i18n';
 import { snippetsI18n } from './snippets.i18n';
@@ -201,6 +207,8 @@ export const dict: Record<I18nKey, string> = {
   ...documentToolbarI18n.uk,
   ...uiBlocksI18n.uk,
   ...updateDialogCanaryI18n.uk,
+  ...aboutReleaseNotesI18n.uk,
+  ...updateCheckErrorsI18n.uk,
   ...secretRequestI18n.uk,
   ...sessionNoticesI18n.uk,
   ...usageStatsI18n.uk,
@@ -210,6 +218,10 @@ export const dict: Record<I18nKey, string> = {
   ...heapSnapshotI18n.uk,
   ...consoleBudgetsI18n.uk,
   ...imageToolI18n.uk,
+  ...usageToolI18n.uk,
+  ...openchamberToolsLayoutI18n.uk,
+  ...openchamberToolOutputI18n.uk,
+  ...opencodeToolOutputI18n.uk,
   ...agentStatusI18n.uk,
   ...snippetsI18n.uk,
   ...sidebarWorkI18n.uk,
@@ -786,6 +798,9 @@ export const dict: Record<I18nKey, string> = {
   "chat.backgroundShells.stopAll": "Зупинити всі",
   "chat.backgroundShells.stopAria": "Зупинити {command}",
   "chat.backgroundShells.elapsed": "Працює {duration}",
+  "chat.backgroundWork.aria": "Робота у фоні",
+  "chat.backgroundWork.count": "У фоні: {count}",
+  "chat.backgroundImages.generating": "Генерується картинка",
   "sessions.sidebar.session.menu.share": "Поділитися",
   "sessions.sidebar.session.menu.copied": "Скопійовано",
   "sessions.sidebar.session.menu.copyLink": "Копіювати посилання",
@@ -825,6 +840,7 @@ export const dict: Record<I18nKey, string> = {
   "sessions.sidebar.session.status.unread": "Непрочитані оновлення",
   "sessions.sidebar.session.status.backgroundSubagent": "Субагент працює у фоні",
   "sessions.sidebar.session.status.backgroundCommand": "Команда працює у фоні",
+  "sessions.sidebar.session.status.backgroundImage": "Картинка генерується у фоні",
   'sessions.sidebar.session.status.waitingOnPullRequest': 'Чекає на перевірки або ревʼю',
   "sessions.sidebar.session.status.pinned": "Закріплена сесія",
   "sessions.sidebar.session.status.movingToWorktree": "Перенесення сесії в новий worktree",
@@ -1253,6 +1269,9 @@ export const dict: Record<I18nKey, string> = {
   "magicPrompts.toast.loadFailed": "Не вдалося завантажити магічні промпти. Нічого не надіслано.",
   "gitView.empty.notGitRepository": "Цей каталог не є репозиторієм Git",
   "gitView.empty.notGitRepositoryDescription": "Ініціалізуйте Git у цьому каталозі або відкрийте сховище.",
+  "gitView.empty.repositoryUnreadable": "Git не зміг прочитати цю теку",
+  "gitView.empty.repositoryUnreadableDescription": "Ось що відповів Git. Виправте це й спробуйте ще раз.",
+  "gitView.empty.repositoryUnreadableRetry": "Спробувати ще раз",
   "gitView.empty.selectSessionOrDirectory": "Виберіть сесію або каталог, щоб переглянути статус Git",
   "gitView.empty.worktreeFeaturesUnavailable": "У цьому режимі робочої області функції worktree недоступні.",
   "gitView.empty.worktreeSetupDescription": "Завершення налаштування worktree та підготовка стану сховища.",
@@ -1805,6 +1824,7 @@ export const dict: Record<I18nKey, string> = {
   "contextSidebar.empty.openSession": "Відкрийте сесію, щоб перевірити контекст.",
   "contextSidebar.section.context": "Контекст",
   "contextSidebar.section.lastAssistantMessage": "Останнє повідомлення асистента",
+  "contextSidebar.section.sessionTotals": "Підсумки сесії",
   "contextSidebar.section.rawMessages": "Необроблені повідомлення",
   "contextSidebar.context.percentUsed": "{percent}% використано",
   "contextSidebar.breakdown.user": "Користувач",
@@ -2215,6 +2235,7 @@ export const dict: Record<I18nKey, string> = {
   "directoryExplorerDialog.browse.retry": "Спробувати знову",
   "directoryExplorerDialog.browse.parentDirectory": "Батьківський каталог",
   "directoryExplorerDialog.browse.addedBadge": "Додано",
+  "directoryExplorerDialog.browse.linkTarget": "Посилання на {path}",
   "directoryExplorerDialog.browse.quickAdd": "Додати",
   "directoryExplorerDialog.browse.selectForAdd": "Вибрати для додавання",
   "directoryExplorerDialog.footer.navigate": "Навігація",
@@ -2530,6 +2551,8 @@ export const dict: Record<I18nKey, string> = {
   "sessions.sidebar.group.empty.loadingSessions": "Завантаження сесій…",
   "sessions.sidebar.group.empty.loadFailed": "Не вдалося оновити сесії.",
   "sessions.sidebar.group.empty.initializationFailed": "Не вдалося підготувати робочий простір.",
+  "sessions.sidebar.group.empty.trustPaused": "Агенти на паузі, доки ви не довірите цій папці.",
+  "sessions.sidebar.group.empty.reviewTrust": "Переглянути й довірити",
   "sessions.search.submitHint": "Натисніть Enter для пошуку",
   "sessions.sidebar.group.empty.retry": "Спробувати знову",
   "sessions.sidebar.group.empty.permissionDenied": "Потрібен доступ до папки.",
@@ -3394,6 +3417,7 @@ export const dict: Record<I18nKey, string> = {
   "updateDialog.status.autoReloadHint": "Після завершення оновлення сторінка автоматично перезавантажиться.",
   "updateDialog.fallback.updateViaTerminal": "Або оновіть через термінал:",
   "updateDialog.desktopHostInstall": "Доступний OpenChamber {version}. Оновіть його на комп’ютері, де він працює.",
+  "updateDialog.openCodeTooOld": "OpenChamber {version} потребує OpenCode {required}. На цьому сервері {current}. Спершу оновіть OpenCode.",
   "updateDialog.actions.copyCommand": "Копіювати команду",
   "updateDialog.actions.copied": "Скопійовано!",
   "updateDialog.status.downloadingPayload": "Завантаження пакета оновлення...",
@@ -3690,6 +3714,9 @@ export const dict: Record<I18nKey, string> = {
   'chat.workStatus.breakdown.skillCountPlural': '{count} скілів',
   'chat.workStatus.breakdown.mcpCountSingle': '{count} MCP',
   'chat.workStatus.breakdown.mcpCountPlural': '{count} MCP',
+  'chat.workStatus.breakdown.planCountSingle': '{count} план',
+  'chat.workStatus.breakdown.planCountPlural': '{count} плани',
+  'chat.workStatus.linkedPlans.open': 'Відкрити план {title}',
   'chat.workStatus.sections.open': 'Обрати секції',
   'chat.workStatus.sections.dialogTitle': 'Секції панелі',
   'chat.workStatus.sections.reorder': 'Перетягніть {label}, щоб змінити порядок',
@@ -3964,6 +3991,8 @@ export const dict: Record<I18nKey, string> = {
   'sessions.moveSession.failed': 'Не вдалося перенести сесію',
   'chat.folderMissing.text': 'Папки {name} більше немає',
   'chat.folderMissing.action': 'Перенести сесію',
+  'chat.trustPaused.text': 'Агенти не працюватимуть у {name}, доки ви не довірите її плагінам і командам.',
+  'chat.trustPaused.action': 'Переглянути й довірити',
   'chat.worktreeSetup.running': 'Налаштовуємо worktree: виконуються команди налаштування проєкту…',
   'chat.draft.creatingSession': 'Створюємо сесію…',
   'desktopHostSwitcher.startup.fellBackToLocal': 'З\'єднання не відкрилося, тож OpenChamber запустився на Local. Підключіть інстанс через перемикач, щойно він стане доступним.',

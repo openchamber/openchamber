@@ -310,6 +310,7 @@ and never reads the store itself.
 
 Invariants:
 
+- Service-login metadata reuses the SDK's `sourceControlServiceLoginSchema` from `@openchamber/sdk/schemas`. The UI preserves the server's hint and ignores unknown keys; manifest normalization and strictness stay in the SDK manifest parser.
 - `useSourceControlProvider` always returns a descriptor. An id the registry
   does not hold reads as `unknownProviderDescriptor(id)`: its id as the label,
   pull-request wording with `#`, the branch icon, no auth methods, no URL
@@ -454,6 +455,14 @@ Invariants:
   (path data only, checked by the schema, drawn as a `d` attribute), else the
   branch icon. `providerIconSrc` gives the same mark as a data URI for surfaces
   that mask an icon URL.
+
+### Why a GitLab gap is built and not hidden
+
+GitLab is held to full parity with GitHub, a maintainer decision: every surface
+that works for a GitHub pull request works for a GitLab merge request, in
+merge-request wording with `!` numbers. When a surface turns out to have no
+GitLab path (a missing server route, an unread field), the fix is to build it,
+not to hide the surface for GitLab.
 
 ### Why descriptors are fetched and not mirrored in the UI
 

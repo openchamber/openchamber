@@ -15,6 +15,8 @@ import { htmlRenderI18n } from './html-render.i18n';
 import { documentToolbarI18n } from './document-toolbar.i18n';
 import { uiBlocksI18n } from './ui-blocks.i18n';
 import { updateDialogCanaryI18n } from './update-dialog-canary.i18n';
+import { aboutReleaseNotesI18n } from './about-release-notes.i18n';
+import { updateCheckErrorsI18n } from './update-check-errors.i18n';
 import { secretRequestI18n } from './secret-request.i18n';
 import { sessionNoticesI18n } from './session-notices.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
@@ -24,6 +26,10 @@ import { compactionSettingsI18n } from './compaction-settings.i18n';
 import { heapSnapshotI18n } from './heap-snapshot.i18n';
 import { consoleBudgetsI18n } from './console-budgets.i18n';
 import { imageToolI18n } from './image-tool.i18n';
+import { usageToolI18n } from './usage-tool.i18n';
+import { openchamberToolsLayoutI18n } from './openchamber-tools-layout.i18n';
+import { openchamberToolOutputI18n } from './openchamber-tool-output.i18n';
+import { opencodeToolOutputI18n } from './opencode-tool-output.i18n';
 import { agentStatusI18n } from './agent-status.i18n';
 import { selectionApprovalI18n } from './selection-approval.i18n';
 import { snippetsI18n } from './snippets.i18n';
@@ -190,6 +196,8 @@ export const dict = {
   ...documentToolbarI18n.nl,
   ...uiBlocksI18n.nl,
   ...updateDialogCanaryI18n.nl,
+  ...aboutReleaseNotesI18n.nl,
+  ...updateCheckErrorsI18n.nl,
   ...secretRequestI18n.nl,
   ...sessionNoticesI18n.nl,
   ...usageStatsI18n.nl,
@@ -199,6 +207,10 @@ export const dict = {
   ...heapSnapshotI18n.nl,
   ...consoleBudgetsI18n.nl,
   ...imageToolI18n.nl,
+  ...usageToolI18n.nl,
+  ...openchamberToolsLayoutI18n.nl,
+  ...openchamberToolOutputI18n.nl,
+  ...opencodeToolOutputI18n.nl,
   ...agentStatusI18n.nl,
   ...snippetsI18n.nl,
   ...sidebarWorkI18n.nl,
@@ -776,6 +788,9 @@ export const dict = {
   'chat.backgroundShells.stopAll': 'Alles stoppen',
   'chat.backgroundShells.stopAria': '{command} stoppen',
   'chat.backgroundShells.elapsed': 'Loopt al {duration}',
+  'chat.backgroundWork.aria': 'Werk op de achtergrond',
+  'chat.backgroundWork.count': 'Op de achtergrond: {count}',
+  'chat.backgroundImages.generating': 'Afbeelding wordt gemaakt',
   'sessions.sidebar.session.menu.share': 'Delen',
   'sessions.sidebar.session.menu.copied': 'Gekopieerd',
   'sessions.sidebar.session.menu.copyLink': 'Link kopiëren',
@@ -815,6 +830,7 @@ export const dict = {
   'sessions.sidebar.session.status.unread': 'Ongelezen updates',
   'sessions.sidebar.session.status.backgroundSubagent': 'Subagent draait op de achtergrond',
   'sessions.sidebar.session.status.backgroundCommand': 'Opdracht draait op de achtergrond',
+  'sessions.sidebar.session.status.backgroundImage': 'Afbeelding wordt op de achtergrond gemaakt',
   'sessions.sidebar.session.status.waitingOnPullRequest': 'Wacht op controles of een review',
   'sessions.sidebar.session.status.pinned': 'Vastgezette sessie',
   'sessions.sidebar.session.status.movingToWorktree': 'Sessie wordt verplaatst naar een nieuwe worktree',
@@ -1253,6 +1269,9 @@ export const dict = {
   'magicPrompts.toast.loadFailed': 'Magic Prompts konden niet worden geladen. Er is niets verzonden.',
   'gitView.empty.notGitRepository': 'Deze map is geen Git-repository',
   'gitView.empty.notGitRepositoryDescription': 'Initialiseer Git in deze map of open een repository.',
+  'gitView.empty.repositoryUnreadable': 'Git kon deze map niet lezen',
+  'gitView.empty.repositoryUnreadableDescription': 'Dit is wat Git meldde. Los het op en probeer het opnieuw.',
+  'gitView.empty.repositoryUnreadableRetry': 'Opnieuw proberen',
   'gitView.empty.selectSessionOrDirectory': 'Selecteer een sessie of map om de Git-status te bekijken',
   'gitView.empty.worktreeFeaturesUnavailable': 'Worktree-functies zijn niet beschikbaar in deze werkruimt-modus.',
   'gitView.empty.worktreeSetupDescription': 'Worktree-inrichting wordt afgerond en de repositorystatus wordt voorbereid.',
@@ -1844,6 +1863,7 @@ export const dict = {
   'contextSidebar.empty.openSession': 'Open een sessie om de context te bekijken.',
   'contextSidebar.section.context': 'Context',
   'contextSidebar.section.lastAssistantMessage': 'Laatste assistentbericht',
+  'contextSidebar.section.sessionTotals': 'Sessietotalen',
   'contextSidebar.section.rawMessages': 'Ruwe berichten',
   'contextSidebar.context.percentUsed': '{percent}% gebruikt',
   'contextSidebar.breakdown.user': 'Gebruiker',
@@ -2247,6 +2267,7 @@ export const dict = {
   'directoryExplorerDialog.browse.retry': 'Probeer het opnieuw',
   'directoryExplorerDialog.browse.parentDirectory': 'Bovenliggende map',
   'directoryExplorerDialog.browse.addedBadge': 'Toegevoegd',
+  'directoryExplorerDialog.browse.linkTarget': 'Koppeling naar {path}',
   'directoryExplorerDialog.browse.quickAdd': 'Toevoegen',
   'directoryExplorerDialog.browse.selectForAdd': 'Selecteren om toe te voegen',
   'directoryExplorerDialog.footer.navigate': 'Navigeren',
@@ -2562,6 +2583,8 @@ export const dict = {
   'sessions.sidebar.group.empty.loadingSessions': 'Sessies laden…',
   'sessions.sidebar.group.empty.loadFailed': 'Kan de sessies niet vernieuwen.',
   'sessions.sidebar.group.empty.initializationFailed': 'Kan de werkruimte niet initialiseren.',
+  'sessions.sidebar.group.empty.trustPaused': 'Agents zijn gepauzeerd totdat je deze map vertrouwt.',
+  'sessions.sidebar.group.empty.reviewTrust': 'Bekijken en vertrouwen',
   'sessions.search.submitHint': 'Druk op Enter om te zoeken',
   'sessions.sidebar.group.empty.retry': 'Opnieuw proberen',
   'sessions.sidebar.group.empty.permissionDenied': 'Toegang tot de map is vereist.',
@@ -3439,6 +3462,7 @@ export const dict = {
   'updateDialog.status.autoReloadHint': 'De pagina wordt automatisch herladen zodra de update voltooid is.',
   'updateDialog.fallback.updateViaTerminal': 'Of werk bij via de terminal:',
   'updateDialog.desktopHostInstall': 'OpenChamber {version} is beschikbaar. Werk het bij op de computer waarop het draait.',
+  'updateDialog.openCodeTooOld': 'OpenChamber {version} heeft OpenCode {required} nodig. Deze server heeft {current}. Werk eerst OpenCode bij.',
   'updateDialog.actions.copyCommand': 'Opdracht kopiëren',
   'updateDialog.actions.copied': 'Gekopieerd!',
   'updateDialog.status.downloadingPayload': 'Update-payload downloaden...',
@@ -3699,6 +3723,9 @@ export const dict = {
   'chat.workStatus.breakdown.skillCountPlural': '{count} skills',
   'chat.workStatus.breakdown.mcpCountSingle': '{count} MCP',
   'chat.workStatus.breakdown.mcpCountPlural': '{count} MCP',
+  'chat.workStatus.breakdown.planCountSingle': '{count} plan',
+  'chat.workStatus.breakdown.planCountPlural': '{count} plannen',
+  'chat.workStatus.linkedPlans.open': 'Plan {title} openen',
   'chat.workStatus.sections.open': 'Secties kiezen',
   'chat.workStatus.sections.dialogTitle': 'Paneelsecties',
   'chat.workStatus.sections.reorder': 'Sleep {label} om te herschikken',
@@ -3963,6 +3990,8 @@ export const dict = {
   'sessions.moveSession.failed': 'Kan de sessie niet verplaatsen',
   'chat.folderMissing.text': 'Map {name} bestaat niet meer',
   'chat.folderMissing.action': 'Sessie verplaatsen',
+  'chat.trustPaused.text': 'Agents kunnen niet werken in {name} totdat je de plugins en opdrachten ervan vertrouwt.',
+  'chat.trustPaused.action': 'Bekijken en vertrouwen',
   'chat.worktreeSetup.running': 'Worktree wordt ingericht: de setupopdrachten van het project lopen…',
   'chat.draft.creatingSession': 'Sessie wordt aangemaakt…',
   'desktopHostSwitcher.startup.fellBackToLocal': 'De verbinding kwam niet tot stand, dus OpenChamber is op Local gestart. Verbind haar via de instantiekiezer zodra ze bereikbaar is.',

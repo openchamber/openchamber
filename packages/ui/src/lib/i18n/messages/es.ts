@@ -16,6 +16,8 @@ import { htmlRenderI18n } from './html-render.i18n';
 import { documentToolbarI18n } from './document-toolbar.i18n';
 import { uiBlocksI18n } from './ui-blocks.i18n';
 import { updateDialogCanaryI18n } from './update-dialog-canary.i18n';
+import { aboutReleaseNotesI18n } from './about-release-notes.i18n';
+import { updateCheckErrorsI18n } from './update-check-errors.i18n';
 import { secretRequestI18n } from './secret-request.i18n';
 import { sessionNoticesI18n } from './session-notices.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
@@ -25,6 +27,10 @@ import { compactionSettingsI18n } from './compaction-settings.i18n';
 import { heapSnapshotI18n } from './heap-snapshot.i18n';
 import { consoleBudgetsI18n } from './console-budgets.i18n';
 import { imageToolI18n } from './image-tool.i18n';
+import { usageToolI18n } from './usage-tool.i18n';
+import { openchamberToolsLayoutI18n } from './openchamber-tools-layout.i18n';
+import { openchamberToolOutputI18n } from './openchamber-tool-output.i18n';
+import { opencodeToolOutputI18n } from './opencode-tool-output.i18n';
 import { agentStatusI18n } from './agent-status.i18n';
 import { selectionApprovalI18n } from './selection-approval.i18n';
 import { snippetsI18n } from './snippets.i18n';
@@ -201,6 +207,8 @@ export const dict: Record<I18nKey, string> = {
   ...documentToolbarI18n.es,
   ...uiBlocksI18n.es,
   ...updateDialogCanaryI18n.es,
+  ...aboutReleaseNotesI18n.es,
+  ...updateCheckErrorsI18n.es,
   ...secretRequestI18n.es,
   ...sessionNoticesI18n.es,
   ...usageStatsI18n.es,
@@ -210,6 +218,10 @@ export const dict: Record<I18nKey, string> = {
   ...heapSnapshotI18n.es,
   ...consoleBudgetsI18n.es,
   ...imageToolI18n.es,
+  ...usageToolI18n.es,
+  ...openchamberToolsLayoutI18n.es,
+  ...openchamberToolOutputI18n.es,
+  ...opencodeToolOutputI18n.es,
   ...agentStatusI18n.es,
   ...snippetsI18n.es,
   ...sidebarWorkI18n.es,
@@ -786,6 +798,9 @@ export const dict: Record<I18nKey, string> = {
   "chat.backgroundShells.stopAll": "Detener todos",
   "chat.backgroundShells.stopAria": "Detener {command}",
   "chat.backgroundShells.elapsed": "En ejecución desde hace {duration}",
+  "chat.backgroundWork.aria": "Trabajo en segundo plano",
+  "chat.backgroundWork.count": "En segundo plano: {count}",
+  "chat.backgroundImages.generating": "Generando una imagen",
   "sessions.sidebar.session.menu.share": "Compartir",
   "sessions.sidebar.session.menu.copied": "Copiado",
   "sessions.sidebar.session.menu.copyLink": "Copiar enlace",
@@ -825,6 +840,7 @@ export const dict: Record<I18nKey, string> = {
   "sessions.sidebar.session.status.unread": "Actualizaciones no leídas",
   "sessions.sidebar.session.status.backgroundSubagent": "Subagente en ejecución en segundo plano",
   "sessions.sidebar.session.status.backgroundCommand": "Comando en ejecución en segundo plano",
+  "sessions.sidebar.session.status.backgroundImage": "Imagen generándose en segundo plano",
   'sessions.sidebar.session.status.waitingOnPullRequest': 'Esperando comprobaciones o una revisión',
   "sessions.sidebar.session.status.pinned": "Sesión anclada",
   "sessions.sidebar.session.status.movingToWorktree": "Moviendo la sesión a un worktree nuevo",
@@ -1253,6 +1269,9 @@ export const dict: Record<I18nKey, string> = {
   "magicPrompts.toast.loadFailed": "No se pudieron cargar los prompts mágicos. No se envió nada.",
   "gitView.empty.notGitRepository": "Este directorio no es un repositorio Git",
   "gitView.empty.notGitRepositoryDescription": "Inicializa Git en este directorio o abre un repositorio.",
+  "gitView.empty.repositoryUnreadable": "Git no pudo leer esta carpeta",
+  "gitView.empty.repositoryUnreadableDescription": "Esto es lo que dijo Git. Corrígelo y vuelve a intentarlo.",
+  "gitView.empty.repositoryUnreadableRetry": "Reintentar",
   "gitView.empty.selectSessionOrDirectory": "Selecciona una sesión o directorio para ver el estado de Git",
   "gitView.empty.worktreeFeaturesUnavailable": "Las características de worktree no están disponibles en este modo de espacio de trabajo.",
   "gitView.empty.worktreeSetupDescription": "Finalizando la configuración de worktree y preparando el estado del repositorio.",
@@ -1805,6 +1824,7 @@ export const dict: Record<I18nKey, string> = {
   "contextSidebar.empty.openSession": "Abrir una sesión para inspeccionar el contexto.",
   "contextSidebar.section.context": "Contexto",
   "contextSidebar.section.lastAssistantMessage": "Último mensaje del asistente",
+  "contextSidebar.section.sessionTotals": "Totales de la sesión",
   "contextSidebar.section.rawMessages": "Mensajes brutos",
   "contextSidebar.context.percentUsed": "{percent}% usado",
   "contextSidebar.breakdown.user": "Usuario",
@@ -2215,6 +2235,7 @@ export const dict: Record<I18nKey, string> = {
   "directoryExplorerDialog.browse.retry": "Reintentar",
   "directoryExplorerDialog.browse.parentDirectory": "Directorio padre",
   "directoryExplorerDialog.browse.addedBadge": "Añadido",
+  "directoryExplorerDialog.browse.linkTarget": "Enlace a {path}",
   "directoryExplorerDialog.browse.quickAdd": "Añadir",
   "directoryExplorerDialog.browse.selectForAdd": "Seleccionar para añadir",
   "directoryExplorerDialog.footer.navigate": "Navegar",
@@ -2530,6 +2551,8 @@ export const dict: Record<I18nKey, string> = {
   "sessions.sidebar.group.empty.loadingSessions": "Cargando sesiones…",
   "sessions.sidebar.group.empty.loadFailed": "No se pudieron actualizar las sesiones.",
   "sessions.sidebar.group.empty.initializationFailed": "No se pudo inicializar el espacio de trabajo.",
+  "sessions.sidebar.group.empty.trustPaused": "Los agentes están en pausa hasta que confíes en esta carpeta.",
+  "sessions.sidebar.group.empty.reviewTrust": "Revisar y confiar",
   "sessions.search.submitHint": "Pulsa Intro para buscar",
   "sessions.sidebar.group.empty.retry": "Reintentar",
   "sessions.sidebar.group.empty.permissionDenied": "Se requiere acceso a la carpeta.",
@@ -3394,6 +3417,7 @@ export const dict: Record<I18nKey, string> = {
   "updateDialog.status.autoReloadHint": "La página se recargará automáticamente cuando la actualización finalice.",
   "updateDialog.fallback.updateViaTerminal": "O actualiza desde la terminal:",
   "updateDialog.desktopHostInstall": "OpenChamber {version} está disponible. Actualízalo en el ordenador donde se ejecuta.",
+  "updateDialog.openCodeTooOld": "OpenChamber {version} necesita OpenCode {required}. Este servidor tiene {current}. Actualiza OpenCode primero.",
   "updateDialog.actions.copyCommand": "Copiar comando",
   "updateDialog.actions.copied": "Copiado!",
   "updateDialog.status.downloadingPayload": "Descargando el payload de actualización...",
@@ -3690,6 +3714,9 @@ export const dict: Record<I18nKey, string> = {
   'chat.workStatus.breakdown.skillCountPlural': '{count} habilidades',
   'chat.workStatus.breakdown.mcpCountSingle': '{count} MCP',
   'chat.workStatus.breakdown.mcpCountPlural': '{count} MCP',
+  'chat.workStatus.breakdown.planCountSingle': '{count} plan',
+  'chat.workStatus.breakdown.planCountPlural': '{count} planes',
+  'chat.workStatus.linkedPlans.open': 'Abrir el plan {title}',
   'chat.workStatus.sections.open': 'Elegir secciones',
   'chat.workStatus.sections.dialogTitle': 'Secciones del panel',
   'chat.workStatus.sections.reorder': 'Arrastra {label} para reordenar',
@@ -3964,6 +3991,8 @@ export const dict: Record<I18nKey, string> = {
   'sessions.moveSession.failed': 'No se pudo mover la sesión',
   'chat.folderMissing.text': 'La carpeta {name} ya no existe',
   'chat.folderMissing.action': 'Mover sesión',
+  'chat.trustPaused.text': 'Los agentes no pueden trabajar en {name} hasta que confíes en sus plugins y comandos.',
+  'chat.trustPaused.action': 'Revisar y confiar',
   'chat.worktreeSetup.running': 'Preparando el worktree: ejecutando los comandos de configuración del proyecto…',
   'chat.draft.creatingSession': 'Creando la sesión…',
   'desktopHostSwitcher.startup.fellBackToLocal': 'No se pudo abrir su conexión, así que OpenChamber se inició en Local. Conéctala desde el selector de instancias cuando esté disponible.',

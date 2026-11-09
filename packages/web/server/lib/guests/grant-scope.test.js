@@ -274,3 +274,33 @@ describe('what a service does with nobody asking', () => {
     expect(effectiveGrants(['transcript'], stored, wider)).toEqual([]);
   });
 });
+
+describe('links scope', () => {
+  const links = (overrides = {}) => ({
+    links: {
+      action: 'open',
+      identifier: { keys: ['OPS', 'DEMO'] },
+      urls: { origin: 'https://tasks.example.com', identifier: 'key-number', item: ['/tasks/{id}'] },
+      ...overrides,
+    },
+  });
+
+  test('covers the keys, the origin, the templates and the action, sorted', () => {
+    expect(guestGrantScope(links()).links).toEqual({
+      action: 'open', keys: ['DEMO', 'OPS'], origin: 'https://tasks.example.com', identifier: 'key-number', urls: ['/tasks/{id}'],
+    });
+    expect(guestGrantScope(links({ urls: undefined })).links).toEqual({ action: 'open', keys: ['DEMO', 'OPS'], origin: null, identifier: null, urls: [] });
+    expect(guestGrantScope(guest)).not.toHaveProperty('links');
+  });
+
+  test('claiming other identifiers or links, or acting differently, needs approval again', () => {
+    const approved = guestGrantScope(links());
+    expect(effectiveGrants(['links'], approved, approved)).toEqual(['links']);
+    expect(effectiveGrants(['links'], approved, guestGrantScope(links({ identifier: { keys: ['DEMO', 'OPS', 'HR'] } })))).toEqual([]);
+    expect(effectiveGrants(['links'], approved, guestGrantScope(links({ action: 'attach' })))).toEqual([]);
+    expect(effectiveGrants(['links'], approved, guestGrantScope(links({ urls: { origin: 'https://evil.example.com', identifier: 'key-number', item: ['/tasks/{id}'] } })))).toEqual([]);
+    expect(effectiveGrants(['links'], approved, guestGrantScope(links({ urls: { origin: 'https://tasks.example.com', identifier: 'key-number', item: ['/tasks/{id}', '/{segments+}/{id}'] } })))).toEqual([]);
+    expect(effectiveGrants(['links'], undefined, approved)).toEqual([]);
+    expect(effectiveGrants(['links'], approved, guestGrantScope(guest))).toEqual([]);
+  });
+});

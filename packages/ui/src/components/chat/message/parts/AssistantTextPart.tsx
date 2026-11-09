@@ -9,6 +9,7 @@ import { isInvisibleText } from '@/lib/invisibleText';
 import { streamPerfCount, streamPerfObserve } from '@/stores/utils/streamDebug';
 import { GeneratedJsonResultCard } from './GeneratedJsonResultCard';
 import { parseGeneratedJsonResult } from './generatedJsonResult';
+import { useGuestLinkRules } from '@/lib/guests/links';
 
 type PartWithText = Part & { text?: string; content?: string; value?: string; time?: { start?: number; end?: number } };
 
@@ -39,6 +40,8 @@ const AssistantTextPart: React.FC<AssistantTextPartProps> = ({
 }) => {
     // Use part directly from props — parent provides the latest version from the store.
     // No store subscription here to avoid re-render cascade from unrelated delta events.
+    // The extension catalog changes on install or pause, never per delta.
+    const guestLinks = useGuestLinkRules();
     const partWithText = part as PartWithText;
     const rawText = typeof partWithText.text === 'string' ? partWithText.text : '';
     const contentText = typeof partWithText.content === 'string' ? partWithText.content : '';
@@ -121,6 +124,7 @@ const AssistantTextPart: React.FC<AssistantTextPartProps> = ({
                 variant={part.type === 'reasoning' ? 'reasoning' : 'assistant'}
                 enableFileReferences={isFinalized}
                 onShowPopup={onShowPopup}
+                guestLinks={part.type === 'text' ? guestLinks : null}
             />
         </div>
     );

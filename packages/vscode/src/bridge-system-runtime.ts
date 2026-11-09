@@ -15,7 +15,7 @@ import { sessionNotificationSchema } from './sessionNotifications';
 import { getOpenCodeUpgradeStatus, upgradeManagedOpenCode } from './opencode-upgrade-runtime';
 import { normalizeWindowsDriveLetter, pathsEqualWithNormalizedDriveLetter } from './pathUtils';
 import { resolveWorkspaceFolders } from './workspaceResolver';
-import { reconstructOriginalContentFromPatch } from './patchReconstruction';
+import { isFileDeletionPatch, reconstructOriginalContentFromPatch } from './patchReconstruction';
 import type { BridgeContext, BridgeResponse } from './bridge';
 import { ENTERPRISE_MODE_ERROR, isEnterpriseMode, publicEnterprisePolicy } from '../../web/server/lib/enterprise-mode.js';
 import { discoverProviderModels } from './model-discovery';
@@ -356,15 +356,21 @@ export async function handleSystemBridgeMessage(
         patch?: string;
       };
       try {
-        const modifiedUri = vscode.Uri.file(modified);
-        const modifiedDoc = await vscode.workspace.openTextDocument(modifiedUri);
+        let modifiedUri = vscode.Uri.file(modified);
+        const patchText = typeof patch === 'string' && patch.trim().length > 0 ? patch : undefined;
+        // A file the patch deleted is gone from disk: its diff shows the old
+        // content against an empty right side.
+        const deleted = patchText !== undefined && isFileDeletionPatch(patchText)
+          && !(await vscode.workspace.fs.stat(modifiedUri).then(() => true, () => false));
+        const modifiedText = deleted ? '' : (await vscode.workspace.openTextDocument(modifiedUri)).getText();
         let originalUri = original ? vscode.Uri.file(original) : modifiedUri;
 
-        if (typeof patch === 'string' && patch.trim().length > 0) {
-          const originalContent = reconstructOriginalContentFromPatch(modifiedDoc.getText(), patch);
+        if (patchText !== undefined) {
+          const originalContent = reconstructOriginalContentFromPatch(modifiedText, patchText);
           if (typeof originalContent === 'string') {
             ensureVirtualDiffProviderRegistered(ctx);
             originalUri = createVirtualOriginalDiffUri(modified, originalContent);
+            if (deleted) modifiedUri = createVirtualOriginalDiffUri(modified, '');
           }
         }
 

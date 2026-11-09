@@ -686,7 +686,7 @@ export const SessionDialogs: React.FC = () => {
             {isWorktreeDelete ? (
                 <div className="oc-tile space-y-2 rounded-lg p-3">
                     <div className="flex items-center gap-2">
-                        <Icon name="git-branch" className="h-4 w-4 text-muted-foreground" />
+                        <Icon name="worktree" className="h-4 w-4 text-muted-foreground" />
                         <span className="typography-meta font-medium text-foreground">{t('sessions.sidebar.sessionDialogs.worktree.label')}</span>
                         {targetWorktree?.label ? (
                             <span className="typography-micro text-muted-foreground">{targetWorktree.label}</span>

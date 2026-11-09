@@ -149,7 +149,9 @@ host.onSessionLifecycle((event) => {
 
 `await onProjects(listener)`, `await onWorktrees(projectId, listener)`, `await onSessions(projectId, listener)`는 구독 해제 함수를 반환합니다. 등록 오류를 처리하세요. 초기 스냅샷 다음에 변경 사항이 전달됩니다. 프레임당 최대32개이며 `dispose()`, 닫기, 일시 중지, 제거, 서버 전환 시 해제됩니다. `state`는 `loading`, `ready`, `error`이고 세션에는 디렉터리별 `coverage`가 있습니다. 오류 시 데이터를 유지하며 완전한 빈 목록은 `ready`만 보장합니다.
 
-`activity`는 `unknown`, `idle`, `running`, `retrying`, `waiting-permission`, `waiting-question`입니다. `outcome`은 관측된 `completed`, `failed` 또는 `null`이며 최대2,000개 세션만 메모리에 유지합니다. 오류 후 idle은 다음 실행까지 실패 결과를 유지합니다. 작업 완료를 뜻하지 않습니다. `openSession(sessionId)`로 채팅을 명시적으로 엽니다.
+`activity`는 `unknown`, `idle`, `running`, `retrying`, `waiting-permission`, `waiting-question`입니다. `outcome`은 관측된 `completed`, `failed` 또는 `null`이며 최대2,000개 세션만 메모리에 유지합니다. 오류 후 idle은 다음 실행까지 실패 결과를 유지합니다. 작업 완료를 뜻하지 않습니다. `inWork`는 세션이 사이드바의 작업 중 영역에 있으면 `true`이고, 사용자가 작업 중을 끈 동안에는 항상 `false`입니다. 이전 호스트에서는 빠집니다. `unread`는 마지막 턴이 끝난 뒤 아무도 세션을 열지 않았으면 `true`이며, 사이드바에 표시되는 표시와 같습니다. 재시작 후에도 유지되고 모든 기기에서 지워집니다. `openSession(sessionId)`로 채팅을 명시적으로 엽니다.
+
+`tool`은 `activity`가 `running`인 동안 세션이 다루고 있는 것입니다. 지금 실행 중인 도구 호출이거나, 에이전트가 결과를 생각하는 동안에는 마지막으로 끝난 호출입니다. `name`은 OpenCode가 부르는 이름(`read`, `edit`, `bash`)이고, `target`은 호출이 가리키는 파일이나 폴더로 세션 `directory` 기준 상대 경로(바깥이면 이름만)이며, 가리키지 않으면 `null`입니다. 셸 명령의 텍스트는 여기에 절대 들어가지 않습니다. `context`는 세션의 최근 단계 이후 컨텍스트 창이 얼마나 찼는지입니다. `tokens`는 담고 있던 토큰 수, `limit`은 모델의 창 크기이며 호스트가 모르면 `null`입니다. `tool`은 세션이 실행 중이 아닐 때 `null`이고, `context`는 호스트가 단계를 보기 전과 압축 후 다음 단계가 측정할 때까지 `null`입니다. 이전 호스트는 두 필드를 모두 생략합니다.
 
 `host.storage.get(key)`, `set(key, value)`, `delete(key)`, `keys()`는 추가 권한 없이 연결된 서버에 자체 JSON을 저장합니다. 없는 키는 `undefined`, 저장된 null은 null입니다. 키는1~128자, 값은 UTF-8 기준64 KiB, 전체는2 MiB와2,000키까지입니다. 프로젝트별 데이터는 키에 프로젝트 ID를 넣으세요. 쓰기는 직렬화되고 원자적으로 처리되며 실패 시 기존 데이터를 유지합니다. 확장 프로그램 제거 시 삭제됩니다.
 
@@ -231,7 +233,11 @@ await host.setInstructions(directory, 'Deploys run through the release branch.')
 await host.emit('deploy-finished', { id: 42 });
 ```
 
-`sessions.start`, `sessions.send`, `sessions.retry`, `sessions.status`에는 `contributes.sessionControl`이 필요하며, 사용자는 이를 별도 줄로 승인합니다. `sessions.lastReply`에는 `sessionControl: { content: true }`가 필요합니다. `setInstructions`에는 `contributes.instructions`가 필요하며, 에이전트가 읽는 내용을 폴더 하나에, 또는 `null`을 주면 모든 곳에 추가합니다.
+`sessions.start`, `sessions.send`, `sessions.retry`, `sessions.status`, `sessions.stop`에는 `contributes.sessionControl`이 필요하며, 사용자는 이를 별도 줄로 승인합니다. `sessions.lastReply`에는 `sessionControl: { content: true }`가 필요합니다. `sessions.send`로 보낸 메시지는 채팅에 입력한 메시지처럼 그 세션에서 에이전트가 기다리는 폼이나 페이지를 닫습니다.
+
+에이전트의 요청을 채팅 앱 같은 다른 곳으로 옮기려면 `answers: true`를 추가합니다. 사용자는 이를 한 줄 더 승인하며, 그러면 서비스가 어느 세션에서든 사용자 대신 응답할 수 있습니다. `permission-asked` 이벤트에는 `sessions.answerPermission(sessionId, requestId, { decision: 'allow' })`(또는 에이전트가 읽는 `message`와 함께 `'deny'`)를, `event.question.kind`가 `form`인 `question-asked` 이벤트에는 `sessions.answerForm(sessionId, formId, values)`를 씁니다. 이벤트 내용에는 폼의 필드가 `key`와 선택지와 함께 나열됩니다. 값 대신 `null`을 주면 폼을 닫습니다. 허용은 그 요청 하나에만 적용됩니다.
+
+`setInstructions`에는 `contributes.instructions`가 필요하며, 에이전트가 읽는 내용을 폴더 하나에, 또는 `null`을 주면 모든 곳에 추가합니다.
 
 `emit`은 `host.onServiceEvent`를 통해 열려 있는 프레임에 전달되므로 패널이 폴링을 멈출 수 있습니다. 다시 보내는 일은 없으므로 나중에 열린 프레임은 먼저 현재 상태를 읽습니다. `readSettings`는 `secret` 필드를 포함한 통합 설정을 서비스에 주고, `needsConfiguration`은 확장 카드에 메시지를 표시합니다.
 

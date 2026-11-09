@@ -127,18 +127,36 @@ the user is still speaking, so only the tail is left to transcribe on stop.
 
 ## Decisions
 
-### Why Parakeet v3 is the default model and not v2
+### Why Parakeet Ultra is the default model and not v3 or v2
 
 v2 knows English only and turns any other language into garbage, while v3
-decodes 25 European languages at the same speed. On English v3 is somewhat
-worse: it writes fillers ("uh", "gonna") and now and then drops a word at the
-end of a phrase. A user who speaks anything but English gets text on the first
-try, which matters more than the English gap.
+decodes 25 European languages at the same speed. Ultra is Moondream's
+post-trained v3: same architecture, size and speed, fewer errors. On 300
+FLEURS clips per language through our own recognizer (int8, 2 threads), WER
+fell from 9.24% to 8.01% on Ukrainian and from 6.85% to 5.50% on English.
+Nemotron 3.5 ASR Streaming, the other candidate, scored 19.5% and 13.5% on the
+same clips.
+
+k2-fsa publishes no sherpa export of Ultra, so the archive is OpenChamber's
+own, in the `asr-models` pre-release: the sherpa v3 export script run on the
+Ultra `.nemo`. Its transcripts match an independent export word for word on
+all 600 clips. A pre-release keeps the desktop updater, which reads the latest
+full release, away from it.
+
+To export another model of the Parakeet v3 architecture, run sherpa-onnx's
+`scripts/nemo/parakeet-tdt-0.6b-v3/export_onnx.py` on its `.nemo` in a Python
+3.11 venv with `nemo_toolkit[asr]`, `numpy<2`, `pyarrow<20`, `onnx==1.17.0`
+and `onnxruntime==1.17.1`. The encoder's `url` metadata must contain `tdt`,
+or sherpa-onnx 1.13 refuses the model. Pack it as a `.tar.bz2`, upload it to
+the `asr-models` pre-release, and point the entry's `archiveUrl` in
+`local/model-catalog.js` at it.
 
 The default applies only while the user has not picked a model (the client
 sends an empty `localModel`). Someone who already has v2 installed keeps v2:
 v2 was the default before, so an installed copy means they dictate with it,
-and switching would cost them a download and English accuracy.
+and switching would cost them a download and English accuracy. Someone with
+v3 installed, the default before Ultra, keeps dictating with v3 while Ultra
+downloads in the background, so the switch never blocks a dictation.
 
 ### Why misheard words are fixed by the Small Model, after the speech model
 

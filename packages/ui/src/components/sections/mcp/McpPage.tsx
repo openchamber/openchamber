@@ -1039,6 +1039,8 @@ export const McpPage: React.FC = () => {
   React.useEffect(() => {
     setSignInAgain(null);
   }, [selectedMcpName]);
+  /** A sign-in in progress keeps the status card while the server reconnects. */
+  const [oauthSignInActive, setOAuthSignInActive] = React.useState(false);
 
   /**
    * OpenCode has stored the OAuth credential; the server itself is still in
@@ -1269,7 +1271,7 @@ export const McpPage: React.FC = () => {
         )}
 
         {/* Runtime Status - Simplified for connected, expanded for errors; a started authorize flow needs the card too */}
-        {!isNewServer && (shouldShowFullStatusCard(effectiveStatusName) || signInAgainRun > 0) && (
+        {!isNewServer && (shouldShowFullStatusCard(effectiveStatusName) || signInAgainRun > 0 || oauthSignInActive) && (
           <SettingsSection divider={false}>
             <div className={cn('rounded-lg p-3', statusCardClass(effectiveStatusName))}>
               <div className="space-y-4">
@@ -1297,12 +1299,13 @@ export const McpPage: React.FC = () => {
                   </p>
                 </div>
 
-                {selectedMcpName && (effectiveStatusName === 'needs_auth' || signInAgainRun > 0) && (
+                {selectedMcpName && (effectiveStatusName === 'needs_auth' || signInAgainRun > 0 || oauthSignInActive) && (
                   <McpOAuthSignIn
                     key={signInAgainRun}
                     serverName={selectedMcpName}
                     directory={currentDirectory}
                     onConnected={handleOAuthConnected}
+                    onActiveChange={setOAuthSignInActive}
                     autoStart={signInAgainRun > 0}
                     showStartButton={signInAgainRun === 0 || getMcpOAuthMethods(oauthIntegration ?? undefined).length > 1}
                   />
@@ -1763,6 +1766,7 @@ export const McpPage: React.FC = () => {
 
           <div className="space-y-3">
             <Textarea
+              dir="ltr"
               value={importJsonText}
               onChange={(e) => {
                 setImportJsonText(e.target.value);

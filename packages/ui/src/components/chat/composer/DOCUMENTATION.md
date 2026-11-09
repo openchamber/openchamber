@@ -128,7 +128,8 @@ time; the reducer trims by creation time).
 
 The composer's top rows render inside the box and inside the mobile pill, so
 the surface stays one shape. Top to bottom: the session's folder being gone
-(`SessionFolderMissingRow`), worktree setup, the session still
+(`SessionFolderMissingRow`), a folder the user declined to trust
+(`SessionTrustPausedRow`), worktree setup, the session still
 being created from a draft's first message, and a message waiting for its
 space (`ComposerStatusStrip`; the creating line yields to the worktree line,
 so one wait shows one line, and appears only once the creation has taken
@@ -168,6 +169,17 @@ and a space's session cannot leave it. The move stays
 manual (*Missing worktree directories* in `sync/DOCUMENTATION.md`): only the user
 knows where the folder went. A running location outlives its folder and keeps
 answering, so no row shows while sends still work; the row comes once it unloads.
+
+### Why a folder the user declined to trust gets a row
+
+After "Not this time" in the folder trust prompt (`lib/opencodeTrust.ts`) the
+server refuses every OpenCode request for the folder, so the model and agent
+pickers stay on Loading and a send fails on the missing model before it could
+ask for trust again. `SessionTrustPausedRow` shows while the folder is paused and
+reopens the prompt; once trust is saved it reloads the folder's sessions and
+catalog (`useResumeOpenCodeFolder`). A paused folder stays paused when the user
+opens another folder, unlike the decline that only silences background reads,
+so the row and the sidebar line do not vanish while nothing changed.
 
 `RevertedMessagesStrip` lists the user messages a staged revert hides (see
 "Committing a revert" in `sync/DOCUMENTATION.md`). Its one action is Restore,
@@ -220,7 +232,12 @@ completions arrive together; a stopping row stays disabled until OpenCode
 reports its command ended, and a failed call makes its commands stoppable again. It shows whether the session runs or idles, and hides in BTW and
 new-session drafts. The elapsed text is a leaf on the shared one-second
 ticker, and the tree is compared as a string, so neither the tick nor
-session-list updates re-render the composer.
+session-list updates re-render the composer. Images the session and its
+subagents generate in the background (`sync/background-images.ts`) join the
+same strip as rows with the image's name, its full path and model in a
+tooltip, and the elapsed time, but no Stop: OpenCode has no route that
+cancels an image job, so Stop all stops the commands only and hides when
+there are none. A count that includes an image reads "In the background".
 
 The "looks done" hint (`SessionDoneHintRow`) and the review offer
 (`SessionReviewHintRow`, "Changes are ready to look over") take the same
@@ -1062,6 +1079,41 @@ goes as its own context part (`sessionReferences.ts`, kinds `session` and
   one records nothing on the session.
 - VS Code keeps session links inert (its sessions live on its own OpenCode),
   so it offers neither the `@` sessions nor the chips.
+
+## Linked issues and PRs in the text
+
+A pasted link to an issue, change request or tracker item (`referenceLinks.ts`)
+is read the way the picker reads a chosen item (`resolveReferenceLink` in
+`components/references/resolveComposerReferences.ts`), through the project the
+picker uses, and then draws as a chip where it stands: its number and title.
+
+- The text decides what is sent, as with session links: each linked item once,
+  after the chips above the composer, as the same context part the picker
+  sends, and the session records it as a linked issue. An item a picker chip
+  already carries keeps the chip's version, so its diff choice stands. A link
+  deleted from the text is not sent. The model reads the link where the user
+  put it. A send waits for a paste still being read, so a quick Enter never
+  sends the link bare; a second Enter meanwhile does nothing.
+- Only a paste that lands in the text reads a link, afresh each time, as the
+  picker does; a large paste that goes as a file reads none. A link
+  typed by hand stays text: typing passes through `/issues/1` on the way to
+  `/issues/12`, and a read per keystroke would attach the wrong item. A link
+  this composer has read before draws as its chip again wherever it reappears
+  (typed or restored), with that read.
+- Editing a queued message puts each item its text links back as that link's
+  chip, the rest above the text.
+- A link on another host than the project's, or one no account can read, stays
+  text with the picker's attach-failed toast. A link past the project's fork
+  network is read again as a linked item, as the Tracker does. Discussions stay
+  text. A change request goes without its diff, the picker's default.
+- `/btw` and VS Code read no links, as they take no picker chips.
+
+### Why inline chips and not picker chips
+
+The picker's chips sit above the text, apart from the sentence. A pasted link
+is part of the sentence ("compare this with that"); turning it into a chip
+above the composer would cut the sentence apart. The maintainer chose the chip
+in place.
 
 ## Paste routing
 

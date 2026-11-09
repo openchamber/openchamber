@@ -16,6 +16,8 @@ import { htmlRenderI18n } from './html-render.i18n';
 import { documentToolbarI18n } from './document-toolbar.i18n';
 import { uiBlocksI18n } from './ui-blocks.i18n';
 import { updateDialogCanaryI18n } from './update-dialog-canary.i18n';
+import { aboutReleaseNotesI18n } from './about-release-notes.i18n';
+import { updateCheckErrorsI18n } from './update-check-errors.i18n';
 import { secretRequestI18n } from './secret-request.i18n';
 import { sessionNoticesI18n } from './session-notices.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
@@ -25,6 +27,10 @@ import { compactionSettingsI18n } from './compaction-settings.i18n';
 import { heapSnapshotI18n } from './heap-snapshot.i18n';
 import { consoleBudgetsI18n } from './console-budgets.i18n';
 import { imageToolI18n } from './image-tool.i18n';
+import { usageToolI18n } from './usage-tool.i18n';
+import { openchamberToolsLayoutI18n } from './openchamber-tools-layout.i18n';
+import { openchamberToolOutputI18n } from './openchamber-tool-output.i18n';
+import { opencodeToolOutputI18n } from './opencode-tool-output.i18n';
 import { agentStatusI18n } from './agent-status.i18n';
 import { selectionApprovalI18n } from './selection-approval.i18n';
 import { snippetsI18n } from './snippets.i18n';
@@ -191,6 +197,8 @@ export const dict: Record<I18nKey, string> = {
   ...documentToolbarI18n.ja,
   ...uiBlocksI18n.ja,
   ...updateDialogCanaryI18n.ja,
+  ...aboutReleaseNotesI18n.ja,
+  ...updateCheckErrorsI18n.ja,
   ...secretRequestI18n.ja,
   ...sessionNoticesI18n.ja,
   ...usageStatsI18n.ja,
@@ -200,6 +208,10 @@ export const dict: Record<I18nKey, string> = {
   ...heapSnapshotI18n.ja,
   ...consoleBudgetsI18n.ja,
   ...imageToolI18n.ja,
+  ...usageToolI18n.ja,
+  ...openchamberToolsLayoutI18n.ja,
+  ...openchamberToolOutputI18n.ja,
+  ...opencodeToolOutputI18n.ja,
   ...agentStatusI18n.ja,
   ...snippetsI18n.ja,
   ...sidebarWorkI18n.ja,
@@ -782,6 +794,9 @@ export const dict: Record<I18nKey, string> = {
   'chat.backgroundShells.stopAll': 'すべて停止',
   'chat.backgroundShells.stopAria': '{command} を停止',
   'chat.backgroundShells.elapsed': '{duration} 実行中',
+  'chat.backgroundWork.aria': 'バックグラウンドの作業',
+  'chat.backgroundWork.count': 'バックグラウンド: {count}',
+  'chat.backgroundImages.generating': '画像を生成中',
   'sessions.sidebar.session.menu.share': '共有',
   'sessions.sidebar.session.menu.copied': 'コピーしました',
   'sessions.sidebar.session.menu.copyLink': 'リンクをコピー',
@@ -821,6 +836,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.session.status.unread': '未読の更新',
   'sessions.sidebar.session.status.backgroundSubagent': 'サブエージェントがバックグラウンドで実行中',
   'sessions.sidebar.session.status.backgroundCommand': 'コマンドがバックグラウンドで実行中',
+  'sessions.sidebar.session.status.backgroundImage': 'バックグラウンドで画像を生成中',
   'sessions.sidebar.session.status.waitingOnPullRequest': 'チェックまたはレビューを待機中',
   'sessions.sidebar.session.status.pinned': 'ピン留めされたセッション',
   'sessions.sidebar.session.status.movingToWorktree': 'セッションを新しいworktreeへ移動中',
@@ -1255,6 +1271,9 @@ export const dict: Record<I18nKey, string> = {
   'magicPrompts.toast.loadFailed': 'マジックプロンプトを読み込めませんでした。何も送信されていません。',
   'gitView.empty.notGitRepository': 'このディレクトリはGitリポジトリではありません',
   'gitView.empty.notGitRepositoryDescription': 'このディレクトリでGitを初期化するか、リポジトリを開いてください。',
+  'gitView.empty.repositoryUnreadable': 'Git がこのフォルダーを読み取れませんでした',
+  'gitView.empty.repositoryUnreadableDescription': 'Git からのメッセージは次のとおりです。問題を解決してから再試行してください。',
+  'gitView.empty.repositoryUnreadableRetry': '再試行',
   'gitView.empty.selectSessionOrDirectory': 'セッションまたはディレクトリを選択してGitステータスを表示',
   'gitView.empty.worktreeFeaturesUnavailable': 'このワークスペースモードではワークツリー機能は利用できません。',
   'gitView.empty.worktreeSetupDescription': 'ワークツリーのセットアップを完了し、リポジトリ状態を準備中。',
@@ -1845,6 +1864,7 @@ export const dict: Record<I18nKey, string> = {
   'contextSidebar.empty.openSession': 'セッションを開いてコンテキストを確認します。',
   'contextSidebar.section.context': 'コンテキスト',
   'contextSidebar.section.lastAssistantMessage': '最後のアシスタントメッセージ',
+  'contextSidebar.section.sessionTotals': 'セッション合計',
   'contextSidebar.section.rawMessages': '生メッセージ',
   'contextSidebar.context.percentUsed': '{percent}%使用',
   'contextSidebar.breakdown.user': 'ユーザー',
@@ -2243,6 +2263,7 @@ export const dict: Record<I18nKey, string> = {
   'directoryExplorerDialog.browse.retry': '再試行',
   'directoryExplorerDialog.browse.parentDirectory': '親ディレクトリ',
   'directoryExplorerDialog.browse.addedBadge': '追加済み',
+  'directoryExplorerDialog.browse.linkTarget': '{path} へのリンク',
   'directoryExplorerDialog.browse.quickAdd': '追加',
   'directoryExplorerDialog.browse.selectForAdd': '追加するものを選択',
   'directoryExplorerDialog.footer.navigate': '移動',
@@ -2558,6 +2579,8 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.group.empty.loadingSessions': 'セッションを読み込んでいます…',
   'sessions.sidebar.group.empty.loadFailed': 'セッションを更新できませんでした。',
   'sessions.sidebar.group.empty.initializationFailed': 'ワークスペースを初期化できませんでした。',
+  'sessions.sidebar.group.empty.trustPaused': 'このフォルダーを信頼するまで、エージェントは一時停止しています。',
+  'sessions.sidebar.group.empty.reviewTrust': '確認して信頼',
   'sessions.search.submitHint': 'Enter キーを押して検索',
   'sessions.sidebar.group.empty.retry': '再試行',
   'sessions.sidebar.group.empty.permissionDenied': 'フォルダへのアクセスが必要です。',
@@ -3434,6 +3457,7 @@ export const dict: Record<I18nKey, string> = {
   'updateDialog.status.autoReloadHint': '更新が完了すると自動的にページが再読み込みされます。',
   'updateDialog.fallback.updateViaTerminal': 'またはターミナルで更新:',
   'updateDialog.desktopHostInstall': 'OpenChamber {version} が利用可能です。実行しているコンピューター上で更新してください。',
+  'updateDialog.openCodeTooOld': 'OpenChamber {version} には OpenCode {required} が必要です。このサーバーは {current} です。先に OpenCode を更新してください。',
   'updateDialog.actions.copyCommand': 'コマンドをコピー',
   'updateDialog.actions.copied': 'コピーしました！',
   'updateDialog.status.downloadingPayload': '更新ペイロードをダウンロード中...',
@@ -3699,6 +3723,9 @@ export const dict: Record<I18nKey, string> = {
   'chat.workStatus.breakdown.skillCountPlural': 'スキル {count} 個',
   'chat.workStatus.breakdown.mcpCountSingle': 'MCP {count} 個',
   'chat.workStatus.breakdown.mcpCountPlural': 'MCP {count} 個',
+  'chat.workStatus.breakdown.planCountSingle': 'プラン {count} 件',
+  'chat.workStatus.breakdown.planCountPlural': 'プラン {count} 件',
+  'chat.workStatus.linkedPlans.open': 'プラン「{title}」を開く',
   'chat.workStatus.sections.open': 'セクションを選択',
   'chat.workStatus.sections.dialogTitle': 'パネルのセクション',
   'chat.workStatus.sections.reorder': '{label}をドラッグして並び替え',
@@ -3963,6 +3990,8 @@ export const dict: Record<I18nKey, string> = {
   'sessions.moveSession.failed': 'セッションを移動できませんでした',
   'chat.folderMissing.text': 'フォルダー {name} はもう存在しません',
   'chat.folderMissing.action': 'セッションを移動',
+  'chat.trustPaused.text': '{name} のプラグインとコマンドを信頼するまで、エージェントはそこで動作できません。',
+  'chat.trustPaused.action': '確認して信頼',
   'chat.worktreeSetup.running': 'worktree を準備中: プロジェクトのセットアップコマンドを実行しています…',
   'chat.draft.creatingSession': 'セッションを作成中…',
   'desktopHostSwitcher.startup.fellBackToLocal': '接続を開けなかったため、OpenChamber は Local で起動しました。到達できるようになったら、インスタンス切り替えから接続してください。',

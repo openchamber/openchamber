@@ -99,17 +99,13 @@ import { useFileTreeUpload } from './files/useFileTreeUpload';
 import { moveWorkspacePath } from './files/moveWorkspacePath';
 import { areDirectoryNodesEqual, buildFileTreeStatusIndex } from './files/fileTreeStatus';
 import { BinaryArtifact } from './files/previews/BinaryArtifact';
-import { delimiterForPath, parseDelimitedText } from './files/previews/delimitedText';
 import { ArchiveArtifact } from './files/previews/ArchiveArtifact';
-import { DataFileArtifact } from './files/previews/DataFileArtifact';
 import { NotebookArtifact } from './files/previews/NotebookArtifact';
-import { OfficeArtifact } from './files/previews/OfficeArtifact';
 import { PdfArtifact } from './files/previews/PdfArtifact';
 import { FontArtifact } from './files/previews/FontArtifact';
 import { ImageArtifact, type ImageNeighbor } from './files/previews/ImageArtifact';
 import { imageNeighborsOf } from './files/imageNeighbors';
 import { MediaArtifact } from './files/previews/MediaArtifact';
-import { TableArtifact } from './files/previews/TableArtifact';
 import { useMarkdownLocalAssets } from './files/previews/useMarkdownLocalAssets';
 import { useHtmlPreviewUrl } from './files/useHtmlPreviewUrl';
 import { useRawAssetUrl } from './files/useRawAssetUrl';
@@ -158,6 +154,12 @@ import { syncScheduledTaskLoops } from '@/lib/scheduledTasksApi';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { watchFileOnScreen } from '@/lib/watchedFiles';
 
+// Table, data and office previews load when a file needs one. A module that
+// cannot be fetched, such as a chunk an antivirus quarantined, then fails only
+// that preview, and the rest of Files keeps working.
+const TableArtifact = React.lazy(() => import('./files/previews/TableArtifact').then((module) => ({ default: module.TableArtifact })));
+const DataFileArtifact = React.lazy(() => import('./files/previews/DataFileArtifact').then((module) => ({ default: module.DataFileArtifact })));
+const OfficeArtifact = React.lazy(() => import('./files/previews/OfficeArtifact').then((module) => ({ default: module.OfficeArtifact })));
 
 type FileNode = {
   name: string;
@@ -608,8 +610,10 @@ const FileRow: React.FC<FileRowProps> = ({
       </button>
       {hasMenuActions && (
         // Takes no width and fades in over the row's end lane, with its own fade over the name.
+        // Only on touch screens: with a mouse the row's menu is its right
+        // click (Shift+F10 from the keyboard).
         <div className={cn(
-          "oc-file-tree-row-end -ms-7 w-7 pe-1 transition-opacity",
+          "oc-file-tree-row-end -ms-7 w-7 pe-1 transition-opacity pointer-fine:hidden",
           fileTreeRowMenuFillClassName(isActive),
           alwaysShowActions ? "opacity-100" : "opacity-0 focus-within:opacity-100 group-hover:opacity-100"
         )}>
@@ -3906,7 +3910,8 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
       printHtml(markdownToPrintableHtml(draftContent, selectedFile.name));
       return;
     }
-    const table = isTable ? parseDelimitedText(draftContent, delimiterForPath(selectedFile.path), Number.MAX_SAFE_INTEGER) : null;
+    const delimited = isTable ? await import('./files/previews/delimitedText') : null;
+    const table = delimited ? delimited.parseDelimitedText(draftContent, delimited.delimiterForPath(selectedFile.path), Number.MAX_SAFE_INTEGER) : null;
     const bytes = table ? await rowsToXlsx(selectedFile.name, [table.header, ...table.rows]) : await markdownToDocx(draftContent);
     const stem = selectedFile.path.replace(/\.[^./\\]+$/, '');
     // A file already there is the user's: the export takes the next free name.
@@ -3966,6 +3971,15 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
     </Tooltip>
   ) : null;
   const binaryFileActions = <>{downloadButton}{openInDefaultAppButton}</>;
+  // Keyed per file, so the next file gets a fresh boundary and not the last
+  // file's failure.
+  const previewBoundary = (key: string, preview: React.ReactNode) => (
+    <ErrorBoundary key={key} fallback={<ContentState title={t('filesView.error.previewUnavailable')} />}>
+      <React.Suspense fallback={<ContentLoadingState label={t('filesView.artifact.state.loading')} />}>
+        {preview}
+      </React.Suspense>
+    </ErrorBoundary>
+  );
 
   // Everything shown as an artifact rather than as editable text. One place
   // for both the docked and the fullscreen viewer, so they cannot drift.
@@ -4006,19 +4020,22 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
         return <ArchiveArtifact key={`${file.path}:${fileContentRevision}`} name={file.name} path={file.path} sizeBytes={artifactSize} loadBytes={loadOfficeBytes} actions={binaryFileActions} />;
       }
       if ((isDataFile(file.path) || isDelimitedTableFile(file.path)) && !(artifactSize !== null && artifactSize > maxDataBytes)) {
-        return <DataFileArtifact key={`${file.path}:${fileContentRevision}`} name={file.name} path={file.path} sizeBytes={artifactSize} loadBytes={loadDataBytes} actions={binaryFileActions} />;
+        return previewBoundary(
+          `${file.path}:${fileContentRevision}`,
+          <DataFileArtifact name={file.name} path={file.path} sizeBytes={artifactSize} loadBytes={loadDataBytes} actions={binaryFileActions} />,
+        );
       }
       if (isOfficePreviewFile(file.path) && !officeTooLarge) {
-        return (
+        return previewBoundary(
+          `${file.path}:${fileContentRevision}`,
           <OfficeArtifact
-            key={`${file.path}:${fileContentRevision}`}
             name={file.name}
             path={file.path}
             sizeBytes={artifactSize}
             loadBytes={loadOfficeBytes}
             actions={binaryFileActions}
             onSave={files.uploadFile && !selectedFileIsOutsideWorkspace ? saveOfficeBytes : undefined}
-          />
+          />,
         );
       }
       return (
@@ -4035,14 +4052,14 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
       return <NotebookArtifact content={fileContent} sizeBytes={artifactSize} />;
     }
     if (isTable && tableViewMode === 'table') {
-      return (
+      return previewBoundary(
+        file.path,
         <TableArtifact
-          key={file.path}
           path={file.path}
           content={canEdit ? draftContent : fileContent}
           sizeBytes={artifactSize}
           onContentChange={canEdit ? setDraftContent : undefined}
-        />
+        />,
       );
     }
     if (isMermaid && mermaidViewMode === 'preview') {

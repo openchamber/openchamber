@@ -372,7 +372,8 @@ strip enters a new scope only once the global session list has loaded, so a
 seed is never taken from a partial list and stored empty for good. At most 40
 other scopes are kept, the least recently shown dropped first. `removeTabs`
 clears a gone session from every set. Version 1 moved the version-0 single
-set into the global scope.
+set into the global scope. How the strip itself looks and behaves is in
+`components/layout/DOCUMENTATION.md`.
 
 ### Session / project coordination stores
 
@@ -581,7 +582,24 @@ An explicit model pick describes the next message's model. Switching agents
 keeps that intent, including while the pinned model is absent from discovery.
 A model restored from the session lets the newly selected agent apply its
 pinned model. Treating every manual source as live intent would prevent that
-normal agent selection from working. Picker changes make no session API writes.
+normal agent selection from working. Picker changes make no session API writes,
+except while the session's turn waits for an automatic retry: the composer then
+switches the session to the unsent model pick at once
+(`sync/session-actions.ts` `applyModelPickToRetry`, driven by
+`hooks/useRetryModelPick.ts`), because OpenCode reloads the session's model
+before every attempt.
+
+### Why a pick reaches a retrying turn and waits during plain generation
+
+A turn stuck in a retry wait does nothing until its next attempt, so a model
+picked then is the person moving the turn off a failing model; the switch makes
+the next attempt run on it and the turn goes on, as the limit-failover plugin
+does from OpenCode's retry hook. During plain generation the same switch would
+also land mid-turn: OpenCode reloads the model before every step, so the rest of
+the turn would run on the new model after the next tool call. That pick waits
+for the next send instead, or for the retry wait if the turn falls into one
+first. Auto waits for the next send too, because it routes a prompt and a retry
+has none.
 
 An open session's agent goes both ways. A pick applies to the session when the
 next message is sent (`switchAgent` before the prompt). Until then it is the
@@ -742,7 +760,7 @@ Core model:
 
 - active runtime owns one `directories` map keyed by directory
 - each directory entry contains:
-  - repo detection
+  - repo detection, and `repoUnreadable`: Git's message when Git could not tell whether the directory is a repository (`GIT_REPOSITORY_UNREADABLE`; a refused `safe.directory`, a Git that cannot start, a timeout). `isGitRepo` stays `null` then and every git surface shows `GitRepositoryUnreadableState` for the project root (Git's words, a retry, no "Initialize Git"), never a "not a repository" answer. A nested repository selected under the root that Git cannot read is dropped like a stale selection instead, so the picker stays reachable. A directory whose status is already on screen keeps it through one such failed read and shows the state on the next one in a row; one known only from a cache, with no status yet, shows it at once instead of waiting forever. Any answer from Git clears it.
   - status
   - branches
   - log

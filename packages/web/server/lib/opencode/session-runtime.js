@@ -50,6 +50,25 @@ const extractSessionStatusUpdate = (payload) => {
 
 const readRequestId = (value) => (typeof value === 'string' && value.trim() ? value.trim() : '');
 
+/** Sessions whose latest context reading the host keeps; the oldest goes first. */
+const CONTEXT_READINGS_MAX = 2000;
+
+const finiteCount = (value) => (typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : 0);
+
+/**
+ * Tokens the context window held after a step: the step's reported total of
+ * its final round-trip, else the sum of its breakdown. Mirrors
+ * `contextTokensFromBreakdown` in the shared UI.
+ */
+const contextTokensOf = (tokens) => {
+  if (!tokens || typeof tokens !== 'object') return 0;
+  const total = finiteCount(tokens.total);
+  if (total > 0) return total;
+  const cache = tokens.cache && typeof tokens.cache === 'object' ? tokens.cache : {};
+  return finiteCount(tokens.input) + finiteCount(tokens.output) + finiteCount(tokens.reasoning)
+    + finiteCount(cache.read) + finiteCount(cache.write);
+};
+
 export const createSessionRuntime = ({
   writeSseEvent,
   getNotificationClients,
@@ -78,6 +97,14 @@ export const createSessionRuntime = ({
   // Survives managed OpenCode restarts. Only a new user message renews the budget.
   const restartResumes = new Map();
   const latestUserMessages = new Map();
+  // What each session's context window held after its latest step, or that
+  // it was compacted since, for clients that start after it.
+  const contextReadings = new Map();
+  const recordContext = (sessionId, reading) => {
+    contextReadings.delete(sessionId);
+    contextReadings.set(sessionId, reading);
+    if (contextReadings.size > CONTEXT_READINGS_MAX) contextReadings.delete(contextReadings.keys().next().value);
+  };
   const isolatedSessionIds = new Set();
   // Pending permission requests and forms per session, kept from the same
   // upstream stream. Clients that do not initialize a directory cannot read
@@ -520,9 +547,18 @@ export const createSessionRuntime = ({
 
   const processOpenCodeSsePayload = (payload, { spaceId = null } = {}) => {
     processBlockingRequestPayload(payload);
+    if (payload?.type === 'session.compacted') {
+      const sessionId = readRequestId(payload.properties?.sessionID);
+      if (sessionId) recordContext(sessionId, { state: 'compacted' });
+    } else if (payload?.type === 'session.deleted') {
+      const sessionId = readRequestId(payload.properties?.sessionID);
+      if (sessionId) contextReadings.delete(sessionId);
+    }
     if (payload?.type === 'message.updated') {
       const info = payload.properties?.info;
       const sessionId = readRequestId(info?.sessionID);
+      const tokens = info?.role === 'assistant' ? contextTokensOf(info.tokens) : 0;
+      if (sessionId && tokens > 0) recordContext(sessionId, { state: 'measured', tokens });
       const messageId = readRequestId(info?.id);
       if (info?.role === 'user' && sessionId && messageId && latestUserMessages.get(sessionId) !== messageId) {
         latestUserMessages.set(sessionId, messageId);
@@ -605,6 +641,7 @@ export const createSessionRuntime = ({
     getActiveSessionCount,
     getSessionStateSnapshot,
     getPendingBlockingRequestsSnapshot,
+    getSessionContextSnapshot: () => Object.fromEntries(contextReadings),
     trackWaitingPage,
     getSessionState,
     resetAllSessionActivityToIdle,

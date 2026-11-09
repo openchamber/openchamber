@@ -1,4 +1,4 @@
-import { normalizeToolName } from '@/lib/opencode/tools';
+import { normalizeToolName, opencodeNamespaceTool } from '@/lib/opencode/tools';
 import {
   isEditTool,
   isPatchTool,
@@ -161,34 +161,6 @@ const TOOL_METADATA: Record<string, ToolMetadata> = {
        { key: 'id', label: 'Skill', type: 'text' }
      ]
    },
-   // The `opencode` namespace: OpenCode managing itself.
-   session_rename: {
-     displayName: 'Rename Session',
-     category: 'system',
-     outputLanguage: 'json',
-     inputFields: [
-       { key: 'title', label: 'Title', type: 'text' },
-       { key: 'sessionID', label: 'Session', type: 'text' }
-     ]
-   },
-   session_move: {
-     displayName: 'Move Session',
-     category: 'system',
-     outputLanguage: 'json',
-     inputFields: [
-       { key: 'directory', label: 'Directory', type: 'file' },
-       { key: 'sessionID', label: 'Session', type: 'text' }
-     ]
-   },
-   models: {
-     displayName: 'Search Models',
-     category: 'system',
-     outputLanguage: 'json',
-     inputFields: [
-       { key: 'search', label: 'Search', type: 'text' },
-       { key: 'provider', label: 'Provider', type: 'text' }
-     ]
-   },
     question: {
        displayName: 'Question',
        category: 'ai',
@@ -240,6 +212,13 @@ const TOOL_METADATA: Record<string, ToolMetadata> = {
       inputFields: []
     },
 
+    openchamber_usage: {
+      displayName: 'OpenChamber Usage',
+      category: 'system',
+      outputLanguage: 'json',
+      inputFields: []
+    },
+
     openchamber_render: {
       displayName: 'OpenChamber Render',
       category: 'system',
@@ -256,6 +235,13 @@ const TOOL_METADATA: Record<string, ToolMetadata> = {
 
     openchamber_secret: {
       displayName: 'OpenChamber Secret',
+      category: 'system',
+      outputLanguage: 'json',
+      inputFields: []
+    },
+
+    openchamber_workflow: {
+      displayName: 'OpenChamber Workflow',
       category: 'system',
       outputLanguage: 'json',
       inputFields: []
@@ -298,7 +284,18 @@ function formatUnknownToolDisplayName(toolName: string): string {
     .replace(/^./, (char) => char.toUpperCase());
 }
 
+// OpenCode's `opencode` namespace goes by one name, as OpenChamber's tools do;
+// what each call did is the row's description.
+const OPENCODE_NAMESPACE_METADATA: ToolMetadata = {
+  displayName: 'OpenCode',
+  category: 'system',
+  outputLanguage: 'json',
+  inputFields: []
+};
+
 export function getToolMetadata(toolName: string): ToolMetadata {
+  // The namespace itself names a script whose calls all went to it.
+  if (toolName === 'opencode' || opencodeNamespaceTool(toolName)) return OPENCODE_NAMESPACE_METADATA;
   // Namespaced tools (`opencode.session_rename`) are keyed by their last segment.
   return TOOL_METADATA[toolName] || TOOL_METADATA[normalizeToolName(toolName)] || {
     displayName: formatUnknownToolDisplayName(toolName),

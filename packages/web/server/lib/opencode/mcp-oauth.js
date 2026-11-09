@@ -26,11 +26,13 @@ const CONFIG_PICKUP_RETRY_MS = 250;
 // A save that lands during preparation sends the sign-in back to planning.
 const MAX_PLANNING_ROUNDS = 3;
 
-const RELAY_REFUSAL = 'MCP sign-in cannot finish over the private relay, because the provider has to redirect the browser to an address that reaches OpenChamber directly. Open OpenChamber at its LAN or tunnel address and sign in from there.';
-const OFF_MACHINE_REFUSAL = 'MCP sign-in cannot finish here, because OpenCode runs on another machine and only that machine can receive the provider\'s redirect. Sign in where OpenCode runs, or set this server\'s oauth.redirect_uri to an address that reaches that machine.';
+// Said only by an OpenCode older than 2.2.6, which cannot take the redirect
+// address pasted back from the browser.
+const RELAY_REFUSAL = 'MCP sign-in cannot finish over the private relay with this OpenCode version, because the provider has to redirect the browser to an address that reaches OpenChamber directly. Update OpenCode to 2.2.6 or newer, or open OpenChamber at its LAN or tunnel address and sign in from there.';
+const OFF_MACHINE_REFUSAL = 'MCP sign-in cannot finish here with this OpenCode version, because OpenCode runs on another machine and only that machine can receive the provider\'s redirect. Update OpenCode to 2.2.6 or newer, sign in where OpenCode runs, or set this server\'s oauth.redirect_uri to an address that reaches that machine.';
 const STALE_CONFIG_REFUSAL = 'OpenCode has not picked up the sign-in address for this MCP server yet, so the sign-in did not start. Try again in a moment.';
 const CHANGING_CONFIG_REFUSAL = 'This MCP server\'s config kept changing while the sign-in was being prepared, so the sign-in did not start. Try again in a moment.';
-const INVALID_CALLBACK_MESSAGE = 'This sign-in link is not valid any more. Start the sign-in again from the server\'s page in OpenChamber.';
+const INVALID_CALLBACK_MESSAGE = 'OpenChamber cannot finish this sign-in from here. If OpenChamber is still waiting for it, copy this page\'s address and paste it there. Otherwise start the sign-in again from the server\'s page in OpenChamber.';
 const LISTENER_UNREACHABLE_MESSAGE = 'The sign-in could not reach the local callback listener, which usually means OpenCode stopped or the sign-in already ended. Start the sign-in again from the server\'s page in OpenChamber.';
 
 const isLoopbackHostname = (hostname) => (
@@ -161,15 +163,21 @@ const ownsRouting = (assignments, name, oauth) => {
  *
  * - `proxy`: OpenCode's own redirect works, or a person configured the route.
  * - `track`: a generated redirect is in place; the attempt only needs binding.
- * - `prepare`: this browser needs a generated redirect on its own origin.
- * - `{ refusal }`: the provider's redirect could never reach the listener.
+ * - `prepare`: this browser needs a generated redirect on its own https origin.
+ * - `pasteOrPrepare`: a browser on another machine over plain http pastes the
+ *   address it lands on, or gets `prepare` from an OpenCode that cannot take one.
+ * - `{ pasteOnly }`: the provider's redirect can never reach the listener, so
+ *   the user pastes the address it lands on; `pasteOnly` is the refusal for
+ *   an OpenCode that cannot take one.
  */
 const planSignIn = ({ oauth, owned, relay, origin, sameMachine }) => {
   const configured = Boolean(oauth?.redirect_uri || oauth?.callback_port);
   if (configured && !owned) return 'proxy';
-  if (!sameMachine) return { refusal: OFF_MACHINE_REFUSAL };
-  if (relay) return owned ? 'track' : { refusal: RELAY_REFUSAL };
+  if (!sameMachine) return { pasteOnly: OFF_MACHINE_REFUSAL };
+  if (relay) return owned ? 'track' : { pasteOnly: RELAY_REFUSAL };
   if (!origin || isLoopbackHostname(hostnameOf(origin))) return owned ? 'track' : 'proxy';
+  // MCP providers take a plain-http redirect only on loopback.
+  if (origin.startsWith('http:')) return owned ? 'track' : 'pasteOrPrepare';
   return 'prepare';
 };
 
@@ -363,6 +371,24 @@ export const createMcpOAuthSignIn = ({
     }
   };
 
+  /**
+   * Starts an attempt whose redirect cannot come back by itself, on OpenCode's
+   * own route: the user pastes the address the browser lands on. An OpenCode
+   * that does not announce `paste` (before 2.2.6) would leave the user waiting
+   * for nothing, so its attempt is cancelled and the start refused, or, with no
+   * `refusal`, left to the caller with nothing sent.
+   */
+  const startPasteOnlyAttempt = async ({ req, res, integrationID, search, refusal }) => {
+    const path = `/api/integration/${integrationID}/connect/oauth${search}`;
+    const upstream = await callOpenCode(req, 'POST', path, JSON.stringify(req.body ?? {}));
+    if (!upstream.ok) return sendUpstream(res, upstream);
+    const payload = await upstream.json();
+    const attempt = isRecord(payload?.data) ? payload.data : payload;
+    if (attempt?.paste === true) return res.status(upstream.status).json(payload);
+    if (attempt?.attemptID) await cancelUpstream(req, integrationID, attempt.attemptID, search);
+    return refusal ? refuse(res, 400, refusal) : null;
+  };
+
   const readMcpServerName = async (req, integrationID, search) => {
     const upstream = await callOpenCode(req, 'GET', `/api/integration/${integrationID}${search}`);
     if (!upstream.ok) return { upstream };
@@ -402,13 +428,21 @@ export const createMcpOAuthSignIn = ({
           sameMachine: isSameMachineUrl(buildOpenCodeUrl('/', '')),
         });
         if (plan === 'proxy') return next();
-        if (plan.refusal) return refuse(res, 400, plan.refusal);
+        if (plan.pasteOnly) {
+          return await startPasteOnlyAttempt({ req, res, integrationID, search, refusal: plan.pasteOnly });
+        }
+        if (plan === 'pasteOrPrepare') {
+          // An OpenCode that cannot take a pasted address still finishes on a
+          // generated http redirect with a provider that accepts one.
+          const sent = await startPasteOnlyAttempt({ req, res, integrationID, search, refusal: null });
+          if (sent) return sent;
+        }
 
         pruneAttempts();
         await supersedeAttempts(req, serverKey, search);
-        const routing = plan === 'prepare'
-          ? await prepareRouting({ name, directory, entry, origin: browserOriginOf(req) })
-          : { redirectUri: entry.oauth.redirect_uri, port: entry.oauth.callback_port, written: false };
+        const routing = plan === 'track'
+          ? { redirectUri: entry.oauth.redirect_uri, port: entry.oauth.callback_port, written: false }
+          : await prepareRouting({ name, directory, entry, origin: browserOriginOf(req) });
         if (!routing.replan) {
           return await startBoundAttempt({ req, res, integrationID, search, name, serverKey, routing });
         }

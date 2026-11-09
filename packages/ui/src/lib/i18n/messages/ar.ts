@@ -15,6 +15,8 @@ import { htmlRenderI18n } from './html-render.i18n';
 import { documentToolbarI18n } from './document-toolbar.i18n';
 import { uiBlocksI18n } from './ui-blocks.i18n';
 import { updateDialogCanaryI18n } from './update-dialog-canary.i18n';
+import { aboutReleaseNotesI18n } from './about-release-notes.i18n';
+import { updateCheckErrorsI18n } from './update-check-errors.i18n';
 import { secretRequestI18n } from './secret-request.i18n';
 import { sessionNoticesI18n } from './session-notices.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
@@ -24,6 +26,10 @@ import { compactionSettingsI18n } from './compaction-settings.i18n';
 import { heapSnapshotI18n } from './heap-snapshot.i18n';
 import { consoleBudgetsI18n } from './console-budgets.i18n';
 import { imageToolI18n } from './image-tool.i18n';
+import { usageToolI18n } from './usage-tool.i18n';
+import { openchamberToolsLayoutI18n } from './openchamber-tools-layout.i18n';
+import { openchamberToolOutputI18n } from './openchamber-tool-output.i18n';
+import { opencodeToolOutputI18n } from './opencode-tool-output.i18n';
 import { agentStatusI18n } from './agent-status.i18n';
 import { selectionApprovalI18n } from './selection-approval.i18n';
 import { snippetsI18n } from './snippets.i18n';
@@ -716,6 +722,9 @@ export const dict = {
   'chat.backgroundShells.stopAll': 'إيقاف الكل',
   'chat.backgroundShells.stopAria': 'إيقاف {command}',
   'chat.backgroundShells.elapsed': 'قيد التشغيل منذ {duration}',
+  'chat.backgroundWork.aria': 'عمل في الخلفية',
+  'chat.backgroundWork.count': 'في الخلفية: {count}',
+  'chat.backgroundImages.generating': 'جارٍ إنشاء صورة',
   'sessions.sidebar.session.menu.share': 'مشاركة',
   'sessions.sidebar.session.menu.copied': 'تم النسخ',
   'sessions.sidebar.session.menu.copyLink': 'نسخ الرابط',
@@ -755,6 +764,7 @@ export const dict = {
   'sessions.sidebar.session.status.unread': 'تحديثات غير مقروءة',
   'sessions.sidebar.session.status.backgroundSubagent': 'وكيل فرعي يعمل في الخلفية',
   'sessions.sidebar.session.status.backgroundCommand': 'أمر يعمل في الخلفية',
+  'sessions.sidebar.session.status.backgroundImage': 'صورة قيد الإنشاء في الخلفية',
   'sessions.sidebar.session.status.waitingOnPullRequest': 'بانتظار الفحوصات أو مراجعة',
   'sessions.sidebar.session.status.pinned': 'جلسة مثبّتة',
   'sessions.sidebar.session.status.movingToWorktree': 'جارٍ نقل الجلسة إلى شجرة عمل جديدة',
@@ -1192,6 +1202,9 @@ export const dict = {
   'magicPrompts.toast.loadFailed': 'تعذّر تحميل الموجّهات السحرية. لم يُرسَل شيء.',
   'gitView.empty.notGitRepository': 'هذا المجلد ليس مستودع Git',
   'gitView.empty.notGitRepositoryDescription': 'هيّئ Git في هذا المجلد أو افتح مستودعًا.',
+  'gitView.empty.repositoryUnreadable': 'تعذّر على Git قراءة هذا المجلد',
+  'gitView.empty.repositoryUnreadableDescription': 'هذا ما قاله Git. أصلح المشكلة ثم أعد المحاولة.',
+  'gitView.empty.repositoryUnreadableRetry': 'إعادة المحاولة',
   'gitView.empty.selectSessionOrDirectory': 'حدّد جلسة أو مجلدًا لعرض حالة Git',
   'gitView.empty.worktreeFeaturesUnavailable': 'ميزات شجرة العمل (worktree) غير متاحة في وضع مساحة العمل هذا.',
   'gitView.empty.worktreeSetupDescription': 'جارٍ إنهاء إعداد شجرة العمل (worktree) وتجهيز حالة المستودع.',
@@ -1768,6 +1781,7 @@ export const dict = {
   'contextSidebar.empty.openSession': 'افتح جلسة لفحص السياق.',
   'contextSidebar.section.context': 'السياق',
   'contextSidebar.section.lastAssistantMessage': 'آخر رسالة من المساعد',
+  'contextSidebar.section.sessionTotals': 'إجماليات الجلسة',
   'contextSidebar.section.rawMessages': 'الرسائل الخام',
   'contextSidebar.context.percentUsed': '{percent}% مستخدم',
   'contextSidebar.breakdown.user': 'المستخدم',
@@ -2163,6 +2177,7 @@ export const dict = {
   'directoryExplorerDialog.browse.retry': 'إعادة المحاولة',
   'directoryExplorerDialog.browse.parentDirectory': 'المجلد الأصل',
   'directoryExplorerDialog.browse.addedBadge': 'مضاف',
+  'directoryExplorerDialog.browse.linkTarget': 'رابط إلى {path}',
   'directoryExplorerDialog.browse.quickAdd': 'إضافة',
   'directoryExplorerDialog.browse.selectForAdd': 'تحديد للإضافة',
   'directoryExplorerDialog.footer.navigate': 'تنقّل',
@@ -2478,6 +2493,8 @@ export const dict = {
   'sessions.sidebar.group.empty.loadingSessions': 'جارٍ تحميل الجلسات…',
   'sessions.sidebar.group.empty.loadFailed': 'تعذّر تحديث الجلسات.',
   'sessions.sidebar.group.empty.initializationFailed': 'تعذّر تهيئة مساحة العمل.',
+  'sessions.sidebar.group.empty.trustPaused': 'الوكلاء متوقفون مؤقتًا حتى تثق بهذا المجلد.',
+  'sessions.sidebar.group.empty.reviewTrust': 'مراجعة والثقة',
   'sessions.search.submitHint': 'اضغط Enter للبحث',
   'sessions.sidebar.group.empty.retry': 'إعادة المحاولة',
   'sessions.sidebar.group.empty.permissionDenied': 'مطلوب إذن الوصول إلى المجلد.',
@@ -3357,6 +3374,7 @@ export const dict = {
   'updateDialog.status.autoReloadHint': 'ستُعاد تحميل الصفحة تلقائيًا عند اكتمال التحديث.',
   'updateDialog.fallback.updateViaTerminal': 'أو حدّث عبر الطرفية:',
   'updateDialog.desktopHostInstall': 'يتوفر OpenChamber {version}. حدّثه على الكمبيوتر الذي يعمل عليه.',
+  'updateDialog.openCodeTooOld': 'يتطلب OpenChamber {version} الإصدار OpenCode {required}. يعمل هذا الخادم بالإصدار {current}. حدّث OpenCode أولًا.',
   'updateDialog.actions.copyCommand': 'نسخ الأمر',
   'updateDialog.actions.copied': 'تم النسخ!',
   'updateDialog.status.downloadingPayload': 'جارٍ تنزيل حزمة التحديث…',
@@ -3618,6 +3636,9 @@ export const dict = {
   'chat.workStatus.breakdown.skillCountPlural': '{count} مهارات',
   'chat.workStatus.breakdown.mcpCountSingle': '{count} MCP',
   'chat.workStatus.breakdown.mcpCountPlural': '{count} MCP',
+  'chat.workStatus.breakdown.planCountSingle': '{count} خطة',
+  'chat.workStatus.breakdown.planCountPlural': '{count} خطط',
+  'chat.workStatus.linkedPlans.open': 'فتح الخطة {title}',
   'chat.workStatus.sections.open': 'اختيار الأقسام',
   'chat.workStatus.sections.dialogTitle': 'أقسام اللوحة',
   'chat.workStatus.sections.reorder': 'اسحب {label} لإعادة الترتيب',
@@ -3877,6 +3898,8 @@ export const dict = {
   'sessions.moveSession.failed': 'تعذّر نقل الجلسة',
   'chat.folderMissing.text': 'لم يعد المجلد {name} موجودًا',
   'chat.folderMissing.action': 'نقل الجلسة',
+  'chat.trustPaused.text': 'لا يمكن للوكلاء العمل في {name} حتى تثق بإضافاته وأوامره.',
+  'chat.trustPaused.action': 'مراجعة والثقة',
   'chat.worktreeSetup.running': 'جارٍ إعداد شجرة العمل: تشغيل أوامر الإعداد الخاصة بالمشروع…',
   'chat.draft.creatingSession': 'جارٍ إنشاء الجلسة…',
   'desktopHostSwitcher.startup.fellBackToLocal': 'لم يُفتح اتصالها، لذا بدأ OpenChamber على النسخة المحلية. اتصل بها من مبدّل النسخ عندما يصبح الوصول إليها ممكنًا.',
@@ -3908,6 +3931,8 @@ export const dict = {
   ...documentToolbarI18n.ar,
   ...uiBlocksI18n.ar,
   ...updateDialogCanaryI18n.ar,
+  ...aboutReleaseNotesI18n.ar,
+  ...updateCheckErrorsI18n.ar,
   ...secretRequestI18n.ar,
   ...sessionNoticesI18n.ar,
   ...usageStatsI18n.ar,
@@ -3917,6 +3942,10 @@ export const dict = {
   ...heapSnapshotI18n.ar,
   ...consoleBudgetsI18n.ar,
   ...imageToolI18n.ar,
+  ...usageToolI18n.ar,
+  ...openchamberToolsLayoutI18n.ar,
+  ...openchamberToolOutputI18n.ar,
+  ...opencodeToolOutputI18n.ar,
   ...agentStatusI18n.ar,
   ...snippetsI18n.ar,
   ...sidebarWorkI18n.ar,

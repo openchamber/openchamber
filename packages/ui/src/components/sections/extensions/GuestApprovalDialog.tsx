@@ -30,9 +30,11 @@ const CAPABILITY_ROWS = {
   origins: { icon: 'global', titleKey: 'settings.extensions.capability.origins', detailKey: 'settings.extensions.capability.origins.detail' },
   transcript: { icon: 'history', titleKey: 'settings.extensions.capability.transcript', detailKey: 'settings.extensions.capability.transcript.detail' },
   sessionControl: { icon: 'robot-2', titleKey: 'settings.extensions.capability.sessionControl', detailKey: 'settings.extensions.capability.sessionControl.detail' },
+  sessionAnswers: { icon: 'shield-check', titleKey: 'settings.extensions.capability.sessionAnswers', detailKey: 'settings.extensions.capability.sessionAnswers.detail' },
   instructions: { icon: 'book-open', titleKey: 'settings.extensions.capability.instructions', detailKey: 'settings.extensions.capability.instructions.detail' },
   skills: { icon: 'sparkling', titleKey: 'settings.extensions.capability.skills', detailKey: 'settings.extensions.capability.skills.detail' },
   opencodePlugin: { icon: 'puzzle', titleKey: 'settings.extensions.capability.opencodePlugin', detailKey: 'settings.extensions.capability.opencodePlugin.detail' },
+  links: { icon: 'link', titleKey: 'settings.extensions.capability.links', detailKey: 'settings.extensions.capability.links.detail' },
 } satisfies Record<GuestCapability, { icon: IconName; titleKey: I18nKey; detailKey: I18nKey }>;
 
 type GuestApprovalDialogProps = {
@@ -192,6 +194,20 @@ export const GuestApprovalDialog: React.FC<GuestApprovalDialogProps> = ({ guest,
                   ) : null}
                   {capability === 'service' && guest?.mentions ? (
                     <p className="typography-meta mt-0.5 text-foreground">{t('settings.extensions.capability.service.mentions')}</p>
+                  ) : null}
+                  {capability === 'links' && guest?.links ? (
+                    // Exactly what the grant covers: these keys and this site; a change opens this dialog again.
+                    <div className="typography-meta mt-0.5 text-foreground">
+                      <ul className="list-disc space-y-0.5 ps-4">
+                        {guest.links.keys.map((key) => (
+                          <li key={key} className="break-all font-mono">{`${key}-123`}</li>
+                        ))}
+                        {guest.links.urls ? <li className="break-all font-mono">{`${guest.links.urls.origin}/…`}</li> : null}
+                      </ul>
+                      <p className="mt-0.5 text-muted-foreground">
+                        {t(guest.links.action === 'open' ? 'settings.extensions.capability.links.open' : 'settings.extensions.capability.links.attach')}
+                      </p>
+                    </div>
                   ) : null}
                   {capability === 'service' && sessionEvents.length > 0 ? (
                     <div className="typography-meta mt-0.5 text-foreground">

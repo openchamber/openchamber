@@ -16,6 +16,8 @@ import { htmlRenderI18n } from './html-render.i18n';
 import { documentToolbarI18n } from './document-toolbar.i18n';
 import { uiBlocksI18n } from './ui-blocks.i18n';
 import { updateDialogCanaryI18n } from './update-dialog-canary.i18n';
+import { aboutReleaseNotesI18n } from './about-release-notes.i18n';
+import { updateCheckErrorsI18n } from './update-check-errors.i18n';
 import { secretRequestI18n } from './secret-request.i18n';
 import { sessionNoticesI18n } from './session-notices.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
@@ -25,6 +27,10 @@ import { compactionSettingsI18n } from './compaction-settings.i18n';
 import { heapSnapshotI18n } from './heap-snapshot.i18n';
 import { consoleBudgetsI18n } from './console-budgets.i18n';
 import { imageToolI18n } from './image-tool.i18n';
+import { usageToolI18n } from './usage-tool.i18n';
+import { openchamberToolsLayoutI18n } from './openchamber-tools-layout.i18n';
+import { openchamberToolOutputI18n } from './openchamber-tool-output.i18n';
+import { opencodeToolOutputI18n } from './opencode-tool-output.i18n';
 import { agentStatusI18n } from './agent-status.i18n';
 import { selectionApprovalI18n } from './selection-approval.i18n';
 import { snippetsI18n } from './snippets.i18n';
@@ -191,6 +197,8 @@ export const dict: Record<I18nKey, string> = {
   ...documentToolbarI18n.pl,
   ...uiBlocksI18n.pl,
   ...updateDialogCanaryI18n.pl,
+  ...aboutReleaseNotesI18n.pl,
+  ...updateCheckErrorsI18n.pl,
   ...secretRequestI18n.pl,
   ...sessionNoticesI18n.pl,
   ...usageStatsI18n.pl,
@@ -200,6 +208,10 @@ export const dict: Record<I18nKey, string> = {
   ...heapSnapshotI18n.pl,
   ...consoleBudgetsI18n.pl,
   ...imageToolI18n.pl,
+  ...usageToolI18n.pl,
+  ...openchamberToolsLayoutI18n.pl,
+  ...openchamberToolOutputI18n.pl,
+  ...opencodeToolOutputI18n.pl,
   ...agentStatusI18n.pl,
   ...snippetsI18n.pl,
   ...sidebarWorkI18n.pl,
@@ -602,6 +614,9 @@ export const dict: Record<I18nKey, string> = {
   'chat.backgroundShells.stopAll': 'Zatrzymaj wszystkie',
   'chat.backgroundShells.stopAria': 'Zatrzymaj {command}',
   'chat.backgroundShells.elapsed': 'Działa od {duration}',
+  'chat.backgroundWork.aria': 'Praca w tle',
+  'chat.backgroundWork.count': 'W tle: {count}',
+  'chat.backgroundImages.generating': 'Generowanie obrazu',
   'sessions.sidebar.session.menu.share': 'Udostępnij',
   'sessions.sidebar.session.menu.copied': 'Skopiowano',
   'sessions.sidebar.session.menu.copyLink': 'Kopiuj link',
@@ -821,6 +836,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.session.status.unread': 'Nieprzeczytane aktualizacje',
   'sessions.sidebar.session.status.backgroundSubagent': 'Subagent działa w tle',
   'sessions.sidebar.session.status.backgroundCommand': 'Polecenie działa w tle',
+  'sessions.sidebar.session.status.backgroundImage': 'Obraz generuje się w tle',
   'sessions.sidebar.session.status.waitingOnPullRequest': 'Czeka na sprawdzenia lub recenzję',
   'sessions.sidebar.session.status.pinned': 'Przypięta sesja',
   'sessions.sidebar.session.status.movingToWorktree': 'Przenoszenie sesji do nowego worktree',
@@ -1129,6 +1145,8 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.group.empty.loadingSessions': 'Wczytywanie sesji…',
   'sessions.sidebar.group.empty.loadFailed': 'Nie udało się odświeżyć sesji.',
   'sessions.sidebar.group.empty.initializationFailed': 'Nie udało się zainicjować obszaru roboczego.',
+  'sessions.sidebar.group.empty.trustPaused': 'Agenci są wstrzymani, dopóki nie zaufasz temu folderowi.',
+  'sessions.sidebar.group.empty.reviewTrust': 'Sprawdź i zaufaj',
   'sessions.search.submitHint': 'Naciśnij Enter, aby wyszukać',
   'sessions.sidebar.group.empty.retry': 'Spróbuj ponownie',
   'sessions.sidebar.group.empty.permissionDenied': 'Wymagany jest dostęp do folderu.',
@@ -2058,6 +2076,7 @@ export const dict: Record<I18nKey, string> = {
   'contextSidebar.empty.openSession': 'Otwórz sesję, aby sprawdzić kontekst.',
   'contextSidebar.section.context': 'Kontekst',
   'contextSidebar.section.lastAssistantMessage': 'Ostatnia wiadomość asystenta',
+  'contextSidebar.section.sessionTotals': 'Sumy sesji',
   'contextSidebar.section.rawMessages': 'Surowe wiadomości',
   'contextSidebar.session.untitled': 'Nienazwana sesja',
   'contextSidebar.stats.assistant': 'Asystent',
@@ -2299,6 +2318,7 @@ export const dict: Record<I18nKey, string> = {
   'directoryExplorerDialog.actions.openInFinder': 'Otwórz w Finderze',
   'directoryExplorerDialog.actions.openingFinder': 'Otwieranie...',
   'directoryExplorerDialog.browse.addedBadge': 'Dodano',
+  'directoryExplorerDialog.browse.linkTarget': 'Dowiązanie do {path}',
   'directoryExplorerDialog.browse.quickAdd': 'Dodaj',
   'directoryExplorerDialog.browse.selectForAdd': 'Zaznacz do dodania',
   'directoryExplorerDialog.browse.empty': 'Brak pasujących katalogów.',
@@ -2552,8 +2572,11 @@ export const dict: Record<I18nKey, string> = {
   'gitView.conflict.resolveNewSession': 'Rozwiąż w nowej sesji',
   'gitView.empty.cleanDescription': 'Wszystkie zmiany zostały zacommitowane',
   'gitView.empty.cleanTitle': 'Drzewo robocze czyste',
-  'gitView.empty.notGitRepository': 'This directory is not a Git repository',
-  'gitView.empty.notGitRepositoryDescription': 'Initialize Git in this directory or open a repository.',
+  'gitView.empty.notGitRepository': 'Ten katalog nie jest repozytorium Git',
+  'gitView.empty.notGitRepositoryDescription': 'Zainicjuj Git w tym katalogu lub otwórz repozytorium.',
+  'gitView.empty.repositoryUnreadable': 'Git nie mógł odczytać tego folderu',
+  'gitView.empty.repositoryUnreadableDescription': 'Oto, co zgłosił Git. Napraw problem i spróbuj ponownie.',
+  'gitView.empty.repositoryUnreadableRetry': 'Spróbuj ponownie',
   'gitView.empty.pullBehindPlural': 'Pull {count} commits',
   'gitView.empty.pullBehindSingle': 'Pull {count} commit',
   'gitView.empty.selectSessionOrDirectory': 'Select a session or directory to view Git status',
@@ -3461,6 +3484,7 @@ export const dict: Record<I18nKey, string> = {
   'mobileUpdate.toast.actions.download': 'Pobierz',
   'updateDialog.fallback.updateViaTerminal': 'Lub zaktualizuj przez terminal:',
   'updateDialog.desktopHostInstall': 'OpenChamber {version} jest dostępny. Zaktualizuj go na komputerze, na którym działa.',
+  'updateDialog.openCodeTooOld': 'OpenChamber {version} wymaga OpenCode {required}. Ten serwer ma {current}. Najpierw zaktualizuj OpenCode.',
   'updateDialog.header.updateAvailable': 'Dostępna aktualizacja',
   'updateDialog.header.updating': 'Aktualizowanie OpenChamber...',
   'updateDialog.status.autoReloadHint': 'Strona automatycznie odświeży się po zakończeniu aktualizacji.',
@@ -3704,6 +3728,9 @@ export const dict: Record<I18nKey, string> = {
   'chat.workStatus.breakdown.skillCountPlural': '{count} umiejętności',
   'chat.workStatus.breakdown.mcpCountSingle': '{count} MCP',
   'chat.workStatus.breakdown.mcpCountPlural': '{count} MCP',
+  'chat.workStatus.breakdown.planCountSingle': '{count} plan',
+  'chat.workStatus.breakdown.planCountPlural': '{count} plany',
+  'chat.workStatus.linkedPlans.open': 'Otwórz plan {title}',
   'chat.workStatus.sections.open': 'Wybierz sekcje',
   'chat.workStatus.sections.dialogTitle': 'Sekcje panelu',
   'chat.workStatus.sections.reorder': 'Przeciągnij {label}, aby zmienić kolejność',
@@ -3968,6 +3995,8 @@ export const dict: Record<I18nKey, string> = {
   'sessions.moveSession.failed': 'Nie udało się przenieść sesji',
   'chat.folderMissing.text': 'Folder {name} już nie istnieje',
   'chat.folderMissing.action': 'Przenieś sesję',
+  'chat.trustPaused.text': 'Agenci nie mogą pracować w {name}, dopóki nie zaufasz jego wtyczkom i poleceniom.',
+  'chat.trustPaused.action': 'Sprawdź i zaufaj',
   'chat.worktreeSetup.running': 'Przygotowywanie worktree: uruchamianie poleceń konfiguracyjnych projektu…',
   'chat.draft.creatingSession': 'Tworzenie sesji…',
   'desktopHostSwitcher.startup.fellBackToLocal': 'Nie udało się nawiązać połączenia, więc OpenChamber uruchomił się na Local. Połącz się z przełącznika instancji, gdy będzie dostępna.',

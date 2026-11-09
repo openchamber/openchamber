@@ -15,6 +15,13 @@ interface McpOAuthSignInProps {
   connectLabel?: string;
   /** Off when the caller starts the sign-in from its own button (with `autoStart`). */
   showStartButton?: boolean;
+  /**
+   * Told while a sign-in runs. Starting one from another machine writes the
+   * server's redirect, and OpenCode reports the server `pending` while it
+   * reconnects, so a caller that mounts this only for `needs_auth` must keep
+   * it mounted until the sign-in ends: unmounting cancels the attempt.
+   */
+  onActiveChange?: (active: boolean) => void;
 }
 
 /**
@@ -31,6 +38,7 @@ export const McpOAuthSignIn: React.FC<McpOAuthSignInProps> = ({
   autoStart,
   connectLabel,
   showStartButton,
+  onActiveChange,
 }) => {
   const integration = useMcpOAuthIntegration(serverName, directory);
   if (!integration) return null;
@@ -45,6 +53,7 @@ export const McpOAuthSignIn: React.FC<McpOAuthSignInProps> = ({
       autoStart={autoStart}
       connectLabel={connectLabel}
       showStartButton={showStartButton}
+      onActiveChange={onActiveChange}
     />
   );
 };

@@ -16,6 +16,8 @@ import { htmlRenderI18n } from './html-render.i18n';
 import { documentToolbarI18n } from './document-toolbar.i18n';
 import { uiBlocksI18n } from './ui-blocks.i18n';
 import { updateDialogCanaryI18n } from './update-dialog-canary.i18n';
+import { aboutReleaseNotesI18n } from './about-release-notes.i18n';
+import { updateCheckErrorsI18n } from './update-check-errors.i18n';
 import { secretRequestI18n } from './secret-request.i18n';
 import { sessionNoticesI18n } from './session-notices.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
@@ -25,6 +27,10 @@ import { compactionSettingsI18n } from './compaction-settings.i18n';
 import { heapSnapshotI18n } from './heap-snapshot.i18n';
 import { consoleBudgetsI18n } from './console-budgets.i18n';
 import { imageToolI18n } from './image-tool.i18n';
+import { usageToolI18n } from './usage-tool.i18n';
+import { openchamberToolsLayoutI18n } from './openchamber-tools-layout.i18n';
+import { openchamberToolOutputI18n } from './openchamber-tool-output.i18n';
+import { opencodeToolOutputI18n } from './opencode-tool-output.i18n';
 import { agentStatusI18n } from './agent-status.i18n';
 import { selectionApprovalI18n } from './selection-approval.i18n';
 import { snippetsI18n } from './snippets.i18n';
@@ -191,6 +197,8 @@ export const dict: Record<I18nKey, string> = {
   ...documentToolbarI18n['zh-CN'],
   ...uiBlocksI18n['zh-CN'],
   ...updateDialogCanaryI18n['zh-CN'],
+  ...aboutReleaseNotesI18n['zh-CN'],
+  ...updateCheckErrorsI18n['zh-CN'],
   ...secretRequestI18n['zh-CN'],
   ...sessionNoticesI18n['zh-CN'],
   ...usageStatsI18n['zh-CN'],
@@ -200,6 +208,10 @@ export const dict: Record<I18nKey, string> = {
   ...heapSnapshotI18n['zh-CN'],
   ...consoleBudgetsI18n['zh-CN'],
   ...imageToolI18n['zh-CN'],
+  ...usageToolI18n['zh-CN'],
+  ...openchamberToolsLayoutI18n['zh-CN'],
+  ...openchamberToolOutputI18n['zh-CN'],
+  ...opencodeToolOutputI18n['zh-CN'],
   ...agentStatusI18n['zh-CN'],
   ...snippetsI18n['zh-CN'],
   ...sidebarWorkI18n['zh-CN'],
@@ -782,6 +794,9 @@ export const dict: Record<I18nKey, string> = {
   'chat.backgroundShells.stopAll': '全部停止',
   'chat.backgroundShells.stopAria': '停止 {command}',
   'chat.backgroundShells.elapsed': '已运行 {duration}',
+  'chat.backgroundWork.aria': '后台工作',
+  'chat.backgroundWork.count': '后台：{count}',
+  'chat.backgroundImages.generating': '正在生成图片',
   'sessions.sidebar.session.menu.share': '分享',
   'sessions.sidebar.session.menu.copied': '已复制',
   'sessions.sidebar.session.menu.copyLink': '复制链接',
@@ -821,6 +836,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.session.status.unread': '有未读更新',
   'sessions.sidebar.session.status.backgroundSubagent': '子智能体正在后台运行',
   'sessions.sidebar.session.status.backgroundCommand': '命令正在后台运行',
+  'sessions.sidebar.session.status.backgroundImage': '图片正在后台生成',
   'sessions.sidebar.session.status.waitingOnPullRequest': '正在等待检查或审查',
   'sessions.sidebar.session.status.pinned': '已置顶会话',
   'sessions.sidebar.session.status.movingToWorktree': '正在将会话移至新工作树',
@@ -1259,6 +1275,9 @@ export const dict: Record<I18nKey, string> = {
   'magicPrompts.toast.loadFailed': '无法加载魔法提示词。未发送任何内容。',
   'gitView.empty.notGitRepository': '当前目录不是 Git 仓库',
   'gitView.empty.notGitRepositoryDescription': '请在此目录初始化 Git，或打开一个 Git 仓库。',
+  'gitView.empty.repositoryUnreadable': 'Git 无法读取此文件夹',
+  'gitView.empty.repositoryUnreadableDescription': '以下是 Git 的输出。解决问题后重试。',
+  'gitView.empty.repositoryUnreadableRetry': '重试',
   'gitView.empty.selectSessionOrDirectory': '请选择会话或目录以查看 Git 状态',
   'gitView.empty.worktreeFeaturesUnavailable': '当前工作区模式下，工作树功能不可用。',
   'gitView.empty.worktreeSetupDescription': '正在完成工作树设置并准备仓库状态。',
@@ -1815,6 +1834,7 @@ export const dict: Record<I18nKey, string> = {
   'contextSidebar.empty.openSession': '请先打开会话以查看上下文。',
   'contextSidebar.section.context': '上下文',
   'contextSidebar.section.lastAssistantMessage': '最近一条助手消息',
+  'contextSidebar.section.sessionTotals': '会话总计',
   'contextSidebar.section.rawMessages': '原始消息',
   'contextSidebar.context.percentUsed': '已使用 {percent}%',
   'contextSidebar.breakdown.user': '用户',
@@ -2213,6 +2233,7 @@ export const dict: Record<I18nKey, string> = {
   'directoryExplorerDialog.browse.retry': '重试',
   'directoryExplorerDialog.browse.parentDirectory': '上级目录',
   'directoryExplorerDialog.browse.addedBadge': '已添加',
+  'directoryExplorerDialog.browse.linkTarget': '链接到 {path}',
   'directoryExplorerDialog.browse.quickAdd': '添加',
   'directoryExplorerDialog.browse.selectForAdd': '选择以添加',
   'directoryExplorerDialog.footer.navigate': '导航',
@@ -2528,6 +2549,8 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.group.empty.loadingSessions': '正在加载会话…',
   'sessions.sidebar.group.empty.loadFailed': '无法刷新会话。',
   'sessions.sidebar.group.empty.initializationFailed': '无法初始化工作区。',
+  'sessions.sidebar.group.empty.trustPaused': '在你信任此文件夹之前，智能体处于暂停状态。',
+  'sessions.sidebar.group.empty.reviewTrust': '查看并信任',
   'sessions.search.submitHint': '按 Enter 键搜索',
   'sessions.sidebar.group.empty.retry': '重试',
   'sessions.sidebar.group.empty.permissionDenied': '需要文件夹访问权限。',
@@ -3404,6 +3427,7 @@ export const dict: Record<I18nKey, string> = {
   'updateDialog.status.autoReloadHint': '更新完成后页面将自动重新加载。',
   'updateDialog.fallback.updateViaTerminal': '或通过终端更新：',
   'updateDialog.desktopHostInstall': 'OpenChamber {version} 已可用。请在运行它的电脑上更新。',
+  'updateDialog.openCodeTooOld': 'OpenChamber {version} 需要 OpenCode {required}。此服务器为 {current}。请先更新 OpenCode。',
   'updateDialog.actions.copyCommand': '复制命令',
   'updateDialog.actions.copied': '已复制！',
   'updateDialog.status.downloadingPayload': '正在下载更新包...',
@@ -3700,6 +3724,9 @@ export const dict: Record<I18nKey, string> = {
   'chat.workStatus.breakdown.skillCountPlural': '{count} 个技能',
   'chat.workStatus.breakdown.mcpCountSingle': '{count} 个 MCP',
   'chat.workStatus.breakdown.mcpCountPlural': '{count} 个 MCP',
+  'chat.workStatus.breakdown.planCountSingle': '{count} 个计划',
+  'chat.workStatus.breakdown.planCountPlural': '{count} 个计划',
+  'chat.workStatus.linkedPlans.open': '打开计划 {title}',
   'chat.workStatus.sections.open': '选择板块',
   'chat.workStatus.sections.dialogTitle': '面板板块',
   'chat.workStatus.sections.reorder': '拖动 {label} 以重新排序',
@@ -3964,6 +3991,8 @@ export const dict: Record<I18nKey, string> = {
   'sessions.moveSession.failed': '无法移动会话',
   'chat.folderMissing.text': '文件夹 {name} 已不存在',
   'chat.folderMissing.action': '移动会话',
+  'chat.trustPaused.text': '在你信任 {name} 的插件和命令之前，智能体无法在其中工作。',
+  'chat.trustPaused.action': '查看并信任',
   'chat.worktreeSetup.running': '正在设置 worktree：正在运行项目的设置命令…',
   'chat.draft.creatingSession': '正在创建会话…',
   'desktopHostSwitcher.startup.fellBackToLocal': '未能建立连接，因此 OpenChamber 以 Local 启动。待其可访问后，请在实例切换器中连接。',

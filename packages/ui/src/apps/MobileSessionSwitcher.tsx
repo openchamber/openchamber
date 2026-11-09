@@ -183,13 +183,13 @@ export const MobileSessionSwitcher: React.FC<{
   if (!shouldRender) return null;
 
   return (
-    <div ref={wrapperRef} className="fixed inset-x-0 bottom-0 top-[calc(var(--oc-safe-area-top,0px)+var(--oc-header-height,56px))] z-20 pointer-events-none">
+    <div ref={wrapperRef} className="oc-side-safe-area fixed inset-x-0 bottom-0 top-[calc(var(--oc-safe-area-top,0px)+var(--oc-header-height,56px))] z-20 pointer-events-none">
       <div
         ref={panelRef}
         role="dialog"
         aria-label={t('sessions.switcher.openAria')}
         className={cn(
-          'oc-surface-elevated flex flex-col overflow-hidden rounded-[20px] border border-edge bg-surface-elevated p-2 shadow-[0_12px_32px_rgb(0_0_0_/_0.2)] will-change-transform',
+          'oc-surface-elevated flex flex-col overflow-hidden rounded-[20px] border border-edge bg-surface-elevated p-2 shadow-[0_4px_12px_rgb(0_0_0_/_0.08)] will-change-transform',
           isPopover ? 'absolute origin-top-left' : 'mx-3 mt-2',
           isExiting ? 'pointer-events-none' : 'pointer-events-auto',
         )}

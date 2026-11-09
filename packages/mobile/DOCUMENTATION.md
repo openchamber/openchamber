@@ -1,3 +1,12 @@
+# Mobile
+
+## Product non-goals
+
+- The in-app browser panel and agent browser control stay on desktop and web.
+  They are not coming to the phone app or the hosted mobile surface, so mobile
+  parity is no reason to shape a browser feature, and browser work needs no
+  mobile plan.
+
 # Native runtime WebSockets
 
 ## Ownership

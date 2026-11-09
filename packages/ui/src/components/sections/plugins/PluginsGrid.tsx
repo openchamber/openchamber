@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { toast } from '@/components/ui';
 import { Icon } from '@/components/icon/Icon';
 import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLayout';
+import { SETTINGS_DESCRIPTION_CLASS } from '@/components/sections/shared/SettingsSection';
 import {
   SETTINGS_CARD_GRID_CLASS,
   SettingsAddCard,
@@ -11,7 +12,7 @@ import {
   SettingsCardChip,
   SettingsCardIcon,
   SettingsCardPill,
-  SettingsCardSearch,
+  SettingsCardToolbar,
   type SettingsCardAction,
 } from '@/components/sections/shared/SettingsCards';
 import { useI18n } from '@/lib/i18n';
@@ -323,32 +324,34 @@ export const PluginsGrid: React.FC<{
   return (
     <SettingsPageLayout
       title={t('settings.page.plugins.title')}
-      description={t('settings.plugins.grid.description')}
-      headerEnd={(
-        <div className="flex items-center gap-2">
-          {runtimeUnavailable ? (
-            <span className="inline-flex items-center gap-1 typography-meta text-muted-foreground">
-              <Icon name="question" className="size-3.5" />
-              {t('settings.plugins.status.sidebar.unavailable')}
-            </span>
-          ) : null}
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-9 w-9 shrink-0 text-muted-foreground"
-            onClick={() => void handleRefresh()}
-            disabled={refreshing}
-            aria-label={t('settings.plugins.sidebar.actions.refresh')}
-            title={t('settings.plugins.sidebar.actions.refresh')}
-          >
-            <Icon name="refresh" className={cn('size-4', refreshing && 'animate-spin')} />
-          </Button>
-        </div>
-      )}
+      namedBySidebar
     >
-      {items.length > 0 ? (
-        <SettingsCardSearch value={query} onChange={setQuery} placeholder={t('settings.plugins.grid.searchPlaceholder')} />
-      ) : null}
+      <SettingsCardToolbar
+        search={items.length > 0 ? { value: query, onChange: setQuery, placeholder: t('settings.plugins.grid.searchPlaceholder') } : null}
+        actions={(
+          <>
+            {runtimeUnavailable ? (
+              <span className="inline-flex items-center gap-1 typography-meta text-muted-foreground">
+                <Icon name="question" className="size-3.5" />
+                {t('settings.plugins.status.sidebar.unavailable')}
+              </span>
+            ) : null}
+            <Button
+              variant="ghost"
+              size="sm"
+              className="w-7 shrink-0 px-0 text-muted-foreground"
+              onClick={() => void handleRefresh()}
+              disabled={refreshing}
+              aria-label={t('settings.plugins.sidebar.actions.refresh')}
+              title={t('settings.plugins.sidebar.actions.refresh')}
+            >
+              <Icon name="refresh" className={cn('size-4', refreshing && 'animate-spin')} />
+            </Button>
+          </>
+        )}
+      />
+      {/* What a card's switch changes and what it leaves alone: a consequence, so it stays on screen. */}
+      <p className={cn(SETTINGS_DESCRIPTION_CLASS, 'mb-4')}>{t('settings.plugins.grid.description')}</p>
 
       {items.length === 0 ? (
         <p className="py-6 typography-meta text-muted-foreground">{t('settings.plugins.grid.empty')}</p>

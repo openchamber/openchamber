@@ -478,7 +478,7 @@ const ExtensionDetail: React.FC<ExtensionHandlers & { guest: InstalledGuest; onB
             </SettingsFieldRow>
           ) : null}
           <SettingsFieldRow label={t('settings.extensions.detail.field.location')} alignEnd={false} controlClassName="min-w-0 @xl:flex-1">
-            <span className="typography-meta min-w-0 truncate font-mono text-muted-foreground" title={location}>{location}</span>
+            <span dir="ltr" className="typography-meta min-w-0 truncate font-mono text-muted-foreground" title={location}>{location}</span>
           </SettingsFieldRow>
         </div>
         {state.builtIn ? <p className={SETTINGS_HELPER_CLASS}>{t('settings.extensions.builtIn.info')}</p> : null}
@@ -784,8 +784,9 @@ export const ExtensionsPage: React.FC = () => {
           { description: result.diagnostic ? describeGuestRequestFailure(result.diagnostic, t) : undefined },
         );
       } else {
+        // A manifest that did not parse says which field and rule, which is what the author needs.
         toast.error(t(errorToastKey(result.code)), {
-          description: result.diagnostic ? describeGuestRequestFailure(result.diagnostic, t) : undefined,
+          description: result.reason ?? (result.diagnostic ? describeGuestRequestFailure(result.diagnostic, t) : undefined),
         });
       }
       return false;
@@ -1170,7 +1171,7 @@ export const ExtensionsPage: React.FC = () => {
     <>
       <SettingsPageLayout
         title={t('settings.page.extensions.title')}
-        description={t('settings.page.extensions.description')}
+        namedBySidebar
         headerEnd={unsupported ? null : (
           <div className="flex items-center gap-2">
             {/* Enterprise mode installs only from approved repositories, so the public list stays out of it. */}

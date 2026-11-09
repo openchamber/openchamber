@@ -1234,6 +1234,41 @@ describe('getStatus', () => {
     }
   });
 
+  it("tells a folder Git refuses from a folder that is no repository, in Git's words", async () => {
+    if (!canRunGit()) return;
+
+    const repo = createTempDir();
+    const plain = createTempDir();
+    runGit(repo, ['init', '-b', 'main']);
+    // Git's own switch for a repository owned by someone else, as a drive
+    // formatted elsewhere looks on Windows.
+    const keys = ['GIT_TEST_ASSUME_DIFFERENT_OWNER', 'GIT_CONFIG_NOSYSTEM', 'GIT_CONFIG_GLOBAL', 'GIT_CONFIG_COUNT', 'GIT_CONFIG_PARAMETERS'];
+    const previous = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
+    const globalConfig = path.join(createTempDir(), 'empty-gitconfig');
+    // Ambient trust settings can otherwise bypass Git's ownership check.
+    process.env.GIT_CONFIG_NOSYSTEM = '1';
+    process.env.GIT_CONFIG_GLOBAL = globalConfig;
+    process.env.GIT_CONFIG_COUNT = '0';
+    delete process.env.GIT_CONFIG_PARAMETERS;
+    process.env.GIT_TEST_ASSUME_DIFFERENT_OWNER = '1';
+    try {
+      await expect(isGitRepository(repo, { failOnGitError: true })).rejects.toMatchObject({
+        code: 'GIT_REPOSITORY_UNREADABLE',
+        message: expect.stringContaining('safe.directory'),
+      });
+      await expect(isGitRepository(plain, { failOnGitError: true })).resolves.toBe(false);
+      await expect(isGitRepository(path.join(plain, 'missing'), { failOnGitError: true })).resolves.toBe(false);
+      // Callers that keep the best-effort probe still read a refusal as no repository.
+      await expect(isGitRepository(repo)).resolves.toBe(false);
+    } finally {
+      for (const key of keys) {
+        if (previous[key] === undefined) delete process.env[key];
+        else process.env[key] = previous[key];
+      }
+    }
+    await expect(isGitRepository(repo, { failOnGitError: true })).resolves.toBe(true);
+  });
+
   it('reads status for a git repo when process.cwd() is elsewhere', async () => {
     if (!canRunGit()) return;
 

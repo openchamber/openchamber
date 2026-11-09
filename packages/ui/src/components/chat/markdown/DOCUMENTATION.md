@@ -11,6 +11,7 @@ The shared renderer classifies and confirms local references before opening them
 - Confirmation and clicks use the same input kind. Confirmation results distinguish hrefs from literal paths and retain directory/runtime scope.
 - Existing file-URL handling, file classification, and final-path containment checks remain in place.
 - Ordinary local hrefs bypass prose-only filename filters. External schemes and protocol-relative URLs are rejected before decoding.
+- An identifier an extension claims (`remarkGuestLinks`) is a link with no href and `data-oc-guest-link`, which only that parser sets (`rehypeMarkdownPolicy` drops it from authored HTML). `MarkdownLink` draws it before any file, anchor or browser branch, so it never reaches file-reference classification; a claimed https link is checked against the app's own link readers at click (`guestLinkClick.ts`). The contract is in `packages/sdk/DOCUMENTATION.md`, *Links in messages*.
 - Encoded edge spaces remain part of the filename during resolution, existence checks, and file-tab navigation.
 
 ## Decisions

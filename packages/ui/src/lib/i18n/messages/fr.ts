@@ -15,6 +15,8 @@ import { htmlRenderI18n } from './html-render.i18n';
 import { documentToolbarI18n } from './document-toolbar.i18n';
 import { uiBlocksI18n } from './ui-blocks.i18n';
 import { updateDialogCanaryI18n } from './update-dialog-canary.i18n';
+import { aboutReleaseNotesI18n } from './about-release-notes.i18n';
+import { updateCheckErrorsI18n } from './update-check-errors.i18n';
 import { secretRequestI18n } from './secret-request.i18n';
 import { sessionNoticesI18n } from './session-notices.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
@@ -24,6 +26,10 @@ import { compactionSettingsI18n } from './compaction-settings.i18n';
 import { heapSnapshotI18n } from './heap-snapshot.i18n';
 import { consoleBudgetsI18n } from './console-budgets.i18n';
 import { imageToolI18n } from './image-tool.i18n';
+import { usageToolI18n } from './usage-tool.i18n';
+import { openchamberToolsLayoutI18n } from './openchamber-tools-layout.i18n';
+import { openchamberToolOutputI18n } from './openchamber-tool-output.i18n';
+import { opencodeToolOutputI18n } from './opencode-tool-output.i18n';
 import { agentStatusI18n } from './agent-status.i18n';
 import { selectionApprovalI18n } from './selection-approval.i18n';
 import { snippetsI18n } from './snippets.i18n';
@@ -190,6 +196,8 @@ export const dict = {
   ...documentToolbarI18n.fr,
   ...uiBlocksI18n.fr,
   ...updateDialogCanaryI18n.fr,
+  ...aboutReleaseNotesI18n.fr,
+  ...updateCheckErrorsI18n.fr,
   ...secretRequestI18n.fr,
   ...sessionNoticesI18n.fr,
   ...usageStatsI18n.fr,
@@ -199,6 +207,10 @@ export const dict = {
   ...heapSnapshotI18n.fr,
   ...consoleBudgetsI18n.fr,
   ...imageToolI18n.fr,
+  ...usageToolI18n.fr,
+  ...openchamberToolsLayoutI18n.fr,
+  ...openchamberToolOutputI18n.fr,
+  ...opencodeToolOutputI18n.fr,
   ...agentStatusI18n.fr,
   ...snippetsI18n.fr,
   ...sidebarWorkI18n.fr,
@@ -614,6 +626,9 @@ export const dict = {
   'chat.backgroundShells.stopAll': 'Tout arrêter',
   'chat.backgroundShells.stopAria': 'Arrêter {command}',
   'chat.backgroundShells.elapsed': 'En cours depuis {duration}',
+  'chat.backgroundWork.aria': 'Travail en arrière-plan',
+  'chat.backgroundWork.count': 'En arrière-plan : {count}',
+  'chat.backgroundImages.generating': 'Génération d\'une image',
   'sessions.sidebar.session.menu.share': 'Partager',
   'sessions.sidebar.session.menu.copied': 'Copié',
   'sessions.sidebar.session.menu.copyLink': 'Copier le lien',
@@ -653,6 +668,7 @@ export const dict = {
   'sessions.sidebar.session.status.unread': 'Mises à jour non lues',
   'sessions.sidebar.session.status.backgroundSubagent': 'Sous-agent en cours en arrière-plan',
   'sessions.sidebar.session.status.backgroundCommand': 'Commande en cours en arrière-plan',
+  'sessions.sidebar.session.status.backgroundImage': 'Image en cours de génération en arrière-plan',
   'sessions.sidebar.session.status.waitingOnPullRequest': "En attente de vérifications ou d'une revue",
   'sessions.sidebar.session.status.pinned': 'Session épinglée',
   'sessions.sidebar.session.status.movingToWorktree': 'Déplacement de la session vers un nouveau worktree',
@@ -1083,6 +1099,9 @@ export const dict = {
   'magicPrompts.toast.loadFailed': 'Impossible de charger les prompts magiques. Rien n’a été envoyé.',
   'gitView.empty.notGitRepository': 'Ce répertoire n\'est pas un dépôt Git',
   'gitView.empty.notGitRepositoryDescription': 'Initialisez Git dans ce répertoire ou ouvrez un dépôt.',
+  'gitView.empty.repositoryUnreadable': 'Git n\'a pas pu lire ce dossier',
+  'gitView.empty.repositoryUnreadableDescription': 'Voici ce que Git a répondu. Corrigez le problème, puis réessayez.',
+  'gitView.empty.repositoryUnreadableRetry': 'Réessayer',
   'gitView.empty.selectSessionOrDirectory': 'Sélectionnez une session ou un répertoire pour afficher l\'état de Git',
   'gitView.empty.worktreeFeaturesUnavailable': 'Les fonctionnalités Worktree ne sont pas disponibles dans ce mode d’espace de travail.',
   'gitView.empty.worktreeSetupDescription': 'Terminez la configuration du worktree et préparez l\'état du dépôt.',
@@ -1603,6 +1622,7 @@ export const dict = {
   'contextSidebar.empty.openSession': 'Ouvrez une session pour inspecter le contexte.',
   'contextSidebar.section.context': 'Contexte',
   'contextSidebar.section.lastAssistantMessage': 'Dernier message de l\'assistant',
+  'contextSidebar.section.sessionTotals': 'Totaux de la session',
   'contextSidebar.section.rawMessages': 'Messages bruts',
   'contextSidebar.context.percentUsed': '{percent}% utilisé',
   'contextSidebar.breakdown.user': 'Utilisateur',
@@ -1994,6 +2014,7 @@ export const dict = {
   'directoryExplorerDialog.browse.retry': 'Réessayer',
   'directoryExplorerDialog.browse.parentDirectory': 'Répertoire parent',
   'directoryExplorerDialog.browse.addedBadge': 'Ajouté',
+  'directoryExplorerDialog.browse.linkTarget': 'Lien vers {path}',
   'directoryExplorerDialog.browse.quickAdd': 'Ajouter',
   'directoryExplorerDialog.browse.selectForAdd': 'Sélectionner pour ajouter',
   'directoryExplorerDialog.footer.navigate': 'Naviguer',
@@ -2278,6 +2299,8 @@ export const dict = {
   'sessions.sidebar.group.empty.loadingSessions': 'Chargement des sessions…',
   'sessions.sidebar.group.empty.loadFailed': 'Impossible d’actualiser les sessions.',
   'sessions.sidebar.group.empty.initializationFailed': 'Impossible d’initialiser l’espace de travail.',
+  'sessions.sidebar.group.empty.trustPaused': 'Les agents sont en pause tant que vous ne faites pas confiance à ce dossier.',
+  'sessions.sidebar.group.empty.reviewTrust': 'Vérifier et faire confiance',
   'sessions.search.submitHint': 'Appuyez sur Entrée pour rechercher',
   'sessions.sidebar.group.empty.retry': 'Réessayer',
   'sessions.sidebar.group.empty.permissionDenied': 'L’accès au dossier est requis.',
@@ -3105,6 +3128,7 @@ export const dict = {
   'updateDialog.status.autoReloadHint': 'La page se rechargera automatiquement une fois la mise à jour terminée.',
   'updateDialog.fallback.updateViaTerminal': 'Ou mettre à jour via le terminal :',
   'updateDialog.desktopHostInstall': 'OpenChamber {version} est disponible. Mettez-le à jour sur l’ordinateur où il s’exécute.',
+  'updateDialog.openCodeTooOld': 'OpenChamber {version} nécessite OpenCode {required}. Ce serveur a la version {current}. Mettez d’abord OpenCode à jour.',
   'updateDialog.actions.copyCommand': 'Commande Copier',
   'updateDialog.actions.copied': 'Copié!',
   'updateDialog.status.downloadingPayload': 'Téléchargement de la charge utile de la mise à jour...',
@@ -3698,6 +3722,9 @@ export const dict = {
   'chat.workStatus.breakdown.skillCountPlural': '{count} compétences',
   'chat.workStatus.breakdown.mcpCountSingle': '{count} MCP',
   'chat.workStatus.breakdown.mcpCountPlural': '{count} MCP',
+  'chat.workStatus.breakdown.planCountSingle': '{count} plan',
+  'chat.workStatus.breakdown.planCountPlural': '{count} plans',
+  'chat.workStatus.linkedPlans.open': 'Ouvrir le plan {title}',
   'chat.workStatus.sections.open': 'Choisir les sections',
   'chat.workStatus.sections.dialogTitle': 'Sections du panneau',
   'chat.workStatus.sections.reorder': 'Faites glisser {label} pour réordonner',
@@ -3962,6 +3989,8 @@ export const dict = {
   'sessions.moveSession.failed': 'Impossible de déplacer la session',
   'chat.folderMissing.text': 'Le dossier {name} n\'existe plus',
   'chat.folderMissing.action': 'Déplacer la session',
+  'chat.trustPaused.text': 'Les agents ne peuvent pas travailler dans {name} tant que vous ne faites pas confiance à ses plugins et commandes.',
+  'chat.trustPaused.action': 'Vérifier et faire confiance',
   'chat.worktreeSetup.running': 'Préparation du worktree : exécution des commandes de configuration du projet…',
   'chat.draft.creatingSession': 'Création de la session…',
   'desktopHostSwitcher.startup.fellBackToLocal': 'Sa connexion ne s’est pas ouverte, OpenChamber a donc démarré sur Local. Connectez-la depuis le sélecteur d’instances dès qu’elle est joignable.',

@@ -234,8 +234,8 @@ describe('managed OpenCode config file', () => {
       includeRender: false,
       includeImage: false,
       includeSecret: false,
+      includeUsage: false,
       includeWorkflow: false,
-      codeMode: false,
     });
   });
 
@@ -302,30 +302,33 @@ describe('managed OpenCode config file', () => {
       includeRender: false,
       includeImage: false,
       includeSecret: false,
+      includeUsage: false,
       includeWorkflow: false,
-      codeMode: false,
     });
   });
 
-  it('puts the tools behind Code Mode only when the user asks for it', async () => {
-    const { runtime, agentToolRuntime } = await createHarness({
-      settings: { agentToolsCodeMode: true },
-    });
+  it('injects the usage tool only when it is switched on, also as the only tool', async () => {
+    const off = await createHarness({ settings: {} });
+    await off.runtime.buildManagedChildEnv();
+    expect(off.agentToolRuntime.materializePlugin).toHaveBeenLastCalledWith(expect.objectContaining({ includeUsage: false }));
 
+    const { runtime, agentToolRuntime } = await createHarness({
+      settings: { agentControlToolEnabled: false, agentScheduleToolEnabled: false, agentWebToolEnabled: false, agentKnowledgeToolEnabled: false, agentRenderToolEnabled: false, agentSecretToolEnabled: false, agentUsageToolEnabled: true },
+    });
     await runtime.buildManagedChildEnv();
 
     expect(agentToolRuntime.materializePlugin).toHaveBeenCalledWith({
-      includeControl: true,
-      includeSchedule: true,
-      includeWeb: true,
+      includeControl: false,
+      includeSchedule: false,
+      includeWeb: false,
       includeMemory: false,
-      includeKnowledge: true,
+      includeKnowledge: false,
       includeNotify: false,
-      includeRender: true,
+      includeRender: false,
       includeImage: false,
-      includeSecret: true,
+      includeSecret: false,
+      includeUsage: true,
       includeWorkflow: false,
-      codeMode: true,
     });
   });
 

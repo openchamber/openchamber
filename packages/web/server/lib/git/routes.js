@@ -125,6 +125,12 @@ export function registerGitRoutes(app, {
   };
 
   const isNonRepoGitError = (error) => /not a git repository/i.test(extractGitErrorText(error));
+  // Git could not tell whether the directory is a repository (`probeRepository`):
+  // its message goes to the client instead of a "not a repository" answer.
+  const isUnreadableRepositoryError = (error) => error?.code === 'GIT_REPOSITORY_UNREADABLE';
+  const unreadableRepositoryBody = (error) => ({ error: error.message, code: error.code });
+  // Every repository check a client acts on reports a Git that could not answer.
+  const probeOptions = { failOnGitError: true };
 
   const canDisposeWorktreeInstance = Boolean(buildOpenCodeUrl && getOpenCodeAuthHeaders);
 
@@ -529,9 +535,12 @@ export function registerGitRoutes(app, {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
 
-      const isRepo = await isGitRepository(directory);
+      const isRepo = await isGitRepository(directory, probeOptions);
       res.json({ isGitRepository: isRepo });
     } catch (error) {
+      if (isUnreadableRepositoryError(error)) {
+        return res.status(500).json(unreadableRepositoryBody(error));
+      }
       if (isNonRepoGitError(error)) {
         console.warn('Git check treated non-repository path as not a git repo:', extractGitErrorText(error));
         return res.json({ isGitRepository: false });
@@ -603,7 +612,7 @@ export function registerGitRoutes(app, {
     };
     return readProjectBatch(req, res, async (directory) => {
       try {
-        const isRepo = await isGitRepository(directory);
+        const isRepo = await isGitRepository(directory, probeOptions);
         if (!isRepo) {
           return nonRepoEntry(directory);
         }
@@ -644,6 +653,9 @@ export function registerGitRoutes(app, {
         if (failures.length > 0) entry.errors = failures;
         return entry;
       } catch (error) {
+        if (isUnreadableRepositoryError(error)) {
+          return { directory, ...unreadableRepositoryBody(error) };
+        }
         if (isNonRepoGitError(error)) {
           return nonRepoEntry(directory);
         }
@@ -786,7 +798,7 @@ export function registerGitRoutes(app, {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
 
-      const isRepo = await isGitRepository(directory);
+      const isRepo = await isGitRepository(directory, probeOptions);
       if (!isRepo) {
         return res.json(nonRepoStatusPayload());
       }
@@ -800,6 +812,9 @@ export function registerGitRoutes(app, {
       const status = await getStatus(directory, { mode });
       res.json(status);
     } catch (error) {
+      if (isUnreadableRepositoryError(error)) {
+        return res.status(500).json(unreadableRepositoryBody(error));
+      }
       // Non-repo / GitError must not abort callers that enumerate projects or
       // sessions (e.g. sidebar discovery). Log a warning and continue.
       if (isNonRepoGitError(error)) {

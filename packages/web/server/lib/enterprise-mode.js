@@ -75,8 +75,9 @@ import { z } from 'zod';
  *   `OPENCHAMBER_ALLOWED_EXTENSIONS`), or from a
  *   local folder where `allowLocalExtensions` /
  *   `OPENCHAMBER_ALLOW_LOCAL_EXTENSIONS` allows it; see `guests/enterprise.js`.
- *   A package that starts sessions, adds to agents' instructions or ships
- *   skills answers to the same list (`guests/enterprise.js`).
+ *   A package that starts sessions, answers the agent's permission requests,
+ *   adds to agents' instructions or ships skills answers to the same list
+ *   (`guests/enterprise.js`).
  *   An allowed extension serving as a notification channel gets the kind's
  *   generic title with no body, session name or directory, as the phone does
  *   (`notifications/runtime.js` `sendToChannels`). An allowed extension
@@ -88,6 +89,9 @@ import { z } from 'zod';
  *   holds for the providers its manifest lists, which the user approved in
  *   the dialog, and no conversation content (`quota/extension-quota.js`);
  *   the allowlist is its gate too, re-read on every call. An extension that
+ *   claims identifiers and links in chat messages (`links`) receives only
+ *   the one the user clicked, in its own frame on this machine; passing it
+ *   on needs a gated capability, so `links` itself is not gated. An extension that
  *   ships an OpenCode plugin (`opencodePlugin`: code inside OpenCode itself)
  *   answers to the same list at install, in the managed OpenCode config
  *   (`guests/agent-context.js`), and at the card's button that writes the

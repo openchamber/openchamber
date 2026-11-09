@@ -180,6 +180,9 @@
     "agentRenderToolEnabled": {
       "scope": "instance"
     },
+    "agentUsageToolEnabled": {
+      "scope": "instance"
+    },
     "agentImageToolEnabled": {
       "scope": "instance"
     },
@@ -187,9 +190,6 @@
       "scope": "instance"
     },
     "agentSecretToolEnabled": {
-      "scope": "instance"
-    },
-    "agentToolsCodeMode": {
       "scope": "instance"
     },
     "agentMemoryToolEnabled": {
@@ -699,6 +699,9 @@
       "scope": "profile"
     },
     "customProviderIcons": {
+      "scope": "profile"
+    },
+    "customProviderLogos": {
       "scope": "profile"
     },
     "recentModels": {

@@ -23,11 +23,19 @@ const status = (type, sessionID = SESSION) => ({ type: 'session.status', propert
  * A fake OpenCode: `active` is what `/api/session/active` lists (the running
  * sessions), `answer` what a ping gets back.
  */
-const makeRuntime = ({ dataDir = makeDataDir(), answer = () => new Response('{"data":{"text":"OK"}}'), active = {} } = {}) => {
+const makeRuntime = ({ dataDir = makeDataDir(), answer = () => new Response('{"data":{"text":"OK"}}'), active = {}, model, modelGate } = {}) => {
   const events = [];
   const opencode = { active, answer };
   const fetchImpl = vi.fn(async (url) => {
-    if (String(url).includes('/api/session/active')) return Response.json({ data: opencode.active });
+    const { pathname } = new URL(String(url));
+    if (pathname === '/api/session/active') return Response.json({ data: opencode.active });
+    // `model`: the session's model as `/api/model` lists it; without one the session has none.
+    if (pathname === `/api/session/${SESSION}`) return Response.json({ data: { id: SESSION, model: model && { id: model.id, providerID: model.providerID } } });
+    if (pathname === '/api/model') {
+      // `modelGate`: a promise the model read waits on, to hold the interval lookup open.
+      await modelGate;
+      return Response.json({ data: model ? [{ cost: [], ...model }] : [] });
+    }
     return opencode.answer();
   });
   const runtime = createSessionWarmingRuntime({
@@ -297,5 +305,90 @@ describe('session warming runtime', () => {
     runtime.start();
     expect(runtime.snapshot()).toMatchObject({ enabled: false, sessions: [] });
     expect(fs.readdirSync(dataDir).some((name) => name.startsWith('session-warming.json.corrupt-'))).toBe(true);
+  });
+
+  describe('ping interval from the cache lifetime', () => {
+    const warmAfterTurn = async (model) => {
+      const made = makeRuntime({ model });
+      made.runtime.setEnabled(true);
+      made.runtime.processPayload(status('busy'));
+      made.runtime.setSessionWarm(SESSION, DIRECTORY, true);
+      made.runtime.processPayload(status('idle'));
+      return made;
+    };
+
+    it('pings Claude Agent on a subscription just inside its hour-long cache', async () => {
+      const { fetchImpl } = await warmAfterTurn({ id: 'opus', providerID: 'claude-agent' });
+      await vi.advanceTimersByTimeAsync(54 * MINUTE - 1);
+      expect(pings(fetchImpl)).toHaveLength(0);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(pings(fetchImpl)).toHaveLength(1);
+      // The next one would land after the hour the window lasts.
+      await vi.advanceTimersByTimeAsync(2 * WARMING_DURATION_MS);
+      expect(pings(fetchImpl)).toHaveLength(1);
+    });
+
+    it('takes the model\'s configured cache ttl', async () => {
+      const { fetchImpl } = await warmAfterTurn({ id: 'sonnet', providerID: 'anthropic', cost: [{}], settings: { cache: { ttl: '10m' } } });
+      await vi.advanceTimersByTimeAsync(9 * MINUTE);
+      expect(pings(fetchImpl)).toHaveLength(1);
+    });
+
+    it('sends the ping a shorter window had no room for once the window grows', async () => {
+      const { runtime, fetchImpl } = makeRuntime({ model: { id: 'opus', providerID: 'claude-agent' } });
+      runtime.setEnabled(true);
+      runtime.setMinutes(30);
+      runtime.processPayload(status('busy'));
+      runtime.setSessionWarm(SESSION, DIRECTORY, true);
+      runtime.processPayload(status('idle'));
+      await vi.advanceTimersByTimeAsync(10 * MINUTE);
+      runtime.setMinutes(60);
+      await vi.advanceTimersByTimeAsync(44 * MINUTE - 1);
+      expect(pings(fetchImpl)).toHaveLength(0);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(pings(fetchImpl)).toHaveLength(1);
+    });
+
+    it('keeps the turn-end beat when the stream reconnects during the interval read', async () => {
+      let open;
+      const modelGate = new Promise((resolve) => { open = resolve; });
+      const { runtime, fetchImpl } = makeRuntime({ model: { id: 'opus', providerID: 'claude-agent' }, modelGate });
+      runtime.setEnabled(true);
+      runtime.processPayload(status('busy'));
+      runtime.setSessionWarm(SESSION, DIRECTORY, true);
+      runtime.processPayload(status('idle'));
+      runtime.processPayload({ type: 'server.connected', properties: {} });
+      await runDue();
+      open();
+      await runDue();
+      expect(pings(fetchImpl)).toHaveLength(0);
+      await vi.advanceTimersByTimeAsync(54 * MINUTE);
+      expect(pings(fetchImpl)).toHaveLength(1);
+    });
+
+    it('does not send a second ping when the duration changes while one is in flight', async () => {
+      let release;
+      const held = new Promise((resolve) => { release = resolve; });
+      const { runtime, fetchImpl } = makeRuntime({ answer: () => held.then(() => new Response('{"data":{"text":"OK"}}')) });
+      runtime.setEnabled(true);
+      runtime.processPayload(status('busy'));
+      runtime.setSessionWarm(SESSION, DIRECTORY, true);
+      runtime.processPayload(status('idle'));
+      await vi.advanceTimersByTimeAsync(WARMING_INTERVAL_MS);
+      expect(pings(fetchImpl)).toHaveLength(1);
+      runtime.setMinutes(120);
+      await runDue();
+      expect(pings(fetchImpl)).toHaveLength(1);
+      release();
+      await runDue();
+      await vi.advanceTimersByTimeAsync(WARMING_INTERVAL_MS);
+      expect(pings(fetchImpl)).toHaveLength(2);
+    });
+
+    it('keeps 4 minutes for Claude Agent billed by key, which caches for 5', async () => {
+      const { fetchImpl } = await warmAfterTurn({ id: 'opus', providerID: 'claude-agent', cost: [{ input: 15 }] });
+      await vi.advanceTimersByTimeAsync(WARMING_INTERVAL_MS);
+      expect(pings(fetchImpl)).toHaveLength(1);
+    });
   });
 });

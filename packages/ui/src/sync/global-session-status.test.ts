@@ -278,6 +278,9 @@ describe("what a session row says keeps its turn open", () => {
     expect(resolveSessionTurnActivity(null, false, false, true)).toBe("pullRequest")
     expect(resolveSessionTurnActivity(null, false, true, true)).toBe("shell")
     expect(resolveSessionTurnActivity("running", false, false, true)).toBe("running")
+    // An image the session waits on comes after a command and before a pull request.
+    expect(resolveSessionTurnActivity(null, false, false, true, true)).toBe("image")
+    expect(resolveSessionTurnActivity(null, false, true, false, true)).toBe("shell")
   })
 })
 

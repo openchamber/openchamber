@@ -1065,8 +1065,8 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
   }, [pushHostState, ready, directory]);
 
   React.useEffect(() => {
-    // A Work Status section or a file editor is not a rail tab and may be the package's only frame.
-    if (headless || surface === 'status' || surface === 'file' || surface === 'popover' || surface === 'block' || catalogStatus !== 'ready' || guest?.entry) {
+    // A Work Status section, file editor, block or full-screen page is not a rail tab and may be the package's only frame.
+    if (headless || surface === 'status' || surface === 'file' || surface === 'popover' || surface === 'block' || surface === 'page' || catalogStatus !== 'ready' || guest?.entry) {
       return;
     }
     closeGuestTabsEverywhere(mode);

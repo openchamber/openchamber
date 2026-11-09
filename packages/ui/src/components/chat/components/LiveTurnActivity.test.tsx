@@ -18,7 +18,6 @@ import { useUIStore } from '@/stores/useUIStore';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { projectTurnRecords } from '../lib/turns/projectTurnRecords';
 import type { ChatMessageEntry, TurnChangedFile, TurnRecord } from '../lib/turns/types';
-import { TurnFold, TurnPagesRow } from './LiveTurnActivity';
 import { useTurnFoldContexts } from './useTurnFold';
 import { LiveFinalActivityContext, LiveTurnHoistedPagesContext } from './liveActivityContext';
 import { buildTimelineRows } from '../lib/turns/timelineRows';
@@ -48,6 +47,10 @@ plugin({
         });
     },
 });
+
+// Loaded after the plugin: its markdown imports reach the worker URL import
+// that Bun cannot resolve on its own.
+const { TurnFold, TurnPagesRow } = await import('./LiveTurnActivity');
 
 const unavailable = (): never => { throw new Error('Activity rendering must not call runtime APIs'); };
 const runtimeApis: RuntimeAPIs = {

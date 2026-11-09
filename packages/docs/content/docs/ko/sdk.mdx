@@ -89,7 +89,7 @@ OpenChamber가 매니페스트를 읽고, 확장이 요구하는 항목을 나�
 
 `ctx.surface`는 `panel`, `dialog`, `page`, `status`, `block` 중 하나입니다. 첨부 항목을 클릭하면 해당 데이터가 `ctx.item`에 들어가며, 그 외에는 `null`입니다.
 
-`contributes.page: true`를 지정하면 세션 목록 위의 확장 프로그램 페이지 메뉴에서 전체 화면으로 열 수 있습니다. `{ "entry": "panel/page.html", "title": "Board" }`로 별도의 HTML과 선택적 제목을 지정합니다. `panel.entry`는 필수이며 샌드박스와 권한은 같습니다. 사용자만 페이지를 열 수 있습니다. 새로고침, 일시 중지, 제거, 서버 전환 시 닫힙니다.
+`contributes.page: true`를 지정하면 세션 목록 위의 확장 프로그램 페이지 메뉴에서 전체 화면으로 열 수 있습니다. `{ "entry": "panel/page.html", "title": "Board" }`로 별도의 HTML과 선택적 제목을 지정합니다. `true`는 `panel.entry`를 그대로 씁니다. 자체 `entry`가 있는 페이지는 레일 패널이 필요 없으므로, 전체 화면 페이지만 있는 확장도 됩니다. 샌드박스와 권한은 같습니다. 사용자만 페이지를 열 수 있습니다. 새로고침, 일시 중지, 제거, 서버 전환 시 닫힙니다.
 
 보드에는 `host.storage`와 프로젝트, worktree, 세션 목록 및 실시간 상태를 사용할 수 있습니다. `startSession`은 보드를 닫지 않고 다른 프로젝트를 지정합니다. [Host API](/sdk/host/)를 참고하세요.
 
@@ -108,7 +108,7 @@ OpenChamber가 매니페스트를 읽고, 확장이 요구하는 항목을 나�
 | `files` | 열린 프로젝트 안의 파일 읽고 쓰기(상대 경로를 쓰는 `readFile`, `writeFile`, `listDir`, `stat`) |
 | `model` | 세션 밖에서 사용자의 Small Model로 일회성 텍스트 생성(`generate`) |
 
-열 가지가 자동으로 추가됩니다. `integration`을 선언하면 `network`, `service`를 선언하면 `service`, `filesystem` 패턴을 선언하면 `filesystem`, `origins`를 선언하면 `origins`, 세션 작업이 메시지를 요청하면 `conversation`([작업, 명령, 배지](#작업-명령-배지) 참고), `sessionEvents`나 `sessionControl`이 `content`를 요청하면 `transcript`([세션 이벤트](/sdk/host/#세션-이벤트) 참고), 서비스가 세션을 다루면 `sessionControl`([OpenChamber 호출](/sdk/host/#서비스에서-openchamber-호출하기) 참고), 에이전트가 읽는 내용에 추가하면 `instructions`, `contributes.skills`를 선언하면 `skills`입니다. `contributes.skills`는 패키지 안의 스킬 폴더로, 확장이 켜져 있는 동안 모든 에이전트에게 전달됩니다. `contributes.opencodePlugin`을 선언하면 `opencodePlugin`도 추가됩니다(아래 참고).
+열두 가지가 자동으로 추가됩니다. `integration`을 선언하면 `network`, `service`를 선언하면 `service`, `filesystem` 패턴을 선언하면 `filesystem`, `origins`를 선언하면 `origins`, 세션 작업이 메시지를 요청하면 `conversation`([작업, 명령, 배지](#작업-명령-배지) 참고), `sessionEvents`나 `sessionControl`이 `content`를 요청하면 `transcript`([세션 이벤트](/sdk/host/#세션-이벤트) 참고), 서비스가 세션을 다루면 `sessionControl`([OpenChamber 호출](/sdk/host/#서비스에서-openchamber-호출하기) 참고), 서비스가 사용자 대신 에이전트의 권한 요청과 폼에 응답하면 `sessionAnswers`(`sessionControl: { answers: true }`), 에이전트가 읽는 내용에 추가하면 `instructions`, `contributes.skills`를 선언하면 `skills`입니다. `contributes.skills`는 패키지 안의 스킬 폴더로, 확장이 켜져 있는 동안 모든 에이전트에게 전달됩니다. `contributes.opencodePlugin`을 선언하면 `opencodePlugin`(아래 참고), `contributes.links`를 선언하면 `links`([채팅 메시지의 링크](#채팅-메시지의-링크) 참고)도 추가됩니다.
 
 사용자는 확장을 설치할 때 전체 목록을 한 번 보고, 승인하거나 확장을 제거합니다. 새 버전이 더 많은 권한을 요구하면 대화상자가 다시 나타납니다. 사용자가 승인하지 않은 권한이 필요한 호출은 `NOT_GRANTED`로 실패합니다.
 
@@ -130,6 +130,25 @@ OpenChamber가 매니페스트를 읽고, 확장이 요구하는 항목을 나�
 그 파일이 OpenCode에 닿지 않는 경우 확장의 화면이 그렇게 말하고 **전역 설정에 추가**를 제안합니다. 이는 당신의 폴더를 사용자의 전역 OpenCode 설정에, 그때부터 사용자 소유인 항목으로 씁니다. OpenChamber가 대화 상대인 OpenCode를 시작하지 않았을 때, 또는 서버 환경이 자체 `OPENCODE_CONFIG`를 설정했을 때(이때 플러그인은 다음 OpenCode 시작 시 불러와집니다) 해당합니다. 다른 컴퓨터의 OpenCode는 이 컴퓨터의 폴더를 불러올 수 없습니다. 화면은 그렇게 말하고 아무것도 제안하지 않습니다. 불러오기에 실패한 플러그인은 항목이 있을 때 설정 → Plugins에서 OpenCode가 보고합니다. 어느 경우든 확장은 계속 동작합니다. 플러그인 폴더가 없거나 그 `package.json`에 진입 파일이 없는 패키지는 설치가 거부됩니다.
 
 VS Code와 모바일 앱은 확장을 불러오지 않으므로 플러그인도 전달되지 않습니다. 격리된 공간 안의 세션은 자체 OpenCode를 실행하며 호스트의 설정을 읽지 않습니다. 엔터프라이즈 모드는 플러그인을 로컬 서비스처럼 다룹니다. 관리자가 등록한 저장소에서만 설치됩니다. SDK에는 동작하는 예제 `examples/opencode-plugin`이 있습니다.
+
+## 채팅 메시지의 링크
+
+확장은 채팅 메시지에서 자신의 식별자와 링크를 클릭할 수 있게 만들 수 있습니다. 그러면 에이전트 답변 속 `DEMO-12`가 브라우저 탭 대신 내 확장에서 그 작업을 엽니다. 무엇을 인식할지와 클릭하면 무엇을 할지 선언하세요.
+
+```json
+"links": {
+  "action": "open",
+  "identifier": { "keys": ["DEMO"] },
+  "urls": { "origin": "https://tasks.example.com", "identifier": "key-number", "item": ["/tasks/{id}"] }
+}
+```
+
+- `identifier.keys`는 최대 8개의 고정된 대문자 키입니다. `DEMO`는 `DEMO-12`가 하나의 단어로 있을 때만 인식합니다. 코드, 링크, 경로, `XDEMO-1` 같은 단어, `DEMO-1.5` 같은 버전은 텍스트로 남습니다.
+- `urls`는 하나의 https origin에 있는 링크를 인식하며, origin은 정확히 일치해야 합니다. `item`은 트래커가 쓰는 형태 그대로의 링크 템플릿입니다. `{id}`는 경로 안이나 `?name={id}`로 한 번만 쓰고, 바뀌는 부분에는 `{segment}`나 `{segments+}`를 씁니다. `identifier`는 `{id}`의 모양을 정하며 `key-number`, `number`, `short-code` 중 하나입니다. 정규식은 직접 쓰지 않습니다. OpenChamber가 템플릿을 컴파일합니다.
+- `action: "open"`은 `ready.item`(또는 `onItem`)을 `{ kind: "link", identifier, url? }`로 설정해 확장을 엽니다. `attach`가 `"dialog"`이면 내 대화상자에서, 아니면 레일 패널에서 열립니다. `isGuestLinkItem`으로 타입을 좁히세요. `panel.entry`가 필요합니다. `url`은 클릭한 링크에서 프래그먼트와, 템플릿 자체에 없는 쿼리 매개변수를 뺀 것입니다. 텍스트 속 식별자라면 `{segment}`가 없는 템플릿이 있고 식별자가 `urls.identifier`에 선언한 모양일 때 그중 첫 템플릿이 만드는 링크입니다(`DEMO-12`는 `number`에 들어가지 않습니다).
+- `action: "attach"`는 대신 식별자가 담긴 칩을 채팅창에 붙이며, 칩이 자기 링크를 가리킬 수 있도록 `{segment}`나 `{segments+}`가 없는 템플릿이 필요합니다. `identifier.keys`를 쓰면 `urls.identifier`는 `number`일 수 없습니다.
+
+인식은 에이전트 답변과 사용자 자신의 메시지에서 이루어지며, 추론, 도구 출력, Files 보기에서는 이루어지지 않습니다. 메시지를 복사하면 쓰인 그대로의 텍스트가 복사됩니다. OpenChamber가 직접 읽는 링크, 즉 트래커 항목, 저장소의 issue나 pull request, 커밋은 평소대로 동작하고, 보조 키를 누른 채 클릭하면 브라우저의 원래 동작이 유지됩니다. `links`를 선언하면 `links` 권한이 추가됩니다. 승인 대화상자에는 키와 origin, 클릭하면 무엇을 하는지가 표시되고, 그중 하나라도 바꾸는 버전은 다시 승인을 요청합니다. `examples/tasks-demo`는 `DEMO-2`와 `https://example.com/tasks/DEMO-2`를 인식합니다.
 
 ## 텍스트 생성
 
@@ -209,7 +228,7 @@ const { entries } = await host.listDir(".");
 - `title`은 섹션 제목에서 패널 이름을 대신하며, 최대 60자입니다.
 - `height`는 픽셀 단위 시작 높이로 24~480이며 기본값은 120입니다. 콘텐츠 크기가 바뀌면 [`host.setHeight()`](/sdk/host/)를 호출하세요.
 
-페이지에서 `ctx.surface`는 `status`입니다. OpenChamber는 Work Status 패널이 보이고 섹션이 펼쳐져 있는 동안에만 페이지를 불러오고, 사용자가 섹션을 접으면 내립니다. 그러니 다시 만들 수 없는 상태는 두지 마세요. 섹션만 있는 확장은 권한, 서비스, 통합, 파일을 쓸 수 있지만 `page`, `attach`, `actions`, `commands`는 쓸 수 없습니다. 웹과 데스크톱 전용입니다. `git-graph-status` 예제가 완성된 섹션입니다.
+페이지에서 `ctx.surface`는 `status`입니다. OpenChamber는 Work Status 패널이 보이고 섹션이 펼쳐져 있는 동안에만 페이지를 불러오고, 사용자가 섹션을 접으면 내립니다. 그러니 다시 만들 수 없는 상태는 두지 마세요. 섹션만 있는 확장은 권한, 서비스, 통합, 파일, 자체 `entry`가 있는 페이지를 쓸 수 있지만 `page: true`, `attach`, `actions`, `commands`는 쓸 수 없습니다. 웹과 데스크톱 전용입니다. `git-graph-status` 예제가 완성된 섹션입니다.
 
 ## 내 파일 형식용 편집기
 
@@ -266,7 +285,7 @@ host.onFileSnapshot(() => ({ bytes: currentBytes(), version: versionOf(currentBy
 
 바이너리 편집기는 패턴이 일치하는 파일이라면 무엇이든 맡을 수 있으며, 이미지나 PDF처럼 OpenChamber가 직접 미리 보여 주는 파일도 포함됩니다. 소스 보기는 없고, 저장하지 않은 변경이 있는 상태에서 사용자가 편집기를 전체 화면으로 전환하거나 전체 화면에서 나오면 OpenChamber가 먼저 저장합니다. 형식을 읽고 쓰는 일은 편집기의 몫입니다. OpenChamber는 반환한 바이트를 그대로 다시 씁니다.
 
-페이지에서 `ctx.surface`는 `file`입니다. 디스크에서 파일이 바뀌거나, 사용자가 변경을 버리거나, 편집기가 전체 화면으로 들어가거나 나올 때 OpenChamber는 페이지를 다시 불러오고 파일을 다시 넘겨줍니다. 패턴이 일치하는 활성화된 확장 중 첫 번째가 선택되며, OpenChamber 자체 미리 보기보다 우선합니다. 편집기만 있는 확장은 권한, 서비스, 통합, 파일을 쓸 수 있지만 `page`, `attach`, `actions`, `commands`는 쓸 수 없습니다. 웹과 데스크톱 전용입니다. `checklist-editor` 예제가 완성된 편집기입니다.
+페이지에서 `ctx.surface`는 `file`입니다. 디스크에서 파일이 바뀌거나, 사용자가 변경을 버리거나, 편집기가 전체 화면으로 들어가거나 나올 때 OpenChamber는 페이지를 다시 불러오고 파일을 다시 넘겨줍니다. 패턴이 일치하는 활성화된 확장 중 첫 번째가 선택되며, OpenChamber 자체 미리 보기보다 우선합니다. 편집기만 있는 확장은 권한, 서비스, 통합, 파일, 자체 `entry`가 있는 페이지를 쓸 수 있지만 `page: true`, `attach`, `actions`, `commands`는 쓸 수 없습니다. 웹과 데스크톱 전용입니다. `checklist-editor` 예제가 완성된 편집기입니다.
 
 ## 작업, 명령, 배지
 
@@ -322,7 +341,19 @@ OpenCode 플러그인이나 MCP 서버가 도구를 추가하면 채팅은 그 �
 
 `match`는 OpenCode가 보고하는 도구 이름이며, 끝의 `*`는 접두사와 일치합니다. `icon`은 Remixicon 이름이거나 패키지 안의 `.svg` 파일이며, `panel.icon`과 같습니다. `title`과 `subtitle`은 호출의 `input`, `output`, `metadata`를 쓰는 템플릿입니다. `output`은 본문을 그리는 방식을 고릅니다. `text`, `json`(트리), `markdown`, `language`가 있는 `code`, `columns`가 있는 `table`(행은 출력 배열이나 `output.items`에서 가져옵니다), 또는 기본값인 `auto`입니다. 정확한 `match`가 와일드카드보다 우선하고, 동점이면 먼저 설치된 확장이 이깁니다. 권한은 필요 없습니다. 이미 채팅에 있는 데이터를 그리는 방식만 바꾸기 때문입니다.
 
-도구 모양만 꾸미는 확장에는 페이지가 전혀 필요 없습니다. `panel.entry`를 생략하면 레일에 아이콘이 없고, 설정 → 확장 에 카드만 표시됩니다. 페이지가 없으면 `tools`만 선언하고 다른 것은 선언하지 않아도 됩니다. 또 다른 예외는 자체 `entry`가 있는 Work Status 섹션이나 파일 편집기입니다(위 참고).
+도구 모양만 꾸미는 확장에는 페이지가 전혀 필요 없습니다. `panel.entry`를 생략하면 레일에 아이콘이 없고, 설정 → 확장 에 카드만 표시됩니다. 페이지가 없으면 `tools`와 `providerLogos`만 선언할 수 있습니다. 또 다른 예외는 자체 `entry`가 있는 Work Status 섹션, 파일 편집기, 전체 화면 페이지입니다(위 참고).
+
+## 프로바이더 로고
+
+OpenCode 플러그인이 모델 프로바이더를 등록하면 모델 선택기와 설정에는 보통 일반 표시가 나타납니다. 패키지에 로고를 넣고 프로바이더를 지정하면 코드 없이 표시할 수 있습니다.
+
+```json
+"providerLogos": {
+  "acme-cloud": "assets/acme-cloud.svg"
+}
+```
+
+키는 OpenCode가 보고하는 프로바이더 ID입니다. 값은 패키지 안의 `.svg` 또는 `.png` 파일이며 크기는 최대 1 MB입니다. 파일이 없거나 비어 있거나 더 크면 설치가 실패합니다. 패키지 하나에 프로바이더를 최대 256개까지 지정할 수 있으며, 두 ID가 같은 파일을 가리킬 수도 있습니다. 로고는 원래 색을 유지하고, SVG의 `currentColor`는 라이트 또는 다크 테마를 따릅니다. 앱에 포함된 해당 ID의 로고를 대체합니다. 사용자가 그 프로바이더에 설정한 항목이 먼저 적용되며, 충돌하면 먼저 설치한 확장이 우선합니다. 권한은 필요 없습니다. VS Code와 휴대폰은 확장을 불러오지 않으므로 이 로고가 표시되지 않습니다.
 
 ## 패널의 첫 줄
 
