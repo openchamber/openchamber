@@ -50,6 +50,8 @@ import { TextSelectionMenu } from './TextSelectionMenu';
 import { useChatSurfaceMode } from '@/components/chat/useChatSurfaceMode';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
+import { opencodeClient } from '@/lib/opencode/client';
+import { openTurnFileDiffInEditor } from './openTurnFileDiffInEditor';
 import { toast } from '@/components/ui';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Icon } from "@/components/icon/Icon";
@@ -154,14 +156,26 @@ const StaticTurnChangedFilePills = React.memo(({ files }: { files: TurnChangedFi
 ));
 
 const InteractiveTurnChangedFilePills = React.memo(({ files }: { files: TurnChangedFile[] }) => {
+    const { t } = useI18n();
     const effectiveDirectory = useEffectiveDirectory();
     const isMobile = useUIStore((state) => state.isMobile);
     const navigateToDiff = useUIStore((state) => state.navigateToDiff);
     const openContextDiff = useUIStore((state) => state.openContextDiff);
     const setPendingTurnDiffFile = useUIStore((state) => state.setPendingTurnDiffFile);
     const mobileActions = useMobileAppActions();
+    const runtime = useRuntimeAPIs();
 
     const openLastTurnDiff = React.useCallback((file: string) => {
+        const editor = runtime.editor;
+        if (runtime.runtime.isVSCode && editor && effectiveDirectory) {
+            const sessionId = useSessionUIStore.getState().currentSessionId;
+            if (!sessionId) return;
+            void opencodeClient.getSessionTurnDiff(sessionId, { directory: effectiveDirectory })
+                .then((turnDiff) => openTurnFileDiffInEditor({ directory: effectiveDirectory, editor, file, turnDiff }))
+                .catch(() => toast.error(t('diffView.state.failedToLoadDiff')));
+            return;
+        }
+
         if (mobileActions) {
             mobileActions.openChanges({ diffPath: file, scope: 'turn' });
             return;
@@ -174,7 +188,7 @@ const InteractiveTurnChangedFilePills = React.memo(({ files }: { files: TurnChan
         }
 
         navigateToDiff(file, false, 'turn');
-    }, [effectiveDirectory, isMobile, mobileActions, navigateToDiff, openContextDiff, setPendingTurnDiffFile]);
+    }, [effectiveDirectory, isMobile, mobileActions, navigateToDiff, openContextDiff, runtime, setPendingTurnDiffFile, t]);
 
     return (
         <>
