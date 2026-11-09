@@ -2757,6 +2757,12 @@ async function main(options = {}) {
   }));
   expressApp = app;
   server = http.createServer(app);
+  // A reverse proxy keeps idle upstream sockets pooled for 60-120 s (nginx,
+  // load balancers, cloudflared, Caddy). The runtime default closes them after
+  // 5 s, so a proxy that reuses one just as it closes answers 502. Outlive the
+  // proxy's pool instead; headersTimeout must stay above keepAliveTimeout.
+  server.keepAliveTimeout = 125_000;
+  server.headersTimeout = 126_000;
   gracefulShutdownRuntime.trackServerConnections(server);
   // A policy placed while the server runs cannot rebind it, so connections
   // from other machines are dropped until the next start binds loopback.
