@@ -368,17 +368,30 @@ const prepareStructuredText = async (file: File, extension: string): Promise<Fil
   return new File([text], file.name, { type: "text/plain" })
 }
 
-const convertHeicToJpeg = async (file: File): Promise<File | undefined> => {
+/**
+ * A HEIC/HEIF image the bundled decoder cannot read. Apple's HDR gain-map
+ * photos are the known case: the vendored `heic2any` predates that format.
+ * The attachment is still refused, but the caller can now name the cause
+ * instead of falling back to the generic "failed to attach" toast.
+ */
+export class HeicConversionError extends Error {
+  constructor(file: File) {
+    super(`Could not convert ${file.name} from HEIC to JPEG`)
+    this.name = "HeicConversionError"
+  }
+}
+
+const convertHeicToJpeg = async (file: File): Promise<File> => {
   try {
     const heic2any = (await import("heic2any")).default
     const converted = await heic2any({ blob: file, toType: "image/jpeg", quality: 0.9 })
     const blob = Array.isArray(converted) ? converted[0] : converted
-    if (!blob) return
+    if (!blob) throw new Error("the decoder returned no image")
     const filename = file.name.replace(/\.(heic|heif)$/i, ".jpg")
     return new File([blob], filename, { type: "image/jpeg" })
   } catch (error) {
     console.warn("Failed to convert HEIC attachment to JPEG", error)
-    return
+    throw new HeicConversionError(file)
   }
 }
 
@@ -388,9 +401,7 @@ export const prepareAttachmentFile = (
   const extension = extensionOf(file.name)
   const type = declaredMimeOf(file)
   if (type === "image/heic" || type === "image/heif" || extension === "heic" || extension === "heif") {
-    return convertHeicToJpeg(file).then((converted) => converted
-      ? { file: converted, mimeType: "image/jpeg" }
-      : undefined)
+    return convertHeicToJpeg(file).then((converted) => ({ file: converted, mimeType: "image/jpeg" }))
   }
   if (extension === "har" || extension === "ipynb") {
     return prepareStructuredText(file, extension).then((prepared) => prepared
@@ -418,7 +429,15 @@ export const prepareAttachmentFiles = (
     if (!extracted) return
     const prepared: PreparedAttachmentFile[] = [{ file: extracted.textFile, mimeType: "text/plain" }]
     for (const image of extracted.images) {
-      const output = await prepareAttachmentFile(image)
+      let output: PreparedAttachmentFile | undefined
+      try {
+        output = await prepareAttachmentFile(image)
+      } catch (error) {
+        // An image inside a document that cannot be converted leaves the
+        // document unreadable as an attachment, as it did before; the file the
+        // user dropped is not the HEIC here, so the reason is not theirs to fix.
+        if (!(error instanceof HeicConversionError)) throw error
+      }
       if (!output || !output.mimeType.startsWith("image/")) return
       prepared.push(output)
     }

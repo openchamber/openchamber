@@ -2,8 +2,10 @@ import { afterAll, expect, mock, test } from 'bun:test';
 import { strToU8, zipSync } from 'fflate';
 import { attachmentBasename, attachmentWireName } from '@/lib/attachmentIdentity';
 
+let decodeHeic = async (): Promise<Blob> => new Blob(['jpeg-data'], { type: 'image/jpeg' });
+
 mock.module('heic2any', () => ({
-  default: async () => new Blob(['jpeg-data'], { type: 'image/jpeg' }),
+  default: async () => decodeHeic(),
 }));
 
 /**
@@ -223,3 +225,20 @@ for (const extension of ['heic', 'heif']) {
     if (file) expect(attachmentBasename(attachmentWireName(file))).toBe(file.filename);
   });
 }
+
+test('a HEIC the decoder cannot read names the cause instead of only failing', async () => {
+  const { useInputStore } = await import('./input-store');
+  useInputStore.getState().clearAttachedFiles();
+  decodeHeic = async () => {
+    throw new Error('ERR_LIBHEIF format not supported');
+  };
+  try {
+    await expect(
+      useInputStore.getState().addAttachedFile(new File(['heic-data'], 'IMG_4015.heic', { type: 'image/heic' })),
+    ).rejects.toThrow('IMG_4015.heic could not be converted from HEIC to JPEG');
+    // The generic "failed to attach" toast stays for every other cause.
+    expect(useInputStore.getState().attachedFiles).toHaveLength(0);
+  } finally {
+    decodeHeic = async () => new Blob(['jpeg-data'], { type: 'image/jpeg' });
+  }
+});

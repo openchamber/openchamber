@@ -8,7 +8,7 @@ import type { AttachIssueRequest } from '@openchamber/sdk'
 import type { ContextPartMetadata } from '@/lib/messages/contextParts'
 import type { AttachedFile } from "@/stores/types/sessionTypes"
 import type { InlineCommentDraftTarget } from "@/stores/useInlineCommentDraftStore"
-import { prepareAttachmentFiles } from "./attachment-files"
+import { HeicConversionError, prepareAttachmentFiles } from "./attachment-files"
 import { getChatDraftIdentityKey, subscribeChatDraftDeletion, type ChatDraftIdentity } from "@/lib/chatDraftPersistence"
 import { pathForDroppedFile } from "@/lib/desktop"
 import { attachmentBasename } from "@/lib/attachmentIdentity"
@@ -459,7 +459,15 @@ export const useInputStore = create<InputState>()((set, get) => ({
       let attachedFiles: AttachedFile[] | undefined
       try {
         attachedFiles = await prepareLocalAttachments(file, reservedFilenames)
-      } catch {
+      } catch (error) {
+        // A HEIC the bundled decoder cannot read (Apple HDR gain-map photos)
+        // used to fall through to the generic "failed to attach" toast. Name
+        // the cause: the photo needs to be saved as JPEG to attach.
+        if (error instanceof HeicConversionError) {
+          throw new Error(formatMessage(useI18nStore.getState().dictionary, 'chat.fileAttachment.toast.heicConversionFailed', {
+            name: file.name,
+          }))
+        }
         return false
       }
       if (generation !== attachmentReadGeneration) return false
