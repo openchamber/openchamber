@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import type { JsonValue } from '@/lib/opencode/model';
-import { hasOpenChamberView, parseOpenChamberEnvelope, secretRowView, tightestWindow } from './openChamberToolEnvelope';
+import { hasOpenChamberView, parseOpenChamberEnvelope, secretRowView, sessionsListedSchema, tightestWindow } from './openChamberToolEnvelope';
 
 const envelope = (body: { [key: string]: JsonValue }) => JSON.stringify({ schemaVersion: 1, ...body });
 
@@ -22,6 +22,16 @@ describe('parseOpenChamberEnvelope', () => {
     expect(parseOpenChamberEnvelope('done')).toBeNull();
     expect(parseOpenChamberEnvelope('')).toBeNull();
     expect(parseOpenChamberEnvelope(undefined)).toBeNull();
+  });
+});
+
+describe('sessionsListedSchema', () => {
+  test('reads the folder of a listed session, and of one stored before the list was trimmed', () => {
+    const parsed = sessionsListedSchema.parse({ sessions: [
+      { id: 'ses_new', title: 'New', directory: '/repo', inWork: true },
+      { id: 'ses_old', title: 'Old', location: { directory: '/old' }, time: { updated: 1 } },
+    ] });
+    expect(parsed.sessions.map(({ id, directory }) => [id, directory])).toEqual([['ses_new', '/repo'], ['ses_old', '/old']]);
   });
 });
 

@@ -2193,6 +2193,8 @@ serviceHostApi.register();
 
 const openChamberControlService = createOpenChamberControlService({
   chatsScope: scheduledChatsScope,
+  chatRoots: [path.join(OPENCHAMBER_USER_CONFIG_ROOT, 'chats'), OPENCHAMBER_CHATS_DIR],
+  updateSessionMetadata: updateSessionMetadataWith,
   readPendingRequests: () => sessionRuntime.getPendingBlockingRequestsSnapshot(),
   isPermissionAutoAnswered: (sessionId, directory, permissionId) => permissionAutoAcceptRuntime.isPermissionAutoAnswered(sessionId, directory, permissionId),
   readSettingsFromDiskMigrated,

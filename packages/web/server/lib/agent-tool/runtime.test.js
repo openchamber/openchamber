@@ -89,6 +89,8 @@ describe('agent tool action allowlist', () => {
     'session.fork',
     'session.status',
     'session.messages',
+    'session.markDone',
+    'session.track',
     'schedule.list',
     'schedule.create',
     'schedule.run',

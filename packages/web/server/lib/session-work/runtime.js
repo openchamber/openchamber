@@ -26,6 +26,7 @@ import { loadAssistContext } from '../session-assist/context.js';
 import { turnsToHistory, excerptHead, excerptHeadTail } from '../routing/history.js';
 import { buildTurnEndRequest, decideAssist, decideReviewReady, decideWrapUp } from './questions.js';
 import { clearSuggestionPatch, offerReviewPatch, openPatch, readWork, suggestDonePatch } from './state.js';
+import { createWorkMembership } from './membership.js';
 
 const OPENCHAMBER_SETTINGS_FILE = path.join(
   process.env.OPENCHAMBER_DATA_DIR
@@ -84,12 +85,6 @@ const busySchema = z.object({
   properties: z.object({ sessionID: z.string().min(1), status: z.object({ type: z.literal('busy') }) }),
 });
 
-/**
- * Sessions that are not the user's own work: a review of another session, a
- * `/btw` side question forked off one, a run of a scheduled task.
- */
-const notWorkSessionSchema = z.object({ openchamber: z.object({ kind: z.enum(['review', 'btw', 'scheduled']) }) });
-
 export function createSessionWorkRuntime({
   buildOpenCodeUrl,
   getOpenCodeAuthHeaders,
@@ -109,12 +104,7 @@ export function createSessionWorkRuntime({
   now = Date.now,
   openRetryDelaysMs = OPEN_RETRY_DELAYS_MS,
 }) {
-  const resolvedChatRoots = chatRoots.filter(Boolean).map((root) => path.resolve(root));
-  const isChatDirectory = (directory) => {
-    if (!directory) return false;
-    const resolved = path.resolve(directory);
-    return resolvedChatRoots.some((root) => resolved === root || resolved.startsWith(`${root}${path.sep}`));
-  };
+  const { canBeInWork } = createWorkMembership({ chatRoots });
   let stopped = false;
   // Messages already taken: each starts its turn and its open once, however
   // often the stream delivers it.
@@ -164,10 +154,7 @@ export function createSessionWorkRuntime({
   const workSession = async (client, sessionId, signal) => {
     const session = await client.session.get({ sessionID: sessionId }, { signal });
     if (session?.id === sessionId) lineage?.remember(sessionId, session.parentID ?? null);
-    if (session?.id !== sessionId || session.parentID) return null;
-    if (isChatDirectory(session.location?.directory ?? session.directory)) return null;
-    if (notWorkSessionSchema.safeParse(session.metadata).success) return null;
-    return session;
+    return session?.id === sessionId && canBeInWork(session) ? session : null;
   };
 
   /** `workSession`, and only while it is not archived. */
