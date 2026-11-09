@@ -115,6 +115,11 @@ in that user's sessions. On the fallback path the same rules are merged into
   `theme-catalog.js` owns POST catalog search/package routes under
   `/api/config/themes/catalog/`. It fetches only Open VSX and its Eclipse CDN over
   HTTPS, validates redirects and checksums, and verifies packaged identity.
+  An empty search query returns the most downloaded color themes; the catalog
+  opens on them. The Themes category also holds icon themes, VS Code's built-ins
+  and tools that ship a theme on the side, so the popular list keeps entries
+  outside the `vscode` namespace whose name has no "icon" and whose name or
+  description speaks of a theme or colors.
   `theme-archive.js` reads selected JSON entries in memory with bounded decompression.
   JSON includes and token references stay inside the package. Each failed variant
   is reported separately so valid siblings remain available. No extension code runs.
@@ -1205,7 +1210,16 @@ within a ten-minute overall deadline.
       channel through `checkForUpdates`. The desktop app keeps its own
       `desktopUpdateChannel`. The Android app ships only as Canary until it
       has a store release: every Android build, an APK from an earlier release
-      included, is offered the newest APK of the `canary` GitHub pre-release. Other app types stay on releases.
+      included, is offered the newest APK of the `canary` GitHub pre-release, downloaded from the R2 mirror (`downloads.openchamber.dev/desktop/canary/`) once canary.yml put it there. Other app types stay on releases.
+  - `GET /api/openchamber/release-notes?version=&since=`
+    - Settings → About shows these. The answer is the releases of `version` as data, `{ releases: [{ version, date, title, intro, groups: [{ key, bullets }] }] }`,
+      read from the website API's `/v1/changelog/full`, which keeps the last
+      good copy through a GitHub outage, else from `changelog/index.json` on
+      `main`; a Canary version reads the Canary nights
+      (`lib/changelog/update-notes.js`). With an older `since`
+      it lists what an update brings, `(since, version]`; otherwise `version`
+      alone. An empty list means the changelog has no notes for it; 502 means
+      no source could be read, so the page never shows an outage as "no notes".
   - `POST /api/openchamber/update-install`
     - A copy no package manager installed answers 409 before any command
       runs: a global install would add a second copy and leave the running

@@ -708,3 +708,38 @@ Project colours are six-digit hex from the same presets as agents
 (`iconBackgroundForProjectColor`). Projects saved by older builds may carry a
 theme key; `resolveProjectColor` in `lib/projectMeta.ts` still paints those,
 and the colour field shows them as a selected swatch until the user picks again.
+
+## Appearance: color mode and theme list
+
+`openchamber/ThemeAppearancePicker.tsx` owns the color mode cards and the
+theme list; `openchamber/ThemeSchematic.tsx` draws the app on the cards.
+
+- The schematic paints each part with the token the real component uses, with
+  `cssGenerator`'s fallback chain and the opacity the component puts on top
+  (message text at 90%, the selected session row at 70%, the effort label at
+  75%, inline code and its background). A component that changes its token or
+  opacity changes the schematic in the same change, or the cards stop showing
+  what the theme looks like.
+- Colours come from the `Theme` object, never from CSS variables: the cards
+  show themes that are not active.
+- The drawing follows the device: the phone layout under `isMobile`, the
+  desktop layout elsewhere.
+- Hovering a theme previews it on the cards and applies nothing. Touch has no
+  hover, so a tap selects at once.
+- The list keeps the chosen theme in view when it opens, when the tab changes
+  and when its column count changes; a scroll that reaches its end goes on to
+  the page.
+- Imported themes show their delete action in the list at rest, so it is
+  clear which themes are imported.
+
+### Why one variant at a time and not both swatches per row
+
+Each row once held a light and a dark swatch with four status dots each; at
+thirty themes the list became a wall of dots. A Light / Dark switch shows one
+column of choices, the cards above carry the preview, and each row needs only
+the theme's canvas and accent.
+
+### Why the list scrolls on its own
+
+Imported themes add up quickly (the catalog, a themes folder). Without a cap
+the page below the list moves further down with every import.

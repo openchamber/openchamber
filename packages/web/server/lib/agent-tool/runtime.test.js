@@ -47,11 +47,13 @@ const prepareManagedEnv = async (runtime, options) => {
 // `hooks` collects the session hooks the plugin registers, by name, and
 // `removed` the ids of OpenCode's own tools it takes away, `namespaces` the
 // namespaces it registers.
-const loadTools = async (dataDir, tag, hooks = {}, removed = [], namespaces = []) => {
+// `context` adds plugin context domains a test needs, such as `permission`.
+const loadTools = async (dataDir, tag, hooks = {}, removed = [], namespaces = [], context = {}) => {
   const entrypoint = path.join(pluginDirectoryFor(dataDir), 'index.js');
   const pluginModule = await import(`${pathToFileURL(entrypoint).href}?${tag}=${Date.now()}`);
   const registered = {};
   await pluginModule.default.setup({
+    ...context,
     tool: {
       transform: (edit) => {
         edit({
@@ -87,6 +89,8 @@ describe('agent tool action allowlist', () => {
     'session.fork',
     'session.status',
     'session.messages',
+    'session.markDone',
+    'session.track',
     'schedule.list',
     'schedule.create',
     'schedule.run',
@@ -727,11 +731,69 @@ describe('managed agent tool runtime', () => {
     const tools = await loadTools(dataDir, 'secret', hooks);
 
     expect(Object.keys(tools)).toEqual(['openchamber_secret']);
-    expect(Object.keys(tools.openchamber_secret.input.properties.parameters.properties).sort()).toEqual(['label', 'placeholder', 'reason']);
+    expect(Object.keys(tools.openchamber_secret.input.properties.parameters.properties).sort())
+      .toEqual(['args', 'inputs', 'label', 'placeholder', 'program', 'reason', 'timeoutMs']);
     expect(tools.openchamber_secret.options).toEqual({ codemode: false });
     expect(tools.openchamber_secret.description.length).toBeLessThanOrEqual(2048);
     // A chat message ends the wait, like a page's.
     expect(hooks.prompt).toBeInstanceOf(Function);
+  });
+
+  it('asks the shell permission for a secret.run command line before the call reaches OpenChamber', async () => {
+    const { runtime, dataDir } = await createRuntime();
+    const prepared = await prepareManagedEnv(runtime, { includeControl: false, includeWeb: false, includeMemory: false, includeSecret: true });
+    const asserted = [];
+    let refuse = false;
+    const permission = { assert: async (input) => { asserted.push(input); if (refuse) throw new Error('The user rejected permission'); } };
+    const tools = await loadTools(dataDir, 'secret-run', {}, [], [], { permission });
+    const sent = [];
+    const originalFetch = globalThis.fetch;
+    const originalUrl = process.env.OPENCHAMBER_AGENT_TOOL_URL;
+    const originalToken = process.env.OPENCHAMBER_AGENT_TOOL_TOKEN;
+    process.env.OPENCHAMBER_AGENT_TOOL_URL = prepared.OPENCHAMBER_AGENT_TOOL_URL;
+    process.env.OPENCHAMBER_AGENT_TOOL_TOKEN = prepared.OPENCHAMBER_AGENT_TOOL_TOKEN;
+    const result = { schemaVersion: 1, ok: true, action: 'secret.run', data: { answer: { status: 'ran', outcome: 'exited', exitCode: 0 } } };
+    globalThis.fetch = async (_endpoint, init) => {
+      sent.push(JSON.parse(init.body));
+      return new Response(JSON.stringify(result));
+    };
+    const context = { sessionID: 'ses_1', agent: 'build', messageID: 'msg_1', id: 'call_1', progress: async () => {} };
+    const input = { action: 'run', program: 'wrangler', args: ['deploy', 'my worker'], reason: 'Deploy', inputs: [{ env: 'TOKEN', label: 'Token' }] };
+
+    try {
+      const answer = await tools.openchamber_secret.execute(input, context);
+      expect(asserted).toEqual([expect.objectContaining({
+        sessionID: 'ses_1', agent: 'build', action: 'shell', resources: ["wrangler deploy 'my worker'"], save: ['wrangler *'],
+        source: { type: 'tool', messageID: 'msg_1', id: 'call_1' },
+      })]);
+      expect(sent).toEqual([expect.objectContaining({ tool: 'openchamber_secret', input: expect.objectContaining({ action: 'secret.run' }) })]);
+      expect(JSON.parse(answer.content)).toEqual(result);
+      expect(answer.metadata.openchamber.answer).toEqual({ status: 'ran', outcome: 'exited', exitCode: 0 });
+
+      // A refused command never reaches OpenChamber, and the refusal propagates.
+      refuse = true;
+      await expect(tools.openchamber_secret.execute(input, context)).rejects.toThrow('rejected');
+      expect(sent).toHaveLength(1);
+
+      // A malformed call asks nothing.
+      const malformed = await tools.openchamber_secret.execute({ ...input, args: 'deploy' }, context);
+      expect(JSON.parse(malformed.content)).toMatchObject({ ok: false, error: { kind: 'usage' } });
+      expect(asserted).toHaveLength(2);
+    } finally {
+      globalThis.fetch = originalFetch;
+      if (originalUrl === undefined) delete process.env.OPENCHAMBER_AGENT_TOOL_URL;
+      else process.env.OPENCHAMBER_AGENT_TOOL_URL = originalUrl;
+      if (originalToken === undefined) delete process.env.OPENCHAMBER_AGENT_TOOL_TOKEN;
+      else process.env.OPENCHAMBER_AGENT_TOOL_TOKEN = originalToken;
+    }
+  });
+
+  it('lets only the secret tool start a secret.run, and in the session OpenCode reported', async () => {
+    const { runtime, executeAction } = await createRuntime();
+    await runtime.execute({ tool: 'openchamber_secret', input: { action: 'run' }, sessionID: 'ses_a', contextSessionId: 'ses_other', callID: 'call_1' });
+    expect(executeAction).toHaveBeenLastCalledWith('secret.run', expect.anything(), undefined, expect.objectContaining({ secretRunAuthorized: true, contextSessionId: 'ses_a' }));
+    await runtime.execute({ input: { action: 'secret.run' }, sessionID: 'ses_a' });
+    expect(executeAction.mock.lastCall[3].secretRunAuthorized).toBeUndefined();
   });
 
   it('takes away the OpenCode tools the control tool replaces, and only while it is on', async () => {

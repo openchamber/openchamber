@@ -608,8 +608,10 @@ const FileRow: React.FC<FileRowProps> = ({
       </button>
       {hasMenuActions && (
         // Takes no width and fades in over the row's end lane, with its own fade over the name.
+        // Only on touch screens: with a mouse the row's menu is its right
+        // click (Shift+F10 from the keyboard).
         <div className={cn(
-          "oc-file-tree-row-end -ms-7 w-7 pe-1 transition-opacity",
+          "oc-file-tree-row-end -ms-7 w-7 pe-1 transition-opacity pointer-fine:hidden",
           fileTreeRowMenuFillClassName(isActive),
           alwaysShowActions ? "opacity-100" : "opacity-0 focus-within:opacity-100 group-hover:opacity-100"
         )}>

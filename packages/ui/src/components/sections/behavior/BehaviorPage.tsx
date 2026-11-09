@@ -269,7 +269,7 @@ export const BehaviorPage: React.FC = () => {
   return (
     <SettingsPageLayout
       title={t('settings.behavior.page.title')}
-      description={t('settings.page.behavior.description')}
+      namedBySidebar
       onBlurCapture={autosave.onBlurCapture}
     >
       <SettingsSection

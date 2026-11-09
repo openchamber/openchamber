@@ -548,7 +548,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
             // iPad's sidebar keeps its height under the raised keyboard
             // (mobile.css), so its footer stays where it is.
             data-keyboard-rider={variant === 'drawer' ? '' : undefined}
-            className="flex shrink-0 items-center justify-between gap-2 border-t border-edge bg-background px-3 pt-1.5"
+            className="oc-sessions-footer flex shrink-0 items-center justify-between gap-2 border-t border-edge bg-background px-3 pt-1.5"
             style={{ paddingBottom: 'calc(0.375rem + var(--oc-safe-area-bottom, 0px))' }}
           >
             <div className="flex min-w-0 items-center">
@@ -821,7 +821,7 @@ const MobileSessionsDrawerContainer: React.FC<{
       aria-modal="true"
       aria-label={ariaLabel}
       aria-hidden={!open}
-      className="oc-keyboard-inset-surface fixed inset-0 z-50 flex flex-col bg-background text-foreground"
+      className="oc-keyboard-inset-surface oc-side-safe-area fixed inset-0 z-50 flex flex-col bg-background text-foreground"
       style={{
         paddingTop: 'var(--oc-safe-area-top, 0px)',
         // Settled state drops the transform entirely so the drawer isn't kept

@@ -19,16 +19,11 @@ describe('prepareUserMarkdownContent', () => {
         expect(content).not.toContain('-&gt;');
     });
 
-    test('escapes raw HTML outside fences so tags display as text', () => {
-        const content = prepareUserMarkdownContent({
-            textContent: 'Use <b>bold</b> and <script>alert("x")</script>',
-            skillNames: new Set(),
-        });
-
-        expect(content).toContain('&lt;b&gt;bold&lt;/b&gt;');
-        expect(content).toContain('&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt;');
-        expect(content).not.toContain('<b>bold</b>');
-        expect(content).not.toContain('<script>');
+    // The renderer keeps tags and entities as text (`literalText`, tested in
+    // streamdownPlugins.test.tsx); entities in the source showed inside code and formulas.
+    test('passes the text through without HTML entities', () => {
+        const textContent = 'Use <b>bold</b>, `a<b && c` and $USER "quoted"';
+        expect(prepareUserMarkdownContent({ textContent, skillNames: new Set() })).toBe(textContent);
     });
 
     test('links $skill and the older /skill form, leaving unknown names as text', () => {

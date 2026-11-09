@@ -17,15 +17,6 @@ export const SKILL_TOKEN_PATTERN = /(^|\s)[$/¥￥＄]([a-z0-9](?:[a-z0-9-]{0,62
 
 const FENCED_CODE_SEGMENT_PATTERN = /(```[\s\S]*?```|~~~[\s\S]*?~~~)/g;
 
-const escapeHtml = (text: string): string => {
-    return text
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#x27;');
-};
-
 const mapNonFencedSegments = (markdown: string, mapSegment: (segment: string) => string): string => {
     return markdown
         .split(FENCED_CODE_SEGMENT_PATTERN)
@@ -40,26 +31,28 @@ const escapeMarkdownLinkText = (text: string): string => text.replace(/[\\`*_~[\
 const joinTrailing = (text: string, at: number): string => (CHIP_TRAILING_PUNCTUATION.test(text.slice(at, at + 8)) ? '\u2060' : '');
 
 /**
- * Escapes a non-code segment and turns each `[name.png]` citation of one of
+ * Turns each `[name.png]` citation of one of
  * the message's own attachments into an attachment link, which the Markdown
  * renderer draws as a file chip. Brackets around anything else stay text.
  */
-const escapeWithAttachmentCitations = (
+const withAttachmentCitations = (
     segment: string,
     attachments: ReadonlyArray<AttachmentCitationLink>,
 ): string => {
-    if (attachments.length === 0) return escapeHtml(segment);
+    // HTML and character references stay text in the renderer (`literalText`),
+    // so the text needs no escaping: entities would show inside code and formulas.
+    if (attachments.length === 0) return segment;
     const byName = new Map(attachments.map((attachment) => [attachment.filename.trim().toLowerCase(), attachment]));
     let output = '';
     let cursor = 0;
     for (const range of findAttachmentCitationRanges(segment, [...byName.keys()])) {
         const attachment = byName.get(segment.slice(range.start + 1, range.end - 1).trim().toLowerCase());
         if (!attachment) continue;
-        output += escapeHtml(segment.slice(cursor, range.start));
-        output += `[${escapeMarkdownLinkText(escapeHtml(attachment.filename))}](${buildAttachmentHref(attachment)})${joinTrailing(segment, range.end)}`;
+        output += segment.slice(cursor, range.start);
+        output += `[${escapeMarkdownLinkText(attachment.filename)}](${buildAttachmentHref(attachment)})${joinTrailing(segment, range.end)}`;
         cursor = range.end;
     }
-    return output + escapeHtml(segment.slice(cursor));
+    return output + segment.slice(cursor);
 };
 
 /**
@@ -86,7 +79,7 @@ const withSessionMentionLinks = (
         output += escapeRest(segment.slice(cursor, range.start));
         // Escaped so the pointy destination cannot be closed or broken from inside.
         const destination = range.link.replace(/[\\<>]/g, (char) => encodeURIComponent(char));
-        output += `[${escapeMarkdownLinkText(escapeHtml(chip.label))}](<${destination}>)${joinTrailing(segment, range.end)}`;
+        output += `[${escapeMarkdownLinkText(chip.label)}](<${destination}>)${joinTrailing(segment, range.end)}`;
         cursor = range.end;
     }
     return output + escapeRest(segment.slice(cursor));
@@ -123,7 +116,7 @@ export const prepareUserMarkdownContent = ({
     let content = mapNonFencedSegments(textContent, (segment) => withSessionMentionLinks(
         segment,
         sessionMentions,
-        (rest) => escapeWithAttachmentCitations(rest, attachments),
+        (rest) => withAttachmentCitations(rest, attachments),
     ));
 
     // Insert agent mention links with an internal href so markdown renders them as mentions, not external links.

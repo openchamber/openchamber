@@ -91,6 +91,13 @@
   }
 }
 
+/* A detailed sidebar row whose second line opens with text, not an icon:
+   the hover chevron sits over the line's start, and the text's first letters
+   fade away under it. */
+@utility oc-lead-mask {
+  mask-image: linear-gradient(var(--oc-to-inline-end), transparent 0.875rem, #000 1.5rem);
+}
+
 /* File tree rows keep the whole name on one line, and a tree wider than its
    pane scrolls sideways. Every row ends in a lane (its git marks) that sticks
    to the pane's end while long rows scroll under it; a row's hover menu is a
@@ -267,6 +274,15 @@ button,
 .markdown-content details > summary {
   unicode-bidi: plaintext;
   text-align: start;
+}
+
+/* A text field takes the direction of what is typed into it, line by line in a
+   textarea, so Persian in an English interface runs from the right. An empty
+   field keeps the interface's direction: with plaintext on a field showing its
+   placeholder, Gecko draws the placeholder outside the box in a right-to-left
+   interface. A field that sets dir keeps it. */
+:where(input, textarea):not([dir]):not(:placeholder-shown) {
+  unicode-bidi: plaintext;
 }
 
 /* Markdown's explicit column alignment still wins over automatic alignment. */

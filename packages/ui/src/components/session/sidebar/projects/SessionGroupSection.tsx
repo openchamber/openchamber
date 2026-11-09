@@ -1013,7 +1013,7 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
                 // level in, under the label.
                 <span className="flex w-full min-w-0 items-center gap-0.5">
                   {headerSlot(
-                    <Icon name="git-branch"
+                    <Icon name="worktree"
                       className={cn('h-3 w-3 shrink-0', groupPrColor ? 'oc-ref-tint' : 'text-muted-foreground')}
                       style={groupPrColor ? refTintStyle(groupPrColor) : undefined}
                     />,

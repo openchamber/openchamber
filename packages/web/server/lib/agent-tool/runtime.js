@@ -43,6 +43,15 @@ import {
   SECRET_REQUEST_MAX_PLACEHOLDER_LENGTH,
   SECRET_REQUEST_MAX_REASON_LENGTH,
 } from '../openchamber-control/secret-request.js';
+import {
+  SECRET_RUN_DEFAULT_TIMEOUT_MS,
+  SECRET_RUN_MAX_INPUTS,
+  SECRET_RUN_MAX_LABEL_LENGTH,
+  SECRET_RUN_MAX_PLACEHOLDER_LENGTH,
+  SECRET_RUN_MAX_TIMEOUT_MS,
+  secretRunCommand,
+  secretRunCommandLine,
+} from '../openchamber-control/secret-run.js';
 import { createCallbackAddress } from './callback-address.js';
 
 const TOOL_SCHEMA_VERSION = 1;
@@ -153,7 +162,10 @@ const ALL_PARAMETER_PROPERTIES = {
   lastAssistant: { type: 'boolean', description: 'Only the last assistant message' },
   limit: { type: 'integer', minimum: 1, description: 'Default 10' },
   all: { type: 'boolean', description: 'Include archived sessions, all messages, or older model versions' },
-  query: { type: 'string', description: 'Words to match in model names and ids' },
+  query: { type: 'string', description: 'Words to match: model names and ids for models.search, session titles for session.list' },
+  inWork: { type: 'boolean', description: 'session.list: only sessions in In work' },
+  busy: { type: 'boolean', description: 'session.list: only sessions running now' },
+  children: { type: 'boolean', description: 'session.list: include subagent sessions' },
   provider: { type: 'string', description: 'Provider id or name' },
   offset: { type: 'integer', minimum: 0, description: 'Results to skip, for the next page' },
   last: { type: 'boolean', description: 'Only the last matching message' },
@@ -286,9 +298,28 @@ const RENDER_PARAMETER_PROPERTIES = {
 
 // Its own names: `label` means something else in the web tool.
 const SECRET_PARAMETER_PROPERTIES = {
-  label: { type: 'string', description: `What the secret is, the card's title, such as Cloudflare API token. At most ${SECRET_REQUEST_MAX_LABEL_LENGTH} characters` },
-  reason: { type: 'string', description: `In the user's language: what you will do with it, and where to create it when that is not obvious. At most ${SECRET_REQUEST_MAX_REASON_LENGTH} characters` },
-  placeholder: { type: 'string', description: `The value's shape, such as sk-ant-...; at most ${SECRET_REQUEST_MAX_PLACEHOLDER_LENGTH} characters` },
+  program: { type: 'string', description: 'secret.run: the executable, by name on PATH or absolute path. No shell: for a script use "sh" (or "bash") with args ["-c", "<script>"]' },
+  args: { type: 'array', items: { type: 'string' }, description: 'secret.run: arguments, without secrets' },
+  inputs: {
+    type: 'array',
+    minItems: 1,
+    maxItems: SECRET_RUN_MAX_INPUTS,
+    description: 'secret.run: one field per secret, which the command reads from the named environment variable',
+    items: {
+      type: 'object',
+      properties: {
+        env: { type: 'string', description: 'Environment variable name, such as CLOUDFLARE_API_TOKEN' },
+        label: { type: 'string', description: `What the secret is, shown above its field, in the user's language. At most ${SECRET_RUN_MAX_LABEL_LENGTH} characters` },
+        placeholder: { type: 'string', description: `The value's shape, such as sk-ant-...; at most ${SECRET_RUN_MAX_PLACEHOLDER_LENGTH} characters` },
+      },
+      required: ['env', 'label'],
+      additionalProperties: false,
+    },
+  },
+  timeoutMs: { type: 'integer', minimum: 1, maximum: SECRET_RUN_MAX_TIMEOUT_MS, description: `secret.run: how long the command may run once the user answered, default ${SECRET_RUN_DEFAULT_TIMEOUT_MS}` },
+  label: { type: 'string', description: `secret.request: what the secret is, the card's title, such as Cloudflare API token. At most ${SECRET_REQUEST_MAX_LABEL_LENGTH} characters` },
+  reason: { type: 'string', description: `In the user's language: what you will do with the secrets, and where to create them when that is not obvious. At most ${SECRET_REQUEST_MAX_REASON_LENGTH} characters` },
+  placeholder: { type: 'string', description: `secret.request: the value's shape, such as sk-ant-...; at most ${SECRET_REQUEST_MAX_PLACEHOLDER_LENGTH} characters` },
 };
 
 const USAGE_PARAMETER_PROPERTIES = {
@@ -371,8 +402,10 @@ const IMAGE_TOOL_DESCRIPTION = "Generate or edit images with the image model the
   + "The call returns the saved file paths, and the chat shows the images to the user, so do not repeat them in your reply. Read a file to look at it. "
   + "Without path the files go to OpenCode's temporary folder: move one into the project when it belongs there. Every call costs the user money: make what was asked, not extra variations.";
 
-const SECRET_TOOL_DESCRIPTION = "Ask the user for a secret (API key, token, password) on a private card in the chat, and wait for it. The card takes one line. "
-  + "A saved secret goes to a file only this user can read, deleted after 24 hours, and the call returns only its path. Read it inside the command that needs it (TOKEN=\"$(cat <file>)\" some-cli ...); never print, echo or log it, and never copy it into the project. "
+const SECRET_TOOL_DESCRIPTION = "Ask the user for secrets (API keys, tokens, passwords, one-time codes) on a private card in the chat, and wait for them. "
+  + "secret.run is the default: name the command and the environment variables it reads the secrets from. After the user approves the command line and fills the card, it runs once in this session's directory with the secrets in its environment, and the call returns its exit code and output with every secret value replaced by [secret:NAME]. It runs without a shell or input; a command that fails can be fixed and run again. "
+  + "On the card the user can let this chat remember a field for 10 minutes; the result's remembered lists those env names, and a new secret.run with the same env name uses it without asking. secret.forget drops them when the user asks or the work is done. "
+  + "secret.request is for a secret a program must read from a file (a key file, a kubeconfig): the value goes to a file only this user can read, deleted after 24 hours, and the call returns only its path. Read it inside the command that needs it; never print, echo or log it, and never copy it into the project. "
   + "The call returns status declined when the user declines, or answered: false when they wrote in the chat instead.";
 
 // What a read costs and how fresh it is, because an agent checking a limit
@@ -444,7 +477,7 @@ const createResult = ({ ok, action, data, error, exitCode }) => ({
 
 /**
  * A call that waits for the user's answer (render.page with awaitAnswer, and
- * every secret.request) holds its call open. A message the user writes in the
+ * secret.request and secret.run) holds its call open. A message the user writes in the
  * chat meanwhile would sit behind that call: OpenCode delivers it only after
  * the call returns. So
  * the call registers itself under its session, and the plugin's prompt hook
@@ -588,10 +621,40 @@ const singleActionSchema = (definition) => ({
  * expression (over `args`) that says whether this call waits, and
  * `closedInChatNote` what the agent reads when the user wrote in the chat.
  */
-const createToolEntry = ({ name, description, definitions, parameters, codeMode, answers = null }) => {
+/**
+ * `secret.run` asks OpenCode's shell permission for its command line before
+ * the call reaches OpenChamber, so the session's rules apply as they do to a
+ * command the agent runs itself (an allowed `git *` allows `git push`, a
+ * denied one refuses it), and a request for the secrets of a command the user
+ * would not let run never appears. A deny or a rejection throws from
+ * `assert`; it is rethrown, because a plain rejection ends the agent's step.
+ * The check sits before the wait is registered, so nothing waits on a call
+ * that was refused.
+ */
+const SECRET_RUN_PERMISSION = String.raw`        if (args.action === "secret.run") {
+          const command = secretRunCommand(args)
+          if (command.error) return failure({ schemaVersion: ${TOOL_SCHEMA_VERSION}, ok: false, action: args.action, error: { message: command.error, kind: "usage" } })
+          if (typeof ctx.permission?.assert !== "function") {
+            return failure({ schemaVersion: ${TOOL_SCHEMA_VERSION}, ok: false, action: args.action, error: { message: "This OpenCode cannot ask the user to approve a command, so secret.run is unavailable; use secret.request", kind: "runtime" } })
+          }
+          const line = secretRunCommandLine(command.program, command.args)
+          await ctx.permission.assert({
+            sessionID: context.sessionID,
+            agent: context.agent,
+            action: "shell",
+            resources: [line],
+            save: [command.program + " *"],
+            source: { type: "tool", messageID: context.messageID, id: context.id },
+          })
+        }
+`;
+
+const createToolEntry = ({ name, description, definitions, parameters, codeMode, answers = null, secretRun = false }) => {
   const normalizeBooleans = booleanNormalizationBlock(parameters);
   const reviveDependsOn = dependsOnRevivalBlock(parameters);
   const actionSchema = definitions.length === 1 ? singleActionSchema(definitions[0]) : multiActionSchema(definitions);
+  // The bare name the server would resolve too, so the permission check sees it.
+  const secretRunNormalize = secretRun ? '        if (args.action === "run") args.action = "secret.run"\n' : '';
   return String.raw`    tools.add({
       name: ${JSON.stringify(name)},
       description: ${JSON.stringify(description)},
@@ -625,7 +688,7 @@ const createToolEntry = ({ name, description, definitions, parameters, codeMode,
             if (revived !== null && typeof revived === 'object' && !Array.isArray(revived)) args.link = revived
           } catch {}
         }
-${reviveDependsOn}${actionSchema.normalize}${normalizeBooleans}        const actionTitles = ${JSON.stringify(AGENT_TOOL_ACTION_TITLES)}
+${reviveDependsOn}${actionSchema.normalize}${secretRunNormalize}${normalizeBooleans}        const actionTitles = ${JSON.stringify(AGENT_TOOL_ACTION_TITLES)}
         const title = Object.hasOwn(actionTitles, args.action) ? actionTitles[args.action] : args.action
         const progress = (extra) => context.progress({
           ${name}: {
@@ -648,7 +711,7 @@ ${reviveDependsOn}${actionSchema.normalize}${normalizeBooleans}        const act
         if (!endpoint || !token) {
           return failure({ schemaVersion: ${TOOL_SCHEMA_VERSION}, ok: false, action: args.action, error: { message: "OpenChamber managed tool connection is unavailable" } })
         }
-${answers ? answerWaitSetup(answers.waitsWhen) : ''}
+${secretRun ? SECRET_RUN_PERMISSION : ''}${answers ? answerWaitSetup(answers.waitsWhen) : ''}
         try {
           const response = await fetch(endpoint, {
             method: "POST",
@@ -811,7 +874,9 @@ const createPluginSource = ({ includeControl, includeSchedule, includeWeb, inclu
       // Never behind Code Mode, like render: the chat draws the card from
       // this tool's own call, and the answer has to reach that call.
       codeMode: false,
-      answers: { waitsWhen: 'true', closedInChatNote: SECRET_REQUEST_CLOSED_IN_CHAT_NOTE },
+      // secret.forget answers at once; the other two wait on the card.
+      answers: { waitsWhen: 'args.action !== "secret.forget" && args.action !== "forget"', closedInChatNote: SECRET_REQUEST_CLOSED_IN_CHAT_NOTE },
+      secretRun: true,
     }));
   }
   if (includeImage) {
@@ -860,7 +925,13 @@ const createPluginSource = ({ includeControl, includeSchedule, includeWeb, inclu
   // included, to that proxy, and no per-request option turns that off. The
   // exemption is added inside the child because only there is the final
   // NO_PROXY, merged from the shell and server environments, visible.
-  return `const exemptCallbackFromProxy = () => {
+  // The plugin checks a secret.run call and shows its command line with the
+  // server's own functions, so the line the user approves is the one the card shows.
+  const secretRunHelpers = includeSecret ? `const secretRunCommand = ${secretRunCommand.toString()}
+const secretRunCommandLine = ${secretRunCommandLine.toString()}
+
+` : '';
+  return `${secretRunHelpers}const exemptCallbackFromProxy = () => {
   const endpoint = process.env.OPENCHAMBER_AGENT_TOOL_URL
   if (!endpoint || !URL.canParse(endpoint)) return
   const host = new URL(endpoint).hostname.replace(/^\\[|\\]$/g, "")
@@ -999,11 +1070,15 @@ export const createAgentToolRuntime = (dependencies) => {
     }
     try {
       // The calling session scopes browser actions to that session's page.
-      const contextSessionId = knowledgeAction ? sessionID : asNonEmptyString(payload.contextSessionId) ?? sessionID;
+      // Secrets the chat remembers belong to the session OpenCode reported, too.
+      const secretAction = OPENCHAMBER_SECRET_ACTIONS.includes(action);
+      const contextSessionId = knowledgeAction || secretAction ? sessionID : asNonEmptyString(payload.contextSessionId) ?? sessionID;
       // The call id lets a page that waits for an answer be found again
       // when the user answers it.
       const contextCallId = asNonEmptyString(payload.callID);
       const actionOptions = { ...options };
+      // Only the secret tool's plugin asks the shell permission before a run.
+      if (action === 'secret.run' && payload.tool === 'openchamber_secret') actionOptions.secretRunAuthorized = true;
       if (contextSessionId) actionOptions.contextSessionId = contextSessionId;
       if (contextCallId) actionOptions.contextCallId = contextCallId;
       const data = await executeAction(action, { ...payload.input, action }, contextDirectory, actionOptions);

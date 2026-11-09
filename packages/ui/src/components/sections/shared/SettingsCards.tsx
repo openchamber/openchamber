@@ -106,12 +106,18 @@ export const SettingsCard: React.FC<SettingsCardProps> = ({ icon, title, subtitl
           <div className="mt-1 line-clamp-2 typography-micro text-muted-foreground">{description}</div>
         ) : null}
       </div>
-      <div className={cn('mt-auto flex min-w-0 items-center gap-2 pt-3 typography-micro text-muted-foreground', hasControl ? 'pe-24' : hasActions && 'pe-8')}>
+      {/* The ⋯ button shows on touch screens only; with a mouse the card's
+          menu is its right click, so the footer keeps no room for it there. */}
+      <div className={cn('mt-auto flex min-w-0 items-center gap-2 pt-3 typography-micro text-muted-foreground', hasControl ? 'pe-24' : hasActions && 'pe-8 pointer-fine:pe-0')}>
         {footer}
-        {onOpen && !hasActions ? (
+        {onOpen ? (
           <Icon
             name="arrow-right-s"
-            className="ms-auto size-4 shrink-0 opacity-0 transition-opacity duration-150 group-hover:opacity-70 group-focus-visible:opacity-70"
+            className={cn(
+              'ms-auto size-4 shrink-0 opacity-0 transition-opacity duration-150 group-hover:opacity-70 group-focus-visible:opacity-70',
+              hasActions && !hasControl && 'hidden pointer-fine:block',
+              hasActions && hasControl && 'hidden',
+            )}
             aria-hidden
           />
         ) : null}
@@ -149,7 +155,7 @@ export const SettingsCard: React.FC<SettingsCardProps> = ({ icon, title, subtitl
                 <Button
                   variant="ghost"
                   size="icon"
-                  className="h-7 w-7 text-muted-foreground opacity-100 transition-opacity md:opacity-0 md:group-hover:opacity-100 md:focus-visible:opacity-100 data-[state=open]:opacity-100"
+                  className="h-7 w-7 text-muted-foreground opacity-100 transition-opacity md:opacity-0 md:group-hover:opacity-100 md:focus-visible:opacity-100 data-[state=open]:opacity-100 pointer-fine:hidden"
                   aria-label={actionsLabel}
                   title={actionsLabel}
                 >
@@ -214,8 +220,11 @@ export const SettingsCardSearch: React.FC<{
   value: string;
   onChange: (value: string) => void;
   placeholder: string;
-}> = ({ value, onChange, placeholder }) => (
-  <div className="relative mb-4 max-w-[24rem]">
+  className?: string;
+  /** 28px, to match the dropdowns and buttons of a toolbar row. */
+  compact?: boolean;
+}> = ({ value, onChange, placeholder, className, compact = false }) => (
+  <div className={cn('relative mb-4 max-w-[24rem]', className)}>
     <Icon
       name="search"
       className="pointer-events-none absolute inset-s-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
@@ -226,8 +235,24 @@ export const SettingsCardSearch: React.FC<{
       onChange={(event) => onChange(event.target.value)}
       placeholder={placeholder}
       aria-label={placeholder}
+      inputSize={compact ? 'compact' : 'default'}
       className="ps-8"
     />
+  </div>
+);
+
+/**
+ * The row above a card grid: the search on the start side, the page's actions
+ * (project picker, refresh) on the end side. Without cards there is nothing
+ * to search, and the actions keep their place.
+ */
+export const SettingsCardToolbar: React.FC<{
+  search: { value: string; onChange: (value: string) => void; placeholder: string } | null;
+  actions: React.ReactNode;
+}> = ({ search, actions }) => (
+  <div className="mb-4 flex flex-wrap items-center gap-2">
+    {search ? <SettingsCardSearch {...search} compact className="mb-0 min-w-0 flex-1 basis-56" /> : null}
+    <div className="ms-auto flex shrink-0 items-center gap-2">{actions}</div>
   </div>
 );
 

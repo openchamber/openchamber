@@ -20,7 +20,9 @@ import { reloadOpenCodeConfiguration } from '@/stores/useAgentsStore';
 import { fetchOpenCodeUpgradeStatus, runOpenCodeUpgrade, type OpenCodeUpgradeStatus } from '@/components/update/openCodeUpgrade';
 import { useDesktopRemoteHostActive } from '@/hooks/useDesktopRemoteHostActive';
 import { getDesktopAppVersion } from '@/lib/desktopNative';
+import { getUpdateCheckErrorMessage } from '@/lib/updateCheckError';
 import { InstanceServiceUrls } from './InstanceServiceUrls';
+import { AboutReleaseNotes } from './AboutReleaseNotes';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import {
   SettingsChipGroup,
@@ -76,7 +78,7 @@ function useConnectedServerUpdate(enabled: boolean) {
         info: null,
         checking: false,
         available: false,
-        error: error instanceof Error ? error.message : String(error),
+        error: error instanceof Error ? getUpdateCheckErrorMessage(error) : String(error),
       });
     }
   }, [enabled]);
@@ -248,6 +250,21 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
   const currentVersion = describeVersion(openChamberVersion || update.info?.currentVersion || 'unknown', offeredVersion);
   const appVersion = describeVersion(desktopAppVersion || updateStore.info?.currentVersion || 'unknown', offeredVersion);
   const remoteHostVersion = openChamberVersion || remoteHostUpdate?.info?.currentVersion || 'unknown';
+
+  // Release notes follow the first version row: the notes of the installed
+  // version, or of the releases its offered update brings. Stable offered to
+  // a Canary build is one release, not a run of them since the build.
+  const installedVersion = isDesktopRemote
+    ? desktopAppVersion || updateStore.info?.currentVersion
+    : openChamberVersion || update.info?.currentVersion;
+  const leavesCanary = Boolean(offeredVersion && parseCanaryVersion(installedVersion) && !parseCanaryVersion(offeredVersion));
+  const releaseNotes = installedVersion ? (
+    <AboutReleaseNotes
+      version={offeredVersion || installedVersion}
+      since={offeredVersion && !leavesCanary ? installedVersion : null}
+      describeVersion={describeVersion}
+    />
+  ) : null;
 
   // The update channel of the desktop app, or of the server installed from npm
   // that this browser page belongs to (a browser on a desktop app's server
@@ -645,6 +662,8 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
           {t('aboutDialog.footerNote')}
         </p>
 
+        {releaseNotes}
+
         <UpdateDialog
           open={updateDialogOpen}
           onOpenChange={setUpdateDialogOpen}
@@ -771,6 +790,8 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
         </div>
         {notes.length > 0 && <div className="space-y-3">{notes}</div>}
       </SettingsSection>
+
+      {releaseNotes}
 
       <UpdateDialog
         open={updateDialogOpen}
