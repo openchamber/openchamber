@@ -151,6 +151,8 @@ host.onSessionLifecycle((event) => {
 
 `activity`, `unknown`, `idle`, `running`, `retrying`, `waiting-permission` veya `waiting-question` olur. `outcome`, gözlemlenen `completed`, `failed` veya `null` değeridir; yalnızca bellekte en fazla 2.000 oturum için tutulur. Hata sonrası idle, sonraki çalışmaya kadar hatayı korur. Bu, görevin tamamlandığı anlamına gelmez. `inWork`, oturum kenar çubuğundaki Devam eden bölümündeyken `true`, kullanıcı Devam eden özelliğini kapattığı sürece her zaman `false` olur; eski host'lar bu alanı göndermez. `unread`, son tur bittiğinde ve o zamandan beri kimse oturumu açmadığında `true` olur; kenar çubuğunun gösterdiği işaret budur. Yeniden başlatmalardan sonra da kalır ve her cihazda temizlenir. `openSession(sessionId)` sohbeti açıkça açar.
 
+`tool`, `activity` `running` iken oturumun üzerinde çalıştığı şeydir: şu an süren araç çağrısı ya da ajan sonucunu düşünürken en son biten çağrı. Alanlar: `name`, OpenCode'un verdiği ad (`read`, `edit`, `bash`), `target` ise çağrının adlandırdığı dosya ya da klasördür; oturumun `directory` değerine göre görelidir (dışındaysa yalnızca adı), hiçbirini adlandırmıyorsa `null` olur. Bir kabuk komutunun metni burada asla yer almaz. `context`, oturumun son adımından sonra bağlam penceresinin ne kadar dolu olduğunu gösterir: içerdiği `tokens` ve modelin penceresi olan `limit`; host bilmiyorsa `null`. `tool`, oturum çalışmıyorken `null` olur; `context`, host bir adım görmeden önce ve sıkıştırmadan sonra bir sonraki adıma kadar `null` olur. Eski hostlar ikisini de göndermez.
+
 ## Kalıcı uzantı verisi
 
 ```ts

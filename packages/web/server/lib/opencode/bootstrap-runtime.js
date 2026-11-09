@@ -155,6 +155,7 @@ export const createBootstrapRuntime = (dependencies) => {
       getSessionActivitySnapshot: sessionRuntime.getSessionActivitySnapshot,
       getSessionStateSnapshot: sessionRuntime.getSessionStateSnapshot,
       getPendingBlockingRequestsSnapshot: sessionRuntime.getPendingBlockingRequestsSnapshot,
+      getSessionContextSnapshot: sessionRuntime.getSessionContextSnapshot,
       getSessionState: sessionRuntime.getSessionState,
       setPushInitialized,
       setAutoAcceptSession,

@@ -45,6 +45,24 @@ export type GuestSessionRecord = {
    * every device. Absent from hosts older than this field.
    */
   unread?: boolean;
+  /**
+   * What the session works with while `activity` is `running`: the tool call
+   * running now, or the one that ended last while the agent thinks about its
+   * result. `name` as OpenCode calls it (`read`, `edit`, `bash`), and
+   * `target`, the file or folder the call names, relative to `directory` (the
+   * bare name for one outside it), or null when it names none. A shell
+   * command's text never appears here. Null whenever the session does not
+   * run. Absent from hosts older than this field.
+   */
+  tool?: { name: string; target: string | null } | null;
+  /**
+   * How full the context window was after the session's latest step:
+   * `tokens` it held, and `limit`, the model's window, or null when the host
+   * does not know it. Null before the host has seen a step of the session, and
+   * after a compaction until the next step measures the window again. Absent
+   * from hosts older than this field.
+   */
+  context?: { tokens: number; limit: number | null } | null;
 };
 export type GuestDirectoryCoverage = { directory: string; state: GuestLoadState };
 export type GuestProjectsSnapshot = { kind: 'projects'; state: GuestLoadState; projects: GuestProject[] };
