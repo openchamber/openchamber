@@ -1,4 +1,5 @@
 import { createProjectIdFromPath, projectConfigFileStemOf } from '../projects/project-id.js';
+import { createSettingsFileState } from './settings-file-state.js';
 import {
   buildPreferencesFields,
   flattenPreferences,
@@ -8,7 +9,6 @@ import {
   isDeviceSettingsKey,
   isProfileSettingsKey,
   normalizeSettingsSurface,
-  parsePreferencesDocument,
   preferencesFilePathFor,
   seedPreferencesFrom,
   serializePreferencesDocument,
@@ -117,7 +117,10 @@ export const createSettingsRuntime = (deps) => {
   // refused meanwhile so a corrupt file is never overwritten with a seed or a
   // partial document; clients keep the values they hold.
   let preferencesUnavailable = false;
-  let preferencesFailureLogged = false;
+  const settingsFileState = createSettingsFileState({
+    fsPromises, path, settingsFilePath: SETTINGS_FILE_PATH, preferencesFilePath: PREFERENCES_FILE_PATH,
+    sanitizeSettingsUpdate,
+  });
 
   // Orphan recovery is a one-shot best-effort scan: when orphans can't be
   // matched on first pass they stay on disk and every subsequent settings
@@ -571,20 +574,8 @@ export const createSettingsRuntime = (deps) => {
   };
 
   const readInstanceSettingsFromDisk = async () => {
-    try {
-      const raw = await fsPromises.readFile(SETTINGS_FILE_PATH, 'utf8');
-      const parsed = JSON.parse(raw);
-      if (parsed && typeof parsed === 'object') {
-        return parsed;
-      }
-      return {};
-    } catch (error) {
-      if (error && typeof error === 'object' && error.code === 'ENOENT') {
-        return {};
-      }
-      console.warn('Failed to read settings file:', error);
-      return {};
-    }
+    const result = await settingsFileState.read('settings');
+    return result.document ?? {};
   };
 
   /**
@@ -593,33 +584,8 @@ export const createSettingsRuntime = (deps) => {
    * "missing" may be seeded; "failed" must leave the file alone.
    */
   const readPreferenceFields = async () => {
-    let raw;
-    try {
-      raw = await fsPromises.readFile(PREFERENCES_FILE_PATH, 'utf8');
-    } catch (error) {
-      if (error && typeof error === 'object' && error.code === 'ENOENT') {
-        return { status: 'missing' };
-      }
-      if (!preferencesFailureLogged) {
-        preferencesFailureLogged = true;
-        console.warn('Failed to read preferences file:', error);
-      }
-      return { status: 'failed' };
-    }
-    const parsed = parsePreferencesDocument(raw);
-    if (!parsed.ok) {
-      if (!preferencesFailureLogged) {
-        preferencesFailureLogged = true;
-        console.warn(`Preferences file is unreadable (${parsed.reason}); profile writes are paused until it is fixed or removed.`);
-      }
-      return { status: 'failed' };
-    }
-    preferencesFailureLogged = false;
-    return { status: 'ok', fields: parsed.fields };
-  };
-
-  const writePreferencesToDisk = async (fields) => {
-    await writeJsonFileAtomic(PREFERENCES_FILE_PATH, serializePreferencesDocument(fields));
+    const result = await settingsFileState.read('preferences');
+    return result.status === 'missing' ? result : { status: result.status, fields: result.document, revision: result.revision };
   };
 
   // The merged document every consumer sees: instance facts from settings.json
@@ -633,28 +599,21 @@ export const createSettingsRuntime = (deps) => {
     const preferences = await readPreferenceFields();
     if (preferences.status === 'failed') {
       preferencesUnavailable = true;
-      return instance;
+      return { ...(preferences.fields ? instancePartOf(instance) : instance), ...flattenPreferences(preferences.fields ?? {}, normalizeSettingsSurface(surface)) };
     }
     preferencesUnavailable = false;
     if (preferences.status === 'missing') {
       const seeded = seedPreferencesFrom(instance, Date.now());
       try {
-        await writePreferencesToDisk(seeded);
+        await writeJsonFileAtomic(PREFERENCES_FILE_PATH, serializePreferencesDocument(seeded), { expectedRevision: preferences.revision ?? 0 });
       } catch (error) {
         console.warn('Failed to seed preferences file:', error);
       }
       return instance;
     }
-    return { ...instance, ...flattenPreferences(preferences.fields, normalizeSettingsSurface(surface)) };
+    return { ...instancePartOf(instance), ...flattenPreferences(preferences.fields, normalizeSettingsSurface(surface)) };
   };
 
-  // Strict variant for callers that REGENERATE persisted identity when a key is
-  // absent (relay signing/encryption keys). The lenient reader above maps every
-  // failure — corrupt JSON, EACCES, transient I/O — to `{}`, which such callers
-  // cannot distinguish from "first run": they would mint a NEW identity, orphan
-  // every paired device and push binding, and overwrite the settings file with
-  // the empty spread. Here only a genuinely missing file means "no settings";
-  // any other failure (including a non-object payload) throws.
   const readSettingsFromDiskStrict = async () => {
     let raw;
     try {
@@ -666,7 +625,7 @@ export const createSettingsRuntime = (deps) => {
       throw error;
     }
     const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== 'object') {
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
       throw new Error('Settings file is malformed (non-object payload)');
     }
     return parsed;
@@ -725,7 +684,18 @@ export const createSettingsRuntime = (deps) => {
     }
   };
 
-  const writeJsonFileAtomic = async (filePath, text) => {
+  const writeJsonFileAtomic = async (filePath, text, { acknowledge = true, expectedRevision = null } = {}) => {
+    const source = filePath === SETTINGS_FILE_PATH ? 'settings' : filePath === PREFERENCES_FILE_PATH ? 'preferences' : null;
+    if (source && (await settingsFileState.read(source)).status === 'failed') {
+      throw new Error(`Cannot replace unreadable ${path.basename(filePath)}`);
+    }
+    if (source && acknowledge && settingsFileState.hasUnreportedChanges(source)) {
+      throw new Error(`Cannot replace an external ${path.basename(filePath)} update before reconciliation`);
+    }
+    const publicationRevision = source ? expectedRevision ?? settingsFileState.getRevision(source) : null;
+    if (source && settingsFileState.getRevision(source) !== publicationRevision) {
+      throw new Error(`${path.basename(filePath)} changed before publication`);
+    }
     const directory = path.dirname(filePath);
     // Tighten only a directory this write created (mkdir's mode is umasked):
     // an existing one keeps the permissions and ACLs an administrator gave it.
@@ -739,7 +709,14 @@ export const createSettingsRuntime = (deps) => {
     try {
       await fsPromises.writeFile(tmp, text, { encoding: 'utf8', mode: 0o600 });
       if (process.platform !== 'win32') await fsPromises.chmod(tmp, 0o600);
+      if (source) {
+        const latest = await settingsFileState.read(source);
+        if (latest.status === 'failed' || settingsFileState.getRevision(source) !== publicationRevision) {
+          throw new Error(`${path.basename(filePath)} changed during publication`);
+        }
+      }
       await replaceFile(tmp, filePath);
+      if (acknowledge) settingsFileState.acknowledge(filePath, text, { expectedRevision: publicationRevision });
       if (process.platform !== 'win32') await fsPromises.chmod(filePath, 0o600);
     } catch (error) {
       await fsPromises.rm(tmp, { force: true }).catch(() => {});
@@ -754,7 +731,11 @@ export const createSettingsRuntime = (deps) => {
    * preferences.json is unreadable its part is skipped rather than replaced.
    */
   const writeSettingsToDisk = async (settings, { surface = null, changedKeys = null } = {}) => {
+    const instanceSnapshot = await settingsFileState.read('settings');
     const current = preferencesUnavailable ? { status: 'failed' } : await readPreferenceFields();
+    if (settingsFileState.hasUnreportedChanges('settings') || (current.status === 'ok' && settingsFileState.hasUnreportedChanges('preferences'))) {
+      throw new Error('Cannot replace external settings updates before reconciliation');
+    }
     if (current.status === 'failed') {
       // The profile part is not saved; settings.json keeps whatever legacy
       // profile copy it already holds rather than losing it too.
@@ -771,8 +752,8 @@ export const createSettingsRuntime = (deps) => {
       surface: normalizeSettingsSurface(surface),
       changedKeys,
     });
-    await writeJsonFileAtomic(SETTINGS_FILE_PATH, JSON.stringify(legacySettingsDocumentOf(settings, nextFields), null, 2));
-    await writePreferencesToDisk(nextFields);
+    await writeJsonFileAtomic(SETTINGS_FILE_PATH, JSON.stringify(legacySettingsDocumentOf(settings, nextFields), null, 2), { expectedRevision: instanceSnapshot.revision ?? 0 });
+    await writeJsonFileAtomic(PREFERENCES_FILE_PATH, serializePreferencesDocument(nextFields), { expectedRevision: current.revision ?? 0 });
   };
 
   const validateProjectEntries = async (projects) => {
@@ -1209,27 +1190,7 @@ export const createSettingsRuntime = (deps) => {
 
       const changedKeys = Object.keys(sanitized);
       await writeSettingsToDisk(next, { surface, changedKeys });
-      // OpenChamber's own OpenCode plugins live in a config file OpenCode
-      // watches, so flipping one of these switches takes effect in the running
-      // process instead of waiting for a restart.
-      if (changedKeys.some((key) => MANAGED_PLUGIN_SETTINGS_KEYS.has(key))) {
-        await Promise.resolve(onManagedPluginSettingsChanged(next)).catch((error) => {
-          console.warn('Failed to refresh the managed OpenCode config:', error?.message ?? error);
-        });
-      }
-      // The search index starts or stops in the background; the save does not wait for it.
-      if (changedKeys.includes('messageSearchEnabled')) {
-        onMessageSearchEnabledChanged(next.messageSearchEnabled === true);
-      }
-      if (changedKeys.includes('messageSearchReasoningEnabled')) {
-        onMessageSearchReasoningChanged(next.messageSearchReasoningEnabled === true);
-      }
-      if (changedKeys.includes('permissionDefaultMode') && next.permissionDefaultMode !== current.permissionDefaultMode) {
-        onPermissionDefaultModeChanged(next.permissionDefaultMode);
-      }
-      if (changedKeys.includes('lastDirectory') && next.lastDirectory !== current.lastDirectory) {
-        onLastDirectoryChanged(next.lastDirectory);
-      }
+      await applyRuntimeSettings(current, next, changedKeys);
       return formatSettingsResponse(next);
     });
     // A failed write (a full disk) rejects only its own caller; the next
@@ -1239,6 +1200,93 @@ export const createSettingsRuntime = (deps) => {
   };
 
   const persistSettings = (changes, options) => persistResolvedSettings(() => changes, options);
+
+  const applyRuntimeSettings = async (previous, next, changedKeys) => {
+    if (changedKeys.some((key) => MANAGED_PLUGIN_SETTINGS_KEYS.has(key))) {
+      await Promise.resolve(onManagedPluginSettingsChanged(next)).catch((error) => {
+        console.warn('Failed to refresh the managed OpenCode config:', error?.message ?? error);
+      });
+    }
+    if (changedKeys.includes('messageSearchEnabled')) onMessageSearchEnabledChanged(next.messageSearchEnabled === true);
+    if (changedKeys.includes('messageSearchReasoningEnabled')) onMessageSearchReasoningChanged(next.messageSearchReasoningEnabled === true);
+    if (changedKeys.includes('permissionDefaultMode') && next.permissionDefaultMode !== previous.permissionDefaultMode) {
+      onPermissionDefaultModeChanged(next.permissionDefaultMode);
+    }
+    if (changedKeys.includes('lastDirectory') && next.lastDirectory !== previous.lastDirectory) onLastDirectoryChanged(next.lastDirectory);
+  };
+
+  const reconcileExternalSettings = ({ source, changedKeys }) => {
+    const result = persistSettingsLock.then(async () => {
+      let profileKeys = changedKeys.filter(isProfileSettingsKey);
+      const instanceResult = await settingsFileState.read('settings');
+      const preferences = await readPreferenceFields();
+      if (instanceResult.status === 'failed' || (profileKeys.length > 0 && preferences.status === 'failed')) {
+        throw new Error('External settings reconciliation paused while a settings file is unreadable');
+      }
+      const instance = instanceResult.document ?? {};
+      if (source === 'settings') profileKeys = profileKeys.filter((key) => Object.hasOwn(instance, key));
+      const fields = structuredClone(preferences.fields ?? {});
+      const preferenceChanges = preferences.status === 'ok' ? settingsFileState.getPendingChangedKeys('preferences') : [];
+      const previousPreferences = settingsFileState.readReported('preferences') ?? {};
+      let changed = false;
+      if (source === 'settings') {
+        const selectionKeys = profileKeys.includes('themeId') && instance.useSystemTheme === false
+          ? [...new Set([...profileKeys, 'useSystemTheme'])] : profileKeys;
+        const values = sanitizeSettingsUpdate(Object.fromEntries(selectionKeys
+          .filter((key) => Object.hasOwn(instance, key)).map((key) => [key, instance[key]])));
+        for (const [key, value] of Object.entries(values)) {
+          fields[key] = { value, updatedAt: Date.now() };
+          changed = true;
+        }
+      }
+      if (!profileKeys.includes('themeId') && profileKeys.some((key) => key === 'lightThemeId' || key === 'darkThemeId')) {
+        if (fields.themeId) {
+          if (source === 'settings') {
+            delete fields.themeId;
+            changed = true;
+          } else {
+            for (const key of profileKeys.filter((key) => key === 'lightThemeId' || key === 'darkThemeId')) {
+              if (JSON.stringify(previousPreferences[key]?.value) !== JSON.stringify(fields[key]?.value) && 'value' in fields.themeId) {
+                delete fields.themeId.value;
+                changed = true;
+              }
+            }
+            if (!('value' in fields.themeId) && Object.keys(fields.themeId.surfaces ?? {}).length === 0) delete fields.themeId;
+          }
+        }
+      }
+      if (!preferenceChanges.includes('themeId')) {
+        for (const surface of ['desktop', 'web', 'mobile', 'vscode']) {
+          const variants = ['lightThemeId', 'darkThemeId'].filter((key) => preferenceChanges.includes(key)
+            && fields[key]?.surfaces?.[surface]
+            && JSON.stringify(previousPreferences[key]?.surfaces?.[surface]?.value) !== JSON.stringify(fields[key].surfaces[surface].value));
+          const selectedKey = variants.length === 1 ? variants[0]
+            : variants.find((key) => key === `${fields.themeVariant?.value}ThemeId`);
+          if (!selectedKey) continue;
+          fields.themeId ??= { updatedAt: 0 };
+          fields.themeId.surfaces ??= {};
+          fields.themeId.surfaces[surface] = { value: fields[selectedKey].surfaces[surface].value, updatedAt: Date.now() };
+          changed = true;
+        }
+      }
+      const settingsText = JSON.stringify(preferences.status === 'failed' ? instance : legacySettingsDocumentOf(instance, fields), null, 2);
+      const preferencesText = serializePreferencesDocument(fields);
+      const mirrorChanged = settingsText !== JSON.stringify(instance, null, 2);
+      if (changed) await writeJsonFileAtomic(PREFERENCES_FILE_PATH, preferencesText, { acknowledge: false, expectedRevision: preferences.revision ?? 0 });
+      if (mirrorChanged) await writeJsonFileAtomic(SETTINGS_FILE_PATH, settingsText, { acknowledge: false, expectedRevision: instanceResult.revision ?? 0 });
+      const previous = {
+        ...instancePartOf(settingsFileState.readReported('settings') ?? {}),
+        ...flattenPreferences(settingsFileState.readReported('preferences') ?? {}),
+      };
+      await applyRuntimeSettings(previous, { ...instancePartOf(instance), ...flattenPreferences(fields) }, [...new Set([...changedKeys, ...preferenceChanges])]);
+      if (changed) settingsFileState.acknowledge(PREFERENCES_FILE_PATH, preferencesText, { expectedRevision: preferences.revision ?? 0 });
+      if (mirrorChanged) settingsFileState.acknowledge(SETTINGS_FILE_PATH, settingsText, { expectedRevision: instanceResult.revision ?? 0 });
+      return source === 'settings' && preferenceChanges.length > 0
+        ? [{ source: 'preferences', changedKeys: preferenceChanges }] : [];
+    });
+    persistSettingsLock = result.catch(() => {});
+    return result;
+  };
 
   // A background session may discover a project while another window saves
   // settings. Resolve the append inside the settings queue, without activation.
@@ -1267,5 +1315,7 @@ export const createSettingsRuntime = (deps) => {
     persistSettings,
     persistResolvedSettings,
     registerSessionProject,
+    watchSettingsFiles: settingsFileState.watch,
+    reconcileExternalSettings,
   };
 };

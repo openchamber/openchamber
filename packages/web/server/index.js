@@ -3011,6 +3011,8 @@ async function main(options = {}) {
     },
   });
   await featureRoutesRuntime.registerRoutes(app, {
+    watchSettingsFiles: settingsRuntime.watchSettingsFiles,
+    reconcileExternalSettings: settingsRuntime.reconcileExternalSettings,
     environmentStore,
     environmentRuntime,
     listConfiguredProjects,

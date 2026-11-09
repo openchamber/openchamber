@@ -5,7 +5,7 @@ import { getRuntimeExtraHeadersSync } from './runtime-auth';
 import { isCapacitorApp } from './platform';
 import { isRelayModeActive } from './relay/runtime-tunnel';
 import { subscribeRuntimeEndpointChanged } from './runtime-switch';
-import { isVSCodeRuntime } from './desktop';
+import { isDesktopShell, isVSCodeRuntime } from './desktop';
 import { canDriveBrowserPage } from './browser/hostCapability';
 import { messageQueueUpdatedEventSchema, type MessageQueueUpdatedEvent } from '@/stores/messageQueueStore';
 import { autoReviewUpdatedEventSchema, type AutoReviewUpdatedEvent } from '@/stores/useAutoReviewStore';
@@ -167,6 +167,11 @@ type GuestServiceEvent = { type: 'guest-service-event'; guestId: string; topic: 
  * rewritten. Carries nothing; listeners re-read the custom themes.
  */
 type ThemesChangedEvent = { type: 'themes-changed' };
+const settingsChangedSchema = z.object({
+  source: z.enum(['settings', 'preferences']),
+  changedKeys: z.array(z.string().min(1).max(128)).min(1),
+});
+type SettingsChangedEvent = { type: 'settings-changed' } & z.infer<typeof settingsChangedSchema>;
 
 /**
  * A usage limit stopped a session and the server moved on: the provider to
@@ -289,6 +294,7 @@ const notificationPropertiesSchema = z.object({
 });
 
 type OpenChamberEvent =
+  | SettingsChangedEvent
   | { type: 'terminal-sessions-changed' }
   | { type: 'notification'; payload: z.infer<typeof notificationPropertiesSchema> }
   /** `connectionId` names this connection on the server; absent from servers before tracked items. */
@@ -409,6 +415,7 @@ const connectFetchStream = (canControlBrowser: boolean) => {
       const response = await runtimeFetch('/api/openchamber/events', {
         query: canControlBrowser ? { browser: '1' } : undefined,
         headers: { Accept: 'text/event-stream' },
+        credentials: 'include',
         signal: controller.signal,
       });
       if (controller.signal.aborted) {
@@ -672,6 +679,13 @@ const dispatchFromEnvelope = (envelope: { type: string; properties: unknown }) =
     return;
   }
 
+  if (envelope.type === 'openchamber:settings-changed') {
+    const parsed = settingsChangedSchema.safeParse(envelope.properties);
+    if (!parsed.success) return;
+    for (const listener of listeners) listener({ type: 'settings-changed', ...parsed.data });
+    return;
+  }
+
   if (envelope.type === 'openchamber:limit-failover') {
     const parsed = limitFailoverSchema.safeParse(envelope.properties);
     if (parsed.success) for (const listener of listeners) listener({ type: 'limit-failover', failover: parsed.data });
@@ -817,9 +831,7 @@ const connect = () => {
   // driven, and the agent tool needs to know which it is talking to without a
   // setting anyone has to remember to change.
   const canControlBrowser = canDriveBrowserPage();
-  // Native mobile has no desktop realtime proxy. Fetch can attach the saved
-  // instance headers to SSE; EventSource cannot.
-  if (isRelayModeActive() || (Object.keys(getRuntimeExtraHeadersSync()).length > 0 && isCapacitorApp())) {
+  if (isDesktopShell() || isRelayModeActive() || (Object.keys(getRuntimeExtraHeadersSync()).length > 0 && isCapacitorApp())) {
     connectFetchStream(canControlBrowser);
     return;
   }
