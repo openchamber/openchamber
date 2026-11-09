@@ -13,7 +13,7 @@ describe('VS Code credential source', () => {
     configureOpenCodeCredentials({
       list: async () => [{ id: 'cred_1', integrationID: 'deepseek', label: 'default', active: true, value: { type: 'key', key: 'ds' } }],
     });
-    assert.deepEqual(await getProviderAuth('deepseek'), { type: 'api', key: 'ds' });
+    assert.deepEqual(await getProviderAuth('deepseek'), { label: 'default', type: 'api', key: 'ds' });
   });
 
   it('throws while OpenCode has no API URL instead of answering empty', async () => {

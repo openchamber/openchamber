@@ -12,7 +12,7 @@ const temporaryQuotaDataDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'openc
 process.env.OPENCHAMBER_DATA_DIR = temporaryQuotaDataDirectory;
 // Credentials come from the running OpenCode; serve a fixed list so the
 // providers treat themselves as configured and go straight to fetch.
-const key = (integrationID: string): CredentialEntry => ({ id: `cred_${integrationID}`, integrationID, label: 'default', active: true, value: { type: 'key', key: 'test-token' } });
+const key = (integrationID: string, label = 'default'): CredentialEntry => ({ id: `cred_${integrationID}`, integrationID, label, active: true, value: { type: 'key', key: 'test-token' } });
 const oauth = (integrationID: string, metadata?: { enterpriseUrl?: string }): CredentialEntry => ({
   id: `cred_${integrationID}`,
   integrationID,
@@ -161,6 +161,18 @@ describe('OpenCode Go quota provider (VS Code parity)', () => {
       assert.equal(result.ok, true);
       assert.equal(new Headers(request?.headers).get('Authorization'), 'Bearer test-token');
       assert.equal(result.usage!.windows['5h']!.usedPercent, 25);
+      // The label the credential carries in OpenCode names the account the meters belong to.
+      assert.equal(result.accountLabel, 'default');
+    });
+
+    test("names the account from the credential's label", async () => {
+      configureOpenCodeCredentials({ list: async () => [key('opencode-go', 'outlook')] });
+      stubFetchReturning(async () => mockResponse({ usage: { rolling: { percent: 25, resetsAt: '2026-08-12T12:00:00.000Z' } } }));
+
+      const result = await fetchQuotaForProvider('opencode-go');
+
+      assert.equal(result.ok, true);
+      assert.equal(result.accountLabel, 'outlook');
     });
 
     test('reports an absent subscription on a 403', async () => {
@@ -278,6 +290,8 @@ describe('OpenCode Go quota provider — Console OAuth (VS Code parity)', () => 
     assert.equal(result.usage!.windows.monthly!.usedPercent, 50);
     assert.equal(result.usage!.windows.credits_balance!.valueLabel, '$12.34');
     assert.equal(result.usage!.windows.credits_balance!.usedPercent, null);
+    // The label the credential carries in OpenCode names the account the meters belong to.
+    assert.equal(result.accountLabel, 'default');
   });
 
   test('accepts a wrk_ workspace id from the Console sign-in', async () => {

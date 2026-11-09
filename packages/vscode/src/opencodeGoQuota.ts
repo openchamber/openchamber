@@ -1,8 +1,8 @@
 import { z } from 'zod';
 
 // `consoleKey` marks a key from the shared `opencode` integration.
-export type OpenCodeGoApiKeyCredential = { apiKey: string; consoleKey: boolean };
-export type OpenCodeGoConsoleCredential = { accessToken: string; orgID: string; expires?: number | null };
+export type OpenCodeGoApiKeyCredential = { apiKey: string; consoleKey: boolean; label?: string | null };
+export type OpenCodeGoConsoleCredential = { accessToken: string; orgID: string; expires?: number | null; label?: string | null };
 type OpenCodeGoCredential = OpenCodeGoApiKeyCredential | OpenCodeGoConsoleCredential;
 
 const API_KEY_USAGE_URL = 'https://opencode.ai/zen/go/v1/usage';

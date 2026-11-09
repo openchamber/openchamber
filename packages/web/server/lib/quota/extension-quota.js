@@ -53,9 +53,15 @@ export const isQuotaGuest = (guest) => {
     && extensionProviderId(guest.id) !== null;
 };
 
-/** The listed entries OpenCode holds now, keyed by provider id; a listed id OpenCode has no credential for is absent. */
+/** The listed entries OpenCode holds now, keyed by provider id; a listed id OpenCode has no credential for is absent.
+ *  The `label` is OpenChamber-internal account naming: it stays out of the service's payload. */
 export const pickCredentials = (auth, providerIds) => Object.fromEntries(
-  providerIds.filter((providerId) => Object.hasOwn(auth, providerId) && auth[providerId]).map((providerId) => [providerId, auth[providerId]]),
+  providerIds
+    .filter((providerId) => Object.hasOwn(auth, providerId) && auth[providerId])
+    .map((providerId) => {
+      const { label: _label, ...entry } = auth[providerId];
+      return [providerId, entry];
+    }),
 );
 
 /** A wire window as the UI draws it: the derived shares and formatted strings of `toUsageWindow`, the structured `value` kept. */
