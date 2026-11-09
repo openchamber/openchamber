@@ -319,6 +319,8 @@ host.onResolve(async ({ command, args }) => {
 
 Gdy użytkownik wpisze `/task ABC-12` w polu czatu, OpenChamber prosi Twoje rozszerzenie o rozwiązanie go i dołącza to, co zwrócisz, jako chip, niczego nie otwierając. Zwróć `null` dla "nic nie znaleziono". Jeśli Twój panel jest zamknięty, OpenChamber ładuje go w tle na potrzeby tego wywołania. Nazwa, której OpenChamber lub OpenCode już używa, jest ignorowana.
 
+Akcje sesji i polecenia z ukośnikiem pojawiają się też w palecie poleceń (⌘P lub Ctrl+P), gdy użytkownik szuka ich etykiety, polecenia albo nazwy twojego rozszerzenia. Akcja sesji działa tam na otwartej sesji. Polecenie trafia na początek pola czatu, a to, co użytkownik już wpisał, staje się jego argumentem; uruchamia się, gdy użytkownik wyśle wiadomość. Akcje wiadomości, zaznaczenia, pliku i diffu zostają w swoich menu.
+
 **Odznaka na ikonie na pasku bocznym.** `host.setBadge(3)` stawia kropkę na Twojej ikonie, a liczbę pokazuje w jej podpowiedzi, na przykład otwarte zadania; `host.setBadge(null)` ją usuwa. Otwarcie panelu też ją usuwa.
 
 ## Twoje narzędzia w czacie

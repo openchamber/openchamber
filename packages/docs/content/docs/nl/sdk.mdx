@@ -319,6 +319,8 @@ host.onResolve(async ({ command, args }) => {
 
 Typt de gebruiker `/task ABC-12`, dan vraagt OpenChamber uw extensie om het item op te zoeken en koppelt het teruggegeven resultaat aan het invoerveld, zonder een venster te openen. Geef `null` terug als niets is gevonden. Is het paneel gesloten, dan laadt OpenChamber het op de achtergrond voor de aanroep. Namen die OpenChamber of OpenCode al gebruikt, worden genegeerd.
 
+Sessieacties en slash-opdrachten verschijnen ook in het opdrachtenpalet (⌘P of Ctrl+P) als de gebruiker zoekt op het label, de opdracht of de naam van uw extensie. Een sessieactie werkt daar op de geopende sessie. Een opdracht komt vooraan in het invoerveld, met wat de gebruiker al had getypt als argument, en wordt uitgevoerd zodra die verstuurt. Acties voor berichten, selecties, bestanden en diffs blijven in hun eigen menu's.
+
 **Badge op het balkpictogram.** `host.setBadge(3)` zet een stip op het pictogram en toont het getal in de tooltip, bijvoorbeeld het aantal open taken. `host.setBadge(null)` wist de badge. Het openen van het paneel wist haar ook.
 
 ## Uw tools in de chat
