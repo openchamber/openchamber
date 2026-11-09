@@ -27,6 +27,7 @@ import { heapSnapshotI18n } from './heap-snapshot.i18n';
 import { consoleBudgetsI18n } from './console-budgets.i18n';
 import { imageToolI18n } from './image-tool.i18n';
 import { usageToolI18n } from './usage-tool.i18n';
+import { openchamberToolsLayoutI18n } from './openchamber-tools-layout.i18n';
 import { openchamberToolOutputI18n } from './openchamber-tool-output.i18n';
 import { opencodeToolOutputI18n } from './opencode-tool-output.i18n';
 import { agentStatusI18n } from './agent-status.i18n';
@@ -146,6 +147,7 @@ export const dict = {
   ...consoleBudgetsI18n.tr,
   ...imageToolI18n.tr,
   ...usageToolI18n.tr,
+  ...openchamberToolsLayoutI18n.tr,
   ...openchamberToolOutputI18n.tr,
   ...opencodeToolOutputI18n.tr,
   ...agentStatusI18n.tr,

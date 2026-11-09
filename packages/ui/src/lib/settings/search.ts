@@ -913,7 +913,8 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     titleKey: 'settings.openchamber.tools.browserProvider.label',
     descriptionKey: 'settings.openchamber.tools.browserProvider.info',
     keywords: ['agent', 'browser', 'provider', 'extension', 'chrome', 'server', 'headless'],
-    isAvailable: (ctx) => !ctx.isVSCode,
+    // Rendered only while its tool is on.
+    isAvailable: (ctx) => !ctx.isVSCode && useUIStore.getState().agentWebToolEnabled,
   },
   {
     id: 'sessions.agent-notify-tool',
@@ -945,7 +946,8 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     titleKey: 'settings.openchamber.tools.imageModel.label',
     descriptionKey: 'settings.openchamber.tools.imageModel.info',
     keywords: ['agent', 'image', 'model', 'picture', 'generate', 'draw'],
-    isAvailable: (ctx) => !ctx.isVSCode,
+    // Rendered only while its tool is on.
+    isAvailable: (ctx) => !ctx.isVSCode && useUIStore.getState().agentImageToolEnabled,
   },
   {
     id: 'sessions.agent-render-tool',
