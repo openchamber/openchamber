@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import { OPENCHAMBER_SDK_API_VERSION } from './api-version.ts';
-import { clampStatusSectionHeight, hasGuestPage, requestedGuestCapabilities, toPublicNotifications, toPublicQuota, toPublicSessionEvents, toPublicSourceControl, resolveAttachEntry, resolveStatusSectionEntry, resolveStatusSectionSource, resolveAttachMode, resolveIntegrationApi, toPublicIntegration, type OpenChamberContributes, isOpenCodeProviderId, isTrackerUrlTemplate, toPublicTracker } from './manifest.ts';
+import { GUEST_PROVIDER_LOGOS_MAX, clampStatusSectionHeight, hasGuestPage, requestedGuestCapabilities, toPublicNotifications, toPublicQuota, toPublicSessionEvents, toPublicSourceControl, resolveAttachEntry, resolveStatusSectionEntry, resolveStatusSectionSource, resolveAttachMode, resolveIntegrationApi, toPublicIntegration, type OpenChamberContributes, isOpenCodeProviderId, isTrackerUrlTemplate, toPublicTracker } from './manifest.ts';
 import type { JsonValue } from './contract.ts';
 import type { LinksContribution } from './manifest.ts';
 import { parseManifest, parseManifestJson } from './parse.ts';
@@ -947,6 +947,38 @@ describe('page-less extensions', () => {
   const withContributes = (extra: Partial<Omit<OpenChamberContributes, 'panel'>>) => parseManifest({
     apiVersion: 1,
     contributes: { panel: pageless, ...extra },
+  });
+
+  test('provider logos need no page and no capability', () => {
+    const result = withContributes({ providerLogos: { acme: 'assets/acme.svg', 'wafer.ai': 'assets/wafer.PNG' } });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.manifest.contributes.providerLogos).toEqual({ acme: 'assets/acme.svg', 'wafer.ai': 'assets/wafer.PNG' });
+    expect(requestedGuestCapabilities(result.manifest.contributes)).toEqual([]);
+  });
+
+  test('provider logos hold an icon pack, with an alias as another key for the same file', () => {
+    const pack = Object.fromEntries(new Array(GUEST_PROVIDER_LOGOS_MAX).fill(null).map((_, index) => [`p${index}`, index % 2 === 0 ? 'a.svg' : 'b.png']));
+    const result = withContributes({ providerLogos: pack });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(Object.keys(result.manifest.contributes.providerLogos ?? {})).toHaveLength(GUEST_PROVIDER_LOGOS_MAX);
+  });
+
+  test('rejects malformed provider logos as invalid-provider-logos', () => {
+    const tooMany = Object.fromEntries(new Array(GUEST_PROVIDER_LOGOS_MAX + 1).fill(null).map((_, index) => [`p${index}`, 'logo.svg']));
+    const cases: Record<string, string>[] = [
+      {},
+      tooMany,
+      { acme: 'acme.gif' },
+      { acme: '../acme.svg' },
+      { acme: '/acme.svg' },
+      { acme: 'https://example.com/acme.svg' },
+      { 'Not An Id': 'acme.svg' },
+    ];
+    for (const providerLogos of cases) {
+      expect(withContributes({ providerLogos })).toMatchObject({ ok: false, code: 'invalid-provider-logos' });
+    }
   });
 
   test('background entry enables actions, commands and granted APIs without a visible panel', () => {

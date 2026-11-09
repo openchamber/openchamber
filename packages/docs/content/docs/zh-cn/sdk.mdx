@@ -341,7 +341,19 @@ host.onResolve(async ({ command, args }) => {
 
 `match` 是 OpenCode 报告的工具名；末尾的 `*` 匹配前缀。`icon` 是 Remixicon 图标名或你包内的 `.svg` 文件，和 `panel.icon` 一样。`title` 和 `subtitle` 是基于这次调用的 `input`、`output` 和 `metadata` 的模板。`output` 决定正文怎么渲染：`text`、`json`（树形）、`markdown`、带 `language` 的 `code`、带 `columns` 的 `table`（行来自输出数组或 `output.items`），或者 `auto` 使用默认方式。精确的 `match` 优先于通配符，平局时先安装的扩展胜出。不需要任何权限：这只改变聊天里已有数据的绘制方式。
 
-只给工具定制样式的扩展根本不需要页面：不写 `panel.entry`，它就没有侧栏图标，只在 设置 → 扩展 里有一张卡片。没有页面时，它可以只声明 `tools`，别的什么都不写。另一个例外是带自己 `entry` 的 Work Status 分区或文件编辑器，见上文。
+只给工具定制样式的扩展根本不需要页面：不写 `panel.entry`，它就没有侧栏图标，只在 设置 → 扩展 里有一张卡片。没有页面时，它只能声明 `tools` 和 `providerLogos`，别的什么都不写。另一个例外是带自己 `entry` 的 Work Status 分区或文件编辑器，见上文。
+
+## 你的提供商的徽标
+
+当你的 OpenCode 插件注册模型提供商时，模型选择器和设置页通常显示一个通用标记。把徽标放进包里并写明提供商，不需要写代码：
+
+```json
+"providerLogos": {
+  "acme-cloud": "assets/acme-cloud.svg"
+}
+```
+
+键是 OpenCode 报告的提供商 ID。值是包内的 `.svg` 或 `.png` 文件，最大 1 MB。文件缺失、为空或更大时，安装会失败。一个包最多写 256 个提供商，两个 ID 可以指向同一个文件。徽标保留自己的颜色，SVG 中的 `currentColor` 跟随浅色或深色主题。它会替换应用为该 ID 自带的徽标。用户为该提供商设置的内容优先，出现冲突时先安装的扩展优先。不需要任何权限。VS Code 和手机不加载扩展，因此不显示这些徽标。
 
 ## 面板里的前几行代码
 

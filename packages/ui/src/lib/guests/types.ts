@@ -78,6 +78,8 @@ export type InstalledGuest = {
   skills?: true;
   /** The package ships an OpenCode plugin, listed in the managed OpenCode config while the extension is on. */
   opencodePlugin?: true;
+  /** `contributes.providerLogos`: OpenCode provider id to a package image, drawn in place of a logo the app ships. */
+  providerLogos?: Record<string, string>;
   /** The section the extension adds to the composer's `@` menu. */
   mentions?: { label: string };
   /** Identifiers and links in chat messages a click hands to the extension (`contributes.links`, compiled by the server). */

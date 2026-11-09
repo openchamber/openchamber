@@ -341,7 +341,19 @@ Quando o seu plugin do OpenCode ou servidor MCP adiciona uma ferramenta, o chat 
 
 `match` é o nome da ferramenta como o OpenCode o reporta; um `*` no final casa com um prefixo. `icon` é um nome do Remixicon ou um arquivo `.svg` no seu pacote, como `panel.icon`. `title` e `subtitle` são templates sobre `input`, `output` e `metadata` da chamada. `output` escolhe como o corpo é renderizado: `text`, `json` (uma árvore), `markdown`, `code` com um `language`, `table` com `columns` (as linhas vêm do array de saída ou de `output.items`) ou `auto` para o padrão. Um `match` exato vence um curinga, e em caso de empate vence a primeira extensão instalada. Nenhuma permissão é necessária: isso só muda como dados que já estão no chat são desenhados.
 
-Uma extensão que só estiliza ferramentas não precisa de página nenhuma: deixe `panel.entry` de fora e ela não terá ícone na barra lateral, só um card em Configurações → Extensões. Sem página ela pode declarar `tools` e nada mais. A outra exceção é uma seção do Work Status ou um editor de arquivos com `entry` próprio, veja acima.
+Uma extensão que só estiliza ferramentas não precisa de página nenhuma: deixe `panel.entry` de fora e ela não terá ícone na barra lateral, só um card em Configurações → Extensões. Sem página ela pode declarar `tools` e `providerLogos`, e nada mais. A outra exceção é uma seção do Work Status ou um editor de arquivos com `entry` próprio, veja acima.
+
+## O logo do seu provedor
+
+Quando seu plugin do OpenCode registra um provedor de modelos, os seletores de modelo e as Configurações costumam desenhar uma marca genérica. Inclua o logo no seu pacote e indique o provedor, sem código:
+
+```json
+"providerLogos": {
+  "acme-cloud": "assets/acme-cloud.svg"
+}
+```
+
+A chave é o ID do provedor como o OpenCode o informa. O valor é um `.svg` ou `.png` do seu pacote, de até 1 MB. Um arquivo ausente, vazio ou maior faz a instalação falhar. Um pacote indica até 256 provedores, e dois IDs podem apontar para o mesmo arquivo. O logo mantém as próprias cores, e `currentColor` em um SVG acompanha o tema claro ou escuro. Ele substitui o logo que o app já traz para esse ID. O que o usuário definiu para esse provedor vem primeiro, e em um empate vence a extensão instalada primeiro. Nenhuma permissão é necessária. O VS Code e o celular não carregam extensões, então não mostram esses logos.
 
 ## Primeiras linhas no painel
 

@@ -341,7 +341,19 @@ Gdy Twoja wtyczka OpenCode lub serwer MCP dodaje narzędzie, czat pokazuje jego 
 
 `match` to nazwa narzędzia w takiej postaci, w jakiej zgłasza ją OpenCode; `*` na końcu dopasowuje prefiks. `icon` to nazwa ikony Remixicon albo plik `.svg` w Twoim pakiecie, tak jak `panel.icon`. `title` i `subtitle` to szablony nad `input`, `output` i `metadata` wywołania. `output` wybiera sposób renderowania treści: `text`, `json` (drzewo), `markdown`, `code` z `language`, `table` z `columns` (wiersze pochodzą z tablicy wyniku lub z `output.items`) albo `auto` dla domyślnego. Dokładny `match` wygrywa z symbolem wieloznacznym, a przy remisie wygrywa pierwsze zainstalowane rozszerzenie. Żadna zgoda nie jest potrzebna: to zmienia tylko sposób rysowania danych, które już są w czacie.
 
-Rozszerzenie, które tylko stylizuje narzędzia, nie potrzebuje żadnej strony: pomiń `panel.entry`, a nie będzie miało ikony na pasku bocznym, tylko kartę w Ustawienia → Rozszerzenia. Bez strony może deklarować `tools` i nic więcej. Drugi wyjątek to sekcja Work Status lub edytor plików z własnym `entry`, patrz wyżej.
+Rozszerzenie, które tylko stylizuje narzędzia, nie potrzebuje żadnej strony: pomiń `panel.entry`, a nie będzie miało ikony na pasku bocznym, tylko kartę w Ustawienia → Rozszerzenia. Bez strony może deklarować `tools` i `providerLogos`, i nic więcej. Drugi wyjątek to sekcja Work Status lub edytor plików z własnym `entry`, patrz wyżej.
+
+## Logo Twojego dostawcy
+
+Gdy Twoja wtyczka OpenCode rejestruje dostawcę modeli, selektory modeli i Ustawienia zwykle pokazują ogólny znak. Dodaj logo do pakietu i wskaż dostawcę, bez kodu:
+
+```json
+"providerLogos": {
+  "acme-cloud": "assets/acme-cloud.svg"
+}
+```
+
+Klucz to ID dostawcy w postaci, w jakiej podaje je OpenCode. Wartość to plik `.svg` lub `.png` z pakietu, do 1 MB. Brakujący, pusty lub większy plik powoduje niepowodzenie instalacji. Pakiet wskazuje do 256 dostawców, a dwa ID mogą wskazywać ten sam plik. Logo zachowuje własne kolory, a `currentColor` w SVG podąża za jasnym lub ciemnym motywem. Zastępuje logo dołączone do aplikacji dla tego ID. To, co użytkownik ustawił dla tego dostawcy, ma pierwszeństwo, a przy remisie wygrywa rozszerzenie zainstalowane jako pierwsze. Nie jest potrzebne żadne uprawnienie. VS Code i telefon nie ładują rozszerzeń, więc nie pokazują tych logo.
 
 ## Pierwsze linie w panelu
 

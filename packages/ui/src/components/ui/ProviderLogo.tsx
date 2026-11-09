@@ -1,12 +1,14 @@
 import React from 'react';
 import { Icon } from '@/components/icon/Icon';
 import { useOptionalThemeSystem } from '@/contexts/useThemeSystem';
-import { useProviderLogo } from '@/hooks/useProviderLogo';
+import { providerLogoIds, useProviderLogo } from '@/hooks/useProviderLogo';
 import { cn } from '@/lib/utils';
 import { getProviderLogoFallbackIcon } from './providerLogoFallback';
 import { useUIStore } from '@/stores/useUIStore';
 import { customProviderIconName } from '@/lib/customProviderIcons';
 import { providerLogoUploadSupported, useUploadedProviderLogoUrl } from '@/lib/customProviderLogos';
+import { useGuestProviderLogo, useGuestProviderLogoUrl } from '@/lib/guests/provider-logos';
+import type { RuntimeObjectUrl } from '@/lib/runtimeObjectUrl';
 
 interface ProviderLogoProps {
     providerId: string;
@@ -19,9 +21,12 @@ interface ProviderLogoProps {
     fallback?: React.ReactNode;
 }
 
+const NO_URLS: ReadonlySet<string> = new Set();
+
 /**
  * A provider's mark, first match wins: the logo the user uploaded, the icon
- * they picked, the bundled logo, the models.dev logo, the generic fallback.
+ * they picked, an active extension's logo, the bundled logo, the models.dev
+ * logo, the generic fallback.
  */
 export const ProviderLogo: React.FC<ProviderLogoProps> = ({
     providerId,
@@ -31,15 +36,20 @@ export const ProviderLogo: React.FC<ProviderLogoProps> = ({
     ignoreCustomIcon = false,
     fallback,
 }) => {
-    const { src, onError: handleInternalError, hasLogo } = useProviderLogo(providerId);
+    const { src, onError: handleInternalError, hasLogo, isBundled } = useProviderLogo(providerId);
     const customIcon = useUIStore((state) => state.customProviderIcons[providerId]);
     const storedLogo = useUIStore((state) => state.customProviderLogos[providerId]);
     const wantsUploadedLogo = Boolean(storedLogo) && !ignoreCustomIcon && providerLogoUploadSupported();
     const themeVariant = useOptionalThemeSystem()?.currentTheme.metadata.variant === 'light' ? 'light' : 'dark';
     const uploadedLogo = useUploadedProviderLogoUrl(providerId, wantsUploadedLogo ? storedLogo : undefined, themeVariant);
-    // An upload the browser fetched but cannot draw (an SVG without its namespace).
-    const [undrawableUrl, setUndrawableUrl] = React.useState<string | null>(null);
-    const uploadedUrl = uploadedLogo.url !== undrawableUrl ? uploadedLogo.url : null;
+    // Images the browser fetched but cannot draw (an SVG without its namespace).
+    const [undrawableUrls, setUndrawableUrls] = React.useState(NO_URLS);
+    const standsIn = (image: RuntimeObjectUrl) => !image.failed && !(image.url && undrawableUrls.has(image.url));
+    const showsUpload = wantsUploadedLogo && standsIn(uploadedLogo);
+    const chosenIcon = ignoreCustomIcon ? undefined : customIcon;
+    const guestLogo = useGuestProviderLogo(providerLogoIds(providerId));
+    const wantsGuestLogo = guestLogo !== null && !showsUpload && !chosenIcon;
+    const guestLogoUrl = useGuestProviderLogoUrl(wantsGuestLogo ? guestLogo : null, themeVariant);
     const fallbackIcon = getProviderLogoFallbackIcon(providerId);
 
     const handleError = React.useCallback(() => {
@@ -47,26 +57,31 @@ export const ProviderLogo: React.FC<ProviderLogoProps> = ({
         externalOnError?.();
     }, [handleInternalError, externalOnError]);
 
-    if (uploadedUrl) {
-        // An upload keeps its own colours; only the monochrome logos below are inverted.
-        return (
-            <img
-                src={uploadedUrl}
-                alt={alt ?? `${providerId} logo`}
-                aria-hidden={alt === '' ? true : undefined}
-                className={cn('object-contain', className)}
-                draggable={false}
-                onError={() => setUndrawableUrl(uploadedUrl)}
-            />
-        );
-    }
-    // Holds the logo's place while it loads; a failed fetch or draw falls through.
-    if (wantsUploadedLogo && !uploadedLogo.failed && uploadedLogo.url === null) {
-        return <span aria-hidden className={cn('inline-block', className)} />;
+    // An upload or an extension's logo keeps its own colours; only the app's
+    // monochrome logos below are inverted. Holds its place while it loads, and
+    // a failed fetch or draw falls through to the next mark.
+    const drawnImage = (url: string) => (
+        <img
+            src={url}
+            alt={alt ?? `${providerId} logo`}
+            aria-hidden={alt === '' ? true : undefined}
+            className={cn('object-contain', className)}
+            draggable={false}
+            onError={() => setUndrawableUrls((urls) => new Set(urls).add(url))}
+        />
+    );
+    const slot = <span aria-hidden className={cn('inline-block', className)} />;
+
+    if (showsUpload) return uploadedLogo.url ? drawnImage(uploadedLogo.url) : slot;
+
+    if (chosenIcon) {
+        return <Icon name={customProviderIconName(chosenIcon)} className={cn('text-muted-foreground', className)} />;
     }
 
-    if (customIcon && !ignoreCustomIcon) {
-        return <Icon name={customProviderIconName(customIcon)} className={cn('text-muted-foreground', className)} />;
+    if (wantsGuestLogo && standsIn(guestLogoUrl)) {
+        if (guestLogoUrl.url) return drawnImage(guestLogoUrl.url);
+        // A bundled logo costs no request, so it stays until this one arrives; a models.dev one would be fetched for nothing.
+        if (!isBundled) return slot;
     }
 
     if (!hasLogo || !src) {

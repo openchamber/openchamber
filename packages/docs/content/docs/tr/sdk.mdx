@@ -341,7 +341,19 @@ OpenCode eklentiniz veya MCP sunucunuz bir araç eklediğinde sohbet, çağrıla
 
 `match`, OpenCode'un bildirdiği haliyle aracın adıdır; sondaki `*` bir öneki eşleştirir. `icon`, `panel.icon` gibi bir Remixicon adı ya da paketinizdeki bir `.svg` dosyasıdır. `title` ve `subtitle`, çağrının `input`, `output` ve `metadata` değerleri üzerinde çalışan şablonlardır. `output`, gövdenin nasıl çizileceğini seçer: `text`, `json` (ağaç), `markdown`, `language` ile `code`, `columns` ile `table` (satırlar çıktı dizisinden veya `output.items` içinden gelir) ya da varsayılan için `auto`. Tam bir `match` joker karakteri yener; eşitlikte ilk yüklenen eklenti kazanır. İzin gerekmez: bu yalnızca sohbette zaten bulunan verilerin nasıl çizildiğini değiştirir.
 
-Yalnızca araçları biçimlendiren bir eklentinin sayfaya hiç ihtiyacı yoktur: `panel.entry` öğesini atlayın, şeritte simgesi olmaz, sadece Ayarlar → Uzantılar içinde bir kart görünür. Sayfası olmadan yalnızca `tools` tanımlayabilir, başka bir şey tanımlamaz. Diğer istisna, kendi `entry` sayfası olan bir Work Status bölümü veya dosya düzenleyicisidir, yukarıya bakın.
+Yalnızca araçları biçimlendiren bir eklentinin sayfaya hiç ihtiyacı yoktur: `panel.entry` öğesini atlayın, şeritte simgesi olmaz, sadece Ayarlar → Uzantılar içinde bir kart görünür. Sayfası olmadan yalnızca `tools` ve `providerLogos` tanımlayabilir, başka bir şey tanımlamaz. Diğer istisna, kendi `entry` sayfası olan bir Work Status bölümü veya dosya düzenleyicisidir, yukarıya bakın.
+
+## Sağlayıcınızın logosu
+
+OpenCode eklentiniz bir model sağlayıcısı kaydettiğinde, model seçiciler ve Ayarlar genellikle genel bir işaret çizer. Logoyu paketinize koyun ve sağlayıcıyı adlandırın, kod gerekmez:
+
+```json
+"providerLogos": {
+  "acme-cloud": "assets/acme-cloud.svg"
+}
+```
+
+Anahtar, OpenCode'un bildirdiği sağlayıcı kimliğidir. Değer, paketinizdeki en fazla 1 MB boyutunda bir `.svg` veya `.png` dosyasıdır. Eksik, boş veya daha büyük bir dosya kurulumu başarısız kılar. Bir paket en fazla 256 sağlayıcı adlandırır ve iki kimlik aynı dosyayı gösterebilir. Logo kendi renklerini korur ve SVG içindeki `currentColor` açık veya koyu temayı izler. Uygulamanın bu kimlik için getirdiği logonun yerine geçer. Kullanıcının bu sağlayıcı için ayarladıkları önce gelir, eşitlikte ilk kurulan eklenti kazanır. İzin gerekmez. VS Code ve telefon eklenti yüklemediği için bu logoları göstermez.
 
 ## Paneldeki ilk satırlar
 

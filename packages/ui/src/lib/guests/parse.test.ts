@@ -17,6 +17,16 @@ describe('parseGuestCatalogJson', () => {
     expect(readGuests(JSON.stringify({ guests: [guest] }))?.[0]?.blocks?.[0]?.answers).toBe(true);
   });
 
+  test('a row keeps its provider logos, and logos it cannot read cost only themselves', () => {
+    const guest = { id: 'hello', name: 'Hello', icon: 'window', capabilities: { requested: [], granted: [] }, source: 'path' };
+    expect(readGuests(JSON.stringify({ guests: [{ ...guest, providerLogos: { acme: 'logos/acme.svg' } }] }))?.[0]?.providerLogos)
+      .toEqual({ acme: 'logos/acme.svg' });
+
+    const unreadable = readGuests(JSON.stringify({ guests: [{ ...guest, providerLogos: { acme: '../acme.svg' } }] }))?.[0];
+    expect(unreadable?.id).toBe('hello');
+    expect(unreadable?.providerLogos).toBeUndefined();
+  });
+
   test('one row it cannot read keeps the others and is listed by name', () => {
     const valid = {
       id: 'hello',

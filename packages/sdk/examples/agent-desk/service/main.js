@@ -60,6 +60,7 @@ function installGuestScrollbarActivity(doc) {
 }
 var GUEST_SCROLLBAR_SCRIPT = `(${installGuestScrollbarActivity.toString()})(document);`;
 // packages/sdk/src/manifest.ts
+var GUEST_PROVIDER_LOGO_BYTES_MAX = 1024 * 1024;
 var TRACKER_URL_TOKENS = ["{id}", "{segment}", "{segments+}"];
 var TRACKER_URL_TOKEN_SET = new Set(TRACKER_URL_TOKENS);
 // packages/sdk/src/session-events.ts
@@ -144,7 +145,10 @@ var createServiceHost = ({ env }) => {
       send: (sessionId, prompt) => call("sessions.send", { sessionId, prompt }),
       retry: (sessionId) => call("sessions.retry", { sessionId }),
       status: (sessionId) => call("sessions.status", { sessionId }),
-      lastReply: (sessionId) => call("sessions.lastReply", { sessionId })
+      lastReply: (sessionId) => call("sessions.lastReply", { sessionId }),
+      stop: (sessionId) => call("sessions.stop", { sessionId }),
+      answerPermission: (sessionId, requestId, answer) => call("sessions.answerPermission", { sessionId, requestId, ...answer }),
+      answerForm: (sessionId, formId, values, message) => call("sessions.answerForm", { sessionId, formId, values, ...message === undefined ? {} : { message } })
     },
     setInstructions: (directory, text) => call("instructions.set", { directory, text }),
     emit: (topic, data) => call("panels.emit", { topic, data }),
