@@ -307,7 +307,8 @@ Declared in the manifest, not answered by the service: OpenChamber reads it to d
 | `repositoryPath` | `"owner/name"` or `"namespace/name"` (nested groups) |
 | `instances` | `{ defaultInstances: up to 4 https origins, custom, allowLoopbackHttp, allowPort, placeholder }`. With `custom: false` the user can add only the default instances, and there must be at least one |
 | `capabilities` | `projects`, `issues`, `changeRequests`, `draftChangeRequests`, `merge` (`false` or `{ methods: ["merge" \| "squash" \| "rebase" \| "submit"] }`, with `submit` the only method when present), `ci`, `comments`, `reviews`, `state`, `labels`, `reviewers`, `changeRequestPatch`, `liveSummaries`, `reviewModel?` (`"verdict"` by default, or `"votes"`), `revisions?`. One left out is off. Review threads, uploads, stacks, the reference picker, multiple accounts and how a change request is created are fixed by OpenChamber |
-| `token` | `{ header: "authorization" \| "private-token", scheme: "bearer" \| "token" \| "basic" \| "none", username?, scopes, createPath? }`. `private-token` takes the bare token (`none`); `authorization` takes `Bearer`, `token` or `basic`. `basic` needs `username: true`, and `username: true` is refused with any other scheme |
+| `login` | Optional `{ kind: "service", hint }`. The service owns sign-in; `hint` is 1 to 2000 characters shown when this instance has no login. At least `login` or `token` is required |
+| `token` | Optional `{ header: "authorization" \| "private-token", scheme: "bearer" \| "token" \| "basic" \| "none", username?, scopes, createPath? }`. `private-token` takes the bare token (`none`); `authorization` takes `Bearer`, `token` or `basic`. `basic` needs `username: true`, and `username: true` is refused with any other scheme |
 | `transport` | `{ httpsUsername: { kind: "login" } \| { kind: "fixed", value }, appendDotGitToHttpsClone }`: how Git over HTTPS signs in with the stored token |
 | `limits` | `{ commentMaxLength (≤ 1 000 000), reviewerId: "numeric" \| "login", labelsMax (≤ 100), reviewersMax (≤ 50) }` |
 | `trackedItems` | `{ batchLimit }`, 1–50 items per `liveSummaries` call |
@@ -334,6 +335,20 @@ Creating a change by pushing to `refs/for/<branch>` stays host-only. An extensio
 
 The catalog row carries `toPublicSourceControl(contribution)`: `{ label, defaultInstances, custom }`, what the approval dialog shows.
 
+### Service-owned sign-in
+
+Declare `login: { kind: "service", hint: "Run forge auth login on the OpenChamber server" }` when the service uses an existing CLI login. Keep credentials in that CLI. OpenChamber calls `auth.status` with `session.instance` set to the exact normalized origin, `session.user: null`, an empty `input`, and a handle with no token or forge access. Return `{ user: null }` only when that instance has no login. A CLI with one login and no instance flag returns null for every other origin. A timeout, unavailable CLI or unreadable status is an error; it does not remove the account or its bindings.
+
+Both `auth.verify` and `auth.status` return the same user DTO: `id` is a positive safe integer or a non-empty string of at most 256 characters, with `login` and optional `name`, `email`, `avatarUrl`. String IDs remain unchanged in storage and resource sessions, including numeric-looking strings beyond JavaScript's safe integer range. Compare identities with `String(current.id) === String(session.user.id)`; keep the original ID in the DTO without trimming or numeric conversion.
+
+OpenChamber reuses its CLI account, `<instance>#cli:<user.id>`, without storing the account or a token. Each status and account resolution checks the service again. With login alone it is the current account; the Settings card shows its user or the hint and offers no token field or account-switch actions. With both login and token, the existing CLI activation and stored-token actions remain available. Declare known login origins in `instances.defaultInstances` so the host can discover them without a token connection.
+
+Every resource call carries the verified `session.user`. Check the CLI identity before reading and again before returning the result. If it differs, discard the result and answer `{ ok: false, error: { code: "ACCOUNT_CHANGED", message: "The CLI account changed", status: 409 } }`. OpenChamber invalidates that exact account and its bindings. This code is trusted only on a service-login account's call; a service-reported 401 still requires proxy evidence on token accounts. No account-switch command or multi-account CLI is required.
+
+The account's handles cannot reach the forge proxy. Read through the service's CLI and leave clone, fetch and push on system Git, `mode: 'system'`. OpenChamber never extracts a CLI credential or supplies this account as a managed HTTPS credential. A failed CLI mutation whose service was reached has an unknown outcome, because the proxy cannot observe its writes.
+
+This addition requires the SDK and host built from the same revision. The checkout version is currently 2.7.0; that does not mean the published 2.7.0 SDK or host contains this addition. Set `engines.openchamber` to the release that first includes it when publishing. Older parsers reject the unknown `login` field.
+
 ### Lifecycle
 
 OpenChamber registers the host when the extension is installed, enabled, approved for `service`, and declares the role; pausing, withdrawing approval, or an update without the role unregisters it, and its routes answer 404 until it comes back. Tokens stay through a pause; uninstalling forgets them. The service starts on the first call, not at registration, and stops after `SOURCE_CONTROL_PROVIDER_IDLE_MS` (ten minutes) without one. Every read starts a cold service at worst, so do not cache across calls: OpenChamber keeps its own status cache and drops it after each write.
@@ -353,7 +368,7 @@ OpenChamber registers the host when the extension is installed, enabled, approve
 }
 ```
 
-`readSourceControlProviderRequest(body)` parses it (`null` → answer HTTP 400). `provider` is the id OpenChamber gave the host: put it in every DTO's `provider` field. `session.user` is `null` in `auth.verify` and `auth.probe`, before an account exists. `input` per method is `SourceControlProviderInputs`; the reads take the route shell's own input, with `directory` and `remote` as OpenChamber resolved them and `context` the binding it validated.
+`readSourceControlProviderRequest(body)` parses it (`null` → answer HTTP 400). `provider` is the id OpenChamber gave the host: put it in every DTO's `provider` field. `session.user` is `null` in `auth.verify`, `auth.probe` and `auth.status`, before an account exists. `input` per method is `SourceControlProviderInputs`; the reads take the route shell's own input, with `directory` and `remote` as OpenChamber resolved them and `context` the binding it validated.
 
 Answer HTTP 200 with `{ "ok": true, "data": … }` or `{ "ok": false, "error": { "message", "status"?, "code"? } }` (`message` ≤ 2000 characters, `status` 400–599, `code` `[A-Z_]{1,64}`). Any other status or shape is a malformed answer, never an empty one.
 
@@ -361,6 +376,7 @@ Answer HTTP 200 with `{ "ok": true, "data": … }` or `{ "ok": false, "error": {
 |---|---|
 | `auth.verify` | `{ user: { id, login, name?, email?, avatarUrl? } }`: who the candidate token belongs to; OpenChamber stores the account |
 | `auth.probe` | `{ supported, version?, message? }`: whether the instance is this forge; the handle carries no token |
+| `auth.status` | `{ user: { id, login, name?, email?, avatarUrl? } \| null }`: the service's current login for this exact instance; called only when `login` is declared, with no candidate token |
 | `changeRequestStatus` | The branch's status as the badge shows it (`ChangeRequestStatus` in the UI): its open pull request, else its most recent closed or merged one, so a merged branch is not offered a new pull request |
 | `listChangeRequests`, `changeRequestContext`, `listIssues`, `getIssue`, `issueComments`, `projectUpstream`, `projectBranches`, `listLabels`, `listReviewerCandidates` | A JSON object or array within `SOURCE_CONTROL_PROVIDER_RESPONSE_MAX`; the UI parses these DTOs itself |
 | `readChangeRequestPatch` | `{ patch, meta: { owner, repo, number } }`: the change request's whole unified diff (`diff --git` per file) and the repository it was read from. Served to the Changes view and walkthroughs only when `capabilities.changeRequestPatch` is on. `sourceRepo`, when given, names the repository the change request lives in; read only within the bound repository's network |
@@ -392,7 +408,7 @@ Review threads have routes too, but they stay off for an extension's Git host.
 
 Deadlines: `changeRequestStatus` 12 s (past it the last known status shows), other reads 20 s, mutation steps 30 s, `auth.*` 15 s (`sourceControlProviderTimeoutMs`).
 
-OpenChamber decides, not the service, what a failure means. A mutation counts as definitely failed only when the service was never reached or every write the proxy saw got a 4xx; anything else is an unknown outcome to reconcile. A `status: 401` writes off the account only when OpenChamber's proxy saw the forge answer 401 on that call; a 401 the service reports on its own is a malformed answer.
+OpenChamber decides what a failure means. A token-account mutation counts as definitely failed only when the service was never reached or every write the proxy saw got a 4xx; anything else is an unknown outcome to reconcile. Service-login mutations are described under *Service-owned sign-in*. A `status: 401` writes off the account only when OpenChamber's proxy saw the forge answer 401 on that call; a 401 the service reports on its own is a malformed answer.
 
 ### Reaching the forge
 
@@ -402,7 +418,7 @@ The service never holds a token. `createSourceControlForge({ env: process.env })
 - Answer: HTTP 200 with `{ status, headers, body }`, the forge's status (any, 401 included), the headers in `SOURCE_CONTROL_OUTBOUND_RESPONSE_HEADERS` plus `x-ratelimit-*`, and the body as text up to `SOURCE_CONTROL_OUTBOUND_RESPONSE_MAX` (8 MB). Redirects are not followed. `request` resolves with it.
 - Refusal: any other status with `{ error: { message, code } }` (an expired or unknown handle, a path off the instance, a body too large). `request` throws `SourceControlForgeError` with that `code` and `status`; `HOST_UNAVAILABLE` when there was no usable answer.
 
-A handle is minted for one call, carries `auth.verify`'s candidate token or the bound account's token (none for `auth.probe`), and is revoked when the call ends. Never store it.
+A handle is minted for one call, carries `auth.verify`'s candidate token or the bound token account's token, and is revoked when the call ends. `auth.probe` carries none. `auth.status` and service-login accounts carry none and cannot send forge requests. Never store a handle.
 
 This is least exposure, not a sandbox. OpenChamber keeps tokens because Git transport needs them anyway and the proxy is the one place origin pinning, enterprise policy and audit can act. An approved service still runs as the user and could read OpenChamber's files itself.
 

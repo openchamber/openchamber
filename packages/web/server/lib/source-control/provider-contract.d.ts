@@ -87,7 +87,7 @@ export interface ProviderDescriptor {
    */
   projectPathOfRemote?(remote: { protocol: 'https' | 'http' | 'ssh'; path: string }): string;
   capabilities: ProviderCapabilities;
-  authMethods: { device: boolean; pat: boolean; cli: false | { tool: string } };
+  authMethods: { device: boolean; pat: boolean; cli: false | { tool: string } | { kind: 'service'; hint: string } };
   transport: {
     httpsUsername: { kind: 'fixed'; value: string } | { kind: 'login' };
     /** `default-only`: managed Git transport reaches the default instances only. */
@@ -142,7 +142,7 @@ export interface ProviderDescriptor {
     guestId: string;
     name: string;
     version: string;
-    token: { header: 'authorization' | 'private-token'; scheme: 'bearer' | 'token' | 'none' };
+    token?: { header: 'authorization' | 'private-token'; scheme: 'bearer' | 'token' | 'basic' | 'none' };
   };
 }
 
@@ -176,6 +176,7 @@ export interface PublicProviderDescriptor {
   auth: {
     methods: Array<'device' | 'pat' | 'cli'>;
     cliName?: string;
+    login?: { kind: 'service'; hint: string };
     cliTransport: boolean;
     token?: { scopes: string[]; createPath?: string };
   };

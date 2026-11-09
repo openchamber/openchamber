@@ -56,7 +56,9 @@ export const ProviderInstanceAccounts: React.FC<ProviderInstanceAccountsProps> =
   const sshUrlConfirm = useConfirmDialog();
   const copy = providerSettingsCopy(descriptor);
   const provider = descriptor.label;
-  const cliName = descriptor.auth.cliName ?? '';
+  const serviceLogin = descriptor.auth.login;
+  const serviceOnly = Boolean(serviceLogin && !descriptor.auth.methods.includes('pat'));
+  const cliName = descriptor.auth.cliName ?? descriptor.label;
   const refreshInstances = useSourceControlAuthStore((state) => state.refreshInstances);
   const refreshStatus = useSourceControlAuthStore((state) => state.refreshStatus);
   const setStatus = useSourceControlAuthStore((state) => state.setStatus);
@@ -124,14 +126,14 @@ export const ProviderInstanceAccounts: React.FC<ProviderInstanceAccountsProps> =
     setCapabilitiesFailed(false);
     void Promise.all([
       sourceControl.capabilities(identity),
-      refreshStatus(sourceControl, identity),
+      refreshStatus(sourceControl, identity, serviceLogin ? { force: true } : undefined),
     ]).then(([nextCapabilities]) => {
       if (!cancelled && isCurrentRuntime()) setCapabilities(nextCapabilities);
     }).catch(() => {
       if (!cancelled && isCurrentRuntime()) setCapabilitiesFailed(true);
     });
     return () => { cancelled = true; };
-  }, [capabilitiesAttempt, captureRuntime, identity, refreshStatus, sourceControl]);
+  }, [capabilitiesAttempt, captureRuntime, identity, refreshStatus, serviceLogin, sourceControl]);
 
   React.useEffect(() => {
     if (!flow || pollDelayMs <= 0) return;
@@ -362,7 +364,7 @@ export const ProviderInstanceAccounts: React.FC<ProviderInstanceAccountsProps> =
   } else if (accounts.length > 0) {
     statusMessage = null;
   } else {
-    statusMessage = t(copy.notConnected);
+    statusMessage = serviceLogin?.hint ?? t(copy.notConnected);
   }
 
   return (
@@ -425,11 +427,13 @@ export const ProviderInstanceAccounts: React.FC<ProviderInstanceAccountsProps> =
             accounts={accounts}
             avatarAlt={(username) => username}
             currentLabel={t('settings.sourceControl.accounts.inUse')}
-            sourceLabel={(account) => account.source === 'cli' ? t(copy.cliLabel, { cli: cliName }) : t(getManagedCredentialSourceLabelKey(account.source))}
+            sourceLabel={(account) => account.source === 'cli'
+              ? serviceLogin ? provider : t(copy.cliLabel, { cli: cliName })
+              : t(getManagedCredentialSourceLabelKey(account.source))}
             statusLabel={(account) => account.status === 'valid'
               ? null
               : t('settings.sourceControl.accounts.needsAuthentication')}
-            renderActions={(account) => (
+            renderActions={(account) => serviceOnly && account.source === 'cli' ? null : (
               <>
                 {account.status === 'invalid' && account.source !== 'cli' ? (
                   <Button size="sm" variant="outline" onClick={() => setIsAddingAccount(true)} disabled={busy}>
@@ -456,7 +460,7 @@ export const ProviderInstanceAccounts: React.FC<ProviderInstanceAccountsProps> =
         </div>
       ) : null}
 
-      {connected && !isAddingAccount && (
+      {connected && connectMethods.length > 0 && !isAddingAccount && (
         <div>
           <Button size="sm" variant="outline" onClick={() => setIsAddingAccount(true)} disabled={busy}>
             {t('settings.github.page.actions.addAccount')}
@@ -552,7 +556,7 @@ export const ProviderInstanceAccounts: React.FC<ProviderInstanceAccountsProps> =
 
       {/* While the CLI login is a listed account, its own row carries the switch.
           A switch the server kept for a CLI that cannot answer has no row, so it shows here. */}
-      {descriptor.auth.methods.includes('cli') && cli && (cli.disabled || cli.active || (connected && cli.available))
+      {!serviceOnly && descriptor.auth.methods.includes('cli') && cli && (cli.disabled || cli.active || (connected && cli.available))
         && (cli.disabled || !accounts.some((account) => account.source === 'cli')) && (
         <div>
           <SettingsFieldRow label={t(copy.cliLabel, { cli: cliName })} info={t(copy.cliInfo, { cli: cliName })}>
@@ -566,4 +570,3 @@ export const ProviderInstanceAccounts: React.FC<ProviderInstanceAccountsProps> =
     </div>
   );
 };
-
