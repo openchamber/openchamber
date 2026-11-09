@@ -2877,6 +2877,7 @@ async function main(options = {}) {
     agentToolRuntime,
     limitFailoverRuntime,
     desktopUpdater,
+    getOpenCodeCompatibility,
     skipBodyParsing: (req) => spacesHost?.skipsBodyParsing(req) === true,
   });
   uiAuthController = bootstrapResult.uiAuthController;

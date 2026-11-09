@@ -25,8 +25,12 @@ export type UpdateInfo = {
    * this copy, so the new version is installed the way this one was.
    * `desktop-host`: a desktop installed from a Linux package asks for the
    * administrator password on its own screen, so it updates only there.
+   * `opencode-version`: the new version needs OpenCode
+   * `requiredOpenCodeVersion`, newer than the server's `openCodeVersion`.
    */
-  installBlocked?: 'service-manager' | 'manual-install' | 'desktop-host';
+  installBlocked?: 'service-manager' | 'manual-install' | 'desktop-host' | 'opencode-version';
+  requiredOpenCodeVersion?: string;
+  openCodeVersion?: string;
 };
 
 export type UpdateProgress = {

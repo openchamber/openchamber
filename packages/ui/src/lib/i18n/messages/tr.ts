@@ -3273,6 +3273,7 @@ export const dict = {
   'updateDialog.status.autoReloadHint': 'Güncelleme tamamlandığında sayfa otomatik olarak yeniden yüklenecek.',
   'updateDialog.fallback.updateViaTerminal': 'Ya da terminalden güncelleyin:',
   'updateDialog.desktopHostInstall': 'OpenChamber {version} kullanılabilir. Çalıştığı bilgisayarda güncelleyin.',
+  'updateDialog.openCodeTooOld': 'OpenChamber {version}, OpenCode {required} gerektirir. Bu sunucuda {current} var. Önce OpenCode’u güncelleyin.',
   'updateDialog.actions.copyCommand': 'Komutu kopyala',
   'updateDialog.actions.copied': 'Kopyalandı!',
   'updateDialog.status.downloadingPayload': 'Güncelleme paketi indiriliyor...',

@@ -3414,6 +3414,7 @@ export const dict: Record<I18nKey, string> = {
   "updateDialog.status.autoReloadHint": "Після завершення оновлення сторінка автоматично перезавантажиться.",
   "updateDialog.fallback.updateViaTerminal": "Або оновіть через термінал:",
   "updateDialog.desktopHostInstall": "Доступний OpenChamber {version}. Оновіть його на комп’ютері, де він працює.",
+  "updateDialog.openCodeTooOld": "OpenChamber {version} потребує OpenCode {required}. На цьому сервері {current}. Спершу оновіть OpenCode.",
   "updateDialog.actions.copyCommand": "Копіювати команду",
   "updateDialog.actions.copied": "Скопійовано!",
   "updateDialog.status.downloadingPayload": "Завантаження пакета оновлення...",

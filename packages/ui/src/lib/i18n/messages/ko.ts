@@ -3458,6 +3458,7 @@ export const dict: Record<I18nKey, string> = {
   'updateDialog.status.autoReloadHint': '업데이트가 완료되면 페이지가 자동으로 새로고침됩니다.',
   'updateDialog.fallback.updateViaTerminal': '또는 터미널에서 업데이트:',
   'updateDialog.desktopHostInstall': 'OpenChamber {version}을(를) 사용할 수 있습니다. 실행 중인 컴퓨터에서 업데이트하세요.',
+  'updateDialog.openCodeTooOld': 'OpenChamber {version}에는 OpenCode {required}이(가) 필요합니다. 이 서버는 {current}입니다. 먼저 OpenCode를 업데이트하세요.',
   'updateDialog.actions.copyCommand': '명령어 복사',
   'updateDialog.actions.copied': '복사 완료!',
   'updateDialog.status.downloadingPayload': '업데이트 패키지 다운로드 중…',

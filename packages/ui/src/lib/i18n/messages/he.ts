@@ -3371,6 +3371,7 @@ export const dict = {
   'updateDialog.status.autoReloadHint': 'הדף ייטען מחדש אוטומטית כשהעדכון יסתיים.',
   'updateDialog.fallback.updateViaTerminal': 'או לעדכן דרך המסוף:',
   'updateDialog.desktopHostInstall': 'OpenChamber {version} זמין. יש לעדכן אותו במחשב שבו הוא פועל.',
+  'updateDialog.openCodeTooOld': 'OpenChamber {version} דורש OpenCode {required}. בשרת הזה מותקנת גרסה {current}. יש לעדכן קודם את OpenCode.',
   'updateDialog.actions.copyCommand': 'העתק פקודה',
   'updateDialog.actions.copied': 'הועתק!',
   'updateDialog.status.downloadingPayload': 'מוריד את חבילת העדכון…',

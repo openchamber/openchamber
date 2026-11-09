@@ -1,5 +1,6 @@
 import { publicEnterprisePolicy } from '../enterprise-mode.js';
 import { withUserEnv } from '../injected-env.js';
+import { isOpenCodeOlderThan } from './compatibility.js';
 
 const SYSTEMD_SERVICE_UNIT_PATTERN = /^[A-Za-z0-9:_.@-]+\.service$/;
 
@@ -75,9 +76,26 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
     fetchFreeZenModels,
     getCachedZenModels,
     desktopUpdater,
+    getOpenCodeCompatibility,
   } = dependencies;
 
   let desktopRestartError = null;
+
+  /**
+   * The offered release needs a newer OpenCode than this server runs: after
+   * the install the new build would refuse to start against it, and an
+   * external OpenCode cannot be updated from the app. Null when the release
+   * does not say what it needs or the OpenCode version cannot be read.
+   */
+  const readOpenCodeShortfall = async (version) => {
+    const { fetchRequiredOpenCodeVersion } = await import('../package-manager.js');
+    const requiredOpenCodeVersion = await fetchRequiredOpenCodeVersion(version);
+    if (!requiredOpenCodeVersion) return null;
+    const openCodeVersion = (await getOpenCodeCompatibility().catch(() => null))?.version ?? null;
+    return openCodeVersion && isOpenCodeOlderThan(openCodeVersion, requiredOpenCodeVersion)
+      ? { requiredOpenCodeVersion, openCodeVersion }
+      : null;
+  };
 
   /**
    * How this server was launched, read from its instance file. A foreground
@@ -171,7 +189,10 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
         // Tell clients up front that the install route will refuse, so they
         // show manual steps instead of an Update button that fails.
         if (updateInfo?.available && updateRequest.appType === 'web') {
-          if (isUnmanagedInstall()) {
+          const openCodeShortfall = await readOpenCodeShortfall(updateInfo.version);
+          if (openCodeShortfall) {
+            updateInfo = { ...updateInfo, installBlocked: 'opencode-version', ...openCodeShortfall };
+          } else if (isUnmanagedInstall()) {
             updateInfo = { ...updateInfo, installBlocked: 'manual-install' };
           } else {
             const { isForegroundService, systemdServiceUnit, isLaunchdService } = await readLaunchState();
@@ -265,6 +286,15 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
       const updateInfo = await checkForUpdates();
       if (!updateInfo.available) {
         return res.status(400).json({ error: 'No update available' });
+      }
+
+      const openCodeShortfall = await readOpenCodeShortfall(updateInfo.version);
+      if (openCodeShortfall) {
+        return res.status(409).json({
+          code: 'OPENCODE_TOO_OLD',
+          error: `OpenChamber ${updateInfo.version} needs OpenCode ${openCodeShortfall.requiredOpenCodeVersion}. This server has ${openCodeShortfall.openCodeVersion}. Update OpenCode first.`,
+          ...openCodeShortfall,
+        });
       }
 
       // A global install would add a second copy and leave this one as it is.
