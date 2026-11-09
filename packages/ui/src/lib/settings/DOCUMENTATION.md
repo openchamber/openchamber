@@ -43,6 +43,24 @@
 
 ## Decisions
 
+### Why file notifications refresh through persistence
+
+Server-backed web, Electron including Mini Chat, hosted mobile and Capacitor
+clients invalidate the settings read cache and perform a non-bootstrap refresh
+when the control stream announces a file change or reconnects. Workspace
+pointers remain bootstrap-only, pending local writes retain precedence and
+superseded reads cannot refill the cache or apply after hydration. VS Code owns
+an extension-host store and does not subscribe to this server watcher.
+An invalidated bootstrap read retries against the latest document while its
+runtime remains active, preserving startup workspace restoration. Live
+refreshes themselves remain non-bootstrap.
+
+The control stream owns notification parsing and delivery. This consumer needs
+the server watcher and its `settings-changed` event to follow live file edits;
+it compiles against an older stream that only announces readiness. File
+authority and legacy profile reconciliation belong to the server's
+`lib/opencode/DOCUMENTATION.md`.
+
 ### Why the Settings view passes its voice availability snapshot
 
 Search and new-setting badges receive the voice fields the view subscribes to, so memoized results refresh when those fields change. Non-React callers can omit the snapshot and read the current config store; separate invalidation-only dependencies hid this relationship from hook checks.

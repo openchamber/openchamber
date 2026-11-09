@@ -13,6 +13,7 @@ import { OpenCodeTrustDialog } from '@/components/projects/OpenCodeTrustDialog';
 import { usePushVisibilityBeacon } from '@/hooks/usePushVisibilityBeacon';
 import { useWindowTitle } from '@/hooks/useWindowTitle';
 import { useRoutingSync } from '@/hooks/useRoutingSync';
+import { useSettingsFileSync } from '@/hooks/useSettingsFileSync';
 import { useRootScrollLock } from '@/hooks/useRootScrollLock';
 import { useGlobalSessionsPolling } from '@/hooks/useGlobalSessionsPolling';
 import { opencodeClient } from '@/lib/opencode/client';
@@ -359,6 +360,7 @@ export function ElectronMiniChatApp({ apis }: ElectronMiniChatAppProps) {
   usePushVisibilityBeacon({ enabled: true });
   useWindowTitle();
   useRoutingSync();
+  useSettingsFileSync();
   useRootScrollLock();
   // The header session switcher lists the global session list; this window
   // is its own app root, so it loads that list itself.

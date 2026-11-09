@@ -167,6 +167,11 @@ type GuestServiceEvent = { type: 'guest-service-event'; guestId: string; topic: 
  * rewritten. Carries nothing; listeners re-read the custom themes.
  */
 type ThemesChangedEvent = { type: 'themes-changed' };
+const settingsChangedSchema = z.object({
+  source: z.enum(['settings', 'preferences']),
+  changedKeys: z.array(z.string().min(1).max(128)).min(1),
+});
+type SettingsChangedEvent = { type: 'settings-changed' } & z.infer<typeof settingsChangedSchema>;
 
 /**
  * A usage limit stopped a session and the server moved on: the provider to
@@ -289,6 +294,7 @@ const notificationPropertiesSchema = z.object({
 });
 
 type OpenChamberEvent =
+  | SettingsChangedEvent
   | { type: 'terminal-sessions-changed' }
   | { type: 'notification'; payload: z.infer<typeof notificationPropertiesSchema> }
   /** `connectionId` names this connection on the server; absent from servers before tracked items. */

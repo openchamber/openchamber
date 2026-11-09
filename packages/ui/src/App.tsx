@@ -25,6 +25,7 @@ import { usePushVisibilityBeacon } from '@/hooks/usePushVisibilityBeacon';
 import { useWebNotificationStream } from '@/hooks/useWebNotificationStream';
 import { useAgentMemorySync } from '@/hooks/useAgentMemorySync';
 import { useBrowserProviderSync } from '@/hooks/useBrowserProviderSync';
+import { useSettingsFileSync } from '@/hooks/useSettingsFileSync';
 import { useSourceControlProviderSync } from '@/hooks/useSourceControlProviderSync';
 import { useTrackerProviderSync } from '@/hooks/useTrackerProviderSync';
 import { useQuotaProviderSync } from '@/hooks/useQuotaProviderSync';
@@ -668,6 +669,7 @@ function App({ apis }: AppProps) {
   // Project notes sent every message with no memory index at all.
   useAgentMemorySync(currentDirectory || null);
   useBrowserProviderSync();
+  useSettingsFileSync();
   useSourceControlProviderSync(apis.sourceControl);
   useTrackerProviderSync(apis.trackers);
   useQuotaProviderSync();
