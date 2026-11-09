@@ -830,9 +830,11 @@ export const serviceProvides = (
  * `opencodePlugin` follows from `contributes.opencodePlugin`: the package's
  * plugin runs inside the user's OpenCode. `opencode` follows from the service
  * role of the same name: the service reads sessions, messages, projects and
- * live events from the OpenCode the host uses, and nothing else.
+ * live events from the OpenCode the host uses, and nothing else. `links`
+ * follows from `contributes.links`: identifiers and links in chat messages
+ * become the extension's, and a click hands the one clicked to it.
  */
-export const GUEST_CAPABILITIES = ['prompt', 'sessions', 'files', 'model', 'shells', 'conversation', 'service', 'network', 'filesystem', 'origins', 'transcript', 'sessionControl', 'sessionAnswers', 'instructions', 'skills', 'opencodePlugin', 'opencode'] as const;
+export const GUEST_CAPABILITIES = ['prompt', 'sessions', 'files', 'model', 'shells', 'conversation', 'service', 'network', 'filesystem', 'origins', 'transcript', 'sessionControl', 'sessionAnswers', 'instructions', 'skills', 'opencodePlugin', 'opencode', 'links'] as const;
 
 export type GuestCapability = (typeof GUEST_CAPABILITIES)[number];
 
@@ -887,6 +889,46 @@ export type MentionsContribution = {
 
 /** Characters of a mention section's label. */
 export const GUEST_MENTIONS_LABEL_MAX = 40;
+
+/** Identifier keys one extension may claim in chat text (`contributes.links.identifier.keys`). */
+export const GUEST_LINK_KEYS_MAX = 8;
+/** A literal identifier key: `PROJ` claims `PROJ-123`. Upper case, so prose and code words stay text. */
+export const GUEST_LINK_KEY = /^[A-Z][A-Z0-9_]{0,31}$/;
+/** What a click on a recognised identifier or link does. */
+export const GUEST_LINK_ACTIONS = ['open', 'attach'] as const;
+export type GuestLinkAction = (typeof GUEST_LINK_ACTIONS)[number];
+
+/**
+ * `contributes.links`: identifiers and links in chat messages the host
+ * recognises for the extension. A click on one does the `action`: `open`
+ * opens the extension with a `link` item (its rail panel, or its dialog when
+ * `attach` is `"dialog"`), `attach` puts a chip on the composer. Patterns are
+ * declared, never written as regular expressions: literal identifier keys,
+ * and link templates in the tracker's grammar (`isTrackerUrlTemplate`) under
+ * one fixed https origin. Grants `links`, approved for exactly these keys,
+ * origin, templates and action.
+ */
+export type LinksContribution = {
+  action: GuestLinkAction;
+  /** `PROJ-123` in text, for each listed key. */
+  identifier?: { keys: string[] };
+  /**
+   * Links to one item on `origin`. `identifier` is the shape of `{id}`; with
+   * `action: "attach"`, at least one template uses no `{segment}` placeholder,
+   * so the chip of a recognised identifier can name its link.
+   */
+  urls?: { origin: string; identifier: TrackerIdentifierKind; item: string[] };
+};
+
+/** A link template the host can fill from an identifier alone: no `{segment}` or `{segments+}`. */
+export const isBuildableLinkTemplate = (template: string): boolean => (
+  isTrackerUrlTemplate(template) && !template.includes('{segment}') && !template.includes('{segments+}')
+);
+
+/** The link a buildable template names for one identifier on `origin`. */
+export const buildLinkUrl = (origin: string, template: string, identifier: string): string => (
+  `${origin}${template.replace('{id}', encodeURIComponent(identifier))}`
+);
 
 /** A component name an agent writes in a UI block. */
 export const GUEST_BLOCK_NAME = /^[A-Z][A-Za-z0-9]{1,31}$/;
@@ -974,6 +1016,8 @@ export type OpenChamberContributes = {
   mentions?: MentionsContribution;
   /** Components agents write in UI blocks, each drawn by its own frame. */
   blocks?: GuestBlockContribution[];
+  /** Identifiers and links in chat messages a click hands to the extension. Grants `links`. */
+  links?: LinksContribution;
 };
 
 /** Whether any declared action asks for a session's messages, which needs `conversation`. */
@@ -988,7 +1032,7 @@ export type PublicGuestCapabilities = {
 };
 
 export const requestedGuestCapabilities = (
-  contributes: Pick<OpenChamberContributes, 'capabilities' | 'integration' | 'service' | 'filesystem' | 'actions' | 'origins' | 'sessionEvents' | 'sessionControl' | 'instructions' | 'skills' | 'opencodePlugin'>,
+  contributes: Pick<OpenChamberContributes, 'capabilities' | 'integration' | 'service' | 'filesystem' | 'actions' | 'origins' | 'sessionEvents' | 'sessionControl' | 'instructions' | 'skills' | 'opencodePlugin' | 'links'>,
 ): GuestCapability[] => {
   const declared = new Set<GuestCapability>(contributes.capabilities ?? []);
   if (guestActionsNeedConversation(contributes.actions)) declared.add('conversation');
@@ -1003,6 +1047,7 @@ export const requestedGuestCapabilities = (
   if (contributes.instructions) declared.add('instructions');
   if (contributes.skills) declared.add('skills');
   if (contributes.opencodePlugin) declared.add('opencodePlugin');
+  if (contributes.links) declared.add('links');
   return GUEST_CAPABILITIES.filter((capability) => declared.has(capability));
 };
 
@@ -1125,6 +1170,7 @@ export type ParseManifestErrorCode =
   | 'invalid-opencode-plugin'
   | 'invalid-mentions'
   | 'invalid-blocks'
+  | 'invalid-links'
   | 'invalid-capabilities'
   | 'invalid-integration'
   | 'invalid-service'

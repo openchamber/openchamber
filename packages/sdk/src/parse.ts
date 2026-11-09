@@ -64,6 +64,10 @@ import {
   TRACKER_URL_TEMPLATES_MAX,
   TRACKER_URL_TOKENS,
   isTrackerUrlTemplate,
+  GUEST_LINK_ACTIONS,
+  GUEST_LINK_KEY,
+  GUEST_LINK_KEYS_MAX,
+  isBuildableLinkTemplate,
 } from './manifest.ts';
 import { isGuestRequestPath } from './contract.ts';
 import { GUEST_SESSION_EVENT_TYPES } from './session-events.ts';
@@ -601,6 +605,54 @@ const blockSchema = z.object({
   answers: z.boolean().optional(),
 }).strict();
 
+// A link origin: a public https origin with a literal hostname, never an IP
+// literal or loopback, so an extension cannot claim links to the app itself.
+const IPV4_HOSTNAME = /^\d+(?:\.\d+){3}$/;
+const isLinkOrigin = (value: string): boolean => (
+  isApprovableOrigin(value) && !IPV4_HOSTNAME.test(new URL(value).hostname)
+);
+
+const linksSchema = z.object({
+  action: z.enum(GUEST_LINK_ACTIONS),
+  identifier: z.object({
+    keys: z.array(z.string().trim().regex(GUEST_LINK_KEY)).min(1).max(GUEST_LINK_KEYS_MAX)
+      .refine((keys) => new Set(keys).size === keys.length, { message: 'keys must be unique' }),
+  }).strict().optional(),
+  urls: z.object({
+    origin: z.string().trim().refine(isLinkOrigin, { message: 'must be a public https origin with no path, like https://tasks.example.com' }),
+    identifier: z.enum(TRACKER_IDENTIFIER_KINDS),
+    item: z.array(z.string().trim().min(1)).min(1).max(TRACKER_URL_TEMPLATES_MAX)
+      .refine((templates) => new Set(templates).size === templates.length, { message: 'link templates must be unique' }),
+  }).strict().optional(),
+}).strict().superRefine((value, ctx) => {
+  if (!value.identifier && !value.urls) {
+    ctx.addIssue({ code: 'custom', path: [], message: 'declare identifier, urls or both' });
+    return;
+  }
+  value.urls?.item.forEach((template, index) => {
+    if (isTrackerUrlTemplate(template)) return;
+    ctx.addIssue({
+      code: 'custom', path: ['urls', 'item', index],
+      message: `templates start with "/" and use literal segments and ${TRACKER_URL_TOKENS.join(', ')}, with {id} once, in the path or as "?name={id}".`,
+    });
+  });
+  // A chip names its link: an identifier alone has to fill a template.
+  if (value.action === 'attach' && !value.urls?.item.some(isBuildableLinkTemplate)) {
+    ctx.addIssue({
+      code: 'custom', path: ['urls'],
+      message: 'action "attach" needs urls with at least one template without {segment} or {segments+}, so a chip can name its link.',
+    });
+    return;
+  }
+  // `PROJ-12` in text never has the shape of a number, so it could name no link.
+  if (value.action === 'attach' && value.identifier && value.urls?.identifier === 'number') {
+    ctx.addIssue({
+      code: 'custom', path: ['urls', 'identifier'],
+      message: 'action "attach" with identifier keys needs urls.identifier "key-number" or "short-code": a key like PROJ-12 cannot fill a "number" {id}, so its chip would have no link.',
+    });
+  }
+});
+
 const blocksSchema = z.array(blockSchema).min(1).max(GUEST_BLOCKS_MAX)
   .refine((blocks) => uniqueBy(blocks, (block) => block.name), { message: 'block names must be unique' });
 
@@ -654,6 +706,7 @@ const contributesSchema = z.object({
   opencodePlugin: z.string().trim().refine(isSafeAssetPath).optional(),
   mentions: z.object({ label: z.string().trim().min(1).max(GUEST_MENTIONS_LABEL_MAX) }).strict().optional(),
   blocks: blocksSchema.optional(),
+  links: linksSchema.optional(),
 });
 
 /**
@@ -800,6 +853,14 @@ export const openChamberManifestSchema = z.object({
       ctx.addIssue({
         code: 'custom', path: ['sessionEvents'],
         message: 'contributes.sessionEvents are posted to the extension\'s service; declare contributes.service.',
+      });
+      return;
+    }
+    // `open` hands the link to the extension's page; without one there is nothing to open.
+    if (contributes.links?.action === 'open' && !hasGuestPage(contributes)) {
+      ctx.addIssue({
+        code: 'custom', path: ['links', 'action'],
+        message: 'contributes.links action "open" opens panel.entry with the link; declare panel.entry, or use action "attach".',
       });
       return;
     }
@@ -1036,6 +1097,12 @@ const failureFromIssue = (issue: { path: ReadonlyArray<PropertyKey>; code: strin
       'invalid-blocks',
       `contributes.blocks lists 1 to ${GUEST_BLOCKS_MAX} components, each with a unique PascalCase name, a description of 1 to ${GUEST_BLOCK_DESCRIPTION_MAX} characters, up to ${GUEST_BLOCK_ARGS_MAX} unique camelCase args, an entry ending in .html inside the package, and an optional height.`,
     );
+  }
+  if (path === 'contributes.links' || path.startsWith('contributes.links.')) {
+    const field = fieldPath(issue.path);
+    return fail('invalid-links', issue.code === 'custom'
+      ? `${field}: ${issue.message}`
+      : `${field} is invalid: contributes.links is { action: "open" | "attach", identifier?: { keys: 1 to ${GUEST_LINK_KEYS_MAX} upper-case keys like "PROJ" }, urls?: { origin: "https://...", identifier: ${TRACKER_IDENTIFIER_KINDS.map((kind) => `"${kind}"`).join(' | ')}, item: link templates } }.`);
   }
   if (path.startsWith('contributes.integration')) {
     return fail(

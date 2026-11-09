@@ -3,6 +3,7 @@ import { describe, expect, test } from 'bun:test';
 import { OPENCHAMBER_SDK_API_VERSION } from './api-version.ts';
 import { clampStatusSectionHeight, hasGuestPage, requestedGuestCapabilities, toPublicNotifications, toPublicQuota, toPublicSessionEvents, toPublicSourceControl, resolveAttachEntry, resolveStatusSectionEntry, resolveStatusSectionSource, resolveAttachMode, resolveIntegrationApi, toPublicIntegration, type OpenChamberContributes, isOpenCodeProviderId, isTrackerUrlTemplate, toPublicTracker } from './manifest.ts';
 import type { JsonValue } from './contract.ts';
+import type { LinksContribution } from './manifest.ts';
 import { parseManifest, parseManifestJson } from './parse.ts';
 
 const validBlock = {
@@ -1695,5 +1696,54 @@ describe('contributes.blocks', () => {
   test('an entry stays inside the package and is html', () => {
     expect(parse([{ ...block, entry: '../issue.html' }])).toMatchObject({ ok: false, code: 'invalid-blocks' });
     expect(parse([{ ...block, entry: 'blocks/issue.js' }])).toMatchObject({ ok: false, code: 'invalid-blocks' });
+  });
+});
+
+describe('contributes.links', () => {
+  const panel = { id: 'tasks', name: 'Tasks', icon: 'task', entry: 'panel/index.html' };
+  const urls: NonNullable<LinksContribution['urls']> = { origin: 'https://tasks.example.com', identifier: 'key-number', item: ['/tasks/{id}'] };
+  const parse = (links: JsonValue, withPanel: JsonValue = panel) => parseManifestJson(JSON.stringify({
+    apiVersion: OPENCHAMBER_SDK_API_VERSION,
+    contributes: { panel: withPanel, links },
+  }));
+
+  test('accepts literal keys, link templates under one origin, and asks for its own capability', () => {
+    const accepted = parse({ action: 'open', identifier: { keys: ['DEMO', 'OPS_2'] }, urls });
+    expect(accepted.ok).toBe(true);
+    if (accepted.ok) expect(accepted.manifest.contributes.links?.identifier?.keys).toEqual(['DEMO', 'OPS_2']);
+    expect(parse({ action: 'attach', urls }).ok).toBe(true);
+    expect(parse({ action: 'open', urls: { ...urls, identifier: 'number', item: ['/{segments+}/c/{id}', '/browse?selectedIssue={id}'] } }).ok).toBe(true);
+    expect(requestedGuestCapabilities({ links: { action: 'open', urls } })).toEqual(['links']);
+  });
+
+  test('refuses keys that are not literal upper-case words', () => {
+    for (const key of ['P.*', '(A|B)', 'proj', 'Proj', '1PROJ', 'PROJ-1', '', 'A'.repeat(33)]) {
+      expect(parse({ action: 'open', identifier: { keys: [key] } }), key).toMatchObject({ ok: false, code: 'invalid-links' });
+    }
+    expect(parse({ action: 'open', identifier: { keys: Array.from({ length: 9 }, (_, index) => `K${index}`) } })).toMatchObject({ ok: false, code: 'invalid-links' });
+    expect(parse({ action: 'open', identifier: { keys: ['DEMO', 'DEMO'] } })).toMatchObject({ ok: false, code: 'invalid-links' });
+  });
+
+  test('refuses an origin that is not a public https origin', () => {
+    for (const origin of ['http://tasks.example.com', 'javascript:alert(1)', 'https://tasks.example.com/app', 'https://user@tasks.example.com', 'https://localhost', 'https://127.0.0.1', 'https://[::1]', 'https://*.example.com']) {
+      expect(parse({ action: 'open', urls: { ...urls, origin } }), origin).toMatchObject({ ok: false, code: 'invalid-links' });
+    }
+  });
+
+  test('refuses templates outside the tracker grammar', () => {
+    for (const template of ['/tasks/(.*)', 'tasks/{id}', '/tasks', '/{segments+}/{segments+}/{id}', '/../{id}', '/tasks/{id}/{id}']) {
+      expect(parse({ action: 'open', urls: { ...urls, item: [template] } }), template).toMatchObject({ ok: false, code: 'invalid-links' });
+    }
+  });
+
+  test('a chip names its link, an open needs a page, and something has to be declared', () => {
+    expect(parse({ action: 'attach', identifier: { keys: ['DEMO'] } })).toMatchObject({ ok: false, code: 'invalid-links' });
+    expect(parse({ action: 'attach', identifier: { keys: ['SC'] }, urls: { ...urls, identifier: 'number', item: ['/story/{id}'] } })).toMatchObject({ ok: false, code: 'invalid-links' });
+    expect(parse({ action: 'open', identifier: { keys: ['SC'] }, urls: { ...urls, identifier: 'number', item: ['/story/{id}'] } }).ok).toBe(true);
+    expect(parse({ action: 'attach', urls: { ...urls, item: ['/{segment}/{id}'] } })).toMatchObject({ ok: false, code: 'invalid-links' });
+    expect(parse({ action: 'open', urls }, { id: 'tasks', name: 'Tasks', icon: 'task' })).toMatchObject({ ok: false, code: 'invalid-links' });
+    expect(parse({ action: 'attach', urls }, { id: 'tasks', name: 'Tasks', icon: 'task' }).ok).toBe(true);
+    expect(parse({ action: 'open' })).toMatchObject({ ok: false, code: 'invalid-links' });
+    expect(parse({ action: 'jump', urls })).toMatchObject({ ok: false, code: 'invalid-links' });
   });
 });

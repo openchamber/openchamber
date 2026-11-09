@@ -35,6 +35,7 @@ import UserContextPart from './UserContextPart';
 import { SessionMentionChipsContext, withSessionMentionChips, type SessionMentionChips } from './sessionMentionChips';
 import { appOwnOrigins } from '@/lib/router/appOrigins';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
+import { useGuestLinkRules } from '@/lib/guests/links';
 
 type PartWithText = Part & { text?: string; content?: string; value?: string };
 
@@ -90,6 +91,7 @@ const UserTextPart: React.FC<UserTextPartProps> = ({
     // Structured context (inline comments, terminal selections, annotations,
     // PR context) renders as a dedicated block instead of raw prompt text.
     const contextPayload = React.useMemo(() => readContextPart(part), [part]);
+    const guestLinks = useGuestLinkRules();
 
     const partWithText = part as PartWithText;
     const rawText = partWithText.text;
@@ -396,6 +398,7 @@ const UserTextPart: React.FC<UserTextPartProps> = ({
                             disableLinkSafety
                             enableFileReferences={false}
                             literalText
+                            guestLinks={guestLinks}
                         />
                     </SessionMentionChipsContext.Provider>
                 ) : (

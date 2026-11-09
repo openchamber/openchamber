@@ -108,7 +108,7 @@ Panel çizmek ve geçerli oturumu okumak izin gerektirmez. Kullanıcı adına bi
 | `files` | açık projedeki dosyaları okuyup yazmak (göreli yol ile `readFile`, `writeFile`, `listDir`, `stat`) |
 | `model` | kullanıcının Small Model'iyle tek seferlik metin üretimi (`generate`), herhangi bir oturumun dışında |
 
-On bir tanesi sizin için otomatik eklenir: bir `integration` tanımladığınızda `network`, bir `service` tanımladığınızda `service`, `filesystem` desenleri tanımladığınızda `filesystem`, `origins` tanımladığınızda `origins`, bir oturum eylemi mesajları istediğinde `conversation` (bkz. [Eylemler, komutlar ve rozet](#eylemler-komutlar-ve-rozet)), `sessionEvents` veya `sessionControl` `content` istediğinde `transcript` (bkz. [Oturum olayları](/sdk/host/#oturum-olayları)), servisiniz oturumlar üzerinde işlem yaptığında `sessionControl` (bkz. [OpenChamber'ı çağırma](/sdk/host/#openchamberı-servisinizden-çağırma)), servisiniz kullanıcı adına ajanın izin isteklerini ve formlarını yanıtladığında `sessionAnswers` (`sessionControl: { answers: true }`), ajanların okuduklarına ekleme yaptığında `instructions` ve `contributes.skills` tanımladığınızda `skills`. `contributes.skills`, eklenti açıkken her ajana ulaşan skill'lerin bulunduğu bir paket klasörüdür. `contributes.opencodePlugin` tanımladığınızda `opencodePlugin` de eklenir (aşağıya bakın).
+On iki tanesi sizin için otomatik eklenir: bir `integration` tanımladığınızda `network`, bir `service` tanımladığınızda `service`, `filesystem` desenleri tanımladığınızda `filesystem`, `origins` tanımladığınızda `origins`, bir oturum eylemi mesajları istediğinde `conversation` (bkz. [Eylemler, komutlar ve rozet](#eylemler-komutlar-ve-rozet)), `sessionEvents` veya `sessionControl` `content` istediğinde `transcript` (bkz. [Oturum olayları](/sdk/host/#oturum-olayları)), servisiniz oturumlar üzerinde işlem yaptığında `sessionControl` (bkz. [OpenChamber'ı çağırma](/sdk/host/#openchamberı-servisinizden-çağırma)), servisiniz kullanıcı adına ajanın izin isteklerini ve formlarını yanıtladığında `sessionAnswers` (`sessionControl: { answers: true }`), ajanların okuduklarına ekleme yaptığında `instructions` ve `contributes.skills` tanımladığınızda `skills`. `contributes.skills`, eklenti açıkken her ajana ulaşan skill'lerin bulunduğu bir paket klasörüdür. `contributes.opencodePlugin` tanımladığınızda `opencodePlugin` (aşağıya bakın), `contributes.links` tanımladığınızda da `links` eklenir (bkz. [Sohbet mesajlarındaki bağlantılar](#sohbet-mesajlarındaki-bağlantılar)).
 
 Kullanıcı tam listeyi bir kez, eklentiyi kurarken görür ve ya onaylar ya da eklentiyi kaldırır. Yeni bir sürüm daha fazlasını isterse pencere yeniden görünür. Kullanıcının onaylamadığı bir yeteneği gerektiren çağrı `NOT_GRANTED` ile başarısız olur.
 
@@ -130,6 +130,25 @@ Onay iletişim kutusuna bir satır daha gelir: **OpenCode'a eklenti ekleme**. Bu
 Bu dosyanın OpenCode'a ulaşmadığı yerde uzantının ekranı bunu söyler ve **Genel yapılandırmaya ekle** seçeneğini sunar; bu, klasörünüzü kullanıcının genel OpenCode yapılandırmasına, o andan itibaren kullanıcıya ait bir kayıt olarak yazar. Bu durum, OpenChamber konuştuğu OpenCode'u başlatmadığında ya da sunucunun ortamı kendi `OPENCODE_CONFIG` değerini ayarladığında olur (eklenti o zaman OpenCode'un bir sonraki başlatılışında yüklenir). Başka bir makinedeki OpenCode bu makinedeki bir klasörü yükleyemez; ekran bunu söyler ve hiçbir şey sunmaz. Yüklenemeyen bir eklentiyi, orada bir kaydı varsa OpenCode Ayarlar → Eklentiler altında bildirir; uzantınız her durumda çalışmaya devam eder. Kurulum, eklenti klasörü olmayan ya da `package.json` dosyası bir giriş dosyası belirtmeyen paketi reddeder.
 
 VS Code ve mobil uygulamalar uzantı yüklemez, bu yüzden onlara eklenti ulaşmaz. Yalıtılmış bir alandaki oturum kendi OpenCode'unu çalıştırır ve ana makinenin yapılandırmasını hiç okumaz. Kurumsal mod eklentiyi yerel bir servis gibi ele alır: yalnızca yöneticinin listelediği bir depodan kurulur. SDK'da çalışan bir örnek vardır: `examples/opencode-plugin`.
+
+## Sohbet mesajlarındaki bağlantılar
+
+Bir uzantı, sohbet mesajlarındaki kendi tanımlayıcılarını ve bağlantılarını tıklanabilir yapabilir; böylece bir ajan yanıtındaki `DEMO-12`, o görevi tarayıcı sekmesi yerine uzantınızda açar. Neyin tanınacağını ve tıklamanın ne yapacağını tanımlayın:
+
+```json
+"links": {
+  "action": "open",
+  "identifier": { "keys": ["DEMO"] },
+  "urls": { "origin": "https://tasks.example.com", "identifier": "key-number", "item": ["/tasks/{id}"] }
+}
+```
+
+- `identifier.keys`, büyük harfle yazılmış en fazla 8 sabit anahtardır. `DEMO`, `DEMO-12` ifadesini yalnızca tam bir sözcük olarak tanır; kod, bağlantılar, yollar, `XDEMO-1` gibi sözcükler ve `DEMO-1.5` gibi sürümler metin olarak kalır.
+- `urls`, tek bir https kaynağındaki bağlantıları tam eşleşmeyle tanır. `item`, izleyicinin kendi kullandığı biçimdeki bağlantı şablonlarıdır: `{id}` bir kez, yolun içinde ya da `?name={id}` olarak; değişen kısımlar için de `{segment}` veya `{segments+}`. `identifier`, `{id}` değerinin neye benzediğini söyler: `key-number`, `number` veya `short-code`. Hiçbir zaman düzenli ifade yazmazsınız; şablonları OpenChamber derler.
+- `action: "open"`, uzantınızı `ready.item` (veya `onItem`) değeri `{ kind: "link", identifier, url? }` olacak şekilde açar: `attach` değeri `"dialog"` ise kendi iletişim kutunuzda, değilse şerit panelinde. Türü `isGuestLinkItem` ile daraltın. Bunun için `panel.entry` gerekir. `url`, tıklanan bağlantıdan `#` sonrası kısmın ve şablonun kendi parametreleri dışındaki sorgu parametrelerinin çıkarılmış hâlidir; metindeki bir tanımlayıcı için, `{segment}` içermeyen bir şablonunuz varsa ve tanımlayıcı `urls.identifier` ile tanımlanan biçimdeyse, bu türden ilk şablonunuzun oluşturduğu bağlantıdır (`DEMO-12` hiçbir zaman bir `number` yerine geçmez).
+- `action: "attach"` bunun yerine sohbet kutusuna tanımlayıcıyı taşıyan bir etiket ekler ve etiketin kendi bağlantısını gösterebilmesi için `{segment}` veya `{segments+}` içermeyen bir şablon gerektirir; `identifier.keys` ile `urls.identifier` değeri `number` olamaz.
+
+Tanıma, ajan yanıtlarında ve kullanıcının kendi mesajlarında çalışır; akıl yürütmede, araç çıktısında ve Files görünümünde çalışmaz. Bir mesajı kopyalamak metni yazıldığı gibi korur. OpenChamber'ın kendisinin okuduğu bir bağlantı, yani bir izleyici öğesi, bir deponun issue'su veya pull request'i ya da bir commit, her zamanki gibi davranır; değiştirici tuşla yapılan tıklama da tarayıcının olağan davranışını korur. `links` tanımlamak `links` yeteneğini ekler: onay iletişim kutusu anahtarlarınızı ve kaynağınızı listeler ve tıklamanın ne yaptığını söyler; bunlardan herhangi birini değiştiren bir sürüm yeniden onay ister. `examples/tasks-demo`, `DEMO-2` ve `https://example.com/tasks/DEMO-2` bağlantılarını tanır.
 
 ## Metin üretme
 
