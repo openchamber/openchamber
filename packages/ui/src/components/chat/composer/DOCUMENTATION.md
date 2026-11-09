@@ -1068,6 +1068,40 @@ goes as its own context part (`sessionReferences.ts`, kinds `session` and
 - VS Code keeps session links inert (its sessions live on its own OpenCode),
   so it offers neither the `@` sessions nor the chips.
 
+## Linked issues and PRs in the text
+
+A pasted link to an issue, change request or tracker item (`referenceLinks.ts`)
+is read the way the picker reads a chosen item (`resolveReferenceLink` in
+`components/references/resolveComposerReferences.ts`), through the project the
+picker uses, and then draws as a chip where it stands: its number and title.
+
+- The text decides what is sent, as with session links: each linked item once,
+  after the chips above the composer, as the same context part the picker
+  sends, and the session records it as a linked issue. An item a picker chip
+  already carries keeps the chip's version, so its diff choice stands. A link
+  deleted from the text is not sent. The model reads the link where the user
+  put it. A send waits for a paste still being read, so a quick Enter never
+  sends the link bare; a second Enter meanwhile does nothing.
+- Only a paste reads a link, afresh each time, as the picker does. A link
+  typed by hand stays text: typing passes through `/issues/1` on the way to
+  `/issues/12`, and a read per keystroke would attach the wrong item. A link
+  this composer has read before draws as its chip again wherever it reappears
+  (typed or restored), with that read.
+- Editing a queued message puts each item its text links back as that link's
+  chip, the rest above the text.
+- A link on another host than the project's, or one no account can read, stays
+  text with the picker's attach-failed toast. A link past the project's fork
+  network is read again as a linked item, as the Tracker does. Discussions stay
+  text. A change request goes without its diff, the picker's default.
+- `/btw` and VS Code read no links, as they take no picker chips.
+
+### Why inline chips and not picker chips
+
+The picker's chips sit above the text, apart from the sentence. A pasted link
+is part of the sentence ("compare this with that"); turning it into a chip
+above the composer would cut the sentence apart. The maintainer chose the chip
+in place.
+
 ## Paste routing
 
 On Linux, a middle-click paste belongs to the editable field or terminal under
