@@ -128,5 +128,6 @@ export interface Theme {
       normal?: string;
       slow?: string;
     };
+    backgroundOpacity?: number;
   };
 }

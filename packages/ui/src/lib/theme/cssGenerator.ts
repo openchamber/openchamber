@@ -145,7 +145,7 @@ const sidebarBaseRgb = hexToRgb(theme.colors.surface.muted);
     return vars;
   }
 
-  apply(theme: Theme): void {
+  apply(theme: Theme, backgroundOpacity: number | null = null): void {
     const cssVars = this.generate(theme);
     const style = document.createElement('style');
     style.id = 'opencode-theme-variables';
@@ -163,6 +163,10 @@ const sidebarBaseRgb = hexToRgb(theme.colors.surface.muted);
       document.documentElement.classList.add('light');
     }
 
+    if (backgroundOpacity !== null && backgroundOpacity < 1) {
+      styleContent += this.generateTranslucentWindow(theme, backgroundOpacity);
+    }
+
     style.textContent = styleContent;
 
     const existing = document.getElementById('opencode-theme-variables');
@@ -174,6 +178,51 @@ const sidebarBaseRgb = hexToRgb(theme.colors.surface.muted);
 
     document.documentElement.setAttribute('data-theme', theme.metadata.variant);
 
+  }
+
+  private generateTranslucentWindow({ colors: { surface } }: Theme, alpha: number): string {
+    const tint = withOpacity(surface.muted, alpha / 2);
+    const control = withOpacity(surface.elevated, 0.1 + 0.9 * alpha);
+    return `
+
+@layer base {
+  :root:root.desktop-runtime body {
+    background: transparent !important;
+  }
+}
+
+:root {
+  --oc-text-backdrop: ${withOpacity(surface.background, 1)};
+}
+
+#root {
+  --background: ${withOpacity(surface.background, alpha)};
+  --surface-elevated: ${control};
+}
+
+#root .oc-glass-popover,
+#root .oc-glass-tooltip {
+  --surface-elevated: ${surface.elevated};
+}
+
+#root > *,
+#root .oc-panel-edge > * {
+  --background: transparent;
+  --surface-background: transparent;
+}
+
+#root > * {
+  --sidebar: ${tint};
+}
+
+#root [data-sidebar-peek] {
+  --sidebar: ${surface.muted};
+}
+
+#root .oc-panel-edge:not([data-edge-floating]) {
+  --background: ${tint};
+  --surface-background: ${tint};
+}`;
   }
 
   private generatePrimaryColors(primary: Theme['colors']['primary']): string[] {
