@@ -28,9 +28,9 @@ Bucket every non-draft PR:
 | Conflicted-active | merge conflict, author committed within 30 days | phase 3 review pool; a PR worth taking we rebase and finish ourselves (see *Landing a PR ourselves*). **rebase-request** only when the author has something to decide, or `maintainerCanModify` is false |
 | Waiting on author | the last substantive event is a request for changes — a maintainer review with `CHANGES_REQUESTED`, a maintainer push-back comment, or a bot `review:blocked` / `review:needs-evidence` — and the author has neither pushed nor replied since | one line in the report ("чекає автора: <what was asked>"); no re-review, no new comment — the ball is theirs |
 | Clean | mergeable and not waiting on the author | phase 3 review pool |
-| Draft | `isDraft` | untouched while the author committed within 14 days, and always for the team's own drafts (`btriapitsyn`, `yulia-ivashko`, `deatheros`, `AlexKutas`); otherwise close with **stale-draft** |
+| Draft | `isDraft` | untouched while the author committed within 14 days, and always for the team's own drafts (`btriapitsyn`, `yulia-ivashko`, `deatheros`, `AlexKutas`, `Galnaz`); otherwise close with **stale-draft** |
 
-Those four authors' PRs are the team bucket and skip review: they land through the team's own process. `IbrahimKhan12` is reviewed like anyone else, but fixes left on his PRs, as on any team member's, are ours to finish, never a push-back list.
+Those five authors' PRs are the team bucket and skip review: they land through the team's own process. `IbrahimKhan12` is reviewed like anyone else, but fixes left on his PRs, as on any team member's, are ours to finish, never a push-back list.
 
 Then detect **duplicate clusters** across the survivors: pairs with high title-token overlap or high changed-file overlap. For each cluster recommend one keeper (prefer: mergeable over conflicted, references an issue, smaller diff, earlier author — a later near-identical body is likely a regenerated copy of the earlier PR, and the earlier author keeps the credit); the rest close with **duplicate-close**.
 
