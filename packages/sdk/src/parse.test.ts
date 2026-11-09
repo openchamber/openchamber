@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import { OPENCHAMBER_SDK_API_VERSION } from './api-version.ts';
-import { GUEST_PROVIDER_LOGOS_MAX, clampStatusSectionHeight, hasGuestPage, requestedGuestCapabilities, toPublicNotifications, toPublicQuota, toPublicSessionEvents, toPublicSourceControl, resolveAttachEntry, resolveStatusSectionEntry, resolveStatusSectionSource, resolveAttachMode, resolveIntegrationApi, toPublicIntegration, type OpenChamberContributes, isOpenCodeProviderId, isTrackerUrlTemplate, toPublicTracker } from './manifest.ts';
+import { GUEST_PROVIDER_LOGOS_MAX, clampStatusSectionHeight, hasGuestPage, requestedGuestCapabilities, toPublicNotifications, toPublicQuota, toPublicSessionEvents, toPublicSourceControl, resolveAttachEntry, resolvePageEntry, resolveStatusSectionEntry, resolveStatusSectionSource, resolveAttachMode, resolveIntegrationApi, toPublicIntegration, type OpenChamberContributes, isOpenCodeProviderId, isTrackerUrlTemplate, toPublicTracker } from './manifest.ts';
 import type { JsonValue } from './contract.ts';
 import type { LinksContribution } from './manifest.ts';
 import { parseManifest, parseManifestJson } from './parse.ts';
@@ -1000,12 +1000,27 @@ describe('page-less extensions', () => {
 
   test('background-only packages reject visible surfaces and actions that would open a panel', () => {
     const visible: Partial<Omit<OpenChamberContributes, 'panel'>>[] = [
-      { page: true }, { page: { entry: 'page.html' } }, { attach: true }, { attach: 'dialog' },
+      { page: true }, { attach: true }, { attach: 'dialog' },
       { actions: [{ id: 'inspect', label: 'Inspect', where: 'message' }] },
       { actions: [{ id: 'inspect', label: 'Inspect', where: 'session', mode: 'open' }] },
     ];
     for (const extra of visible) {
       expect(withContributes({ ...extra, background: { entry: 'background/index.html' } })).toMatchObject({ ok: false, code: 'invalid-panel' });
+    }
+  });
+
+  test('a full-screen page with its own entry needs no panel page', () => {
+    const result = withContributes({ page: { entry: 'page/index.html', title: 'Kitchen' }, capabilities: ['sessions'] });
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error(result.message);
+    expect(hasGuestPage(result.manifest.contributes)).toBe(false);
+    expect(resolvePageEntry(result.manifest.contributes)).toBe('page/index.html');
+    expect(withContributes({ page: { entry: 'page/index.html' }, background: { entry: 'background/index.html' } })).toMatchObject({ ok: true });
+    // `true` reuses panel.entry, so without one there is nothing to load.
+    expect(withContributes({ page: true })).toMatchObject({ ok: false, code: 'invalid-panel' });
+    // The page only hosts itself: what the host opens or invokes elsewhere still needs a panel or background entry.
+    for (const extra of [{ attach: true }, { commands: [{ name: 'task' }] }, { actions: [{ id: 'inspect', label: 'Inspect', where: 'message' as const }] }]) {
+      expect(withContributes({ page: { entry: 'page/index.html' }, ...extra })).toMatchObject({ ok: false, code: 'invalid-panel' });
     }
   });
 
@@ -1162,7 +1177,7 @@ describe('contributes.statusSection', () => {
 
   test('a status-only package cannot declare things that open or invoke another frame', () => {
     for (const extra of [
-      { page: { entry: 'page.html' } }, { attach: 'dialog' }, { commands: [{ name: 'graph' }] },
+      { page: true }, { attach: 'dialog' }, { commands: [{ name: 'graph' }] },
       { actions: [{ id: 'inspect', label: 'Inspect', where: 'message', mode: 'background' }] },
     ]) {
       expect(parse({ panel: pageless, statusSection: { entry: 'status/index.html' }, ...extra })).toMatchObject({ ok: false, code: 'invalid-panel' });

@@ -164,7 +164,7 @@ if (projectId) {
 
 Snapshots have `state: "loading" | "ready" | "error"`. Loading/error may retain data; only ready establishes complete empty success. Session snapshots include per-directory `coverage` and known archived sessions. Projects expose ID, name, and directory; worktrees expose directory, name, branch, and availability. Sessions include their project/directory/worktree, timestamps, parent ID, and this extension's attached item IDs/data.
 
-Session `activity` is `unknown`, `idle`, `running`, `retrying`, `waiting-permission`, or `waiting-question`. `outcome` is an observed `completed`/`failed` turn or `null`. It is not reconstructed from history and is retained in memory for at most 2,000 observed sessions. Idle after an error keeps the failed outcome until another run starts. Neither idle nor completed marks your task Done. Use `host.openSession(sessionId)` for an explicit transition from a card to its chat.
+Session `activity` is `unknown`, `idle`, `running`, `retrying`, `waiting-permission`, or `waiting-question`. `outcome` is an observed `completed`/`failed` turn or `null`. It is not reconstructed from history and is retained in memory for at most 2,000 observed sessions. Idle after an error keeps the failed outcome until another run starts. Neither idle nor completed marks your task Done. `inWork` is `true` when the session sits in the sidebar's In work block, and always `false` while the user has In work turned off; older hosts leave it out. `unread` is `true` when the last turn ended and nobody has opened the session since, the mark the sidebar shows; it survives restarts and clears on every device. Use `host.openSession(sessionId)` for an explicit transition from a card to its chat.
 
 ## Background shells
 

@@ -7,6 +7,8 @@ import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useGlobalSessionStatusStore } from '@/sync/global-session-status';
 import { getAllSyncSessionMap, getDirectoryState, getSyncChildStores } from '@/sync/sync-refs';
 import { getLinkedIssues, isLinkedChange } from '@/lib/linkedIssues';
+import { isSessionInWork } from '@/lib/sessionWorkMetadata';
+import { isSessionUnread } from '@/sync/session-unread';
 import { normalizePath } from '@/lib/pathNormalization';
 import { checkoutHoldsDirectory, checkoutHoldsSubfolder } from '@/lib/worktrees/worktreePaths';
 import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
@@ -73,6 +75,10 @@ const projectSession = (session: Session, projectId: string, guestId: string, wo
     // user's too: no more than the session titles it already reads. Another
     // extension's opaque `data` stays out.
     links: linked.map((item) => ({ title: item.title, url: item.url, kind: isLinkedChange(item) ? 'change' : 'issue', linkedAt: item.linkedAt })),
+    // The sidebar's In work rule (`orderInWorkWorks`): a top-level session that
+    // is not archived, and nobody while In work is off.
+    inWork: useUIStore.getState().sessionWorkEnabled && !session.parentID && !session.time.archived && isSessionInWork(session),
+    unread: isSessionUnread(session),
   };
 };
 
@@ -167,6 +173,7 @@ export const observeGuestWorkspace = (query: GuestWorkspaceQuery, guestId: strin
         useGlobalSessionsStore.subscribe((state, previous) => { if (state.activeSessions !== previous.activeSessions || state.archivedSessions !== previous.archivedSessions || state.status !== previous.status) update(); }),
         useGlobalSessionStatusStore.subscribe(update),
         useConfigStore.subscribe((state, previous) => { if (state.isConnected !== previous.isConnected) update(); }),
+        useUIStore.subscribe((state, previous) => { if (state.sessionWorkEnabled !== previous.sessionWorkEnabled) update(); }),
         manager.subscribeBootstrap(update),
         manager.subscribeAllSelected((state) => state.session, update),
         manager.subscribeAllSelected((state) => state.permission, update),

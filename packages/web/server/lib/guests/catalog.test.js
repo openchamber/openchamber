@@ -259,6 +259,24 @@ describe('page-less packages', () => {
       expect(toPublicGuest(inspected.guest)).toMatchObject({ pageEntry: 'panel/page.html', pageTitle: 'Tasks' });
     } finally { await fs.rm(dir, { recursive: true, force: true }); }
   });
+  test('a page-only package publishes its page without a panel entry and is served as a frame', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-page-only-'));
+    try {
+      await fs.writeFile(path.join(dir, 'package.json'), JSON.stringify({ version: '1.0.0', openchamber: {
+        apiVersion: 1, contributes: { panel: { id: 'kitchen', name: 'Kitchen', icon: 'restaurant' }, page: { entry: 'page/index.html', title: 'Kitchen' } },
+      } }));
+      await fs.mkdir(path.join(dir, 'page'));
+      await fs.writeFile(path.join(dir, 'page/index.html'), '<script src="main.js"></script>');
+      await fs.writeFile(path.join(dir, 'page/main.js'), 'console.log("page")');
+      const inspected = await inspectGuestPackage(dir);
+      expect(inspected.ok).toBe(true);
+      const row = toPublicGuest(inspected.guest);
+      expect(row).toMatchObject({ pageEntry: 'page/index.html', pageTitle: 'Kitchen' });
+      expect(row).not.toHaveProperty('entry');
+      expect(hasGuestFrame(inspected.guest)).toBe(true);
+      expect(await resolveGuestServedFile(dir, 'page/main.js', { hasRuntime: hasGuestFrame(inspected.guest) })).not.toBeNull();
+    } finally { await fs.rm(dir, { recursive: true, force: true }); }
+  });
   test('a status-section-only package validates its HTML and scripts and publishes title and height without a panel entry', async () => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-status-'));
     try {
@@ -388,7 +406,7 @@ describe('page-less packages', () => {
         },
       },
     }));
-    expect(await inspectGuestPackage(guestRoot, { openchamberVersion: '1.0.0' })).toEqual({ ok: false, code: 'invalid-manifest' });
+    expect(await inspectGuestPackage(guestRoot, { openchamberVersion: '1.0.0' })).toEqual({ ok: false, code: 'invalid-manifest', reason: expect.stringContaining('panel.entry') });
     await fs.rm(dir, { recursive: true, force: true });
   });
 });

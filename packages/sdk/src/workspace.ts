@@ -34,6 +34,17 @@ export type GuestSessionRecord = {
   items: { id: string; data?: JsonValue }[];
   /** Every link on the session, read-only. Absent from hosts older than this field. */
   links?: GuestSessionLink[];
+  /**
+   * The session sits in the sidebar's In work block. Always false while the
+   * user has In work turned off. Absent from hosts older than this field.
+   */
+  inWork?: boolean;
+  /**
+   * The last turn ended and nobody has opened the session since, as the
+   * sidebar marks it. Kept by OpenCode, so it survives restarts and clears on
+   * every device. Absent from hosts older than this field.
+   */
+  unread?: boolean;
 };
 export type GuestDirectoryCoverage = { directory: string; state: GuestLoadState };
 export type GuestProjectsSnapshot = { kind: 'projects'; state: GuestLoadState; projects: GuestProject[] };

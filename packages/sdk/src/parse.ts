@@ -731,6 +731,11 @@ const hasStatusFrame = (contributes: z.output<typeof contributesSchema>): boolea
   contributes.statusSection === true || Boolean(contributes.statusSection?.entry)
 );
 
+/** A full-screen page that names its own entry; `true` reuses `panel.entry`. */
+const hasPageFrame = (contributes: z.output<typeof contributesSchema>): boolean => (
+  Boolean(contributes.page && contributes.page !== true)
+);
+
 const runtimeContributions = (contributes: z.output<typeof contributesSchema>): string[] => {
   const declared: string[] = [];
   if (contributes.page !== undefined) declared.push('page');
@@ -885,7 +890,7 @@ export const openChamberManifestSchema = z.object({
     if (hasGuestPage(contributes)) return;
     if (contributes.background) {
       const needsPanel = [];
-      if (contributes.page !== undefined) needsPanel.push('page');
+      if (contributes.page === true) needsPanel.push('page: true');
       if (contributes.attach !== undefined && contributes.attach !== false) needsPanel.push('attach');
       if (contributes.actions?.some((action) => action.mode !== 'background')) needsPanel.push('actions with mode "open"');
       if (needsPanel.length > 0) ctx.addIssue({
@@ -894,12 +899,13 @@ export const openChamberManifestSchema = z.object({
       });
       return;
     }
-    if (hasStatusFrame(contributes) || contributes.fileEditors || contributes.blocks) {
-      // A status section, file editor or block frame runs code and may use what
-      // the package is granted, but it only hosts itself: things the host opens
-      // or invokes elsewhere need a panel or background entry.
+    if (hasStatusFrame(contributes) || contributes.fileEditors || contributes.blocks || hasPageFrame(contributes)) {
+      // A status section, file editor, block or full-screen page with its own
+      // entry runs code and may use what the package is granted, but it only
+      // hosts itself: things the host opens or invokes elsewhere need a panel
+      // or background entry.
       const needsFrame = [];
-      if (contributes.page !== undefined) needsFrame.push('page');
+      if (contributes.page === true) needsFrame.push('page');
       if (contributes.attach !== undefined && contributes.attach !== false) needsFrame.push('attach');
       if (contributes.actions !== undefined) needsFrame.push('actions');
       if (contributes.commands !== undefined) needsFrame.push('commands');

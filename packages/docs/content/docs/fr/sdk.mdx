@@ -89,7 +89,7 @@ Vous pouvez aussi ajouter un `.zip` local ou un lien https vers un dépôt git o
 
 `ctx.surface` vaut `panel`, `dialog`, `page`, `status` ou `block`. Un clic sur un élément attaché place ses données dans `ctx.item`, sinon cette valeur est `null`.
 
-`contributes.page: true` propose votre panneau en plein écran dans le menu Pages des extensions au-dessus des sessions. `{ "entry": "panel/page.html", "title": "Board" }` utilise un HTML distinct et un titre facultatif. `panel.entry` reste obligatoire, avec le même bac à sable et les mêmes permissions. Seul l'utilisateur ouvre la page. Recharger, mettre en pause, supprimer ou changer de serveur la ferme.
+`contributes.page: true` propose votre panneau en plein écran dans le menu Pages des extensions au-dessus des sessions. `{ "entry": "panel/page.html", "title": "Board" }` utilise un HTML distinct et un titre facultatif. `true` réutilise `panel.entry` ; une page avec son propre `entry` n'a pas besoin de panneau dans la barre latérale, et l'extension peut n'être qu'une page plein écran. Le bac à sable et les permissions sont les mêmes. Seul l'utilisateur ouvre la page. Recharger, mettre en pause, supprimer ou changer de serveur la ferme.
 
 Pour un tableau, utilisez `host.storage` et les listes de projets, worktrees et sessions avec leurs états en direct. `startSession` peut viser un autre projet sans fermer le tableau. Voir [Host API](/sdk/host/).
 
@@ -228,7 +228,7 @@ Les écritures sont atomiques : OpenChamber écrit un fichier temporaire puis le
 - `title` remplace le nom du panneau dans l'en-tête de la section, jusqu'à 60 caractères.
 - `height` est la hauteur de départ en pixels, de 24 à 320 (120 par défaut). Appelez [`host.setHeight()`](/sdk/host/) quand la taille de votre contenu change.
 
-Votre page voit `ctx.surface` à `status`. OpenChamber ne la charge que tant que le panneau Work Status est visible et votre section dépliée, et la décharge quand l'utilisateur replie la section. N'y gardez donc rien que vous ne puissiez reconstruire. Une extension réduite à une section peut utiliser des permissions, un service, une intégration et des fichiers, mais pas `page`, `attach`, `actions` ni `commands`. Web et bureau uniquement. L'exemple `git-graph-status` est une section complète.
+Votre page voit `ctx.surface` à `status`. OpenChamber ne la charge que tant que le panneau Work Status est visible et votre section dépliée, et la décharge quand l'utilisateur replie la section. N'y gardez donc rien que vous ne puissiez reconstruire. Une extension réduite à une section peut utiliser des permissions, un service, une intégration, des fichiers et une page avec son propre `entry`, mais pas `page: true`, `attach`, `actions` ni `commands`. Web et bureau uniquement. L'exemple `git-graph-status` est une section complète.
 
 ## Un éditeur pour votre type de fichier
 
@@ -285,7 +285,7 @@ host.onFileSnapshot(() => ({ bytes: currentBytes(), version: versionOf(currentBy
 
 Un éditeur binaire peut prendre en charge n'importe quel fichier correspondant à ses motifs, y compris ceux dont OpenChamber affiche lui-même un aperçu, comme les images et les PDF. Il n'a pas de vue source, et quand l'utilisateur le passe en plein écran ou l'en sort avec des modifications non enregistrées, OpenChamber les enregistre d'abord. Lire et écrire le format revient à votre éditeur : OpenChamber réécrit exactement les octets que vous renvoyez.
 
-Votre page voit `ctx.surface` à `file`. OpenChamber la recharge, en lui retransmettant le fichier, quand le fichier change sur le disque, que l'utilisateur annule ses modifications, ou que l'éditeur passe en plein écran ou en sort. La première extension activée dont un motif correspond l'emporte, avant les aperçus propres à OpenChamber. Une extension réduite à un éditeur peut utiliser des permissions, un service, une intégration et des fichiers, mais pas `page`, `attach`, `actions` ni `commands`. Web et bureau uniquement. L'exemple `checklist-editor` est un éditeur complet.
+Votre page voit `ctx.surface` à `file`. OpenChamber la recharge, en lui retransmettant le fichier, quand le fichier change sur le disque, que l'utilisateur annule ses modifications, ou que l'éditeur passe en plein écran ou en sort. La première extension activée dont un motif correspond l'emporte, avant les aperçus propres à OpenChamber. Une extension réduite à un éditeur peut utiliser des permissions, un service, une intégration, des fichiers et une page avec son propre `entry`, mais pas `page: true`, `attach`, `actions` ni `commands`. Web et bureau uniquement. L'exemple `checklist-editor` est un éditeur complet.
 
 ## Actions, commandes et le badge
 
@@ -341,7 +341,7 @@ Quand votre plugin OpenCode ou serveur MCP ajoute un outil, le chat affiche ses 
 
 `match` est le nom de l'outil tel qu'OpenCode le rapporte ; un `*` final correspond à un préfixe. `icon` est un nom Remixicon ou un fichier `.svg` dans votre paquet, comme `panel.icon`. `title` et `subtitle` sont des gabarits sur `input`, `output` et `metadata` de l'appel. `output` choisit comment le corps est rendu : `text`, `json` (un arbre), `markdown`, `code` avec un `language`, `table` avec `columns` (les lignes viennent du tableau de sortie ou de `output.items`) ou `auto` pour le rendu par défaut. Un `match` exact l'emporte sur un joker, et en cas d'égalité la première extension installée gagne. Aucune permission n'est nécessaire : cela ne change que la façon dont des données déjà dans le chat sont dessinées.
 
-Une extension qui ne fait que styliser des outils n'a besoin d'aucune page : omettez `panel.entry` et elle n'aura pas d'icône dans la barre latérale, juste une carte dans Paramètres → Extensions. Sans page, elle peut déclarer `tools` et `providerLogos`, et rien d'autre. L'autre exception est une section Work Status ou un éditeur de fichiers avec son propre `entry`, voir plus haut.
+Une extension qui ne fait que styliser des outils n'a besoin d'aucune page : omettez `panel.entry` et elle n'aura pas d'icône dans la barre latérale, juste une carte dans Paramètres → Extensions. Sans page, elle peut déclarer `tools` et `providerLogos`, et rien d'autre. L'autre exception est une section Work Status, un éditeur de fichiers ou une page plein écran avec son propre `entry`, voir plus haut.
 
 ## Le logo de votre fournisseur
 

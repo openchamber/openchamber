@@ -89,7 +89,7 @@ Você também pode adicionar um `.zip` local ou um link https para um repositór
 
 `ctx.surface` é `panel`, `dialog`, `page`, `status` ou `block`. Clicar em um item anexado coloca seus dados em `ctx.item`; nos demais casos é `null`.
 
-`contributes.page: true` oferece o painel em tela cheia no menu Páginas de extensões acima das sessões. `{ "entry": "panel/page.html", "title": "Board" }` usa um HTML separado e um título opcional. `panel.entry` continua obrigatório, com o mesmo isolamento e permissões. Só o usuário abre a página. Recarregar, pausar, remover ou trocar de servidor fecha a página.
+`contributes.page: true` oferece o painel em tela cheia no menu Páginas de extensões acima das sessões. `{ "entry": "panel/page.html", "title": "Board" }` usa um HTML separado e um título opcional. `true` reutiliza `panel.entry`; uma página com `entry` próprio não precisa de painel na barra lateral, então a extensão pode ser só uma página em tela cheia. O isolamento e as permissões são os mesmos. Só o usuário abre a página. Recarregar, pausar, remover ou trocar de servidor fecha a página.
 
 Para um quadro, use `host.storage` e as listas de projetos, worktrees e sessões com estados ao vivo. `startSession` pode usar outro projeto sem fechar o quadro. Veja [Host API](/sdk/host/).
 
@@ -228,7 +228,7 @@ As escritas são atômicas: o OpenChamber escreve um arquivo temporário e o ren
 - `title` substitui o nome do painel no cabeçalho da seção, até 60 caracteres.
 - `height` é a altura inicial em pixels, de 24 a 320 (120 por padrão). Chame [`host.setHeight()`](/sdk/host/) quando o tamanho do conteúdo mudar.
 
-Sua página vê `ctx.surface` como `status`. O OpenChamber só a carrega enquanto o painel Work Status está visível e sua seção está expandida, e a descarrega quando o usuário recolhe a seção, então não guarde ali nada que você não consiga reconstruir. Uma extensão só com a seção pode usar permissões, um serviço, uma integração e arquivos, mas não `page`, `attach`, `actions` nem `commands`. Só web e desktop. O exemplo `git-graph-status` é uma seção completa.
+Sua página vê `ctx.surface` como `status`. O OpenChamber só a carrega enquanto o painel Work Status está visível e sua seção está expandida, e a descarrega quando o usuário recolhe a seção, então não guarde ali nada que você não consiga reconstruir. Uma extensão só com a seção pode usar permissões, um serviço, uma integração, arquivos e uma página com `entry` próprio, mas não `page: true`, `attach`, `actions` nem `commands`. Só web e desktop. O exemplo `git-graph-status` é uma seção completa.
 
 ## Um editor para o seu tipo de arquivo
 
@@ -285,7 +285,7 @@ host.onFileSnapshot(() => ({ bytes: currentBytes(), version: versionOf(currentBy
 
 Um editor binário pode assumir qualquer arquivo que corresponda aos seus padrões, inclusive os que o próprio OpenChamber mostra em prévia, como imagens e PDFs. Ele não tem visualização do código-fonte, e quando o usuário o leva para a tela cheia ou o tira dela com alterações não salvas, o OpenChamber as salva primeiro. Ler e gravar o formato é trabalho do seu editor: o OpenChamber grava exatamente os bytes que você devolve.
 
-Sua página vê `ctx.surface` como `file`. O OpenChamber a recarrega, entregando o arquivo de novo, quando o arquivo muda no disco, o usuário descarta as alterações ou o editor entra ou sai da tela cheia. Vence a primeira extensão ativada cujo padrão corresponde, antes das prévias do próprio OpenChamber. Uma extensão só com o editor pode usar permissões, um serviço, uma integração e arquivos, mas não `page`, `attach`, `actions` nem `commands`. Só web e desktop. O exemplo `checklist-editor` é um editor completo.
+Sua página vê `ctx.surface` como `file`. O OpenChamber a recarrega, entregando o arquivo de novo, quando o arquivo muda no disco, o usuário descarta as alterações ou o editor entra ou sai da tela cheia. Vence a primeira extensão ativada cujo padrão corresponde, antes das prévias do próprio OpenChamber. Uma extensão só com o editor pode usar permissões, um serviço, uma integração, arquivos e uma página com `entry` próprio, mas não `page: true`, `attach`, `actions` nem `commands`. Só web e desktop. O exemplo `checklist-editor` é um editor completo.
 
 ## Ações, comandos e o selo
 
@@ -341,7 +341,7 @@ Quando o seu plugin do OpenCode ou servidor MCP adiciona uma ferramenta, o chat 
 
 `match` é o nome da ferramenta como o OpenCode o reporta; um `*` no final casa com um prefixo. `icon` é um nome do Remixicon ou um arquivo `.svg` no seu pacote, como `panel.icon`. `title` e `subtitle` são templates sobre `input`, `output` e `metadata` da chamada. `output` escolhe como o corpo é renderizado: `text`, `json` (uma árvore), `markdown`, `code` com um `language`, `table` com `columns` (as linhas vêm do array de saída ou de `output.items`) ou `auto` para o padrão. Um `match` exato vence um curinga, e em caso de empate vence a primeira extensão instalada. Nenhuma permissão é necessária: isso só muda como dados que já estão no chat são desenhados.
 
-Uma extensão que só estiliza ferramentas não precisa de página nenhuma: deixe `panel.entry` de fora e ela não terá ícone na barra lateral, só um card em Configurações → Extensões. Sem página ela pode declarar `tools` e `providerLogos`, e nada mais. A outra exceção é uma seção do Work Status ou um editor de arquivos com `entry` próprio, veja acima.
+Uma extensão que só estiliza ferramentas não precisa de página nenhuma: deixe `panel.entry` de fora e ela não terá ícone na barra lateral, só um card em Configurações → Extensões. Sem página ela pode declarar `tools` e `providerLogos`, e nada mais. A outra exceção é uma seção do Work Status, um editor de arquivos ou uma página em tela cheia com `entry` próprio, veja acima.
 
 ## O logo do seu provedor
 

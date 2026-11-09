@@ -89,7 +89,7 @@ OpenChamber 会读取清单，并弹出一个对话框列出扩展所请求的�
 
 `ctx.surface` 为 `panel`、`dialog`、`page`、`status` 或 `block`。点击附加条目时，`ctx.item` 包含其数据；其他情况下为 `null`。
 
-`contributes.page: true` 将面板作为全屏页面加入会话列表上方的扩展页面菜单。`{ "entry": "panel/page.html", "title": "Board" }` 使用独立 HTML 和可选标题。仍需 `panel.entry`，并使用相同沙箱和权限。只有用户可以打开页面。重新加载、暂停、移除或切换服务器时会关闭页面。
+`contributes.page: true` 将面板作为全屏页面加入会话列表上方的扩展页面菜单。`{ "entry": "panel/page.html", "title": "Board" }` 使用独立 HTML 和可选标题。`true` 复用 `panel.entry`；带自己 `entry` 的页面不需要侧栏面板，扩展可以只有一个全屏页面。页面使用相同沙箱和权限。只有用户可以打开页面。重新加载、暂停、移除或切换服务器时会关闭页面。
 
 看板可以使用 `host.storage`，以及项目、worktree、会话列表和实时状态。`startSession` 可以选择其他项目而不关闭看板。详见 [Host API](/sdk/host/)。
 
@@ -228,7 +228,7 @@ const { entries } = await host.listDir(".");
 - `title` 替换分区标题中的面板名称，最多 60 个字符。
 - `height` 是初始高度（像素），24 到 320，默认 120。内容尺寸变化时调用 [`host.setHeight()`](/sdk/host/)。
 
-你的页面看到的 `ctx.surface` 是 `status`。只有在 Work Status 面板可见且你的分区展开时，OpenChamber 才会加载它；用户折叠分区时会卸载，所以不要在里面保存无法重建的状态。只有分区的扩展可以使用权限、服务、集成和文件，但不能用 `page`、`attach`、`actions` 或 `commands`。仅限 Web 和桌面版。示例 `git-graph-status` 就是一个完整的分区。
+你的页面看到的 `ctx.surface` 是 `status`。只有在 Work Status 面板可见且你的分区展开时，OpenChamber 才会加载它；用户折叠分区时会卸载，所以不要在里面保存无法重建的状态。只有分区的扩展可以使用权限、服务、集成、文件和带自己 `entry` 的页面，但不能用 `page: true`、`attach`、`actions` 或 `commands`。仅限 Web 和桌面版。示例 `git-graph-status` 就是一个完整的分区。
 
 ## 为你的文件类型提供编辑器
 
@@ -285,7 +285,7 @@ host.onFileSnapshot(() => ({ bytes: currentBytes(), version: versionOf(currentBy
 
 二进制编辑器可以接管任何与其模式匹配的文件，包括 OpenChamber 自己会预览的文件，比如图片和 PDF。它没有源码视图；当用户在有未保存更改时将它切换到全屏或退出全屏，OpenChamber 会先保存这些更改。读写该格式由你的编辑器负责：OpenChamber 会原样写回你返回的字节。
 
-你的页面看到的 `ctx.surface` 是 `file`。当文件在磁盘上发生变化、用户放弃更改，或编辑器进入或退出全屏时，OpenChamber 会重新加载页面并再次交给它文件。第一个模式匹配且已启用的扩展胜出，优先于 OpenChamber 自带的预览。只有编辑器的扩展可以使用权限、服务、集成和文件，但不能用 `page`、`attach`、`actions` 或 `commands`。仅限 Web 和桌面版。示例 `checklist-editor` 就是一个完整的编辑器。
+你的页面看到的 `ctx.surface` 是 `file`。当文件在磁盘上发生变化、用户放弃更改，或编辑器进入或退出全屏时，OpenChamber 会重新加载页面并再次交给它文件。第一个模式匹配且已启用的扩展胜出，优先于 OpenChamber 自带的预览。只有编辑器的扩展可以使用权限、服务、集成、文件和带自己 `entry` 的页面，但不能用 `page: true`、`attach`、`actions` 或 `commands`。仅限 Web 和桌面版。示例 `checklist-editor` 就是一个完整的编辑器。
 
 ## 操作、命令和徽标
 
@@ -341,7 +341,7 @@ host.onResolve(async ({ command, args }) => {
 
 `match` 是 OpenCode 报告的工具名；末尾的 `*` 匹配前缀。`icon` 是 Remixicon 图标名或你包内的 `.svg` 文件，和 `panel.icon` 一样。`title` 和 `subtitle` 是基于这次调用的 `input`、`output` 和 `metadata` 的模板。`output` 决定正文怎么渲染：`text`、`json`（树形）、`markdown`、带 `language` 的 `code`、带 `columns` 的 `table`（行来自输出数组或 `output.items`），或者 `auto` 使用默认方式。精确的 `match` 优先于通配符，平局时先安装的扩展胜出。不需要任何权限：这只改变聊天里已有数据的绘制方式。
 
-只给工具定制样式的扩展根本不需要页面：不写 `panel.entry`，它就没有侧栏图标，只在 设置 → 扩展 里有一张卡片。没有页面时，它只能声明 `tools` 和 `providerLogos`，别的什么都不写。另一个例外是带自己 `entry` 的 Work Status 分区或文件编辑器，见上文。
+只给工具定制样式的扩展根本不需要页面：不写 `panel.entry`，它就没有侧栏图标，只在 设置 → 扩展 里有一张卡片。没有页面时，它只能声明 `tools` 和 `providerLogos`，别的什么都不写。另一个例外是带自己 `entry` 的 Work Status 分区、文件编辑器或全屏页面，见上文。
 
 ## 你的提供商的徽标
 

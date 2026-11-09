@@ -177,6 +177,44 @@ describe('extension workspace projection', () => {
       { title: 'Own card', url: 'https://board.example/B-2', kind: 'issue', linkedAt: 5 },
     ]);
   });
+  test('in work follows the session metadata and the In work setting, and publishes the toggle', async () => {
+    useUIStore.setState({ sessionWorkEnabled: true });
+    useGlobalSessionsStore.getState().applySnapshot([
+      { ...session('b-session', '/b-tree'), metadata: { openchamber: { work: { state: 'open', openedAt: 1 } } } },
+      { ...session('b-done', '/b-tree'), metadata: { openchamber: { work: { state: 'done', doneAt: 2 } } } },
+      session('b-plain', '/b-tree'),
+      { ...session('b-sub', '/b-tree'), parentID: 'b-session', metadata: { openchamber: { work: { state: 'open', openedAt: 1 } } } },
+    ], [{ ...session('b-archived', '/b-tree'), time: { created: 1, updated: 1, archived: 3 }, metadata: { openchamber: { work: { state: 'open', openedAt: 1 } } } }], 'ready');
+    const inWork = () => Object.fromEntries(readB().sessions.map((entry) => [entry.id, entry.inWork]));
+    expect(inWork()).toEqual({ 'b-session': true, 'b-done': false, 'b-plain': false, 'b-sub': false, 'b-archived': false });
+    const seen: boolean[] = [];
+    const stop = observeGuestWorkspace({ kind: 'sessions', projectId: 'b' }, 'board', (next) => {
+      if (next.kind === 'sessions') seen.push(next.sessions.some((entry) => entry.inWork));
+    });
+    try {
+      useUIStore.setState({ sessionWorkEnabled: false });
+      await Promise.resolve();
+      expect(inWork()).toEqual({ 'b-session': false, 'b-done': false, 'b-plain': false, 'b-sub': false, 'b-archived': false });
+      expect(seen).toEqual([true, false]);
+    } finally {
+      stop();
+      useUIStore.setState({ sessionWorkEnabled: true });
+    }
+  });
+  test('unread follows the idle and viewed marks, and a view publishes', async () => {
+    const turned = { ...session('b-session', '/b-tree'), time: { created: 1, updated: 2, idle: 5 } };
+    useGlobalSessionsStore.getState().applySnapshot([turned, { ...session('b-seen', '/b-tree'), time: { created: 1, updated: 2, idle: 5, viewed: 5 } }], [], 'ready');
+    expect(Object.fromEntries(readB().sessions.map((entry) => [entry.id, entry.unread]))).toEqual({ 'b-session': true, 'b-seen': false });
+    const seen: boolean[] = [];
+    const stop = observeGuestWorkspace({ kind: 'sessions', projectId: 'b' }, 'board', (next) => {
+      if (next.kind === 'sessions') seen.push(next.sessions.find((entry) => entry.id === 'b-session')?.unread ?? false);
+    });
+    try {
+      useGlobalSessionsStore.getState().upsertSession({ ...turned, time: { ...turned.time, viewed: 5 } });
+      await Promise.resolve();
+      expect(seen).toEqual([true, false]);
+    } finally { stop(); }
+  });
   test('blocking requests and retries expose state without conversation data', () => {
     const child = manager.ensureChild('/b-tree', { bootstrap: false });
     applyGlobalSessionStatusEvent('/b-tree', { type: 'session.status', properties: { sessionID: 'b-session', status: { type: 'retry', attempt: 1, message: 'Wait', next: 1 } } });
