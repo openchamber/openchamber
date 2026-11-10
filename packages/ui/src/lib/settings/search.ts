@@ -1767,11 +1767,21 @@ export const SETTINGS_ANCHOR_PAGES: ReadonlyMap<string, SettingsPageSlug> = new 
 );
 
 export const getAvailableSettingsAnchorPages = (ctx: SettingsSearchAvailabilityContext): ReadonlyMap<string, SettingsPageSlug> => new Map(
-  SETTINGS_SEARCH_ITEMS.filter((item) => {
-    const page = getSettingsPageMeta(item.page);
-    return page && (!page.isAvailable || page.isAvailable(ctx)) && (!item.isAvailable || item.isAvailable(ctx));
-  }).map((item) => [item.id, item.page] as const),
+  SETTINGS_SEARCH_ITEMS.filter((item) => isSettingsAnchorAvailable(item.id, ctx)).map((item) => [item.id, item.page] as const),
 );
+
+const SETTINGS_SEARCH_ITEMS_BY_ID = new Map(SETTINGS_SEARCH_ITEMS.map((item) => [item.id, item] as const));
+
+/**
+ * One anchor's availability, the same test `getAvailableSettingsAnchorPages`
+ * runs, read at render: some items depend on live store state (a tool that is on).
+ */
+export const isSettingsAnchorAvailable = (anchorId: string, ctx: SettingsSearchAvailabilityContext): boolean => {
+  const item = SETTINGS_SEARCH_ITEMS_BY_ID.get(anchorId);
+  if (!item) return false;
+  const page = getSettingsPageMeta(item.page);
+  return Boolean(page) && (!page?.isAvailable || page.isAvailable(ctx)) && (!item.isAvailable || item.isAvailable(ctx));
+};
 
 interface BuildSettingsSearchResultsOptions {
   query: string;

@@ -12,6 +12,7 @@ import {
   SettingsRadioGroup,
   SettingsRadioOption,
   SettingsStackedField,
+  SettingsNewBadge,
   SETTINGS_NUMBER_INPUT_CLASS,
   SETTINGS_NUMBER_STEPPER_ROW_CLASS,
   SETTINGS_NUMBER_UNIT_CLASS,
@@ -35,7 +36,7 @@ import { DEFAULT_SELECTION_APPROVAL_TEXT, useUIStore, type LargeTextPasteBehavio
 
 import { MessageSearchSettings } from './MessageSearchSettings';
 import { SessionGoalCheckerField, SessionGoalMaxTurnsField } from './SessionGoalCheckerField';
-import { useChatSettingsTabStore, type ChatSettingsTab } from './chatSettingsTabs';
+import { chatSettingsTabAnchors, useChatSettingsTabStore, type ChatSettingsTab } from './chatSettingsTabs';
 
 type ChipOption<T extends string> = { id: T; labelKey: I18nKey };
 
@@ -676,11 +677,13 @@ export const ChatSettings: React.FC = () => {
   const { t } = useI18n();
   const tab = useChatSettingsTabStore((state) => state.tab);
   const setTab = useChatSettingsTabStore((state) => state.setTab);
-  const tabs = React.useMemo<Array<SortableTabsStripItem & { id: ChatSettingsTab }>>(() => [
-    { id: 'messages', label: t('settings.layout.chat.tab.messages') },
-    { id: 'composer', label: t('settings.layout.chat.tab.composer') },
-    { id: 'assistance', label: t('settings.layout.chat.tab.assistance') },
-  ], [t]);
+  const tabs = React.useMemo<Array<SortableTabsStripItem & { id: ChatSettingsTab }>>(() => (
+    (['messages', 'composer', 'assistance'] as const).map((id) => ({
+      id,
+      label: t(`settings.layout.chat.tab.${id}`),
+      accessory: <SettingsNewBadge items={chatSettingsTabAnchors(id)} />,
+    }))
+  ), [t]);
 
   return (
     <>
