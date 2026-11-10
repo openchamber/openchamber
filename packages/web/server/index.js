@@ -168,7 +168,7 @@ import { createInsideSpaceTaskNaming, SPACE_TASK_TITLE_ROUTE } from './lib/space
 import { dockerHostOf } from './lib/spaces/places/ssh-host.js';
 import { SPACE_IDLE_EXIT_CODE } from './lib/spaces/layout.js';
 import { createSwitchController, registerSpaceRoutes } from './lib/spaces/routes.js';
-import { configureGitEnvironment, getCheckedOutBranch, getWorktreeBootstrapGateStatus, getWorktrees, readRenameableGeneratedBranch, renameGeneratedWorktreeBranch, resolvePrimaryWorktreeRoot, setWorktreeTaskTitle } from './lib/git/service.js';
+import { configureGitEnvironment, getCheckedOutBranch, getWorktreeBootstrapGateStatus, getWorktrees, isWorktreeDirectoryPinned, readRenameableGeneratedBranch, renameGeneratedWorktreeBranch, resolvePrimaryWorktreeRoot, setWorktreeTaskTitle } from './lib/git/service.js';
 import { createEnvironmentStore } from './lib/environment/store.js';
 import { createEnvironmentRuntime } from './lib/environment/runtime.js';
 import { readOpenCodeServiceEnv } from './lib/environment/opencode-service-env.js';
@@ -1325,6 +1325,7 @@ const sessionWorkRuntime = createSessionWorkRuntime({
   readMetadata: (sessionID, directory) => sessionMetadataStore.get(sessionID, { directory }),
   updateMetadata: updateSessionMetadataWith,
   isSessionArchived: (sessionID) => openChamberSessionService.sessionArchive.isArchived(sessionID),
+  isWorktreePinned: isWorktreeDirectoryPinned,
   chatRoots: [path.join(OPENCHAMBER_USER_CONFIG_ROOT, 'chats'), OPENCHAMBER_CHATS_DIR],
   lineage: sessionLineage,
   activityProbe: createSessionActivityProbe({ buildOpenCodeUrl, getOpenCodeAuthHeaders, timeoutMs: 2_000 }),
@@ -2274,6 +2275,7 @@ const openChamberControlService = createOpenChamberControlService({
   chatsScope: scheduledChatsScope,
   chatRoots: [path.join(OPENCHAMBER_USER_CONFIG_ROOT, 'chats'), OPENCHAMBER_CHATS_DIR],
   updateSessionMetadata: updateSessionMetadataWith,
+  isWorktreePinned: isWorktreeDirectoryPinned,
   readPendingRequests: () => sessionRuntime.getPendingBlockingRequestsSnapshot(),
   isPermissionAutoAnswered: (sessionId, directory, permissionId) => permissionAutoAcceptRuntime.isPermissionAutoAnswered(sessionId, directory, permissionId),
   readSettingsFromDiskMigrated,

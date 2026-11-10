@@ -58,7 +58,11 @@ export function useWorktreeWork({ group, projectId, collapsed, onNavigate }: Arg
   const projectLabel = project ? formatProjectLabel(project.label?.trim() || project.path) : null;
   const refs = useGroupRefs(group, sessions, true);
   const sessionWorkEnabled = useUIStore((state) => state.sessionWorkEnabled);
-  const inWork = sessionWorkEnabled && isWorkInWork(sessions);
+  // The pin lives in the branch's config, so a detached worktree has none.
+  // The row moves once the server's topology event lists the change.
+  const pinned = worktree?.pinnedAt !== undefined;
+  // A pinned work is never in work.
+  const inWork = sessionWorkEnabled && !pinned && isWorkInWork(sessions);
   // Where the user is: the open session (`CURRENT_SESSION`) or the open
   // draft (its id, '' before it has one) in this worktree; null elsewhere.
   // A space's draft waits on the project root while the space is made, and
@@ -120,13 +124,13 @@ export function useWorktreeWork({ group, projectId, collapsed, onNavigate }: Arg
     prepare();
     useSessionUIStore.getState().setCurrentSession(session.id, session.directory ?? directory);
   };
-  // The pin lives in the branch's config, so a detached worktree has none.
-  // The row moves once the server's topology event lists the change.
-  const pinned = worktree?.pinnedAt !== undefined;
   // The pin list it is filed in (Pin to), Pinned when none.
   const pinList = pinned ? worktree?.pinList ?? DEFAULT_PIN_LIST : null;
   const canPin = Boolean(group.directory && worktree?.branch?.trim()) && !worktreeRemoving;
-  /** `list` null is Pinned; `pin` false unpins. */
+  /**
+   * `list` null is Pinned; `pin` false unpins. The sidebar closes the work of
+   * a pinned worktree's sessions once the pin arrives (`useClosePinnedWork`).
+   */
   const setPin = async (pin: boolean, list: string | null = null): Promise<void> => {
     if (!group.directory || !canPin) return;
     try {
@@ -190,8 +194,8 @@ export function useWorktreeWork({ group, projectId, collapsed, onNavigate }: Arg
       setFinishing(false);
     }
   };
-  /** Done or Track: present while the feature is on and there is a session to track. */
-  const workAction = sessionWorkEnabled && (inWork || sessions.length > 0);
+  /** Done or Track: present while the feature is on, the work is not pinned and there is a session to track. */
+  const workAction = sessionWorkEnabled && !pinned && (inWork || sessions.length > 0);
   const toggleWork = (): void => {
     if (inWork) {
       void finish(archiveOnDone);

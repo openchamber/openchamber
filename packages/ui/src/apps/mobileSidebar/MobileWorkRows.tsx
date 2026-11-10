@@ -8,7 +8,7 @@ import { CollapsedActivityIndicator } from '@/components/session/sidebar/session
 import { useCollapsedSessionActivityState } from '@/components/session/sidebar/sessions/collapsedActivityState';
 import { DirectoryActionIndicator } from '@/components/session/sidebar/sessions/DirectoryActionIndicator';
 import { useRunWork } from '@/components/session/sidebar/sessions/useRunWork';
-import type { SessionSidebarRow } from '@/components/session/sidebar/sessionSidebarRowModel';
+import { isPinnedZoneRowKey, type SessionSidebarRow } from '@/components/session/sidebar/sessionSidebarRowModel';
 import { useSessionDraftRow } from '@/components/session/sidebar/works/useSessionDraftRow';
 import { useWorktreeWork } from '@/components/session/sidebar/works/useWorktreeWork';
 import { SessionActivityDuration } from '@/components/session/SessionActivityDuration';
@@ -19,7 +19,6 @@ import { refTintStyle } from '@/lib/source-control/prVisualState';
 import { cn } from '@/lib/utils';
 import { useGitBranchLabel } from '@/stores/useGitStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
-import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { MobileProjectIcon } from '../MobileProjectIcon';
 import { MobileRunProviderLogos } from '../MobileRunProviderLogos';
 import { MobileSessionRenameForm } from '../MobileSessionRenameForm';
@@ -144,10 +143,9 @@ export const MobileWorktreeRow: React.FC<{
     </span>
   ) : space ? <SpaceStatusMark spaceId={space.id} /> : null;
   const directoryIndicator = row.group.directory ? <DirectoryActionIndicator directory={row.group.directory} /> : null;
-  // With the Pinned section shown a pinned work is listed there, whose header
-  // already says so; otherwise the row carries the mark, as a session's does.
-  const pinnedSectionShown = useSessionDisplayStore((state) => state.showPinnedSection);
-  const pinMark = work.pinned && !pinnedSectionShown
+  // The Pinned section's header already says its works are pinned; anywhere
+  // else the row carries the mark, as a session's does.
+  const pinMark = work.pinned && !isPinnedZoneRowKey(row.key)
     ? <Icon name="pushpin" className="size-3 shrink-0 text-muted-foreground" aria-label={t('sessions.sidebar.session.status.pinned')} />
     : null;
 

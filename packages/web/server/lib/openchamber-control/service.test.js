@@ -1031,6 +1031,22 @@ describe('OpenChamber control service', () => {
       expect(decide({})).toEqual({ openchamber: { work: { state: 'open', openedAt: 700, openedBy: 'user', doneAt: null, suggestDoneAt: null } } });
     });
 
+    it('never puts a pinned session, or one in a pinned worktree, in work', async () => {
+      const updateSessionMetadata = vi.fn(async () => ({ changed: true }));
+      const isWorktreePinned = vi.fn(async (directory) => directory === '/repo/pinned-wt');
+      const { service, client } = createService({ updateSessionMetadata, isWorktreePinned });
+      const fields = {
+        pinned: { metadata: { openchamber: { pinned: { at: 1 } } } },
+        'in-wt': { location: { directory: '/repo/pinned-wt' } },
+      };
+      client.session.get.mockImplementation(async ({ sessionID }) => session(sessionID, fields[sessionID]));
+
+      await expect(service.execute('session.track', { sessionId: 'pinned' })).rejects.toMatchObject({ statusCode: 409 });
+      await expect(service.execute('session.track', { sessionId: 'in-wt' })).rejects.toMatchObject({ statusCode: 409 });
+      await expect(service.execute('session.markDone', { sessionId: 'pinned' })).resolves.toMatchObject({ inWork: false });
+      expect(updateSessionMetadata).toHaveBeenCalledTimes(1);
+    });
+
     it('reports an unknown session and a server that cannot write', async () => {
       const tagged = Object.assign(new Error('Session not found'), { _tag: 'SessionNotFoundError' });
       const { service, client } = createService({ updateSessionMetadata: vi.fn() });

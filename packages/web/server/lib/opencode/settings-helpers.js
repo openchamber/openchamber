@@ -492,6 +492,9 @@ export const createSettingsHelpers = (dependencies) => {
     if (typeof candidate.sidebarKeepWorkInPlace === 'boolean') {
       result.sidebarKeepWorkInPlace = candidate.sidebarKeepWorkInPlace;
     }
+    if (typeof candidate.sidebarKeepPinnedInPlace === 'boolean') {
+      result.sidebarKeepPinnedInPlace = candidate.sidebarKeepPinnedInPlace;
+    }
     if (SIDEBAR_PROJECT_SORT_ORDER_VALUES.has(candidate.sidebarProjectSortOrder)) {
       result.sidebarProjectSortOrder = candidate.sidebarProjectSortOrder;
     }

@@ -188,6 +188,8 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
   const setShowPinnedSection = useSessionDisplayStore((state) => state.setShowPinnedSection);
   const keepWorkInPlace = useSessionDisplayStore((state) => state.keepWorkInPlace);
   const setKeepWorkInPlace = useSessionDisplayStore((state) => state.setKeepWorkInPlace);
+  const keepPinnedInPlace = useSessionDisplayStore((state) => state.keepPinnedInPlace);
+  const setKeepPinnedInPlace = useSessionDisplayStore((state) => state.setKeepPinnedInPlace);
   const detailedZoneRows = useSessionDisplayStore((state) => state.detailedZoneRows);
   const setDetailedZoneRows = useSessionDisplayStore((state) => state.setDetailedZoneRows);
   const worktreeNameByBranch = useSessionDisplayStore((state) => state.worktreeNameByBranch);
@@ -359,7 +361,10 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
             {!hiddenSections.includes(section.id) ? <Icon name="check" className="size-4 text-primary" /> : null}
           </DropdownMenuItem>
         ))}
-        {/* A work in In work leaves its project unless asked. */}
+        {/* A pinned work stays in its project unless asked; one in In work leaves it unless asked. */}
+        {showPinnedSection ? renderMenuChoice('pinned-in-place', 'sessions.sidebar.header.displayMode.keepPinnedInPlace', keepPinnedInPlace, toggleSetting(keepPinnedInPlace, setKeepPinnedInPlace, (next) => {
+          void updateDesktopSettings({ sidebarKeepPinnedInPlace: next });
+        })) : null}
         {sessionWorkEnabled && showWorkSection ? renderMenuChoice('in-place', 'sessions.sidebar.header.displayMode.keepWorkInPlace', keepWorkInPlace, toggleSetting(keepWorkInPlace, setKeepWorkInPlace, (next) => {
           void updateDesktopSettings({ sidebarKeepWorkInPlace: next });
         })) : null}

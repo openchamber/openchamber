@@ -41,7 +41,7 @@ import { SortableSidebarSection } from './SortableSidebarSection';
 import { sectionDragId, sectionIdOfRow } from './sectionDrag';
 import { sessionDetailedRowPaddingLeft, sessionTreeTextInset } from '../sessions/sessionTreeGeometry';
 import { SessionSidebarActivityHeader, SessionSidebarCaption } from '../sessionSidebarHeaderPresentation';
-import { resolveSessionSidebarStickyHeader, type SessionSidebarRow, type SessionSidebarRowModel } from '../sessionSidebarRowModel';
+import { isPinnedZoneRowKey, resolveSessionSidebarStickyHeader, type SessionSidebarRow, type SessionSidebarRowModel } from '../sessionSidebarRowModel';
 import { SortableProjectItem } from './sortableItems';
 import { WorktreeWorkRow } from '../works/WorktreeWorkRow';
 import { SessionDraftRow } from '../works/SessionDraftRow';
@@ -427,7 +427,7 @@ function SessionProjectScrollerComponent({ model, view, actions }: SessionProjec
       // row; the archive keeps its group header.
       return isGroupWork(row.group)
         ? <WorktreeWorkRow
-          group={row.group} groupKey={row.groupKey} projectId={row.projectId} depth={row.depth} detailed={row.detailed} mixed={row.mixed}
+          group={row.group} groupKey={row.groupKey} projectId={row.projectId} depth={row.depth} detailed={row.detailed} mixed={row.mixed} inPinnedZone={isPinnedZoneRowKey(row.key)}
           collapsed={row.collapsed} forceExpanded={row.forceExpanded} empty={row.empty}
           normalizedSessionSearchQuery={model.groupProps.normalizedSessionSearchQuery}
           alwaysShowActions={view.alwaysShowActions} mobileVariant={view.mobileVariant}

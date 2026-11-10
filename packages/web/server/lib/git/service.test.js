@@ -44,6 +44,7 @@ import {
   getWorktrees,
   setWorktreeTaskTitle,
   setWorktreePinned,
+  isWorktreeDirectoryPinned,
   seedBranchTaskTitle,
   markGeneratedBranchName,
   readRenameableGeneratedBranch,
@@ -7220,6 +7221,19 @@ describe('worktree task titles', () => {
 
     expect(await setWorktreePinned(linked, false)).toEqual({ pinned: false, branch: 'feature/task' });
     expect((await entryOf())?.pinnedAt).toBeUndefined();
+  });
+
+  it('tells a pinned worktree\'s folders from the project checkout, whose branch config does not count', async () => {
+    const { repo, linked } = createLinkedWorktree();
+    expect(await isWorktreeDirectoryPinned(linked)).toBe(false);
+    await setWorktreePinned(linked, true, 'release', 1234);
+    expect(await isWorktreeDirectoryPinned(linked)).toBe(true);
+    fs.mkdirSync(path.join(linked, 'sub'), { recursive: true });
+    expect(await isWorktreeDirectoryPinned(path.join(linked, 'sub'))).toBe(true);
+    const rootBranch = String(runGit(repo, ['symbolic-ref', '--short', 'HEAD'])).trim();
+    runGit(repo, ['config', `branch.${rootBranch}.openchamberPinned`, '99']);
+    expect(await isWorktreeDirectoryPinned(repo)).toBe(false);
+    expect(await isWorktreeDirectoryPinned(path.join(repo, 'missing'))).toBe(false);
   });
 
   it('files a pinned worktree into a pin list and back, keeping the first pin time', async () => {

@@ -2,6 +2,7 @@
 export const sidebarWorkI18n = {
   en: {
     "sessions.sidebar.header.displayMode.keepWorkInPlace": "Also show in work under projects",
+    "sessions.sidebar.header.displayMode.keepPinnedInPlace": "Also show pinned under projects",
     "sessions.sidebar.work.rename.failed": "Couldn't rename the task",
     "sessions.sidebar.work.rename.placeholder": "Task name",
     "sessions.sidebar.work.rename.aria": "Rename the task",
@@ -28,6 +29,7 @@ export const sidebarWorkI18n = {
   },
   de: {
     "sessions.sidebar.header.displayMode.keepWorkInPlace": "In Arbeit auch unter Projekten zeigen",
+    "sessions.sidebar.header.displayMode.keepPinnedInPlace": "Angeheftete auch unter Projekten zeigen",
     "sessions.sidebar.work.rename.failed": "Die Aufgabe konnte nicht umbenannt werden",
     "sessions.sidebar.work.rename.placeholder": "Name der Aufgabe",
     "sessions.sidebar.work.rename.aria": "Aufgabe umbenennen",
@@ -54,6 +56,7 @@ export const sidebarWorkI18n = {
   },
   fr: {
     "sessions.sidebar.header.displayMode.keepWorkInPlace": "Afficher aussi le travail en cours sous les projets",
+    "sessions.sidebar.header.displayMode.keepPinnedInPlace": "Afficher aussi les éléments épinglés sous les projets",
     "sessions.sidebar.work.rename.failed": "Impossible de renommer la tâche",
     "sessions.sidebar.work.rename.placeholder": "Nom de la tâche",
     "sessions.sidebar.work.rename.aria": "Renommer la tâche",
@@ -80,6 +83,7 @@ export const sidebarWorkI18n = {
   },
   nl: {
     "sessions.sidebar.header.displayMode.keepWorkInPlace": "Werk in uitvoering ook onder projecten tonen",
+    "sessions.sidebar.header.displayMode.keepPinnedInPlace": "Vastgezette items ook onder projecten tonen",
     "sessions.sidebar.work.rename.failed": "De taak kon niet worden hernoemd",
     "sessions.sidebar.work.rename.placeholder": "Naam van de taak",
     "sessions.sidebar.work.rename.aria": "Taak hernoemen",
@@ -106,6 +110,7 @@ export const sidebarWorkI18n = {
   },
   es: {
     "sessions.sidebar.header.displayMode.keepWorkInPlace": "Mostrar también lo que está en curso bajo los proyectos",
+    "sessions.sidebar.header.displayMode.keepPinnedInPlace": "Mostrar también los fijados bajo los proyectos",
     "sessions.sidebar.work.rename.failed": "No se pudo cambiar el nombre de la tarea",
     "sessions.sidebar.work.rename.placeholder": "Nombre de la tarea",
     "sessions.sidebar.work.rename.aria": "Cambiar el nombre de la tarea",
@@ -132,6 +137,7 @@ export const sidebarWorkI18n = {
   },
   ja: {
     "sessions.sidebar.header.displayMode.keepWorkInPlace": "作業中の項目もプロジェクトの下に表示",
+    "sessions.sidebar.header.displayMode.keepPinnedInPlace": "ピン留めした項目もプロジェクトの下に表示",
     "sessions.sidebar.work.rename.failed": "タスク名を変更できませんでした",
     "sessions.sidebar.work.rename.placeholder": "タスク名",
     "sessions.sidebar.work.rename.aria": "タスク名を変更",
@@ -158,6 +164,7 @@ export const sidebarWorkI18n = {
   },
   'pt-BR': {
     "sessions.sidebar.header.displayMode.keepWorkInPlace": "Mostrar também o que está em andamento nos projetos",
+    "sessions.sidebar.header.displayMode.keepPinnedInPlace": "Mostrar também os fixados nos projetos",
     "sessions.sidebar.work.rename.failed": "Não foi possível renomear a tarefa",
     "sessions.sidebar.work.rename.placeholder": "Nome da tarefa",
     "sessions.sidebar.work.rename.aria": "Renomear a tarefa",
@@ -184,6 +191,7 @@ export const sidebarWorkI18n = {
   },
   uk: {
     "sessions.sidebar.header.displayMode.keepWorkInPlace": "Також показувати роботу в проєктах",
+    "sessions.sidebar.header.displayMode.keepPinnedInPlace": "Також показувати закріплене в проєктах",
     "sessions.sidebar.work.rename.failed": "Не вдалося перейменувати задачу",
     "sessions.sidebar.work.rename.placeholder": "Назва задачі",
     "sessions.sidebar.work.rename.aria": "Перейменувати задачу",
@@ -210,6 +218,7 @@ export const sidebarWorkI18n = {
   },
   ko: {
     "sessions.sidebar.header.displayMode.keepWorkInPlace": "진행 중인 작업을 프로젝트 아래에도 표시",
+    "sessions.sidebar.header.displayMode.keepPinnedInPlace": "고정한 항목을 프로젝트 아래에도 표시",
     "sessions.sidebar.work.rename.failed": "작업 이름을 바꿀 수 없습니다",
     "sessions.sidebar.work.rename.placeholder": "작업 이름",
     "sessions.sidebar.work.rename.aria": "작업 이름 바꾸기",
@@ -236,6 +245,7 @@ export const sidebarWorkI18n = {
   },
   pl: {
     "sessions.sidebar.header.displayMode.keepWorkInPlace": "Pokazuj też prace w toku pod projektami",
+    "sessions.sidebar.header.displayMode.keepPinnedInPlace": "Pokazuj też przypięte pod projektami",
     "sessions.sidebar.work.rename.failed": "Nie udało się zmienić nazwy zadania",
     "sessions.sidebar.work.rename.placeholder": "Nazwa zadania",
     "sessions.sidebar.work.rename.aria": "Zmień nazwę zadania",
@@ -262,6 +272,7 @@ export const sidebarWorkI18n = {
   },
   'zh-CN': {
     "sessions.sidebar.header.displayMode.keepWorkInPlace": "在项目下也显示进行中的工作",
+    "sessions.sidebar.header.displayMode.keepPinnedInPlace": "在项目下也显示已置顶的内容",
     "sessions.sidebar.work.rename.failed": "无法重命名任务",
     "sessions.sidebar.work.rename.placeholder": "任务名称",
     "sessions.sidebar.work.rename.aria": "重命名任务",
@@ -288,6 +299,7 @@ export const sidebarWorkI18n = {
   },
   'zh-TW': {
     "sessions.sidebar.header.displayMode.keepWorkInPlace": "在專案下也顯示進行中的工作",
+    "sessions.sidebar.header.displayMode.keepPinnedInPlace": "在專案下也顯示已釘選的內容",
     "sessions.sidebar.work.rename.failed": "無法重新命名任務",
     "sessions.sidebar.work.rename.placeholder": "任務名稱",
     "sessions.sidebar.work.rename.aria": "重新命名任務",
@@ -314,6 +326,7 @@ export const sidebarWorkI18n = {
   },
   tr: {
     "sessions.sidebar.header.displayMode.keepWorkInPlace": "Devam eden işleri projelerin altında da göster",
+    "sessions.sidebar.header.displayMode.keepPinnedInPlace": "Sabitlenenleri projelerin altında da göster",
     "sessions.sidebar.work.rename.failed": "Görev yeniden adlandırılamadı",
     "sessions.sidebar.work.rename.placeholder": "Görev adı",
     "sessions.sidebar.work.rename.aria": "Görevi yeniden adlandır",
@@ -340,6 +353,7 @@ export const sidebarWorkI18n = {
   },
   ar: {
     "sessions.sidebar.header.displayMode.keepWorkInPlace": "إظهار العمل الجاري تحت المشاريع أيضًا",
+    "sessions.sidebar.header.displayMode.keepPinnedInPlace": "إظهار العناصر المثبّتة تحت المشاريع أيضًا",
     "sessions.sidebar.work.rename.failed": "تعذّرت إعادة تسمية المهمة",
     "sessions.sidebar.work.rename.placeholder": "اسم المهمة",
     "sessions.sidebar.work.rename.aria": "إعادة تسمية المهمة",
@@ -366,6 +380,7 @@ export const sidebarWorkI18n = {
   },
   he: {
     "sessions.sidebar.header.displayMode.keepWorkInPlace": "להציג עבודה פעילה גם תחת הפרויקטים",
+    "sessions.sidebar.header.displayMode.keepPinnedInPlace": "להציג גם פריטים מוצמדים תחת הפרויקטים",
     "sessions.sidebar.work.rename.failed": "לא ניתן לשנות את שם המשימה",
     "sessions.sidebar.work.rename.placeholder": "שם המשימה",
     "sessions.sidebar.work.rename.aria": "שינוי שם המשימה",

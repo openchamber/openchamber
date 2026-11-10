@@ -5262,6 +5262,21 @@ export async function setWorktreePinned(directory, pinned, list = null, now = Da
   return { pinned, branch };
 }
 
+/**
+ * Whether `directory` is inside a linked worktree whose task the user pinned.
+ * The project's own checkout is never a pinned work, whatever its branch's
+ * config says. Any git failure reads as not pinned.
+ */
+export async function isWorktreeDirectoryPinned(directory) {
+  const directoryPath = normalizeDirectoryPath(directory);
+  if (!directoryPath || !fs.existsSync(directoryPath)) return false;
+  const result = await runGitCommand(directoryPath, ['rev-parse', '--path-format=absolute', '--git-dir', '--git-common-dir', '--abbrev-ref', 'HEAD']);
+  if (!result.success) return false;
+  const [gitDir, commonDir, branch] = String(result.stdout || '').split(/\r?\n/);
+  if (!gitDir || !commonDir || gitDir === commonDir || !branch || branch === 'HEAD') return false;
+  return parseBranchPin(await readGitConfigValue(directoryPath, `branch.${branch}.openchamberPinned`)) !== null;
+}
+
 const readGitConfigValue = async (directory, key) => {
   const result = await runGitCommand(directory, ['config', '--get', key]);
   return result.success ? String(result.stdout || '').replace(/\r?\n$/, '') : '';

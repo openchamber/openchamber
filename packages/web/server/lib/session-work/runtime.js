@@ -108,6 +108,8 @@ export function createSessionWorkRuntime({
   /** `(sessionID, decide, { directory }) => { metadata, changed }`, decided against the record at write time. */
   updateMetadata,
   isSessionArchived = async () => false,
+  /** Whether a folder is inside a worktree the user pinned: its sessions are never in work. */
+  isWorktreePinned = async () => false,
   /** Roots of managed Chats: plain conversations, never work. */
   chatRoots = [],
   /** `../session-lineage.js`: known subsessions are skipped without reading them. */
@@ -204,7 +206,7 @@ export function createSessionWorkRuntime({
    * One try at the open a message owes. `archived` when the session has to be
    * restored first, `settled` when nothing more is owed: it opened, was
    * already open, the user closed it after the message, it can never be in
-   * work, or In work is off. Throws when a read or the write failed.
+   * work, it is pinned, or In work is off. Throws when a read or the write failed.
    */
   const tryOpen = async ({ sessionId, directory, createdAt }) => {
     if (stopped || !getSettings().enabled) return 'settled';
@@ -212,6 +214,9 @@ export function createSessionWorkRuntime({
     if (readWork(await readMetadata(sessionId, directory))?.state === 'open') return 'settled';
     const session = await workSession(openCodeClient(directory), sessionId, AbortSignal.timeout(READ_TIMEOUT_MS));
     if (!session) return 'settled';
+    // A pinned worktree's sessions are never in work; a pinned session's own
+    // pin is checked by `openPatch`, against the record at write time.
+    if (await isWorktreePinned(session.location?.directory ?? session.directory ?? directory)) return 'settled';
     if (await isSessionArchived(sessionId)) return 'archived';
     if (stopped) return 'settled';
     await updateMetadata(sessionId, (metadata) => openPatch(metadata, { requestAt: createdAt, now: now() }), { directory });

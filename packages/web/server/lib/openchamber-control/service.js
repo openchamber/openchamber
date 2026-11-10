@@ -14,7 +14,7 @@ import { createUsageReadAction } from './usage-read.js';
 import { createWorkNamer } from '../openchamber-sessions/work-naming.js';
 import { CHATS_SCOPE_PUBLIC_ID } from '../scheduled-tasks/chats-scope.js';
 import { createWorkMembership } from '../session-work/membership.js';
-import { userStatePatch } from '../session-work/state.js';
+import { isPinnedMetadata, userStatePatch } from '../session-work/state.js';
 
 const DEFAULT_WAIT_TIMEOUT_SECONDS = 600;
 const MAX_WAIT_TIMEOUT_SECONDS = 86_400;
@@ -287,6 +287,8 @@ export const createOpenChamberControlService = (dependencies) => {
     // write the app's own Done goes through; absent means the server cannot
     // change In work.
     updateSessionMetadata = null,
+    // Whether a folder is inside a worktree the user pinned: its sessions are never in work.
+    isWorktreePinned = async () => false,
     scheduledTaskService,
     browserControl = null,
     fileOpen = null,
@@ -725,6 +727,9 @@ export const createOpenChamberControlService = (dependencies) => {
       throw new OpenChamberControlError(`${sessionID} is archived; In work shows no archived sessions`, 409);
     }
     const directory = asNonEmptyString(session?.location?.directory) || '';
+    if (state === 'open' && (isPinnedMetadata(session?.metadata) || (directory && await isWorktreePinned(directory)))) {
+      throw new OpenChamberControlError(`${sessionID} is pinned, or its worktree is; a pinned session is never in work`, 409);
+    }
     const { changed } = await updateSessionMetadata(sessionID, (metadata) => userStatePatch(metadata, { state, now: now() }), { directory });
     return { sessionId: sessionID, directory, title: asNonEmptyString(session?.title), inWork: state === 'open', changed };
   };

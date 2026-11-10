@@ -8,7 +8,7 @@ import { useSessionAiRenameAction } from '@/components/session/useSessionAiRenam
 import { resolveTooltipBranchLabel } from '@/components/session/sidebar/sessions/sessionNodeItemUtils';
 import { useSessionRefLines } from '@/components/session/sidebar/sessions/useSessionRefLines';
 import { refTintStyle } from '@/lib/source-control/prVisualState';
-import { isMultiLineTimelineContext, sessionExpansionKey, type SessionSidebarRow } from '@/components/session/sidebar/sessionSidebarRowModel';
+import { isMultiLineTimelineContext, isPinnedZoneRowKey, sessionExpansionKey, type SessionSidebarRow } from '@/components/session/sidebar/sessionSidebarRowModel';
 import type { SessionNode } from '@/components/session/sidebar/types';
 import { isChatDirectoryPath } from '@/lib/chatDirectories';
 import { useI18n } from '@/lib/i18n';
@@ -18,7 +18,6 @@ import { getSessionGoal } from '@/lib/sessionGoalMetadata';
 import { collectSessionWorkInWork } from '@/components/session/sidebar/works/sidebarWorks';
 import { cn } from '@/lib/utils';
 import { useProjectsStore } from '@/stores/useProjectsStore';
-import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { useSessionPinnedStore } from '@/stores/useSessionPinnedStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useSessionTurnActivity } from '@/sync/global-session-status';
@@ -85,16 +84,16 @@ export const MobileSessionRow: React.FC<{
   const sessionWorkEnabled = useUIStore((state) => state.sessionWorkEnabled);
   // Only a work's own row tracks it, for every session of it: what nests in
   // a work is tracked and finished with it.
-  const ownsWork = sessionWorkEnabled && row.ownsWork && topLevel && !isChatDirectoryPath(directory);
+  const pinned = useSessionPinnedStore((state) => isSessionPinned(state.ids, directory || null, session.id));
+  // A pinned session is never in work, so it offers no Track or Done.
+  const ownsWork = sessionWorkEnabled && row.ownsWork && topLevel && !isChatDirectoryPath(directory) && !pinned;
   const sessionsInWork = React.useMemo(() => (ownsWork ? collectSessionWorkInWork(node) : []), [node, ownsWork]);
   const work = ownsWork
     ? { inWork: sessionsInWork.length > 0, onToggle: () => { void toggleMobileSessionWork(session, sessionsInWork, t); } }
     : undefined;
-  const pinned = useSessionPinnedStore((state) => isSessionPinned(state.ids, directory || null, session.id));
   const pin = topLevel && directory ? { pinned, onToggle: () => toggleMobileSessionPin(session, pinned, t) } : undefined;
-  const inZone = row.renderContext === 'timeline-mixed' || row.renderContext === 'mixed-compact';
-  // With the Pinned zone shown, the zones need no pin: it says it in its header.
-  const pinnedZoneShown = useSessionDisplayStore((state) => state.showPinnedSection) && inZone;
+  // The Pinned section's header already says its rows are pinned.
+  const inPinnedZone = isPinnedZoneRowKey(row.key);
   const showDoneHint = Boolean(work?.inWork) && !isStreaming && isDoneSuggested(session);
   // Two lines in a zone with Detailed rows on ('timeline-mixed'), and under a
   // project for the works there (`detailed`); what nests inside stays one line.
@@ -146,7 +145,7 @@ export const MobileSessionRow: React.FC<{
   const timeSlot = showActivityDuration && !waitingOnUser
     ? <SessionActivityDuration sessionId={session.id} running={isStreaming} className="shrink-0 typography-micro" />
     : null;
-  const pinMarker = pinned && !pinnedZoneShown
+  const pinMarker = pinned && !inPinnedZone
     ? <Icon name="pushpin" className="size-3 shrink-0 text-muted-foreground" aria-label={t('sessions.sidebar.session.status.pinned')} />
     : null;
   const doneHint = showDoneHint

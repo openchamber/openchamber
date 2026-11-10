@@ -32,7 +32,6 @@ import { SessionReadShortcut } from '@/components/session/SessionReadMenuItem';
 import { sessionEvents } from '@/lib/sessionEvents';
 import { refTintStyle } from '@/lib/source-control/prVisualState';
 import { cn, formatDirectoryName } from '@/lib/utils';
-import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { useSessionFoldersStore } from '@/stores/useSessionFoldersStore';
 import { DirectoryActionIndicator } from '../sessions/DirectoryActionIndicator';
 import { CollapsedActivityIndicator } from '../sessions/collapsedActivityIndicator';
@@ -85,6 +84,8 @@ type Props = {
   detailed: boolean;
   /** Listed among other projects' works (In work, the list by time), so it names its project. */
   mixed: boolean;
+  /** Listed in the Pinned section, whose header already says it is pinned. */
+  inPinnedZone: boolean;
   collapsed: boolean;
   forceExpanded: boolean;
   empty: boolean;
@@ -117,6 +118,7 @@ export function WorktreeWorkRow(props: Props): React.ReactNode {
     depth,
     detailed,
     mixed,
+    inPinnedZone,
     collapsed,
     forceExpanded,
     empty,
@@ -142,11 +144,10 @@ export function WorktreeWorkRow(props: Props): React.ReactNode {
     title, branch, label, secondName, finishing, canArchive, canRename, canNewChat, pinned, canPin, workAction, inWork, activityState,
     runningSessionId, durationSessionId,
   } = work;
-  // With the Pinned section shown a pinned work is listed there, whose header
-  // already says so; otherwise the row carries the mark, as a session's does.
-  const pinnedSectionShown = useSessionDisplayStore((state) => state.showPinnedSection);
+  // The Pinned section's header already says its works are pinned; anywhere
+  // else the row carries the mark, as a session's does.
   const pinnedLabel = t('sessions.sidebar.session.status.pinned');
-  const pinnedMark = pinned && !pinnedSectionShown ? (
+  const pinnedMark = pinned && !inPinnedZone ? (
     <RowMarkTooltip label={pinnedLabel}>
       <span className="inline-flex flex-shrink-0 items-center" aria-label={pinnedLabel}>
         <Icon name="pushpin" className="h-3 w-3 text-muted-foreground" />

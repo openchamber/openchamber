@@ -68,6 +68,15 @@ runtime and for the agent tool's `session.list`.
 - A hint is current while its time `>= session.time.idle` (the assist's
   freshness rule). This runtime also deletes a hint it wrote when the next
   turn starts; the rule covers hints written by another process.
+- A pinned session is never in work, whether the session is pinned
+  (`openchamber.pinned`, checked by `openPatch` against the record at write
+  time) or its worktree is (`branch.<name>.openchamberPinned`,
+  `isWorktreeDirectoryPinned` in `../git/service.js`, read before the write).
+  A sent message opens neither and the agent tool's `session.track` refuses
+  both; `isInWork` leaves out a session pinned itself (a worktree's pin needs
+  git, and such a session is closed by the UI the moment it opens). The UI closes the work of a session when it
+  pins it, and the sidebar closes what an older build left open
+  (`useClosePinnedWork`); Done stays allowed for that.
 - Only top-level, unarchived project sessions that are not review sessions,
   `/btw` side questions or scheduled task runs (`openchamber.kind` `review` /
   `btw` / `scheduled`) open or are asked about. A run's marker is set when

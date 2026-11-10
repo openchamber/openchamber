@@ -529,7 +529,8 @@ time, everything else groups by project); the phone follows the same
 setting, and VS Code always groups by project. The display menu opens with Select sessions, then Grouping, then
 (grouped by project) the project sort and project display,
 then Customize sections…, which opens the sections manager beside the sidebar (the order,
-each section's visibility, the "Also in projects" chip on In work
+each section's visibility, the "Also in projects" chip on Pinned
+(`keepPinnedInPlace`, `sidebarKeepPinnedInPlace`, on by default) and on In work
 (`keepWorkInPlace`, `sidebarKeepWorkInPlace`, off by default) and the user's
 own sections), Detailed rows, "Name worktrees by branch", then Collapse all /
 Expand all, and last Mark all as read, which marks every unread session the
@@ -817,21 +818,54 @@ The display menu's Show pinned section toggle (`showPinnedSection`,
 `sidebarShowPinnedSection`, per surface, on by default for new installs) adds a `pinned`
 activity zone between Chats and In work. It lists pinned top-level,
 unarchived project sessions in the shared lifecycle order; pinned chats stay
-pinned at the top of Chats. A work whose root session is pinned is listed in
-Pinned only: it leaves its project (`movedSessionIds`), always, with no
-"also show under projects" choice; the zone is there because the user turned
-it on (maintainer, 2026-10-25). Turned off, pinned sessions stay in their
-projects. Search
-lists each of them once, in the zone (`zoneSessionIds` carries both zones' ids),
-and the rows follow the same render context. Its rows show no pin marker,
-because the header already says they are pinned; In work rows show it only
-while the zone is hidden, since otherwise no pinned session reaches In work.
+pinned at the top of Chats. A pinned work stays in its project or folder and
+in the list by time too, unless the user turns "Also in projects" off on
+Pinned (`keepPinnedInPlace`, on by default); then it is listed in Pinned only
+and leaves its project (`movedSessionIds`, `movedGroupKeys`). Turned off,
+the zone leaves pinned sessions in their projects.
+
+A pinned work is never in work, a session or a worktree alike, in any pin
+list: pinning a session closes its work in the same write
+(`setSessionPinned`), Track on a pinned session writes nothing
+(`setSessionWorkState`), the server opens no work in a pinned one
+(`web/server/lib/session-work`), its row offers no Track or Done, and In work
+leaves it out. What is still open (an older build, a worktree pin, which lives
+in git apart from session state, another client) the sidebar closes once it
+sees it (`works/useClosePinnedWork.ts`), each open once, so a refused write is
+not retried and a later open is closed again; that also
+moved the pins from before this rule out of In work. Unpinned, a session stays
+done until the next message the user sends in it. So the order of Pinned and
+In work decides nothing. Search lists each of them once,
+in the zone (`zoneSessionIds` carries both zones' ids), and the rows follow the
+same render context. Rows in the Pinned zone show no pin mark, because the
+header already says they are pinned (`isPinnedZoneRowKey`); a pinned work
+anywhere else carries the mark.
+
+### Why a pinned work stays in its project by default
+
+Pinned used to take its works out of their projects, with no choice
+(maintainer, 2026-10-25). Users then had to look in Pinned, In work and the
+projects to find a session, and a folder whose sessions were all pinned
+looked empty. Pinned is a shortlist on top of the projects, as a bookmark is,
+so its works stay where the user filed them; the chip brings the old
+behavior back for anyone who wants each work listed once (maintainer,
+2026-11-10).
+
+### Why a pinned work is never in work
+
+The two sections used to share works, and the higher one listed a work that
+was both pinned and in work. That made the order of sections a rule about
+where a session lives, and a pinned session left its project whenever In work
+took it. A pin is the user's own long-lived shortlist and In work is what they
+are on now, so a pinned work stays out of In work for good (maintainer,
+2026-11-10). The rule lives in the state, not only in the list, so the
+Overview, extensions and the agent tool read the same thing.
 
 A worktree work is pinned too, from its row's menu (desktop, web) or its swipe
 actions (phone): Pinned lists it after the pinned sessions, the latest pin
-first (`pinnedWorktrees` on the row model), and it leaves its project, In work
-and the list by time (`movedGroupKeys`). With the zone hidden it stays in its
-project, leading the list as pinned sessions do, with the pin mark on its row.
+first (`pinnedWorktrees` on the row model), and it follows the same choice.
+In its project or the list by time it leads the list, as pinned sessions do,
+with the pin mark on its row.
 Manual worktree order is gone (see "Why a worktree is listed among the
 project's sessions"); pinning is how a worktree stays on top. The pin lives in
 the branch's config beside the task title (`branch.<name>.openchamberPinned`,

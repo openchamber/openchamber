@@ -30,6 +30,9 @@ export const isSessionPinnedInMetadata = (session: Session | null | undefined): 
   pinnedSchema.safeParse(session?.metadata).success
 );
 
+/** The same, for a metadata record about to be written. */
+export const isPinnedMetadata = (metadata: Metadata): boolean => pinnedSchema.safeParse(metadata).success;
+
 /** The pin list a pinned session is filed in, `DEFAULT_PIN_LIST` for Pinned, or null when not pinned. */
 export const getSessionPinList = (session: Session | null | undefined): string | null => {
   const parsed = pinnedSchema.safeParse(session?.metadata);

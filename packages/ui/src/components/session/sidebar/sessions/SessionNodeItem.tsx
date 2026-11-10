@@ -38,7 +38,7 @@ import { toggleSessionWork } from './sessionWorkToggle';
 import { useSessionMarkdownExport } from './useSessionMarkdownExport';
 import type { SessionNode } from '../types';
 import { listedChildren } from '../listedChildren';
-import { isMultiLineTimelineContext, sessionExpansionKey, type SessionSidebarRenderContext } from '../sessionSidebarRowModel';
+import { isMultiLineTimelineContext, isPinnedZoneRowKey, sessionExpansionKey, type SessionSidebarRenderContext } from '../sessionSidebarRowModel';
 import { SessionTimelineRowBody } from './SessionTimelineRowBody';
 import { sessionDetailedRowPaddingLeft, sessionTreeRowPaddingLeft } from './sessionTreeGeometry';
 import { FileTreeChevron } from '@/components/views/files/FileTreeRowParts';
@@ -73,7 +73,6 @@ import {
 import { streamPerfCount } from '@/stores/utils/streamDebug';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useUIStore } from '@/stores/useUIStore';
-import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import type { WorktreeMetadata } from '@/types/worktree';
 import {
   type StartSessionWorktreeMenuLoadResult,
@@ -392,12 +391,10 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
   const isDetailedTreeRow = detailed && renderContext === 'project';
   const isTwoLineRow = isMultiLineTimelineContext(renderContext) || isDetailedTreeRow;
   const isTimelineRow = isTwoLineRow || isOneLineTimelineRow;
-  // While the Pinned section is shown it holds every pinned zone session, and
-  // its header already says they are pinned; In work and the list by time,
-  // whose rows share the zones' context, then have none of them.
   const isZoneRow = renderContext === 'timeline-mixed' || renderContext === 'mixed-compact';
-  const pinnedSectionShown = useSessionDisplayStore((state) => state.showPinnedSection);
-  const hidePinnedMarker = isZoneRow && pinnedSectionShown;
+  // The Pinned section's header already says its rows are pinned; anywhere
+  // else a pinned session carries the mark.
+  const hidePinnedMarker = rowKey !== undefined && isPinnedZoneRowKey(rowKey);
   // Detailed zone rows name the project with its icon on their second line;
   // one-line rows leave that room to the title (the row's tooltip names the
   // project). The row reads exactly that one project record, and `find` keeps

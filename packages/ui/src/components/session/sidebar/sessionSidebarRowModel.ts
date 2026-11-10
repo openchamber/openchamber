@@ -62,6 +62,13 @@ const DEFAULT_BLOCKS: readonly SessionSidebarBlock[] = [{ kind: 'chats' }, { kin
 
 /** Activity sections; the display menu's Collapse all / Expand all drive them with the projects. */
 export const SIDEBAR_ACTIVITY_KEYS: readonly SessionSidebarActivityKey[] = ['chats', 'pinned', 'work', 'timeline'];
+const PINNED_ZONE_KEY = 'activity:pinned';
+/**
+ * A row listed in the Pinned section, whose header already says its works are
+ * pinned, so they carry no pin mark there. Every row of the section, nested
+ * ones included, has a key under the section's.
+ */
+export const isPinnedZoneRowKey = (rowKey: string): boolean => rowKey.startsWith(`${PINNED_ZONE_KEY}:`);
 /** The `collapsedActivities` key of the Projects caption. */
 export const PROJECTS_CAPTION_COLLAPSE_KEY = 'projects';
 
@@ -163,9 +170,9 @@ export type SessionSidebarRowModelArgs = {
   authoritativeSections: readonly ProjectSection[];
   chatGroup: SessionGroup | null;
   archivedChatGroup?: SessionGroup | null;
-  /** Pinned sessions, already ordered and search-filtered; they stay under their project too. */
+  /** Pinned sessions, already ordered and search-filtered; `movedSessionIds` says whether they leave their project. */
   pinnedItems?: readonly SessionSidebarActivityItem[];
-  /** Pinned worktree works, listed after the pinned sessions, the latest pin first; they leave their project. */
+  /** Pinned worktree works, listed after the pinned sessions, the latest pin first; `movedGroupKeys` says whether they leave their project. */
   pinnedWorktrees?: readonly SessionSidebarWorkEntry[];
   /** The works in the In work block, in lifecycle order. */
   workEntries?: readonly SessionSidebarWorkEntry[];
@@ -370,7 +377,7 @@ const mergeWorktreeEntries = (
   const rankOfNode = (node: SessionNode): number => sessionOrderIndex.get(node.session.id) ?? Number.POSITIVE_INFINITY;
   const rankOfEntry = (entry: SidebarEntry): number => (isRunEntry(entry) ? Math.min(...entry.lanes.map(rankOfNode)) : rankOfNode(entry));
   const rankOfWorktree = ({ group, groupKey }: WorktreeInFolder): number => {
-    // A pinned worktree still listed here (the Pinned section is hidden)
+    // A pinned worktree still listed here (Pinned is hidden or leaves it in place)
     // leads the list, as pinned sessions do.
     if (group.worktree?.pinnedAt !== undefined) return Number.NEGATIVE_INFINITY;
     // A space nobody has chatted in yet, being made or running, was made to be used now: it leads
@@ -1098,8 +1105,8 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
     if (pinnedItems.length === 0 && pinnedWorktrees.length === 0) return;
     const collapsed = appendActivityHeader('pinned');
     if (collapsed) return;
-    appendActivityItems(pinnedItems, 'activity:pinned', zoneRenderContext);
-    appendWorkEntries(pinnedWorktrees, 'activity:pinned');
+    appendActivityItems(pinnedItems, PINNED_ZONE_KEY, zoneRenderContext);
+    appendWorkEntries(pinnedWorktrees, PINNED_ZONE_KEY);
   };
   const appendWork = (): void => {
     const workEntries = (args.workEntries ?? []).filter(matchesSearch);

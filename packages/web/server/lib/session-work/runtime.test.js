@@ -39,6 +39,7 @@ const makeRuntime = ({
   endpoint = ENDPOINT,
   lineage = null,
   isSessionArchived = async () => false,
+  isWorktreePinned = async () => false,
   doneHintDelayMs = 5,
   activityProbe = null,
 } = {}) => {
@@ -63,6 +64,7 @@ const makeRuntime = ({
     readMetadata,
     updateMetadata,
     isSessionArchived,
+    isWorktreePinned,
     chatRoots: ['/home/me/.config/openchamber/chats'],
     lineage,
     now: () => time++,
@@ -118,6 +120,22 @@ describe('session work runtime: a message was sent', () => {
 
     expect(jev.ask).not.toHaveBeenCalled();
     expect(records.get('ses_1')).toMatchObject({ openchamber: { work: { state: 'open', openedBy: 'auto' } } });
+  });
+
+  it('opens nothing in a pinned session or in a session of a pinned worktree', async () => {
+    stubOpenCode({ session: { location: { directory: '/repo-wt' } } });
+    const pinnedSession = makeRuntime({ metadata: { openchamber: { pinned: { at: 1 } } } });
+    pinnedSession.runtime.processPayload(sent());
+    await settle(() => pinnedSession.updateMetadata.mock.calls.length > 0);
+    expect(pinnedSession.records.get('ses_1')).toEqual({ openchamber: { pinned: { at: 1 } } });
+
+    const isWorktreePinned = vi.fn(async () => true);
+    const inPinnedWorktree = makeRuntime({ isWorktreePinned });
+    inPinnedWorktree.runtime.processPayload(sent());
+    await settle(() => isWorktreePinned.mock.calls.length > 0);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(isWorktreePinned).toHaveBeenCalledWith('/repo-wt');
+    expect(inPinnedWorktree.updateMetadata).not.toHaveBeenCalled();
   });
 
   it('opens the session on a message with only an attachment or attached context', async () => {

@@ -353,6 +353,10 @@
       "scope": "profile",
       "perSurface": true
     },
+    "sidebarKeepPinnedInPlace": {
+      "scope": "profile",
+      "perSurface": true
+    },
     "sidebarProjectSortOrder": {
       "scope": "profile"
     },
