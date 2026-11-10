@@ -233,9 +233,10 @@ mismatch, add an entry for the new tag with all three systems and drop the old
 tag's entry:
 
 - **aarch64-darwin**: the `got:` of a local `nix build --no-link .#openchamber`.
-- **aarch64-linux**: `colima start`, then
-  `docker run --rm --platform linux/arm64 nixos/nix sh -c "nix --extra-experimental-features 'nix-command flakes' build --no-link github:anomalyco/opencode/vX.Y.Z#node_modules_updater"`
-  prints `got:`. Leave colima in the state you found it.
-- **x86_64-linux**: the `got:` in the `nix-eval` CI job's mismatch output.
-  An Apple Silicon Mac cannot compute it: `nixos/nix` under Rosetta or qemu
+- **x86_64-linux and aarch64-linux**: push the bump, then
+  `gh workflow run nix-eval.yml --ref <branch>`; each failing job's log shows
+  `got:`. Add both, push, and run it again until all three jobs pass. Building
+  OpenCode's own flake in Docker (`node_modules_updater`) gives a different
+  hash, because it uses OpenCode's nixpkgs and Bun, not ours. An Apple Silicon
+  Mac cannot compute x86_64-linux at all: `nixos/nix` under Rosetta or qemu
   fails on the pty, and Bun crashes under qemu (no AVX).
