@@ -7,18 +7,18 @@ import { packCodeTokens, unpackCodeTokens } from './streamdown-code-protocol';
 import { sanitizeTemplateCallGrammar } from '@/lib/shiki/sanitizeTemplateCallGrammar';
 import { MARKDOWN_HIGHLIGHTS_THEME } from '@/lib/shiki/zedThemeFromAppTheme';
 
-// CoffeeScript has no Highlights lexer, so it exercises the Oniguruma path and
+// PureScript has no Highlights lexer, so it exercises the Oniguruma path and
 // its carried grammar state.
 test('incremental grammar state matches full tokenization at each character and after edits', async () => {
-  const grammar = await bundledLanguages.coffee();
+  const grammar = await bundledLanguages.purescript();
   const full = await createHighlighter({ themes: [MARKDOWN_SHIKI_THEME_DEFINITION], langs: grammar.default.map(sanitizeTemplateCallGrammar) });
   const highlight = createStreamdownHighlighter();
-  const code = '### 中文\n still comment ###\nvalue = """hello\n#{1 + 2} 😀"""\n';
+  const code = '{- 中文\n still comment -}\nvalue = """hello\n{- not a comment -} 😀"""\n';
   const sources = Array.from({ length: code.length + 1 }, (_, length) => code.slice(0, length));
-  sources.push('### edited ###\nx = 2', 'x = "a"\r\ny = "б"');
+  sources.push('{- edited -}\nx = 2', 'x = "a"\r\ny = "б"');
   for (const source of sources) {
-    const result = await highlight(source, 'coffee');
-    const expected = full.codeToTokensBase(source, { lang: 'coffee', theme: MARKDOWN_SHIKI_THEME_DEFINITION });
+    const result = await highlight(source, 'purescript');
+    const expected = full.codeToTokensBase(source, { lang: 'purescript', theme: MARKDOWN_SHIKI_THEME_DEFINITION });
     expect(result).toEqual(expected);
     const packed = packCodeTokens(result);
     const moved = structuredClone(packed, { transfer: [packed.spans.buffer, packed.lines.buffer] });
