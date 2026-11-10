@@ -780,6 +780,7 @@ The branch list used to ask every remote by default, so a branch a collaborator 
 - Branches created for new worktrees use `openchamber/<worktree-name>` pattern.
 
 ### Cross-Platform Considerations
+- `GIT_BINARY`, then `OPENCHAMBER_GIT_BINARY`, picks the Git executable on every platform when it names an executable file; otherwise Git comes from `PATH`, and on Windows from the Git for Windows install folders after that. Windows caches the first answer because the folder search is slow; elsewhere both resolvers read the override on each call, though the push, pull and fetch runtime asks once when the server starts. `resolveGitBinaryForSpawn` in `../opencode/env-runtime.js` makes the same choice for Git started outside this module (push, pull and fetch, file search, extension installs), so a change to one goes to both.
 - Use `normalizeDirectoryPath` for all directory inputs to handle `~` and path separators.
 - Use `canonicalPath` for path comparisons to handle case-insensitive filesystems (Windows).
 - MSYS2 Git can return `/c/repos/project` on Windows. Pass Git filesystem-path output through `normalizeGitOutputPath` before resolving it or using it with Node filesystem and process APIs. It converts drive mounts to `C:/repos/project` on Windows and preserves other paths, including POSIX paths on Linux and macOS.
