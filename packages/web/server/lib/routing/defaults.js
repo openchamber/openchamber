@@ -88,12 +88,12 @@ export const JEV_LINGER_MS = 5 * 60_000;
  * so the fallback model took them. Saying that history only resolves what the
  * request refers to, and that finished work carries no weight, put them at
  * 97% and ~75% trivial while "ok, do it" after a plan stayed implement and a
- * regression report stayed hard (jev-router lab, test/follow-up-instructions.js).
+ * regression report stayed hard (a private routing lab outside this repository).
  *
  * The fourth line covers a bare approval, which the third would otherwise
  * read as trivial: "go" after a plan carries no work of its own, so it takes
  * the category of the work it approves (the #4374 author measured this on
- * their own prompts; not yet replayed in the jev-router lab).
+ * their own prompts; not yet replayed in the routing lab).
  * It does not let finished work raise a follow-up; a follow-up that only
  * looks cheap because it reuses a warm context is the router's concern, not
  * the classifier's.

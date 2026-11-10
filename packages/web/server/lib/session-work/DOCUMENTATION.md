@@ -145,8 +145,8 @@ not retry a subscriber that failed.
 
 The looks-done and next-step signs were measured on 881 turns of 100 recent
 sessions, 95 of them closed by the user with Done, which marks the closing
-turn (`julia-lab/label/turnend`: `run-jev-genre2-prod.mjs`,
-`score-genre2-prod.mjs`, with the blind hand judgments in `judge/`). With the
+turn, in a private measurement lab outside this repository, with blind hand
+judgments of the disagreements. With the
 10-minute pause, looks done stood on the closing turn in 54 of the 95 sessions
 and showed 34 times while the user went on working; the earlier single
 question (`wrap_up >= 0.8`, "does this turn close out the work") gave 36 and
@@ -160,8 +160,7 @@ were dropped.
 `review_ready >= 0.7` was set on the 156 sessions and checked on the 190,
 against whether the turn ran an edit tool (Jev sees no tools): with looks
 done winning it hinted after 271 of 362 edit turns and after 14 of 823 turns
-without edits. The lab is `julia-lab/jev-work` (`run-review.mjs`,
-`score-held.mjs`) under `~/projects/openchamber-extensions`.
+without edits.
 `recap` stayed high (0.86–0.96) after a closing "thanks"/"commit" that followed
 real work, because it reads the same three turns the recap does. Do not change
 the wording or thresholds without re-running this measurement.
