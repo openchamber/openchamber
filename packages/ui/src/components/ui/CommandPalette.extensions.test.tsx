@@ -7,7 +7,7 @@ const browser = new Window({ url: 'http://localhost' });
 const descriptors = new Map<string, PropertyDescriptor | undefined>();
 for (const [key, value] of Object.entries({
   window: browser, document: browser.document, navigator: browser.navigator,
-  localStorage: browser.localStorage, Element: browser.Element, HTMLElement: browser.HTMLElement,
+  localStorage: browser.localStorage, Event: browser.Event, CustomEvent: browser.CustomEvent, Element: browser.Element, HTMLElement: browser.HTMLElement,
   Node: browser.Node, Text: browser.Text, Document: browser.Document, DocumentFragment: browser.DocumentFragment,
   ShadowRoot: browser.ShadowRoot, MutationObserver: browser.MutationObserver, SVGElement: browser.SVGElement,
   ResizeObserver: browser.ResizeObserver, getComputedStyle: browser.getComputedStyle.bind(browser),
@@ -128,6 +128,18 @@ test('extension commands are found by search and wait in the composer for their 
   await act(async () => item.dispatchEvent(new browser.MouseEvent('click', { bubbles: true })));
   expect(useInputStore.getState().consumePendingInputText()).toEqual({ text: 'task', mode: 'slash-command' });
   expect(useUIStore.getState().isCommandPaletteOpen).toBe(false);
+});
+
+test('picking a command over Settings or a page shows the chat it lands in', async () => {
+  useUIStore.setState({ openGuestPageId: 'tasks-demo', isSettingsDialogOpen: true });
+  await render();
+  await search('/task');
+  const item = [...browser.document.querySelectorAll('[cmdk-item]')].find((node) => node.textContent?.includes('/task'));
+  if (!item) throw new Error('Extension command row missing');
+  await act(async () => item.dispatchEvent(new browser.MouseEvent('click', { bubbles: true })));
+  expect(useUIStore.getState().openGuestPageId).toBeNull();
+  expect(useUIStore.getState().isSettingsDialogOpen).toBe(false);
+  expect(useInputStore.getState().pendingInputMode).toBe('slash-command');
 });
 
 test('only session actions show, and only while a session is open', async () => {

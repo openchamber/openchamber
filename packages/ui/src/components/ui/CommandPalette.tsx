@@ -637,7 +637,13 @@ export const CommandPalette: React.FC = () => {
           keywords: `${entry.guestName} ${entry.command.description ?? ''}`,
           // Like picking it in the composer's slash menu: the command waits
           // in the composer for its argument and runs when the user sends.
-          onSelect: run(() => useInputStore.getState().setPendingInputText(entry.command.name, 'slash-command')),
+          // Settings or a page covering the chat closes, so the composer can be seen.
+          onSelect: run(() => {
+            const ui = useUIStore.getState();
+            ui.setSettingsDialogOpen(false);
+            ui.closeMainSurfaces();
+            useInputStore.getState().setPendingInputText(entry.command.name, 'slash-command');
+          }),
         });
       }
     }
