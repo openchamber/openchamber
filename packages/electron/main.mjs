@@ -64,6 +64,7 @@ import {
   takeDeferredAppEvents,
   takeEarlyWindow,
   usesFramelessChrome,
+  usesLinuxNativeFrame,
   wasEarlyWindowClosed,
 } from './early-startup.mjs';
 import { sanitizeRuntimeRequestHeaders } from './runtime-request-headers.mjs';
@@ -3324,7 +3325,7 @@ const createMiniChatWindow = async ({ mode, sessionId = '', directory = '', proj
     icon: getWindowIconPath(),
     show: false,
     backgroundColor: resolveSplashBackgroundColor(),
-    frame: usesFramelessChrome() ? false : undefined,
+    frame: usesLinuxNativeFrame(),
     autoHideMenuBar: process.platform !== 'darwin',
     titleBarStyle: process.platform === 'darwin' || usesFramelessChrome() ? 'hidden' : 'default',
     trafficLightPosition: process.platform === 'darwin' ? macTrafficLightPosition() : undefined,
