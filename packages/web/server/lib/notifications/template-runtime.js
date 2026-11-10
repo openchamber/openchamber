@@ -355,6 +355,9 @@ export const createNotificationTemplateRuntime = (deps) => {
           baseDir: worktreeDir,
           spawnOptions: { windowsHide: true },
           binary: resolveGitBinaryForSpawn(),
+          // The binary comes from the server's own resolver; an override path
+          // with a space would otherwise be refused and leave {branch} empty.
+          unsafe: { allowUnsafeCustomBinary: true },
         });
         branch = await withGitTimeout(git.revparse(['--abbrev-ref', 'HEAD'])).catch(() => '');
       } catch {
