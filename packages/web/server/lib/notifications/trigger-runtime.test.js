@@ -11,8 +11,9 @@ import { translateWireEvent } from '../event-stream/translate-v2.js';
  * agent and model from the start, a user abort announces nothing, and an
  * active goal (which lives in OpenChamber's own metadata) silences the push.
  */
-const makeRuntime = ({ metadata = {}, settings = {}, isInAutoReview } = {}) => {
+const makeRuntime = ({ metadata = {}, settings = {}, isInAutoReview, isAnyUiVisible } = {}) => {
   const emitDesktopNotification = vi.fn(() => true);
+  const broadcastUiNotification = vi.fn();
   const runtime = createNotificationTriggerRuntime({
     readSettingsFromDisk: async () => ({ nativeNotificationsEnabled: true, notificationMode: 'always', notifyOnCompletion: true, ...settings }),
     prepareNotificationLastMessage: async ({ message }) => message,
@@ -22,16 +23,17 @@ const makeRuntime = ({ metadata = {}, settings = {}, isInAutoReview } = {}) => {
     resolveNotificationTemplate: () => '',
     shouldApplyResolvedTemplateMessage: () => false,
     emitDesktopNotification,
-    broadcastUiNotification: vi.fn(),
+    broadcastUiNotification,
     sendPushToAllUiSessions: vi.fn(async () => undefined),
     sendApnsToAllUiSessions: vi.fn(async () => undefined),
     isAnyInteractiveClientVisible: () => true,
+    isAnyUiVisible,
     buildOpenCodeUrl: (path) => `http://opencode.test${path}`,
     getOpenCodeAuthHeaders: () => ({}),
     readSessionMetadata: async () => metadata,
     isInAutoReview,
   });
-  return { runtime, emitDesktopNotification };
+  return { runtime, emitDesktopNotification, broadcastUiNotification };
 };
 
 const stepStarted = (sessionID, id) => ({
@@ -79,6 +81,25 @@ describe('ready notification on v2 step events', () => {
       title: 'Build 已完成',
       body: 'Claude Sonnet 5 已完成任务',
     });
+  });
+
+  it('reaches no open window while another client is in use, unless the mode shows notifications in focus', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const cases = [
+      { notificationMode: 'hidden-only', visible: true, shown: false },
+      { notificationMode: 'hidden-only', visible: false, shown: true },
+      { notificationMode: 'always', visible: true, shown: true },
+    ];
+    for (const { notificationMode, visible, shown } of cases) {
+      const { runtime, emitDesktopNotification, broadcastUiNotification } = makeRuntime({
+        settings: { notificationMode },
+        isAnyUiVisible: () => visible,
+      });
+      await runtime.maybeSendPushForTrigger(stepStarted('ses_1', 'msg_1'));
+      await runtime.maybeSendPushForTrigger(turnEnded('ses_1'));
+      expect(emitDesktopNotification).toHaveBeenCalledTimes(shown ? 1 : 0);
+      expect(broadcastUiNotification).toHaveBeenCalledTimes(shown ? 1 : 0);
+    }
   });
 
   it('announces nothing for a user abort', async () => {
