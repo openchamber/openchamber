@@ -89,7 +89,7 @@ test(`a child displayed in A opens ${kind} with owner ${ownerProjectId} through 
     editingId: null, editingRowKey: null, editTitle: '', openSidebarMenuKey: null,
     setEditingId: noop, setEditingRowKey: noop, setEditTitle: noop,
     handleSaveEdit: noop, handleCancelEdit: noop, toggleParent: noop,
-    handleSessionSelect: noop, handleSessionDoubleClick: noop, handleCopySessionId: noop,
+    handleSessionSelect: noop, handleSessionDoubleClick: noop,
     setOpenSidebarMenuKey: noop, createFolderAndStartRename: () => null,
     handleDeleteSession: noop, handleRestoreSession: noop,
     startSessionWorktreeMenuLoad: () => ({ cachedTargets: [], refreshTargets: Promise.resolve([]) }),

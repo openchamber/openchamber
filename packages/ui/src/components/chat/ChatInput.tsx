@@ -4079,6 +4079,9 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             // when the user is already working inside its column (e.g. opened
             // a subtask from there).
             if (columnPinned && !composerFormRef.current?.closest('[data-chat-column]')?.contains(document.activeElement)) return;
+            // A rename that switched to this session (Rename on an inactive
+            // tab) keeps its title field.
+            if (document.activeElement?.closest('[data-session-rename-form]')) return;
             composerRef.current?.focus();
         });
         return () => window.cancelAnimationFrame(frame);

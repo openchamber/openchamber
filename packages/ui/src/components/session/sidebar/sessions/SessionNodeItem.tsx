@@ -4,7 +4,6 @@ import { useSessionTurnActivity } from '@/sync/global-session-status';
 import { getSessionActivityTime } from '@/sync/session-ordering';
 import React from 'react';
 import { TooltipLabelWithShortcut } from '@/components/ui/action-toolbar';
-import { leaveFinishedSessions } from '@/lib/sessionTabs';
 import { SessionActivityIndicator } from '@/components/session/SessionActivityIndicator';
 import type { Session } from '@/lib/opencode/model';
 import { ContextMenu } from '@base-ui/react/context-menu';
@@ -13,47 +12,30 @@ import { openContextMenuFromKeyboard } from '@/components/ui/contextMenuKeyboard
 import {
   DropdownMenu,
   DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuSub,
-  DropdownMenuSubContent,
-  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { dropdownMenuItemClass, dropdownMenuPopupClass, dropdownMenuSeparatorClass, dropdownMenuSubTriggerClass } from '@/components/ui/dropdown-menu.styles';
+import { dropdownMenuPopupClass } from '@/components/ui/dropdown-menu.styles';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn, formatDirectoryName } from '@/lib/utils';
-import { canUseElectronDesktopIPC, getMiniChatRuntimeArgs, invokeDesktop, isVSCodeRuntime } from '@/lib/desktop';
-import { toast } from '@/components/ui';
-import { Button } from '@/components/ui/button';
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { getSessionPinList, isSessionPinned } from '@/lib/sessionPins';
-import { setSessionPinList } from '@/sync/session-pins';
-import { PinToMenu } from '../sections/PinToMenu';
-import { DEFAULT_PIN_LIST } from '@/lib/sidebarSections';
+import { isVSCodeRuntime } from '@/lib/desktop';
+import { isSessionPinned } from '@/lib/sessionPins';
 import { Icon } from "@/components/icon/Icon";
-import { buildExportFilename, downloadAsMarkdown, formatSessionAsMarkdown, getExportRevealLabelKey, revealExportedMarkdown, saveAsMarkdownDesktop } from '@/lib/exportSession';
-import type { ChildSessionExport } from '@/lib/exportSession';
-import { GuestIcon } from '@/components/layout/GuestRailIcon';
-import { useGuestActions } from '@/hooks/useGuestSurfaces';
-import { guestSessionActions, type GuestActionEntry } from '@/lib/guests/actions';
-import { runGuestSessionAction } from '@/lib/guests/session-action';
-import { SessionAiRenameMenuItem } from '@/components/session/SessionAiRenameMenuItem';
 import { MoveSessionDialog } from '@/components/session/MoveSessionDialog';
 import { handleSessionRenameKeyDown } from '@/components/session/sessionRenameKeyboard';
 import { useIsSessionAiRenamePending } from '@/sync/use-session-ai-rename';
 import { useSessionBlockingRequests } from '@/sync/sync-context';
-import { usePrefetchSessionMessages, useSessionMessageRecordsForExport } from '@/sync/use-sync';
+import { usePrefetchSessionMessages } from '@/sync/use-sync';
 import { useSessionHoverPrefetch } from '../list/useSessionPrefetch';
 import { getSyncSessionMaterializationStatus } from '@/sync/sync-refs';
 import { useViewportStore, viewportSessionKey } from '@/sync/viewport-store';
 import { DraggableSessionRow } from '../folders/sessionFolderDnd';
-import { requestNewFolder } from '../folders/newFolderRequest';
-import { getWorkFolderScope } from './sessionFolderIdentity';
 import { useSessionRowOrderRegistry } from './sessionRowOrder';
-import { canShowSessionWorktreeMenu, getSessionWorktreeMenuDisabled, nodeContainsSessionId, nodeHasPinnedMembershipChange, resolveTooltipBranchLabel, selectBlockingBadgeSessionScopes, type BlockingBadgeSessionScope } from './sessionNodeItemUtils';
+import { nodeContainsSessionId, nodeHasPinnedMembershipChange, resolveTooltipBranchLabel, selectBlockingBadgeSessionScopes, type BlockingBadgeSessionScope } from './sessionNodeItemUtils';
 import { useSessionRowMenuState } from './useSessionRowMenuState';
-import { buildActiveSessionTreeFromCache, collectSessionMoveDescendants } from './sessionSubtreeActions';
+import { SessionActionsMenuItems } from './SessionActionsMenuItems';
+import { contextSessionMenuSlots, dropdownSessionMenuSlots, type SessionMenuSlots } from './sessionMenuSlots';
+import { toggleSessionWork } from './sessionWorkToggle';
+import { useSessionMarkdownExport } from './useSessionMarkdownExport';
 import type { SessionNode } from '../types';
 import { listedChildren } from '../listedChildren';
 import { isMultiLineTimelineContext, sessionExpansionKey, type SessionSidebarRenderContext } from '../sessionSidebarRowModel';
@@ -64,13 +46,11 @@ import { formatProjectLabel, formatSessionCompactDateLabel, formatSessionDateLab
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useOpenTrackerItem } from '@/components/sourceBoard/openTrackerItem';
 import { RowMarkTooltip } from './RowMarkTooltip';
-import { SessionMenuItemHint } from '../../SessionMenuItemHint';
 import { SIDEBAR_REF_TOOLTIP_CLOSE_DELAY_MS, SidebarRefLinks } from './SidebarRefLinks';
 import { useScrollDismissedTooltip } from './useScrollDismissedTooltip';
 import { refTintStyle } from '@/lib/source-control/prVisualState';
 import { useSessionRefLines } from './useSessionRefLines';
 import { useSessionMarkedUnread, useSessionUnread } from '@/sync/session-unread';
-import { SessionReadMenuItem } from '@/components/session/SessionReadMenuItem';
 import { toggleSessionRead } from '@/components/session/sessionReadActions';
 import { openSessionInSidePanel } from '@/components/session/sessionSidePanel';
 import { useHasSessionTurnDuration } from '@/sync/session-turn-duration';
@@ -83,28 +63,19 @@ import { getCurrentSessionAssist } from '@/lib/sessionAssistMetadata';
 import { isDoneSuggested } from '@/lib/sessionWorkMetadata';
 import { collectSessionWorkInWork } from '../works/sidebarWorks';
 import { isRowBoxClick } from './rowBoxClick';
-import { setSessionWorkState } from '@/sync/session-actions';
-import { useSessionWarmingStore, useSessionWarmUntil } from '@/stores/useSessionWarmingStore';
-import { isSpaceDirectory } from '@/lib/spaces/space-route';
 import { sessionGoalMarkLabelKey, sessionGoalStatusColor } from '@/lib/sessionGoalPresentation';
-import { getChatsRootFromDirectory, isChatDirectoryPath } from '@/lib/chatDirectories';
-import { getMultiRunIdentity, sameMultiRunIdentity } from '@/lib/multirun/identity';
-import { ArrowsMerge } from '@/components/icons/ArrowsMerge';
+import { isChatDirectoryPath } from '@/lib/chatDirectories';
+import { sameMultiRunIdentity } from '@/lib/multirun/identity';
 import { RuntimeAPIContext } from '@/contexts/runtimeAPIContext';
 import {
-  buildSessionTreeMoveMessages,
-  requestSessionTreeMove,
   useIsSessionWorktreeMovePending,
 } from '@/lib/worktrees/sessionWorktreeMove';
 import { streamPerfCount } from '@/stores/utils/streamDebug';
 import { useSessionUIStore } from '@/sync/session-ui-store';
-import { useSessionFoldersStore } from '@/stores/useSessionFoldersStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import type { WorktreeMetadata } from '@/types/worktree';
 import {
-  getSessionWorktreeMenuState,
-  type SessionWorktreeMenuTarget,
   type StartSessionWorktreeMenuLoadResult,
 } from '../sessionWorktreeMenu';
 
@@ -141,7 +112,6 @@ export type SessionNodeItemProps = {
   toggleParent: (expansionKey: string) => void;
   handleSessionSelect: (sessionId: string, sessionDirectory: string | null) => void;
   handleSessionDoubleClick: (sessionId: string, sessionTitle: string) => void;
-  handleCopySessionId: (sessionId: string) => void;
   openSidebarMenuKey: string | null;
   setOpenSidebarMenuKey: (key: string | null) => void;
   createFolderAndStartRename: (scopeKey: string, parentId?: string | null) => { id: string } | null;
@@ -334,7 +304,6 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
     toggleParent,
     handleSessionSelect,
     handleSessionDoubleClick,
-    handleCopySessionId,
     openSidebarMenuKey,
     setOpenSidebarMenuKey,
     createFolderAndStartRename,
@@ -351,13 +320,7 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
     dragKey,
     children,
   } = props;
-  const getFoldersForScope = useSessionFoldersStore((state) => state.getFoldersForScope);
-  const getSessionFolderId = useSessionFoldersStore((state) => state.getSessionFolderId);
-  const removeSessionFromFolder = useSessionFoldersStore((state) => state.removeSessionFromFolder);
-  const addSessionToFolder = useSessionFoldersStore((state) => state.addSessionToFolder);
-
   const isVSCode = React.useMemo(() => isVSCodeRuntime(), []);
-  const isElectron = React.useMemo(() => canUseElectronDesktopIPC(), []);
   const runtimeApis = React.useContext(RuntimeAPIContext);
   const revealOnHoverClass = isVSCode
     ? 'group-hover:opacity-100 group-hover:pointer-events-auto'
@@ -373,8 +336,10 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
   // conversations, never work, and a session nested in a work is tracked and
   // finished with it, or one group would mix tracked and finished sessions.
   // Touch layouts keep their actions permanently visible, where an icon on
-  // every row would be noise: there it lives in the session menu only.
-  const canTrackWork = sessionWorkEnabled && ownsWork && !archivedBucket && !node.session.parentID && !isChatDirectoryPath(node.session.directory);
+  // every row would be noise: there it lives in the session menu only. A
+  // pinned session is never in work, so it offers neither.
+  const canTrackWork = sessionWorkEnabled && ownsWork && !archivedBucket && !node.session.parentID && !isChatDirectoryPath(node.session.directory)
+    && !isSessionPinned(pinnedSessionIds, normalizePath(node.session.directory ?? null) ?? normalizePath(groupDirectory ?? null), node.session.id);
   const showWorkAction = canTrackWork && !alwaysShowActions;
   // Hover-revealed actions besides the menu: work, quick archive, and in VS
   // Code open-in-editor.
@@ -461,7 +426,6 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
   // overview covers it, and then the run's row is the selected one.
   const isCurrentSession = useSessionUIStore((state) => state.currentSessionId === session.id);
   const shortcutOverrides = useUIStore((state) => state.shortcutOverrides);
-  const renameShortcut = formatShortcutForDisplay(getEffectiveShortcutCombo('rename_current_session', shortcutOverrides), '');
   const archiveShortcut = formatShortcutForDisplay(getEffectiveShortcutCombo('archive_current_session', shortcutOverrides), '');
   const runOverviewOpen = useUIStore((state) => state.runOverviewKey !== null);
   const isActive = isCurrentSession && !runOverviewOpen;
@@ -481,7 +445,6 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
     ? explicitSelectionScopeKey
     : projectId ?? sessionDirectory ?? null;
   const hasFolderMutationAuthority = folderOwnerKey === undefined ? true : Boolean(folderOwnerKey);
-  const loadExportRecords = useSessionMessageRecordsForExport();
   const prefetchSessionMessages = usePrefetchSessionMessages();
   // Same gate as the sidebar's neighbor prefetch: the VS Code webview keeps
   // its message traffic to what is actually opened.
@@ -522,11 +485,7 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
     return out;
   }, []);
 
-  const [exportDialogOpen, setExportDialogOpen] = React.useState(false);
-  const [exportIncludeSubtasks, setExportIncludeSubtasks] = React.useState(true);
-  // The tree the open export dialog offers. A flat row's own node has no
-  // children, so the tree is resolved when the user picks Export Markdown.
-  const [exportTree, setExportTree] = React.useState<SessionNode | null>(null);
+  const sessionExport = useSessionMarkdownExport();
 
   const legacyContextKey = sessionExpansionKey(renderContext, archivedBucket, session.id);
   const menuInstanceKey = rowKey ? `session-menu:${rowKey}` : legacyContextKey;
@@ -544,10 +503,6 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
   const isSessionActionPending = isMovingToWorktree || isAiRenaming;
   const currentWorktreeMetadata = node.worktree ?? useSessionUIStore.getState().getWorktreeMetadata(session.id) ?? null;
   const [moveDialogOpen, setMoveDialogOpen] = React.useState(false);
-  const [worktreeTargets, setWorktreeTargets] = React.useState<SessionWorktreeMenuTarget[]>([]);
-  const [worktreeTargetsLoadFailed, setWorktreeTargetsLoadFailed] = React.useState(false);
-  const worktreeSubmenuOpenRef = React.useRef(false);
-  const worktreeLoadSequenceRef = React.useRef(0);
   const sessionGoal = getSessionGoal(resolvedSession);
   // A root row is its work: the session with the reviews and btw sessions
   // nested under it. It is in work when any of them is,
@@ -559,35 +514,7 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
   const isInWork = workSessionsInWork.length > 0;
   const showDoneHint = isInWork && !isStreaming && isDoneSuggested(resolvedSession);
   const workActionLabel = isInWork ? t('sessions.sidebar.session.work.markDone') : t('sessions.sidebar.session.work.track');
-  const toggleSessionWork = async () => {
-    try {
-      if (!isInWork) {
-        await setSessionWorkState(session.id, sessionDirectory, 'open');
-        return;
-      }
-      for (const entry of workSessionsInWork) {
-        await setSessionWorkState(entry.id, normalizePath(entry.directory ?? null) ?? sessionDirectory, 'done');
-      }
-      // Done work leaves the working set, as Mark done in the composer does.
-      leaveFinishedSessions(workSessionsInWork.map((entry) => entry.id));
-    } catch {
-      toast.error(t('sessions.sidebar.session.work.updateFailed'));
-    }
-  };
-  // Per-session warming is offered only while Settings chose it, for a root
-  // session the host's OpenCode runs (a space's sessions run on its own).
-  const perSessionWarming = useSessionWarmingStore((state) => state.enabled);
-  const isWarmed = useSessionWarmUntil(session.id) !== undefined;
-  const canKeepWarm = perSessionWarming && !archivedBucket && !node.session.parentID
-    && Boolean(sessionDirectory) && !isSpaceDirectory(sessionDirectory);
-  const toggleSessionWarm = async () => {
-    if (!sessionDirectory) return;
-    try {
-      await useSessionWarmingStore.getState().setSessionWarm(session.id, sessionDirectory, !isWarmed);
-    } catch {
-      toast.error(t('sessions.warming.toggleFailed'));
-    }
-  };
+  const toggleWork = () => { void toggleSessionWork(session.id, sessionDirectory, workSessionsInWork, t); };
   const sessionGoalLabel = sessionGoal ? t(sessionGoalMarkLabelKey[sessionGoal.status]) : '';
   const sessionGoalGlyph = sessionGoal ? (
     <RowMarkTooltip label={sessionGoalLabel}>
@@ -614,7 +541,6 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
     hasPermission: hasPendingPermission,
     hasForm: hasPendingForm,
   } = useSessionBlockingRequests(blockingBadgeSessionScopes);
-  const isSubtaskSession = Boolean(resolvedSession.parentID);
   const needsAttention = useSessionUnread(session.id);
   const markedUnread = useSessionMarkedUnread(session.id);
   // The last conversation, as the list orders by: a rename or a metadata
@@ -644,126 +570,6 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
     },
   });
   const isSessionMenuOpen = isMenuOpen || isContextMenuOpen;
-  const multiRunKey = React.useMemo(() => getMultiRunIdentity(resolvedSession)?.key ?? null, [resolvedSession]);
-
-  const descendantCount = React.useMemo(() => (exportTree ? collectNodeDescendantIds(exportTree).length : 0), [collectNodeDescendantIds, exportTree]);
-
-  const collectChildExports = React.useCallback(async (children: SessionNode[]): Promise<{ children: ChildSessionExport[]; skipped: number }> => {
-    const results: ChildSessionExport[] = [];
-    let skipped = 0;
-    for (const child of children) {
-      try {
-        if (!sessionDirectory) throw new Error('Session directory is required for export');
-        const childRecords = await loadExportRecords({ directory: sessionDirectory, sessionID: child.session.id });
-        if (!childRecords) throw new Error('Session runtime changed during export');
-        const childTitle = child.session.title || t('sessions.sidebar.session.export.untitledSubagent');
-        // SAFETY: OpenCode session payloads may carry the optional agent label used by exports.
-        const childAgent = (child.session as Session & { agent?: string }).agent;
-        const grandChildren = await collectChildExports(child.children);
-        skipped += grandChildren.skipped;
-        results.push({
-          title: childTitle,
-          agent: childAgent,
-          records: childRecords,
-          children: grandChildren.children,
-        });
-      } catch {
-        skipped += collectNodeDescendantIds(child).length + 1;
-      }
-    }
-    return { children: results, skipped };
-  }, [collectNodeDescendantIds, loadExportRecords, sessionDirectory, t]);
-
-  const showSkippedSubtasksWarning = React.useCallback((count: number) => {
-    if (count <= 0) return;
-    toast.warning(count === 1
-      ? t('sessions.sidebar.session.export.skippedSubtaskSingle', { count })
-      : t('sessions.sidebar.session.export.skippedSubtaskMany', { count }));
-  }, [t]);
-
-  const doExportSession = React.useCallback(async (includeSubtasks: boolean, tree: SessionNode) => {
-    if (!sessionDirectory) {
-      toast.error(t('sessions.sidebar.session.export.nothingToExport'));
-      return;
-    }
-
-    const records = await loadExportRecords({ directory: sessionDirectory, sessionID: session.id }).catch(() => null);
-    if (!records) {
-      toast.error(t('sessions.sidebar.session.export.failedLoadHistory'));
-      return;
-    }
-    if (records.length === 0) {
-      toast.error(t('sessions.sidebar.session.export.nothingToExport'));
-      return;
-    }
-
-    let childExports: ChildSessionExport[] | undefined;
-    let skippedSubtaskCount = 0;
-    if (includeSubtasks && tree.children.length > 0) {
-      const collected = await collectChildExports(tree.children);
-      childExports = collected.children;
-      skippedSubtaskCount = collected.skipped;
-    }
-
-    const markdown = formatSessionAsMarkdown(records, resolvedSession.title ?? null, childExports);
-    const filename = buildExportFilename(resolvedSession.title ?? null);
-    const savedPath = await saveAsMarkdownDesktop(markdown, filename);
-
-    if (savedPath) {
-      toast.success(t('sessions.sidebar.session.export.success'), {
-        action: {
-          label: t(getExportRevealLabelKey()),
-          onClick: () => {
-            void revealExportedMarkdown(savedPath).then((revealed) => {
-              if (!revealed) {
-                toast.error(t('sessions.sidebar.session.export.failedRevealPath'));
-              }
-            });
-          },
-        },
-      });
-      showSkippedSubtasksWarning(skippedSubtaskCount);
-      return;
-    }
-
-    downloadAsMarkdown(markdown, filename);
-    toast.success(t('sessions.sidebar.session.export.success'));
-    showSkippedSubtasksWarning(skippedSubtaskCount);
-  }, [collectChildExports, loadExportRecords, resolvedSession.title, session.id, sessionDirectory, showSkippedSubtasksWarning, t]);
-  const guestActionEntries = useGuestActions();
-  const guestSessionActionEntries = React.useMemo(() => guestSessionActions(guestActionEntries), [guestActionEntries]);
-  const handleGuestSessionAction = React.useCallback((entry: GuestActionEntry) => {
-    void runGuestSessionAction({
-      entry,
-      t,
-      session: { id: session.id, title: resolvedSession.title, directory: sessionDirectory },
-      loadRecords: () => (sessionDirectory
-        ? loadExportRecords({ directory: sessionDirectory, sessionID: session.id }).catch(() => null)
-        : Promise.resolve(null)),
-      onLoadFailed: () => toast.error(t('sessions.sidebar.session.export.failedLoadHistory')),
-    });
-  }, [loadExportRecords, resolvedSession.title, session.id, sessionDirectory, t]);
-  const handleExportSession = React.useCallback(async () => {
-    const tree = node.children.length > 0 ? node : buildActiveSessionTreeFromCache(resolvedSession);
-    if (tree.children.length > 0) {
-      setExportTree(tree);
-      setExportIncludeSubtasks(true);
-      setExportDialogOpen(true);
-      return;
-    }
-    await doExportSession(false, tree);
-  }, [doExportSession, node, resolvedSession]);
-
-  const handleOpenMiniChatWindow = React.useCallback(() => {
-    if (!sessionDirectory) return;
-    void invokeDesktop('desktop_open_session_mini_chat_window', {
-      sessionId: session.id,
-      directory: sessionDirectory,
-      ...getMiniChatRuntimeArgs(),
-    }).catch((error) => {
-      console.warn('[session-sidebar] failed to open mini chat window', error);
-    });
-  }, [session.id, sessionDirectory]);
 
   const handleOpenInSidePanel = () => {
     if (!sessionDirectory) return;
@@ -1187,399 +993,49 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
     }
   };
 
-  const handleWorktreeSubmenuOpenChange = (open: boolean) => {
-    worktreeSubmenuOpenRef.current = open;
-    worktreeLoadSequenceRef.current += 1;
-    const loadSequence = worktreeLoadSequenceRef.current;
-    if (!open) {
-      setWorktreeTargetsLoadFailed(false);
-      return;
-    }
-    const load = startSessionWorktreeMenuLoad({
-      projectId: projectId ?? null,
-      sourceDirectory: sessionDirectory,
-      currentWorktree: currentWorktreeMetadata,
-    });
-    setWorktreeTargets(load.cachedTargets);
-    setWorktreeTargetsLoadFailed(false);
-    void load.refreshTargets
-      .then((freshTargets) => {
-        if (!worktreeSubmenuOpenRef.current || worktreeLoadSequenceRef.current !== loadSequence) {
-          return;
-        }
-        setWorktreeTargets(freshTargets);
-        setWorktreeTargetsLoadFailed(false);
-      })
-      .catch(() => {
-        if (!worktreeSubmenuOpenRef.current || worktreeLoadSequenceRef.current !== loadSequence) {
-          return;
-        }
-        setWorktreeTargetsLoadFailed(true);
-      });
-  };
-
-  const renderSessionMenuItems = ({
-    Item,
-    Separator,
-    Sub,
-    SubTrigger,
-    SubContent,
-  }: {
-    Item: React.ElementType;
-    Separator: React.ElementType;
-    Sub: React.ElementType;
-    SubTrigger: React.ElementType;
-    SubContent: React.ElementType;
-  }) => (
-    <>
-      <SessionMenuItemHint hint={t('sessions.sidebar.session.menuHint.rename')}>
-      <Item
-        onClick={() => {
-          // Defer rename until dropdown close transition completes.
-          // onOpenChangeComplete fires after animation + focus cleanup are done,
-          // avoiding focus stealing from Base UI's unmount cleanup.
-          pendingRenameRef.current = { id: session.id, title: sessionTitle };
-        }}
-        className="[&>svg]:me-1"
-      >
-        <Icon name="pencil-ai" className="me-1 h-4 w-4" />
-        {t('sessions.sidebar.session.menu.rename')}
-        {isCurrentSession && renameShortcut ? <span className="ms-auto ps-3 typography-meta text-muted-foreground">{renameShortcut}</span> : null}
-      </Item>
-      </SessionMenuItemHint>
-      <SessionAiRenameMenuItem sessionID={session.id} directory={sessionDirectory} open={isSessionMenuOpen} Item={Item} />
-      <SessionMenuItemHint hint={t('sessions.sidebar.session.menuHint.copyId')}>
-      <Item onClick={() => handleCopySessionId(session.id)} className="[&>svg]:me-1">
-        <Icon name="file-copy" className="me-1 h-4 w-4" />
-        {t('sessions.sidebar.session.menu.copyId')}
-      </Item>
-      </SessionMenuItemHint>
-      <SessionReadMenuItem sessionId={session.id} Item={Item} className="[&>svg]:me-1" iconClassName="me-1 h-4 w-4" showShortcut={!mobileVariant} />
-      <PinToMenu
-        slots={{ Item, Separator, Sub, SubTrigger, SubContent }}
-        current={isPinnedSession ? getSessionPinList(session) ?? DEFAULT_PIN_LIST : null}
-        triggerClassName="[&>svg]:me-1"
-        itemClassName="[&>svg]:me-1"
-        onPin={(list) => {
-          if (!sessionDirectory) return;
-          setSessionPinList({ directory: sessionDirectory, sessionId: session.id }, true, list)
-            .catch(() => toast.error(t('sessions.sidebar.session.pin.pinFailed')));
-        }}
-        onUnpin={() => {
-          if (!sessionDirectory) return;
-          setSessionPinList({ directory: sessionDirectory, sessionId: session.id }, false, null)
-            .catch(() => toast.error(t('sessions.sidebar.session.pin.unpinFailed')));
-        }}
-      />
-      {canTrackWork ? (
-        <SessionMenuItemHint hint={isInWork ? t('sessions.sidebar.session.menuHint.markDone') : t('sessions.sidebar.session.menuHint.track')}>
-        <Item onClick={() => { void toggleSessionWork(); }} className="[&>svg]:me-1">
-          <Icon name={isInWork ? 'check' : 'eye'} className="me-1 h-4 w-4" />
-          {isInWork ? t('sessions.sidebar.session.work.markDone') : t('sessions.sidebar.session.work.track')}
-        </Item>
-        </SessionMenuItemHint>
-      ) : null}
-      {canKeepWarm ? (
-        <SessionMenuItemHint hint={isWarmed ? t('sessions.sidebar.session.menuHint.stopWarm') : t('sessions.sidebar.session.menuHint.keepWarm')}>
-        <Item onClick={() => { void toggleSessionWarm(); }} className="[&>svg]:me-1">
-          <Icon name={isWarmed ? 'fire-fill' : 'fire'} className="me-1 h-4 w-4" />
-          {isWarmed ? t('sessions.sidebar.session.menu.stopWarm') : t('sessions.sidebar.session.menu.keepWarm')}
-        </Item>
-        </SessionMenuItemHint>
-      ) : null}
-      <SessionMenuItemHint hint={t('sessions.sidebar.session.menuHint.exportMarkdown')}>
-      <Item onClick={() => { void handleExportSession(); }} className="[&>svg]:me-1">
-        <Icon name="download" className="me-1 h-4 w-4" />
-        {t('sessions.sidebar.session.menu.exportMarkdown')}
-      </Item>
-      </SessionMenuItemHint>
-      {guestSessionActionEntries.map((entry) => (
-        <Item key={`${entry.guest.id}:${entry.action.id}`} onClick={() => handleGuestSessionAction(entry)} className="[&>svg]:me-1">
-          <GuestIcon icon={entry.icon} iconSrc={entry.iconSrc} className="me-1 size-4" />
-          {entry.action.label}
-        </Item>
-      ))}
-      {canShowSessionWorktreeMenu({ isSubtaskSession, archivedBucket: Boolean(archivedBucket), isVSCode, sessionDirectory }) ? (() => {
-        const isWorktreeMenuDisabled = getSessionWorktreeMenuDisabled({
-          sessionDirectory,
-          isStreaming,
-          isMovingToWorktree,
-        });
-        const worktreeMenuState = getSessionWorktreeMenuState({
-          targets: worktreeTargets,
-          loadFailed: worktreeTargetsLoadFailed,
-        });
-        const worktreeSubTrigger = (
-          <SubTrigger
-            disabled={isWorktreeMenuDisabled}
-            className="w-full [&>svg]:me-1"
-            data-session-worktree-submenu-trigger={session.id}
-          >
-            <Icon name="folder-shared" className="me-1 h-4 w-4" />
-            {t('sessions.sidebar.session.menu.moveToWorktreeTargets')}
-          </SubTrigger>
-        );
-        // Only a disabled item explains itself: an enabled one opens the
-        // worktree list, which the hint would cover.
-        const worktreeMenuHint = isMovingToWorktree
-          ? t('sessions.sidebar.session.moveToWorktree.tooltipMoving')
-          : isStreaming
-            ? t('sessions.sidebar.session.moveToWorktree.tooltipBusy')
-            : null;
-        return (
-          <Sub onOpenChange={handleWorktreeSubmenuOpenChange}>
-            {worktreeMenuHint
-              ? <SessionMenuItemHint hint={worktreeMenuHint}>{worktreeSubTrigger}</SessionMenuItemHint>
-              : worktreeSubTrigger}
-            <SubContent className="min-w-[220px]" data-session-worktree-submenu={session.id}>
-              {worktreeTargets.map((target) => {
-                const targetPath = normalizePath(target.metadata.path ?? null) ?? target.metadata.path;
-                const itemLabel = target.isPrimary
-                  ? t('sessions.sidebar.session.moveToWorktree.main')
-                  : (target.metadata.label || target.metadata.branch || target.metadata.name || target.metadata.path);
-                const isDisabled = target.isCurrent || target.metadata.worktreeStatus !== 'ready';
-
-                return (
-                  <Item
-                    key={targetPath}
-                    disabled={isDisabled}
-                    title={target.metadata.path}
-                    data-session-worktree-target={targetPath}
-                    onClick={() => {
-                      if (isDisabled || !sessionDirectory) {
-                        return;
-                      }
-                      requestSessionTreeMove({
-                        kind: 'existing',
-                        root: resolvedSession,
-                        descendants: collectSessionMoveDescendants(resolvedSession, collectNodeDescendantSessions(node)),
-                        sourceDirectory: sessionDirectory,
-                        destination: target.metadata,
-                        messages: buildSessionTreeMoveMessages(t, {
-                          success: 'sessions.sidebar.session.moveToWorktree.existingSuccess',
-                          failure: 'sessions.sidebar.session.moveToWorktree.existingFailed',
-                        }),
-                      });
-                    }}
-                  >
-                    <span className="flex min-w-0 flex-1 items-center gap-1 truncate">
-                      <span className="truncate">{itemLabel}</span>
-                      {target.isCurrent ? <span className="sr-only">{t('sessions.sidebar.session.moveToWorktree.current')}</span> : null}
-                    </span>
-                    {target.isCurrent ? <Icon name="check" className="ms-2 h-3.5 w-3.5 flex-shrink-0 text-primary" aria-hidden="true" /> : null}
-                  </Item>
-                );
-              })}
-              {worktreeMenuState.refreshState === 'error' ? (
-                <Item disabled data-session-worktree-refresh-state="error" className="py-0.5 text-muted-foreground typography-micro">
-                  {t('sessions.sidebar.session.moveToWorktree.loadFailed')}
-                </Item>
-              ) : null}
-              <Separator />
-              {worktreeMenuState.showNewWorktreeAction ? (
-                <Item
-                  disabled={isWorktreeMenuDisabled}
-                  data-session-worktree-new-action="true"
-                  onClick={() => {
-                    if (isWorktreeMenuDisabled || !sessionDirectory) return;
-                    requestSessionTreeMove({
-                      kind: 'quick',
-                      root: resolvedSession,
-                      descendants: collectSessionMoveDescendants(resolvedSession, collectNodeDescendantSessions(node)),
-                      sourceDirectory: sessionDirectory,
-                      messages: buildSessionTreeMoveMessages(t, {
-                        success: 'sessions.sidebar.session.moveToWorktree.success',
-                        failure: 'sessions.sidebar.session.moveToWorktree.failed',
-                      }),
-                    });
-                  }}
-                  className="[&>svg]:me-1"
-                >
-                  <Icon name="add" className="me-1 h-4 w-4" />
-                  {t('sessions.sidebar.session.menu.newWorktree')}
-                </Item>
-              ) : null}
-            </SubContent>
-          </Sub>
-        );
-      })() : null}
-      {!isSubtaskSession && !archivedBucket && !isVSCode && sessionDirectory && !isSpaceDirectory(sessionDirectory) ? (
-        <SessionMenuItemHint hint={isStreaming ? t('sessions.sidebar.session.moveToWorktree.tooltipBusy') : t('sessions.moveSession.hint')}>
-          <span className="block">
-            <Item disabled={isStreaming || isMovingToWorktree} onClick={() => setMoveDialogOpen(true)} className="w-full [&>svg]:me-1">
-              <Icon name="folder-received" className="me-1 h-4 w-4" />
-              {t('sessions.moveSession.menu')}
-            </Item>
-          </span>
-        </SessionMenuItemHint>
-      ) : null}
-      {multiRunKey ? (
-        <SessionMenuItemHint hint={t('sessions.sidebar.session.menuHint.openRunOverview')}>
-        <Item onClick={() => useUIStore.getState().setRunOverviewKey(multiRunKey)} className="[&>svg]:me-1">
-          <ArrowsMerge className="me-1 h-4 w-4" />
-          {t('sessions.sidebar.session.menu.openRunOverview')}
-        </Item>
-        </SessionMenuItemHint>
-      ) : null}
-
-      {sessionDirectory && !archivedBucket && hasFolderMutationAuthority ? (() => {
-        // A session files where its row lives: the project root's folders, or
-        // those of its own worktree, which itself files whole. Every other
-        // scope is read only to find and clear an older membership.
-        const workScope = getWorkFolderScope(folderOwnerKey);
-        const scopes: string[] = [];
-        const pushScope = (candidate: string | null | undefined) => {
-          const normalized = normalizePath(candidate ?? null);
-          if (normalized && !scopes.includes(normalized)) scopes.push(normalized);
-        };
-        const project = sessionProjectId && !isVSCode
-          ? useProjectsStore.getState().projects.find((entry) => entry.id === sessionProjectId)
-          : undefined;
-        const projectRoot = normalizePath(project?.path ?? null);
-        if (workScope) pushScope(workScope);
-        else if (projectRoot) pushScope(projectRoot);
-        else {
-          pushScope(getChatsRootFromDirectory(sessionDirectory));
-          pushScope(sessionDirectory);
-        }
-        const offeredScopes = [...scopes];
-        pushScope(projectRoot);
-        pushScope(sessionDirectory);
-        if (projectRoot) {
-          (useSessionUIStore.getState().availableWorktreesByProject.get(projectRoot) ?? [])
-            .forEach((worktree) => pushScope(worktree.path));
-        }
-        const allEntries = scopes.flatMap((scope) =>
-          getFoldersForScope(scope).map((folder) => ({ scope, folder })));
-        const currentEntry = allEntries.find(({ scope, folder }) =>
-          getSessionFolderId(scope, session.id) === folder.id) ?? null;
-        const folderEntries = allEntries.filter((entry) => offeredScopes.includes(entry.scope) || entry === currentEntry);
-        const defaultScope = offeredScopes[0] ?? sessionDirectory;
-        const fileInNewFolder = (folderId: string): void => {
-          for (const scope of scopes) {
-            if (scope !== defaultScope) removeSessionFromFolder(scope, session.id);
-          }
-          addSessionToFolder(defaultScope, folderId, session.id);
-        };
-        if (workScope && folderEntries.length === 0) return null;
-        return (
-          <>
-            <Separator />
-            <Sub>
-              <SessionMenuItemHint hint={t('sessions.sidebar.session.menuHint.moveToFolder')}>
-                <SubTrigger className="[&>svg]:me-1"><Icon name="folder" className="h-4 w-4" />{t('sessions.sidebar.folders.moveToFolder')}</SubTrigger>
-              </SessionMenuItemHint>
-              <SubContent className="min-w-[180px]">
-                {folderEntries.length === 0 ? (
-                  <Item disabled className="text-muted-foreground">{t('sessions.sidebar.folders.none')}</Item>
-                ) : (
-                  folderEntries.map(({ scope, folder }) => {
-                    const isCurrent = currentEntry?.folder.id === folder.id;
-                    return (
-                      <Item key={folder.id} onClick={() => {
-                        if (isCurrent) {
-                          removeSessionFromFolder(scope, session.id);
-                          return;
-                        }
-                        for (const candidateScope of scopes) {
-                          if (candidateScope !== scope) removeSessionFromFolder(candidateScope, session.id);
-                        }
-                        addSessionToFolder(scope, folder.id, session.id);
-                      }}>
-                        <span dir="auto" className="oc-ui-start-align flex-1 truncate">{folder.name}</span>
-                        {isCurrent ? <Icon name="check" className="ms-2 h-3.5 w-3.5 text-primary flex-shrink-0" /> : null}
-                      </Item>
-                    );
-                  })
-                )}
-                {!workScope ? <>
-                  <Separator />
-                  <Item onClick={() => {
-                    if (isZoneRow) {
-                      requestNewFolder({
-                        projectLabel: project?.label?.trim() || (project ? formatDirectoryName(project.path, null) : null),
-                        create: (name) => fileInNewFolder(useSessionFoldersStore.getState().createFolder(defaultScope, name).id),
-                      });
-                      return;
-                    }
-                    const newFolder = createFolderAndStartRename(defaultScope);
-                    if (!newFolder) return;
-                    pendingFolderCreateRef.current = true;
-                    fileInNewFolder(newFolder.id);
-                  }}>
-                    <Icon name="add" className="me-1 h-4 w-4" />
-                    {t('sessions.sidebar.folders.newFolderEllipsis')}
-                  </Item>
-                </> : null}
-                {currentEntry ? (
-                  <Item onClick={() => { removeSessionFromFolder(currentEntry.scope, session.id); }} className="text-destructive focus:text-destructive">
-                    <Icon name="close" className="me-1 h-4 w-4" />
-                    {t('sessions.sidebar.folders.removeFromFolder')}
-                  </Item>
-                ) : null}
-              </SubContent>
-            </Sub>
-          </>
-        );
-      })() : null}
-
-      {!isVSCode ? (
-        <SessionMenuItemHint hint={t('sessions.sidebar.session.menuHint.openInSidePanel')}>
-        <Item
-          disabled={!sessionDirectory}
-          onClick={handleOpenInSidePanel}
-          className="[&>svg]:me-1"
-        >
-          <Icon name="chat-4" className="me-1 h-4 w-4" />
-          <span className="truncate">{t('sessions.sidebar.session.menu.openInSidePanel')}</span>
-        </Item>
-        </SessionMenuItemHint>
-      ) : null}
-
-      {isElectron ? (
-        <SessionMenuItemHint hint={t('sessions.sidebar.session.menuHint.openMiniChatWindow')}>
-        <Item
-          disabled={!sessionDirectory}
-          onClick={handleOpenMiniChatWindow}
-          className="[&>svg]:me-1"
-        >
-          <Icon name="window" className="me-1 h-4 w-4" />
-          <span className="truncate">{t('sessions.sidebar.session.menu.openMiniChatWindow')}</span>
-        </Item>
-        </SessionMenuItemHint>
-      ) : null}
-
-      <Separator />
-      {!archivedBucket ? (
-        <SessionMenuItemHint hint={t('sessions.sidebar.session.menuHint.archive')}>
-        <Item className="[&>svg]:me-1" onClick={() => handleDeleteSession(session, { archivedBucket })}>
-          <Icon name="inbox-archive" className="me-1 h-4 w-4" />
-          {t('sessions.sidebar.bulkActions.archive')}
-          {isCurrentSession && archiveShortcut ? <span className="ms-auto ps-3 typography-meta text-muted-foreground">{archiveShortcut}</span> : null}
-        </Item>
-        </SessionMenuItemHint>
-      ) : null}
-      {archivedBucket ? (
-        <SessionMenuItemHint hint={t('sessions.sidebar.session.menuHint.restore')}>
-        <Item className="[&>svg]:me-1" onClick={() => handleRestoreSession(session)}>
-          <Icon name="inbox-unarchive" className="me-1 h-4 w-4" />
-          {t('sessions.sidebar.bulkActions.restore')}
-        </Item>
-        </SessionMenuItemHint>
-      ) : null}
-      <SessionMenuItemHint hint={t('sessions.sidebar.session.menuHint.delete')}>
-      <Item className="text-destructive focus:text-destructive [&>svg]:me-1" onClick={() => handleDeleteSession(session, { archivedBucket, hardDelete: true })}>
-        <Icon name="delete-bin" className="me-1 h-4 w-4" />
-        {t('sessions.sidebar.bulkActions.delete')}
-      </Item>
-      </SessionMenuItemHint>
-    </>
+  const renderSessionMenuItems = (slots: SessionMenuSlots) => (
+    <SessionActionsMenuItems
+      session={resolvedSession}
+      directory={sessionDirectory}
+      open={isSessionMenuOpen}
+      slots={slots}
+      archived={archivedBucket}
+      pinned={isPinnedSession}
+      work={canTrackWork ? { inWork: isInWork, toggle: toggleWork } : null}
+      projectId={projectId ?? null}
+      currentWorktree={currentWorktreeMetadata}
+      descendants={collectNodeDescendantSessions(node)}
+      startWorktreeLoad={startSessionWorktreeMenuLoad}
+      folders={hasFolderMutationAuthority ? {
+        ownerKey: folderOwnerKey ?? null,
+        projectId: sessionProjectId ?? null,
+        // Zone rows mix projects, so they ask for the new folder's name in a
+        // dialog; a project's rows name it in place in the list.
+        createInline: isZoneRow ? undefined : (scope) => {
+          const newFolder = createFolderAndStartRename(scope);
+          if (newFolder) pendingFolderCreateRef.current = true;
+          return newFolder;
+        },
+      } : null}
+      touch={mobileVariant}
+      onRename={() => {
+        // Defer rename until dropdown close transition completes.
+        // onOpenChangeComplete fires after animation + focus cleanup are done,
+        // avoiding focus stealing from Base UI's unmount cleanup.
+        pendingRenameRef.current = { id: session.id, title: sessionTitle };
+      }}
+      onExport={() => sessionExport.requestExport(resolvedSession, sessionDirectory, node)}
+      onMoveSession={() => setMoveDialogOpen(true)}
+      onArchive={() => handleDeleteSession(session, { archivedBucket })}
+      onRestore={archivedBucket ? () => handleRestoreSession(session) : null}
+      onDelete={() => handleDeleteSession(session, { archivedBucket, hardDelete: true })}
+    />
   );
 
   const handleWorkToggleClick = (event: React.MouseEvent<HTMLButtonElement>) => {
     event.preventDefault();
     event.stopPropagation();
-    void toggleSessionWork();
+    toggleWork();
   };
 
   // Two-line zone rows are taller, so their hover actions step up one
@@ -1714,13 +1170,7 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
       }
       return editingIdRef.current ? false : true;
     }}>
-      {renderSessionMenuItems({
-        Item: DropdownMenuItem,
-        Separator: DropdownMenuSeparator,
-        Sub: DropdownMenuSub,
-        SubTrigger: DropdownMenuSubTrigger,
-        SubContent: DropdownMenuSubContent,
-      })}
+      {renderSessionMenuItems(dropdownSessionMenuSlots)}
     </DropdownMenuContent>
   );
 
@@ -1741,38 +1191,7 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
           }}
           className={cn(dropdownMenuPopupClass, 'min-w-[180px]')}
         >
-          {renderSessionMenuItems({
-            Item: ({ className, ...itemProps }: React.ComponentProps<typeof ContextMenu.Item>) => (
-              <ContextMenu.Item className={cn(dropdownMenuItemClass, className)} {...itemProps} />
-            ),
-            Separator: ({ className, ...separatorProps }: React.ComponentProps<typeof ContextMenu.Separator>) => (
-              <ContextMenu.Separator className={cn(dropdownMenuSeparatorClass, className)} {...separatorProps} />
-            ),
-            Sub: ContextMenu.SubmenuRoot,
-            SubTrigger: ({ className, children, ...triggerProps }: React.ComponentProps<typeof ContextMenu.SubmenuTrigger>) => (
-              <ContextMenu.SubmenuTrigger className={cn(dropdownMenuSubTriggerClass, className)} {...triggerProps}>
-                {children}
-                <Icon name="arrow-right-s" className="ms-auto size-3.5" />
-              </ContextMenu.SubmenuTrigger>
-            ),
-            SubContent: ({ className, children, ...popupProps }: React.ComponentProps<typeof ContextMenu.Popup>) => (
-              <ContextMenu.Portal>
-                <ContextMenu.Positioner className="app-region-no-drag z-50">
-                  <ContextMenu.Popup
-                    data-slot="dropdown-menu-sub-content"
-                    style={{
-                      backgroundColor: 'var(--surface-elevated)',
-                      color: 'var(--surface-elevated-foreground)',
-                    }}
-                    className={cn(dropdownMenuPopupClass, className)}
-                    {...popupProps}
-                  >
-                    {children}
-                  </ContextMenu.Popup>
-                </ContextMenu.Positioner>
-              </ContextMenu.Portal>
-            ),
-          })}
+          {renderSessionMenuItems(contextSessionMenuSlots)}
         </ContextMenu.Popup>
       </ContextMenu.Positioner>
     </ContextMenu.Portal>
@@ -2008,47 +1427,7 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
       {moveDialogOpen && sessionDirectory ? (
         <MoveSessionDialog open onOpenChange={setMoveDialogOpen} sessionId={session.id} sourceDirectory={sessionDirectory} />
       ) : null}
-      <Dialog open={exportDialogOpen} onOpenChange={setExportDialogOpen}>
-        <DialogContent showCloseButton={false} className="max-w-sm gap-5">
-          <DialogHeader>
-            <DialogTitle>{t('sessions.sidebar.session.export.dialog.title')}</DialogTitle>
-            <DialogDescription>
-              {descendantCount === 1
-                ? t('sessions.sidebar.session.export.dialog.descriptionSingle', { count: descendantCount })
-                : t('sessions.sidebar.session.export.dialog.descriptionMany', { count: descendantCount })}
-            </DialogDescription>
-          </DialogHeader>
-          <label className="flex items-center gap-2 typography-ui-label cursor-pointer">
-            <input
-              type="checkbox"
-              checked={exportIncludeSubtasks}
-              onChange={(e) => setExportIncludeSubtasks(e.target.checked)}
-              className="h-4 w-4 rounded border-border accent-primary"
-            />
-            {t('sessions.sidebar.session.export.dialog.includeSubtasks')}
-          </label>
-          <DialogFooter>
-            <Button
-              type="button"
-              onClick={() => setExportDialogOpen(false)}
-              variant="outline"
-              size="sm"
-            >
-              {t('sessions.sidebar.dialogs.cancel')}
-            </Button>
-            <Button
-              type="button"
-              onClick={() => {
-                setExportDialogOpen(false);
-                void doExportSession(exportIncludeSubtasks, exportTree ?? node);
-              }}
-              size="sm"
-            >
-              {t('sessions.sidebar.session.export.dialog.confirm')}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      {sessionExport.dialog}
     </React.Fragment>
   );
 }
@@ -2223,7 +1602,6 @@ const sessionNodeItemPropsChange = (prev: SessionNodeItemProps, next: SessionNod
     && prev.toggleParent === next.toggleParent
     && prev.handleSessionSelect === next.handleSessionSelect
     && prev.handleSessionDoubleClick === next.handleSessionDoubleClick
-    && prev.handleCopySessionId === next.handleCopySessionId
     && prev.setOpenSidebarMenuKey === next.setOpenSidebarMenuKey
     && prev.createFolderAndStartRename === next.createFolderAndStartRename
     && prev.handleDeleteSession === next.handleDeleteSession

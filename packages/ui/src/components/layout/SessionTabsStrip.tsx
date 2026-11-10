@@ -25,7 +25,8 @@ import { ContextMenu } from '@base-ui/react/context-menu';
 import { ContextMenu as ContextMenuRoot } from '@/components/ui/context-menu';
 import type { Session } from '@/lib/opencode/model';
 
-import { dropdownMenuItemClass, dropdownMenuPopupClass, dropdownMenuSeparatorClass } from '@/components/ui/dropdown-menu.styles';
+import { dropdownMenuPopupClass } from '@/components/ui/dropdown-menu.styles';
+import { contextSessionMenuSlots, type SessionMenuSlots } from '@/components/session/sidebar/sessions/sessionMenuSlots';
 import { Icon } from '@/components/icon/Icon';
 import { cn } from '@/lib/utils';
 import { isRightToLeft, useI18n } from '@/lib/i18n';
@@ -69,16 +70,6 @@ const scrollTabsWithWheel = (event: React.WheelEvent<HTMLDivElement>) => {
 
 type SessionTab = { id: string; session: Session };
 
-export type SessionTabMenuComponents = {
-  Item: React.ComponentType<{
-    className?: string;
-    disabled?: boolean;
-    onClick?: React.MouseEventHandler;
-    children?: React.ReactNode;
-  }>;
-  Separator: React.ComponentType<{ className?: string }>;
-};
-
 export type SessionTabMenuArgs = {
   session: Session;
   open: boolean;
@@ -86,16 +77,7 @@ export type SessionTabMenuArgs = {
   select: () => void;
   closeOtherTabs: () => void;
   /** Menu primitives for the surface the menu opens in. */
-  components: SessionTabMenuComponents;
-};
-
-const contextComponents: SessionTabMenuComponents = {
-  Item: ({ className, ...props }) => (
-    <ContextMenu.Item className={cn(dropdownMenuItemClass, className)} {...props} />
-  ),
-  Separator: ({ className, ...props }) => (
-    <ContextMenu.Separator className={cn(dropdownMenuSeparatorClass, className)} {...props} />
-  ),
+  components: SessionMenuSlots;
 };
 
 /**
@@ -118,8 +100,9 @@ const SessionTabItem: React.FC<{
   renderMenu: (args: SessionTabMenuArgs) => React.ReactNode;
   closeOtherTabs: (id: string) => void;
   onMenuOpenChangeComplete?: (open: boolean) => void;
+  menuReturnsFocus?: () => boolean;
   children?: React.ReactNode;
-}> = ({ tab, tabNumber, isActive, isPreview, suppressControls, onSelect, onPin, onClose, renderMenu, closeOtherTabs, onMenuOpenChangeComplete, children }) => {
+}> = ({ tab, tabNumber, isActive, isPreview, suppressControls, onSelect, onPin, onClose, renderMenu, closeOtherTabs, onMenuOpenChangeComplete, menuReturnsFocus, children }) => {
   const { t } = useI18n();
   const shortcutOverrides = useUIStore((state) => state.shortcutOverrides);
   const tabPrefix = getEffectiveShortcutPrefix('switch_session_tab', shortcutOverrides);
@@ -146,7 +129,7 @@ const SessionTabItem: React.FC<{
     isActive,
     select: () => onSelect(tab),
     closeOtherTabs: () => closeOtherTabs(tab.id),
-    components: contextComponents,
+    components: contextSessionMenuSlots,
   };
 
   return (
@@ -273,6 +256,7 @@ const SessionTabItem: React.FC<{
           <ContextMenu.Positioner className="app-region-no-drag z-50">
             <ContextMenu.Popup
               data-slot="dropdown-menu-content"
+              finalFocus={() => menuReturnsFocus?.() ?? true}
               style={{ color: 'var(--surface-elevated-foreground)' }}
               className={cn(dropdownMenuPopupClass, 'min-w-[190px]')}
             >
@@ -303,8 +287,13 @@ export const SessionTabsStrip: React.FC<{
   onMenuOpenChangeComplete?: (open: boolean) => void;
   /** While the active tab renames, its hover controls stay hidden. */
   suppressActiveTabControls?: boolean;
+  /**
+   * Whether a closing tab menu gives focus back to its tab. False while a
+   * Rename from the menu opens the title field, which takes the focus.
+   */
+  menuReturnsFocus?: () => boolean;
   children: React.ReactNode;
-}> = ({ renderMenu, onMenuOpenChangeComplete, suppressActiveTabControls = false, children }) => {
+}> = ({ renderMenu, onMenuOpenChangeComplete, suppressActiveTabControls = false, menuReturnsFocus, children }) => {
   const { t, direction } = useI18n();
   // The horizontal strategy assumes later tabs sit further right; RTL uses real rects.
   const isRtl = direction === 'rtl';
@@ -516,6 +505,7 @@ export const SessionTabsStrip: React.FC<{
                 renderMenu={renderMenu}
                 closeOtherTabs={handleCloseOthers}
                 onMenuOpenChangeComplete={onMenuOpenChangeComplete}
+                menuReturnsFocus={menuReturnsFocus}
               >
                 {tab.id === currentSessionId ? children : null}
               </SessionTabItem>

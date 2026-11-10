@@ -7,7 +7,7 @@ import type { GroupSearchData, SessionGroup, SessionNode } from './types';
 import type { ProjectSection } from './projects/sessionProjectRender';
 import { buildGroupRenderDescriptors } from './projects/sessionProjectRender';
 import { normalizeFolderRoots, selectFolderIdsForProjection, selectFolderRootNodes, type BlockingBadgeSessionScope } from './sessions/sessionNodeItemUtils';
-import { getAuthoritativeSessionFolderOwnerKey, getGroupFolderOwnerKey, getSessionFolderIdentityKey, getSessionFolderScopes, getWorkFolderOwnerKey, isArchivedFolderScope } from './sessions/sessionFolderIdentity';
+import { getAuthoritativeSessionFolderOwnerKey, getGroupFolderOwnerKey, getSessionFolderIdentityKey, getSessionFolderScopes, isArchivedFolderScope, resolveSessionFolderOwnerKey } from './sessions/sessionFolderIdentity';
 import type { SessionRowOrderEntry } from './sessions/sessionRowOrder';
 import { computeSessionTreeGuides, type SessionTreeGuide } from './sessions/sessionTreeGeometry';
 import { countSessionTreeQueryMatches } from './recent/activitySections';
@@ -503,14 +503,11 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
   const movedFolderMembers = new Set<string>();
   let searchMatchCount = 0;
   const runIndex = args.runIndex ?? EMPTY_MULTI_RUN_INDEX;
-  // A lane of a run lists under the project root wherever it runs, so it files
-  // like the root's sessions.
-  const folderOwnerKeyOf = (session: Session): string | null => {
-    const owner = args.sessionOwnerById.get(session.id);
-    return owner && owner.kind !== 'project' && !runIndex.runKeyBySessionId.has(session.id)
-      ? getWorkFolderOwnerKey(owner.scopeDirectory)
-      : getAuthoritativeSessionFolderOwnerKey(session, owner);
-  };
+  const folderOwnerKeyOf = (session: Session): string | null => resolveSessionFolderOwnerKey(
+    session,
+    args.sessionOwnerById.get(session.id),
+    runIndex.runKeyBySessionId.has(session.id),
+  );
 
   const authoritativeRoots = [
     ...args.authoritativeSections.flatMap((section) => section.groups.flatMap((group) => group.sessions)),
