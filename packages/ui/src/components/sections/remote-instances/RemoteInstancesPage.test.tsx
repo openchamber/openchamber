@@ -19,7 +19,11 @@ const sshState = {
   load: async () => {}, loadImports: async () => {}, refreshStatuses: async () => {},
 };
 mock.module('@/stores/useDesktopSshStore', () => ({ useDesktopSshStore: (select: (state: unknown) => unknown) => select(sshState) }));
-mock.module('@/stores/useUIStore', () => ({ useUIStore: (select: (state: unknown) => unknown) => select({ settingsRemoteInstancesSelectedId: null }) }));
+const uiState = { settingsRemoteInstancesSelectedId: null };
+// useConfigStore subscribes to the UI store when it loads, through the Settings search index.
+mock.module('@/stores/useUIStore', () => ({
+  useUIStore: Object.assign((select: (state: unknown) => unknown) => select(uiState), { getState: () => uiState, subscribe: () => () => {} }),
+}));
 mock.module('@/hooks/useRuntimeAPIs', () => ({ useRuntimeAPIs: () => ({}) }));
 mock.module('@/components/ui', () => ({ toast: { error() {} } }));
 

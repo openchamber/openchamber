@@ -182,7 +182,10 @@ describe('SourceControlProviderCard', () => {
   const apis: RuntimeAPIs = {
     runtime: { platform: 'web', isVSCode: false, isDesktop: false }, sourceControl,
     get git() { return unexpected(); }, get terminal() { return unexpected(); },
-    get files() { return unexpected(); }, get settings() { return unexpected(); },
+    get files() { return unexpected(); },
+    // The directory store loads with Settings and may persist the home folder it
+    // resolves; that write is not part of the card under test.
+    settings: { load: unexpected, save: async (changes) => ({ ...changes }) },
     get permissions() { return unexpected(); }, get notifications() { return unexpected(); },
   };
 
@@ -197,7 +200,7 @@ describe('SourceControlProviderCard', () => {
   beforeEach(() => {
     dom = new Window({ url: 'http://localhost/' });
     const values = {
-      window: dom, document: dom.document, navigator: dom.navigator,
+      window: dom, document: dom.document, navigator: dom.navigator, localStorage: dom.localStorage,
       HTMLElement: dom.HTMLElement, Element: dom.Element, Node: dom.Node,
       HTMLInputElement: dom.HTMLInputElement, DocumentFragment: dom.DocumentFragment,
       MutationObserver: dom.MutationObserver, ResizeObserver: dom.ResizeObserver,
