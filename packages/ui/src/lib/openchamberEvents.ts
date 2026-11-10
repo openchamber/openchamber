@@ -11,6 +11,7 @@ import { messageQueueUpdatedEventSchema, type MessageQueueUpdatedEvent } from '@
 import { autoReviewUpdatedEventSchema, type AutoReviewUpdatedEvent } from '@/stores/useAutoReviewStore';
 import { prWatchUpdatedEventSchema, type PrWatchUpdatedEvent } from '@/sync/pr-watch';
 import { sessionWarmingSnapshotSchema, type SessionWarmingSnapshot } from '@/stores/useSessionWarmingStore';
+import { sessionTodosEventSchema, type SessionTodosEvent } from '@/stores/useSessionTodosStore';
 import { isJsonValue, type JsonValue } from '@openchamber/sdk';
 import { z } from 'zod';
 import { trackedItemRecordsSchema } from './trackedItems/model';
@@ -307,6 +308,8 @@ type OpenChamberEvent =
   | ControlStreamSyncEnvelope
   /** Which sessions the server keeps warm, as a full snapshot. */
   | { type: 'session-warming'; snapshot: SessionWarmingSnapshot }
+  /** A session's todo list changed, or has to be read again (`todos` null); `sessionId` null for a whole directory. */
+  | { type: 'session-todos'; event: SessionTodosEvent }
   /** The host follows this space's queue again; what changed in a gap is read from the space. */
   | { type: 'space-queue-stream'; spaceId: string }
   /** The host follows this space's permission modes again; what changed in a gap is read from the space. */
@@ -579,6 +582,12 @@ const dispatchFromEnvelope = (envelope: { type: string; properties: unknown }) =
   if (envelope.type === 'openchamber:session-warming') {
     const parsed = sessionWarmingSnapshotSchema.safeParse(envelope.properties);
     if (parsed.success) for (const listener of listeners) listener({ type: 'session-warming', snapshot: parsed.data });
+    return;
+  }
+
+  if (envelope.type === 'openchamber:session-todos') {
+    const parsed = sessionTodosEventSchema.safeParse(envelope.properties);
+    if (parsed.success) for (const listener of listeners) listener({ type: 'session-todos', event: parsed.data });
     return;
   }
 

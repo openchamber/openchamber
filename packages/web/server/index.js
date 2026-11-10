@@ -100,6 +100,8 @@ import { createSessionAssistRuntime } from './lib/session-assist/runtime.js';
 import { createSessionGoalRuntime } from './lib/session-goal/runtime.js';
 import { createContextObligatoryRuntime } from './lib/context-obligatory/runtime.js';
 import { createSessionWarmingRuntime } from './lib/session-warming/runtime.js';
+import { createSessionTodosRuntime } from './lib/session-todos/runtime.js';
+import { isSpaceDirectory } from './lib/spaces/dispatcher.js';
 import { createTrackerRegistry } from './lib/trackers/registry.js';
 import { createTrackerSessionStatus } from './lib/trackers/session-status.js';
 import { sourceControlProviderDescriptors } from './lib/source-control/provider-descriptors.js';
@@ -1465,6 +1467,23 @@ const messageSearchRuntime = createMessageSearchRuntime({
   },
 });
 
+// The agent's todo list per session, from OpenCode's experimental `todowrite`
+// tool. Idle while the tool is off; see lib/session-todos.
+const sessionTodosRuntime = createSessionTodosRuntime({
+  dataDir: OPENCHAMBER_DATA_DIR,
+  buildOpenCodeUrl,
+  getOpenCodeAuthHeaders,
+  globalEventHub: globalMessageStreamHub,
+  // Declared further down; only ever called after startup. An external
+  // OpenCode's environment is unknown, so only its config counts there.
+  getFlagOverrides: () => openCodeLifecycleRuntime.getManagedOpenCodeProcessEnv()?.OPENCODE_FLAGS,
+  isSpaceDirectory,
+  broadcast: (event) => broadcastOpenChamberUiEvent(event),
+});
+void sessionTodosRuntime.start().catch((error) => {
+  console.warn('[session-todos] failed to start:', error?.message ?? error);
+});
+
 const openCodeWatcherRuntime = createOpenCodeWatcherRuntime({
   waitForOpenCodePort: (...args) => waitForOpenCodePort(...args),
   buildOpenCodeUrl,
@@ -2421,6 +2440,7 @@ const gracefulShutdownRuntime = createGracefulShutdownRuntime({
   sessionGoalRuntime,
   contextObligatoryRuntime,
   sessionWarmingRuntime,
+  sessionTodosRuntime,
   autoReviewRuntime,
   prWatchRuntime,
   messageQueueRuntime,
@@ -3087,6 +3107,7 @@ async function main(options = {}) {
     listConfiguredProjects,
     messageSearchRuntime,
     sessionWarmingRuntime,
+    sessionTodosRuntime,
     scheduledWorktreeBridge,
     crypto,
     fs,

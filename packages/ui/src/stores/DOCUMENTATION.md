@@ -397,6 +397,7 @@ Examples:
 - `messageQueueStore.ts`
 - `useRoutingStore.ts`
 - `useSessionWarmingStore.ts`
+- `useSessionTodosStore.ts`
 
 These stores coordinate persistent project/session metadata across multiple views.
 
@@ -417,6 +418,20 @@ subscribe and whenever the control stream reconnects, and applies the whole
 snapshot each broadcast carries; an older revision is ignored, and a runtime
 switch resets the store first. VS Code keeps it empty: it has no OpenChamber
 server and offers only OpenCode's global warming.
+
+`useSessionTodosStore.ts` projects the agent's todo list of each session the
+Work Status panel showed (`packages/web/server/lib/session-todos/DOCUMENTATION.md`).
+An entry is `loading` until the first answer, `off` while OpenCode's
+`todowrite` tool is off in its directory, else `ready`. One read per session at
+a time; a demand during it earns one read after it. A failed read keeps what is
+shown. `sync/session-todos-sync.ts` applies each broadcast list, reads a
+session again when the server announces it with `todos: null` (a revert) and
+every session of a directory announced with `sessionId: null` (its config
+changed; with no directory as well, OpenCode's stream had a gap), and reads
+every entry again when the control stream reconnects. Reads an event starts
+carry the subscription's runtime guard. A
+runtime switch resets the store. VS Code keeps it empty: it has no OpenChamber
+server and no panel.
 
 `messageQueueStore.ts` has two owners, decided by `isServerOwnedMessageQueue()`.
 The VS Code foreground delivery gate holds an idle parent while a live busy or
@@ -679,7 +694,7 @@ Session display persistence keeps a hydrated local cache for the independent all
 
 Session folders are stored by the OpenChamber server and shared by all of its clients (`packages/web/server/lib/session-folders/DOCUMENTATION.md` owns the stored format and the change semantics). `useSessionFoldersStore` shows the server's last answer with this device's not-yet-stored changes laid over it. Every folder action is one change (`lib/sessionFolders/folderChanges.ts`) that the store applies at once, queues in runtime-scoped storage (`oc.sessions.folderChanges.v2:<runtime>`, written immediately so a reload still sends it) and sends to `PATCH /api/session-folders` 150 ms later, up to 500 changes per request; a change stays queued until the server stored it, a failed write retries with backoff up to 30 s and again when the event stream reconnects, and a change the server rejects as malformed is dropped and the server copy read again. The server's answer and every later read replace the shown folders only when their revision is not older than the last one shown. `sync/session-folders-sync.ts` reads them again when the control stream announces `session-folders-changed` with a newer revision, after each reconnect, and when the window comes back (visible, focused, online or woken). A failed read keeps what is shown and retries with the same backoff; every folder request times out after 15 s (2 minutes for a device's whole copy, which on a slow link would never fit in 15 s) and counts as failed, so a hung one cannot hold the sync. A move records which folder each chat was in (`from`), and both sides skip a chat that has since moved elsewhere, so a move re-sent after a timeout or a reload cannot undo a newer one. Before the first successful read nothing is sent: on its first contact with a server a device hands its own folders from older versions to the server once (an `import` change, with any tombstones an older version left unsent), marks the runtime in `oc.sessions.foldersShared.v2:<runtime>` and only then shows the server's folders. Creates, renames, moves and deletions queued before that are already in the copy the import sends (deletions as tombstones) and leave the queue with it, since a new folder the server joins by name would otherwise come back as a second one under its local id; until that succeeds the local copy stays on screen. An import the server rejects is not sent again until the next start. Changes still queued after an import lose their `from`, since the folders it names may have joined server folders. A missing file on a server that stores shared folders is an empty list; a failed or malformed read keeps what is shown. A server from before shared folders answers 404 to `PATCH`; the store then writes its whole copy with `POST` the way older clients did, with the folders it deleted as tombstones, and gets no live updates from that server. The runtime-specific v2 browser keys stay as this device's cache of the server copy, flushed on runtime switch, page hide, freeze and unload. Which folders are collapsed stays on the device (`oc.sessions.folderCollapse.v2:<runtime>`) and is never read from the server. VS Code has no OpenChamber server, so its folders stay in its own storage and nothing is sent. File-search cache and in-flight keys include runtime plus directory and are cleared on endpoint reset.
 
-Persisted session todos use a bounded composite key of runtime, normalized directory, and session ID. Ambiguous legacy todo entries are discarded rather than claimed by whichever runtime starts first. Authoritative deletion uses an explicit runtime identity, and session-folder deletion scans every scope in the active runtime so archived assignments cannot survive after their session is gone; it reaches the server as a `forget-sessions` change, so the chat leaves its folder on every client. Closing a project sends `forget-scopes` for its root, its archive and each of its worktrees, so its folders do not come back when the project is added again.
+Authoritative deletion uses an explicit runtime identity, and session-folder deletion scans every scope in the active runtime so archived assignments cannot survive after their session is gone; it reaches the server as a `forget-sessions` change, so the chat leaves its folder on every client. Closing a project sends `forget-scopes` for its root, its archive and each of its worktrees, so its folders do not come back when the project is added again.
 
 Chat composer drafts, confirmed mentions, inline-comment drafts, and pinned sessions use the same runtime/directory/session ownership rule. Chat drafts use a bounded shared envelope and notify mounted composers when authoritative deletion clears their identity, preventing unmount autosave from resurrecting deleted text. Inline drafts have shared bounds of 50 sessions and 1 MiB of serialized data, and no count bound per session. At a bound the store refuses the new comment or the edit that grows it and evicts nothing, because each draft is something the person wrote and has not sent; the field keeps the text and a localized toast says why. Context already written comes back past the bounds: a failed send, a fork, and a reverted or edited message restore everything they took. A browser annotation and a VS Code editor comment pass the bounds too, because their field has closed by the time they reach the store and a refusal would lose the text. Pins retain every valid composite key across runtimes without silent age/count eviction and are never pruned from the first startup list. Confirmed local deletion and routed deletion events clear immediately; after an authoritative baseline exists, a later complete omission also cleans persisted state. Ambiguous session-only legacy drafts and pins are not claimed.
 

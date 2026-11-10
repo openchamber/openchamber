@@ -212,7 +212,7 @@ which requests only providers enabled for this panel.
 | Goal | `useSessionGoal` | respects the Settings toggle |
 | MCP | `useMcpStore` | the switch reuses the dropdown's `setEnabled` |
 | Pinned messages | `getContextObligatoryMessages` + `state.part`, else one `getSessionMessage` read | see below |
-| Todos | live `state.todo[sessionId]`, persisted fallback | live channel wins |
+| Tasks | `useSessionTodosStore`: the server's list for the session (`packages/web/server/lib/session-todos`), read once by `useLoadSessionTodos` in the section list, then kept current by `openchamber:session-todos` events | listed only once the server says OpenCode's experimental `todowrite` tool is on in the session's directory; while it is off nothing is read or shown |
 
 ### Subagent rows
 
@@ -490,14 +490,14 @@ The default order is by durability:
    long as the session is open. Usage sits here rather than lower down because a
    spent quota stops the work outright, and Context sources because it holds the
    linked issue and PR, which tell what the session is about;
-2. **Subagents** and **Workflows** — what is happening right now;
+2. **Subagents**, **Tasks** and **Workflows** — what is happening right now;
 3. **MCP** and **Pinned messages** — supporting material.
 
 The sections dialog has drag handles for changing this order, including hidden
 sections. A drop updates the panel immediately. `workStatusSectionOrder` is a
 profile preference persisted through the settings registry and the local UI
 store. Missing or empty order uses the default; duplicate and obsolete ids are
-discarded, and newly introduced sections append in default order. Visibility
+discarded, and newly introduced sections append in default order, except those listed in `PLACED_AFTER` (`sections.ts`), which go right after their default neighbour: Tasks lands after Subagents in every saved list, where the default puts it. Visibility
 changes never alter positions.
 
 Clients saved the default as their order without the user choosing it, so a
