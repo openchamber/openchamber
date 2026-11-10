@@ -4223,6 +4223,11 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     const pendingDraftContent = useInputStore((state) => state.pendingDraftContent);
     React.useEffect(() => {
         if (pendingDraftContent == null || columnPinned) return;
+        // The draft's id is in the store one commit before the column actually shows it:
+        // `currentSessionId` comes from the column and trails the switch. Applying the share
+        // into that commit files it under the session the user is leaving, which the column
+        // then overwrites when it loads the draft — the share looks like it vanished.
+        if (currentSessionId !== null) return;
         if (draftSubmitDraftId === null || pendingDraftContent.draftId !== draftSubmitDraftId) return;
         const content = useInputStore.getState().consumePendingDraftContent(draftSubmitDraftId);
         if (content === null) return;
@@ -4231,7 +4236,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             setMessage((prev) => (prev.trim().length > 0 ? appendWithLineBreaks(prev, text) : text));
         }
         if (content.files.length > 0) void attachFiles(content.files);
-    }, [attachFiles, columnPinned, draftSubmitDraftId, pendingDraftContent]);
+    }, [attachFiles, columnPinned, currentSessionId, draftSubmitDraftId, pendingDraftContent]);
 
     const handleVSCodePickFiles = React.useCallback(async () => {
         try {
