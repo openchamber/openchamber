@@ -346,7 +346,7 @@ export function resolveLfsPushConfig({ lfsConfigOutput, effectiveConfigOutput, g
   const value = (key) => effective.get(key) ?? committed.get(key);
   const configured = value('lfs.pushurl') || value('lfs.url')
     || effective.get(`remote.${gitRemoteName.toLowerCase()}.lfspushurl`) || value(remoteUrlKey);
-  const remote = normalizeDiscoveryEndpoint(gitRemoteUrl);
+  const remote = normalizeDiscoveryEndpoint(gitRemoteUrl, { ownRemote: true });
   const base = remote.endpoint.replace(/\/$/, '');
   const endpoint = configured ? httpsCandidate(configured, gitRemoteUrl)
     : remote.kind === 'https' ? httpsCandidate(`${base}${base.endsWith('.git') ? '' : '.git'}/info/lfs`, gitRemoteUrl) : null;
@@ -373,7 +373,7 @@ export function discoverLfs({
     || !Array.isArray(pointerSamples) || !Array.isArray(remoteLfsUrls)) {
     throw lfsError('LFS discovery input is invalid');
   }
-  const gitRemote = normalizeDiscoveryEndpoint(gitRemoteUrl);
+  const gitRemote = normalizeDiscoveryEndpoint(gitRemoteUrl, { ownRemote: true });
   const attributePaths = parseAttributes(attributesOutput, limits);
   if (pointerSamples.length > limits.maxPointerSamples || remoteLfsUrls.length > limits.maxRemoteUrls) {
     throw lfsError('LFS discovery input exceeds its record limit', 'LFS_DISCOVERY_LIMIT_EXCEEDED');

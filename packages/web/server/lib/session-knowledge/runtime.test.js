@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { KNOWLEDGE_ENTRY_KEYS, RENDER_PAGE_GUIDANCE, REPLY_COMMAND_GUIDANCE, SECRET_REQUEST_GUIDANCE, SESSION_LINK_GUIDANCE, WORK_NAME_GUIDANCE, WORKFLOW_GUIDANCE, buildKnowledgeEntries, createSessionKnowledgeRuntime, directToolsGuidance } from './runtime.js';
+import { DISPATCH_GUIDANCE, KNOWLEDGE_ENTRY_KEYS, RENDER_PAGE_GUIDANCE, REPLY_COMMAND_GUIDANCE, SECRET_REQUEST_GUIDANCE, SESSION_LINK_GUIDANCE, WORK_NAME_GUIDANCE, WORKFLOW_GUIDANCE, buildKnowledgeEntries, createSessionKnowledgeRuntime, directToolsGuidance } from './runtime.js';
 import { UI_BLOCKS_GUIDANCE } from './ui-blocks-guidance.js';
 
 const DIRECTORY = '/work/project';
@@ -203,9 +203,17 @@ describe('when to link', () => {
     });
     const entries = await entriesFor(runtime, NO_PINS);
 
-    expect(entries[GUIDANCE]).toBe(SESSION_LINK_GUIDANCE);
+    expect(entries[GUIDANCE]).toBe(`${SESSION_LINK_GUIDANCE}\n\n${DISPATCH_GUIDANCE}`);
     expect(entries[PINNED]).toBe('');
     expect(entries[MEMORY]).toBe('');
+  });
+
+  test('dispatch names the Code Mode call path and leaves subagent work alone', () => {
+    expect(DISPATCH_GUIDANCE).toContain('tools.openchamber inside execute');
+    expect(SESSION_LINK_GUIDANCE).toContain('tools.openchamber inside a Code Mode execute script');
+    expect(WORK_NAME_GUIDANCE).toContain('tools.openchamber inside execute');
+    expect(DISPATCH_GUIDANCE).toContain('session.send');
+    expect(DISPATCH_GUIDANCE).toContain('subagent tool');
   });
 
   test('asks for the task name in the language of the user, the branch in English', () => {

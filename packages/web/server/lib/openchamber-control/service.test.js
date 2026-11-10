@@ -272,6 +272,21 @@ describe('OpenChamber control service', () => {
     expect(paged).toMatchObject({ models: [{ id: 'a/new' }], total: 2, next: 1 });
   });
 
+  it('keeps every model released with the newest of its family', async () => {
+    const model = (id, released) => ({ providerID: 'z', id, name: id, family: 'glm', time: { released }, variants: [], cost: [], status: 'active' });
+    const { service, client } = createService({
+      readSettingsFromDiskMigrated: vi.fn(async () => ({ favoriteModels: [], recentModels: [], hiddenModels: [] })),
+    });
+    client.model = { list: vi.fn(async () => ({ data: [model('glm-5.3-highspeed', 2), model('glm-5.2', 1), model('glm-5.3', 2)] })) };
+    client.provider = { list: vi.fn(async () => ({ data: [{ id: 'z', name: 'Zed' }] })) };
+
+    const found = await service.execute('models.search', { query: 'glm' }, '/repo');
+    expect(found.models.map(({ id }) => id).toSorted()).toEqual(['z/glm-5.3', 'z/glm-5.3-highspeed']);
+    // An older version asked for by name still shows when nothing newer matches.
+    const older = await service.execute('models.search', { query: 'glm-5.2' }, '/repo');
+    expect(older.models.map(({ id }) => id)).toEqual(['z/glm-5.2']);
+  });
+
   it('maps schedule creation into the shared scheduled-task service', async () => {
     const { service, scheduledTaskService } = createService();
     scheduledTaskService.upsert.mockResolvedValue({ task: { id: 'task-1' }, created: true });

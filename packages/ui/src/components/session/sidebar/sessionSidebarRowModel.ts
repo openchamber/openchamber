@@ -76,7 +76,7 @@ export type SessionSidebarRenderContext = 'project' | 'timeline-mixed' | 'mixed-
 export const isMultiLineTimelineContext = (context: SessionSidebarRenderContext): boolean => context === 'timeline-mixed';
 
 export type SessionSidebarGroupStatus = {
-  state: 'ready' | 'loading' | 'load-failed' | 'initialization-failed' | 'permission-denied';
+  state: 'ready' | 'loading' | 'load-failed' | 'initialization-failed' | 'permission-denied' | 'trust-paused';
   directory: string | null;
   canGrantAccess: boolean;
 };

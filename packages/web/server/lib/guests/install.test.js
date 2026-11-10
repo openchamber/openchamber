@@ -98,7 +98,8 @@ describe('installGuestFromPath', () => {
     const badIdRoot = path.join(dir, 'bad-id');
     await writeGuest(badIdRoot, 'Not Kebab');
     const badId = await installGuestFromPath(badIdRoot, persistPath);
-    expect(badId).toEqual({ ok: false, code: 'invalid-manifest' });
+    // The parser's reason travels with the refusal, so the author learns which field broke.
+    expect(badId).toEqual({ ok: false, code: 'invalid-manifest', reason: expect.stringContaining('kebab-case') });
 
     const serviceFile = path.join(guestDataDir(persistPath, 'clone-hello'), 'state.json');
     await fs.mkdir(path.dirname(serviceFile), { recursive: true });

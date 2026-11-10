@@ -1132,6 +1132,31 @@ describe('getStatus', () => {
     await expect(getStatus(repo)).resolves.toMatchObject({ current: 'main' });
   });
 
+  it.each(['OPENCHAMBER_GIT_BINARY', 'GIT_BINARY'])('runs Git through %s outside Windows', async (name) => {
+    if (process.platform === 'win32' || !canRunGit()) return;
+
+    const repo = createTempDir();
+    runGit(repo, ['init', '-b', 'main']);
+    const log = path.join(createTempDir(), 'calls.log');
+    const wrapper = path.join(createTempDir(), 'git-wrapper');
+    fs.writeFileSync(wrapper, `#!/bin/sh\nprintf '%s\\n' "$*" >> '${log}'\nexec git "$@"\n`, { mode: 0o755 });
+    const original = process.env[name];
+    process.env[name] = wrapper;
+    try {
+      await expect(getStatus(repo)).resolves.toMatchObject({ current: 'main' });
+      expect(fs.readFileSync(log, 'utf8')).toContain('status');
+
+      // An override that is not an executable file leaves Git to PATH.
+      fs.rmSync(log);
+      process.env[name] = path.join(repo, 'missing-git');
+      await expect(getStatus(repo)).resolves.toMatchObject({ current: 'main' });
+      expect(fs.existsSync(log)).toBe(false);
+    } finally {
+      if (original === undefined) delete process.env[name];
+      else process.env[name] = original;
+    }
+  });
+
   it('reports a branch with no commit yet as unborn until the first commit (#4886)', async () => {
     if (!canRunGit()) return;
 

@@ -1106,9 +1106,13 @@ export const resolveAttachEntry = (
   return attach.entry ?? null;
 };
 
+/**
+ * The HTML the full-screen page loads: `panel.entry` for `true`, the object's
+ * own `entry` otherwise, which needs no panel page.
+ */
 export const resolvePageEntry = (contributes: Pick<OpenChamberContributes, 'panel' | 'page'>): string | null => {
-  if (!contributes.page || !contributes.panel.entry) return null;
-  return contributes.page === true ? contributes.panel.entry : contributes.page.entry;
+  if (!contributes.page) return null;
+  return contributes.page === true ? contributes.panel.entry ?? null : contributes.page.entry;
 };
 
 /**

@@ -372,7 +372,8 @@ strip enters a new scope only once the global session list has loaded, so a
 seed is never taken from a partial list and stored empty for good. At most 40
 other scopes are kept, the least recently shown dropped first. `removeTabs`
 clears a gone session from every set. Version 1 moved the version-0 single
-set into the global scope.
+set into the global scope. How the strip itself looks and behaves is in
+`components/layout/DOCUMENTATION.md`.
 
 ### Session / project coordination stores
 

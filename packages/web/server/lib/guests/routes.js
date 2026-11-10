@@ -207,6 +207,9 @@ const sendInstallResult = (res, result) => {
     if (conflict && result.id) {
       body.id = result.id;
     }
+    if (result.code === 'invalid-manifest' && result.reason) {
+      body.reason = result.reason.slice(0, 1000);
+    }
     return res.status(conflict ? 409 : 400).json(body);
   }
   res.status(result.replaced ? 200 : 201).json({ guest: result.guest });

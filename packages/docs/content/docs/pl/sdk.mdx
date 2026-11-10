@@ -89,7 +89,7 @@ Możesz też dodać lokalny plik `.zip` albo link https do repozytorium git lub 
 
 `ctx.surface` ma wartość `panel`, `dialog`, `page`, `status` lub `block`. Kliknięcie dołączonego elementu przekazuje jego dane w `ctx.item`; w pozostałych przypadkach jest to `null`.
 
-`contributes.page: true` udostępnia panel na pełnym ekranie w menu Strony rozszerzeń nad listą sesji. `{ "entry": "panel/page.html", "title": "Board" }` wskazuje osobny HTML i opcjonalny tytuł. `panel.entry` jest wymagane, a izolacja i uprawnienia pozostają te same. Stronę otwiera tylko użytkownik. Przeładowanie, wstrzymanie, usunięcie lub zmiana serwera zamyka ją.
+`contributes.page: true` udostępnia panel na pełnym ekranie w menu Strony rozszerzeń nad listą sesji. `{ "entry": "panel/page.html", "title": "Board" }` wskazuje osobny HTML i opcjonalny tytuł. `true` używa `panel.entry`; strona z własnym `entry` nie potrzebuje panelu na pasku bocznym, więc rozszerzenie może być tylko stroną na pełnym ekranie. Izolacja i uprawnienia pozostają te same. Stronę otwiera tylko użytkownik. Przeładowanie, wstrzymanie, usunięcie lub zmiana serwera zamyka ją.
 
 Tablica może używać `host.storage` oraz list projektów, worktree i sesji ze stanami na żywo. `startSession` może wskazać inny projekt bez zamykania tablicy. Zobacz [Host API](/sdk/host/).
 
@@ -228,7 +228,7 @@ Zapisy są atomowe: OpenChamber zapisuje plik tymczasowy i zmienia jego nazwę, 
 - `title` zastępuje nazwę panelu w nagłówku sekcji, do 60 znaków.
 - `height` to początkowa wysokość w pikselach, od 24 do 320 (domyślnie 120). Wywołaj [`host.setHeight()`](/sdk/host/), gdy zmieni się rozmiar treści.
 
-Twoja strona widzi `ctx.surface` jako `status`. OpenChamber ładuje ją tylko wtedy, gdy panel Work Status jest widoczny, a twoja sekcja rozwinięta, i zwalnia ją, gdy użytkownik zwinie sekcję, więc nie trzymaj tam niczego, czego nie da się odtworzyć. Rozszerzenie z samą sekcją może używać uprawnień, usługi, integracji i plików, ale nie `page`, `attach`, `actions` ani `commands`. Tylko web i desktop. Przykład `git-graph-status` to kompletna sekcja.
+Twoja strona widzi `ctx.surface` jako `status`. OpenChamber ładuje ją tylko wtedy, gdy panel Work Status jest widoczny, a twoja sekcja rozwinięta, i zwalnia ją, gdy użytkownik zwinie sekcję, więc nie trzymaj tam niczego, czego nie da się odtworzyć. Rozszerzenie z samą sekcją może używać uprawnień, usługi, integracji, plików i strony z własnym `entry`, ale nie `page: true`, `attach`, `actions` ani `commands`. Tylko web i desktop. Przykład `git-graph-status` to kompletna sekcja.
 
 ## Edytor dla twojego typu pliku
 
@@ -285,7 +285,7 @@ host.onFileSnapshot(() => ({ bytes: currentBytes(), version: versionOf(currentBy
 
 Edytor binarny może przejąć każdy plik pasujący do jego wzorców, także te, które OpenChamber sam pokazuje w podglądzie, jak obrazy i pliki PDF. Nie ma widoku źródła, a gdy użytkownik przełącza go na pełny ekran lub z niego wychodzi, mając niezapisane zmiany, OpenChamber najpierw je zapisuje. Odczyt i zapis formatu należy do twojego edytora: OpenChamber zapisuje dokładnie te bajty, które zwrócisz.
 
-Twoja strona widzi `ctx.surface` jako `file`. OpenChamber przeładowuje ją i ponownie przekazuje plik, gdy plik zmieni się na dysku, użytkownik odrzuci zmiany albo edytor przejdzie na pełny ekran lub z niego wyjdzie. Wygrywa pierwsze włączone rozszerzenie z pasującym wzorcem, przed własnymi podglądami OpenChamber. Rozszerzenie z samym edytorem może używać uprawnień, usługi, integracji i plików, ale nie `page`, `attach`, `actions` ani `commands`. Tylko web i desktop. Przykład `checklist-editor` to kompletny edytor.
+Twoja strona widzi `ctx.surface` jako `file`. OpenChamber przeładowuje ją i ponownie przekazuje plik, gdy plik zmieni się na dysku, użytkownik odrzuci zmiany albo edytor przejdzie na pełny ekran lub z niego wyjdzie. Wygrywa pierwsze włączone rozszerzenie z pasującym wzorcem, przed własnymi podglądami OpenChamber. Rozszerzenie z samym edytorem może używać uprawnień, usługi, integracji, plików i strony z własnym `entry`, ale nie `page: true`, `attach`, `actions` ani `commands`. Tylko web i desktop. Przykład `checklist-editor` to kompletny edytor.
 
 ## Akcje, polecenia i odznaka
 
@@ -343,7 +343,7 @@ Gdy Twoja wtyczka OpenCode lub serwer MCP dodaje narzędzie, czat pokazuje jego 
 
 `match` to nazwa narzędzia w takiej postaci, w jakiej zgłasza ją OpenCode; `*` na końcu dopasowuje prefiks. `icon` to nazwa ikony Remixicon albo plik `.svg` w Twoim pakiecie, tak jak `panel.icon`. `title` i `subtitle` to szablony nad `input`, `output` i `metadata` wywołania. `output` wybiera sposób renderowania treści: `text`, `json` (drzewo), `markdown`, `code` z `language`, `table` z `columns` (wiersze pochodzą z tablicy wyniku lub z `output.items`) albo `auto` dla domyślnego. Dokładny `match` wygrywa z symbolem wieloznacznym, a przy remisie wygrywa pierwsze zainstalowane rozszerzenie. Żadna zgoda nie jest potrzebna: to zmienia tylko sposób rysowania danych, które już są w czacie.
 
-Rozszerzenie, które tylko stylizuje narzędzia, nie potrzebuje żadnej strony: pomiń `panel.entry`, a nie będzie miało ikony na pasku bocznym, tylko kartę w Ustawienia → Rozszerzenia. Bez strony może deklarować `tools` i `providerLogos`, i nic więcej. Drugi wyjątek to sekcja Work Status lub edytor plików z własnym `entry`, patrz wyżej.
+Rozszerzenie, które tylko stylizuje narzędzia, nie potrzebuje żadnej strony: pomiń `panel.entry`, a nie będzie miało ikony na pasku bocznym, tylko kartę w Ustawienia → Rozszerzenia. Bez strony może deklarować `tools` i `providerLogos`, i nic więcej. Drugi wyjątek to sekcja Work Status, edytor plików lub strona na pełnym ekranie z własnym `entry`, patrz wyżej.
 
 ## Logo Twojego dostawcy
 

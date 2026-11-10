@@ -83,9 +83,10 @@ still swapped the whole list away to open one entry.
 ## Adding entries
 
 Notes, todos and plans add through the same `KnowledgeComposer`: one line that
-grows with its text, Enter to add, the add button at its end. Notes follow the
+grows with its text, Enter to add, the chat composer's send button at its end.
+The button was a plus, which read as "attach a file". Notes follow the
 chat composer: Shift+Enter starts a new line on desktop, and on a phone, whose
-keyboard has no Shift+Enter, Return starts a new line and the add button adds.
+keyboard has no Shift+Enter, Return starts a new line and the send button adds.
 Todos and plan titles are one line, and pasted line breaks become spaces. The length counter appears
 only near the limit. An empty, always-open 3000-character box used to take a
 third of the panel above notes that are read far more often than written.
@@ -94,6 +95,20 @@ The field clears as soon as an entry is sent and stays enabled while it saves,
 so the next entry can be typed right away; a failed add puts the text back if
 nothing new was typed. Disabling the field during the save dropped its focus,
 and an entry typed straight after the first one went nowhere.
+
+### Why the field's text is a stored draft
+
+An entry exists only once it is added, so until then the field's text is the
+whole draft. The sections render only while their tab and the Project knowledge
+surface are on screen, and that text used to live in the field's state alone: a
+tab switch, another rail surface or a reload threw it away. The field now keeps
+its text the way the chat composer keeps its own, in the same store
+(`lib/chatDraftPersistence`), one draft per runtime, project and section under
+the composer key `knowledge:<note|todo|plan>`, which no session id takes. It
+saves after a 500 ms pause in typing and at once when the field unmounts or the
+page hides or unloads, and an added entry clears it. A store of its own would
+have repeated the chat composer's storage, size limit and eviction for the same
+kind of text.
 
 With no notes yet, the notes tab shows only the field: its placeholder already
 says what goes there, and a second line repeating it was noise.

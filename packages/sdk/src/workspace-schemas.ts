@@ -25,6 +25,10 @@ export const guestWorkspaceSnapshotSchema = z.discriminatedUnion('kind', [
       activity: z.enum(['unknown', 'idle', 'running', 'retrying', 'waiting-permission', 'waiting-question']),
       outcome: z.enum(['completed', 'failed']).nullable(), items: z.array(z.object({ id: identity, data: z.json().optional() })),
       links: z.array(z.object({ title: z.string(), url: z.string(), kind: z.enum(['issue', 'change']), linkedAt: z.number() })).optional(),
+      inWork: z.boolean().optional(),
+      unread: z.boolean().optional(),
+      tool: z.object({ name: z.string(), target: z.string().nullable() }).nullable().optional(),
+      context: z.object({ tokens: z.number().nonnegative(), limit: z.number().positive().nullable() }).nullable().optional(),
     })),
   }),
 ]);

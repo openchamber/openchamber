@@ -329,6 +329,14 @@ describe('Git LFS discovery', () => {
     });
   });
 
+  it('derives the LFS endpoint of an HTTPS remote that names a user without the name', () => {
+    const gitRemoteUrl = 'https://myorg@dev.azure.com/myorg/app/_git/app';
+    expect(discoverLfs(input({ gitRemoteUrl })).endpoint.candidate.endpoint)
+      .toBe('https://dev.azure.com/myorg/app/_git/app/info/lfs');
+    expect(resolveLfsPushConfig({ ...input({ gitRemoteUrl }), lfsConfigOutput: '', effectiveConfigOutput: '' }).endpoint.endpoint)
+      .toBe('https://dev.azure.com/myorg/app/_git/app.git/info/lfs');
+  });
+
   it('uses explicit .lfsconfig authority before remote-specific input', () => {
     const result = discoverLfs(input({
       lfsConfigOutput: configOutput([['lfs.url', 'https://lfs.example.net/storage/repository']]),

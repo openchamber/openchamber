@@ -25,7 +25,6 @@ import {
     ATTACHMENT_ACCEPT,
     getUnsupportedAttachmentInputs,
     isReadOnSendMentionFilename,
-    prepareAttachmentFile,
     type AttachmentInputModality,
 } from '@/sync/attachment-files';
 import type { AttachedFile } from '@/stores/types/sessionTypes';
@@ -179,6 +178,7 @@ import {
     findImagePathCitationNames,
     imageSaveModeForModel,
     nextPastedContextFilename,
+    prepareImageToSave,
     renameFileForAttachmentCitation,
 } from './attachmentCitations';
 import {
@@ -286,6 +286,8 @@ import { LinkedReferenceRow } from './composer/ui/LinkedReferenceRow';
 import { usePlaceholderFitsOneLine } from './composer/ui/usePlaceholderFitsOneLine';
 import { RevertedMessagesStrip } from './RevertedMessagesStrip';
 import { SessionFolderMissingRow } from './SessionFolderMissingRow';
+import { SessionTrustPausedRow } from './SessionTrustPausedRow';
+import { useOpenCodeTrustPaused } from '@/components/projects/useOpenCodeTrustPause';
 import { useFolderMissing } from '@/components/session/sidebar/projects/useProjectFolderMissing';
 import { isSpaceDirectory } from '@/lib/spaces/space-route';
 import { SessionSuggestionChip } from '@/components/chat/SessionSuggestionChip';
@@ -598,6 +600,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     // the panel is expanded, so this composer's sends route to the fork
     // instead of the main session. Collapsed keeps the fork alive (chip stays
     // visible) while the composer talks to the main session again.
+    const trustDirectory = currentSessionDirectoryForSync ?? currentDirectory ?? null;
+    const trustPausedDirectory = useOpenCodeTrustPaused(trustDirectory) ? trustDirectory : null;
     const btwPanel = useBtwPanelState(currentSessionId, currentSessionDirectoryForSync ?? currentDirectory ?? undefined);
     const pendingForms = useScopedBlockingForms(currentSessionId, currentSessionDirectoryForSync ?? currentDirectory ?? undefined);
     const pendingPermissions = useScopedBlockingPermissions(currentSessionId, currentSessionDirectoryForSync ?? currentDirectory ?? undefined);
@@ -3473,14 +3477,15 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
      * (#5087), next to it for one that does (#5218). Each image gets a name no
      * attachment or link in the draft uses yet. Answers both groups under
      * those names; the caller attaches the unsaved ones as before, and in
-     * `alongside` the saved ones too.
+     * `alongside` the `attachable` saved ones too. A HEIC saved unconverted
+     * gets only its link (`prepareImageToSave`).
      */
     const saveImagesWithPathCitation = React.useCallback(async (
         files: File[],
         leadingText: string,
         reservedNames: string[],
         mode: 'instead' | 'alongside',
-    ): Promise<{ saved: File[]; unsaved: File[] }> => {
+    ): Promise<{ saved: File[]; attachable: File[]; unsaved: File[] }> => {
         const attachmentDraftKey = useInputStore.getState().attachmentDraftKey;
         const names = assignImageAttachmentFilenames(files, [
             ...reservedNames,
@@ -3489,10 +3494,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         const images = files.map((file, index) => renameFileForAttachmentCitation(file, names[index]));
         // A cold or remote OpenCode can take seconds; this toast says what is going on.
         const savingToastId = toast.loading(t('chat.chatInput.toast.imagesSaving', { files: images.map((file) => file.name).join(', ') }));
-        const prepared = await Promise.all(images.map(async (file) => {
-            const output = await prepareAttachmentFile(file);
-            return output ? { file, filename: output.file.name, bytes: new Uint8Array(await output.file.arrayBuffer()) } : null;
-        }).map((entry) => entry.catch(() => null)));
+        const prepared = await Promise.all(images.map((file) => prepareImageToSave(file).catch(() => null)));
         const readable = prepared.filter((entry) => entry !== null);
         let results: Awaited<ReturnType<typeof opencodeClient.writeOpenCodeTempFiles>>;
         try {
@@ -3503,7 +3505,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             results = readable.map(({ filename }) => ({ filename, error: error instanceof Error ? error : new Error(String(error)) }));
         }
         toast.dismiss(savingToastId);
-        if (useInputStore.getState().attachmentDraftKey !== attachmentDraftKey) return { saved: [], unsaved: [] };
+        if (useInputStore.getState().attachmentDraftKey !== attachmentDraftKey) return { saved: [], attachable: [], unsaved: [] };
 
         const saved = results.flatMap((result) => 'path' in result ? [result] : []);
         const savedNames = new Set(saved.map((result) => result.filename));
@@ -3541,7 +3543,11 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                 ? t('chat.chatInput.toast.imageCopySaveFailed', { files })
                 : t('chat.chatInput.toast.imageSaveFailed', { files }));
         }
-        return { saved: images.filter((_file, index) => isSaved(index)), unsaved };
+        return {
+            saved: images.filter((_file, index) => isSaved(index)),
+            attachable: images.filter((_file, index) => isSaved(index) && !prepared[index]?.linkOnly),
+            unsaved,
+        };
     }, [currentDirectory, currentModelKey, currentModelName, insertCitationAtSelection, t]);
 
     /**
@@ -3574,7 +3580,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         let savedAny = false;
         let attached = false;
         if (imageSaveMode !== 'attach' && imageFiles.length > 0) {
-            const { saved, unsaved } = await saveImagesWithPathCitation(imageFiles, leadingText, usedNames(), imageSaveMode);
+            const { saved, attachable, unsaved } = await saveImagesWithPathCitation(imageFiles, leadingText, usedNames(), imageSaveMode);
             if (useInputStore.getState().attachmentDraftKey !== attachmentDraftKey) return;
             if (saved.length > 0) {
                 savedAny = true;
@@ -3582,7 +3588,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             }
             if (imageSaveMode === 'alongside') {
                 // The links already name these, so they attach without a second citation.
-                for (const file of saved) {
+                for (const file of attachable) {
                     try {
                         attached = (await addAttachedFile(file)) || attached;
                     } catch (error) {
@@ -4265,7 +4271,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
 
         const images = list.filter((file) => file.type.startsWith('image/'));
         if (imageSaveMode !== 'attach' && images.length > 0) {
-            const { saved, unsaved } = await saveImagesWithPathCitation(
+            const { saved, attachable, unsaved } = await saveImagesWithPathCitation(
                 images,
                 '',
                 useInputStore.getState().attachedFiles.map((file) => file.filename),
@@ -4274,7 +4280,9 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             if (useInputStore.getState().attachmentDraftKey !== attachmentDraftKey) return;
             const others = list.filter((file) => !file.type.startsWith('image/'));
             if (imageSaveMode === 'alongside') {
-                list = [...others, ...saved, ...unsaved];
+                // A HEIC saved unconverted gets only its link, which counts as attached.
+                attached = saved.length > attachable.length;
+                list = [...others, ...attachable, ...unsaved];
             } else {
                 attached = saved.length > 0;
                 list = [...others, ...unsaved];
@@ -4878,9 +4886,15 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     const folderMissingRow = sessionFolder.missing && currentSessionId && currentSessionDirectoryForSync && !isBtwActive && !newSessionDraftOpen
         ? <SessionFolderMissingRow sessionId={currentSessionId} directory={currentSessionDirectoryForSync} busy={sessionPhase !== 'idle'} />
         : null;
-    const composerTopRows = folderMissingRow || worktreeSetupRow || creatingSessionRow || spaceWaitRow || goalRow || autoReviewRow || prWatchRow || backgroundShellsRow || revertRow || queueRow || doneHintRow || reviewHintRow || suggestionRow ? (
+    // A folder the user declined to trust loads no agent or model; the row
+    // brings the prompt back. A missing folder says more, so it wins.
+    const trustPausedRow = trustPausedDirectory && !folderMissingRow && !isBtwActive
+        ? <SessionTrustPausedRow directory={trustPausedDirectory} />
+        : null;
+    const composerTopRows = folderMissingRow || trustPausedRow || worktreeSetupRow || creatingSessionRow || spaceWaitRow || goalRow || autoReviewRow || prWatchRow || backgroundShellsRow || revertRow || queueRow || doneHintRow || reviewHintRow || suggestionRow ? (
         <>
             {folderMissingRow}
+            {trustPausedRow}
             {worktreeSetupRow}
             {creatingSessionRow}
             {spaceWaitRow}

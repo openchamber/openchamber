@@ -97,7 +97,7 @@ const isGuestFrameContentType = (contentType) => (
 
 /**
  * A `.js` URL can be served from a sibling `.ts` that the host compiles.
- * `hasRuntime` means the guest declared panel.entry or background.entry.
+ * `hasRuntime` means the guest has a frame the host loads (`hasGuestFrame`).
  * Tools-only packages can serve assets, never HTML or JS.
  */
 export const resolveGuestServedFile = async (packageRoot, relativePath, { hasRuntime = true } = {}) => {
@@ -179,7 +179,8 @@ export const inspectGuestPackage = async (packageRoot, { openchamberVersion, ski
   }
   const parsed = parseManifestJson(raw);
   if (!parsed.ok) {
-    return { ok: false, code: 'invalid-manifest' };
+    // The parser names the field and the rule, so the author sees why.
+    return { ok: false, code: 'invalid-manifest', reason: parsed.message };
   }
   if (!skipEngineCheck && !parsed.version) {
     return { ok: false, code: 'invalid-manifest' };
@@ -416,9 +417,9 @@ const withSource = (guest, source, displayPath) => ({
   path: displayPath,
 });
 
-/** Whether the package has any page the host loads: panel, background, status section, or file editor. */
+/** Whether the package has any page the host loads: panel, background, full-screen page, status section, file editor, or block. */
 export const hasGuestFrame = (guest) => Boolean(
-  guest.entry || guest.backgroundEntry || guest.statusEntry
+  guest.entry || guest.backgroundEntry || guest.pageEntry || guest.statusEntry
     || (Array.isArray(guest.fileEditors) && guest.fileEditors.length > 0)
     || (Array.isArray(guest.blocks) && guest.blocks.length > 0),
 );

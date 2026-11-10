@@ -128,7 +128,8 @@ time; the reducer trims by creation time).
 
 The composer's top rows render inside the box and inside the mobile pill, so
 the surface stays one shape. Top to bottom: the session's folder being gone
-(`SessionFolderMissingRow`), worktree setup, the session still
+(`SessionFolderMissingRow`), a folder the user declined to trust
+(`SessionTrustPausedRow`), worktree setup, the session still
 being created from a draft's first message, and a message waiting for its
 space (`ComposerStatusStrip`; the creating line yields to the worktree line,
 so one wait shows one line, and appears only once the creation has taken
@@ -168,6 +169,17 @@ and a space's session cannot leave it. The move stays
 manual (*Missing worktree directories* in `sync/DOCUMENTATION.md`): only the user
 knows where the folder went. A running location outlives its folder and keeps
 answering, so no row shows while sends still work; the row comes once it unloads.
+
+### Why a folder the user declined to trust gets a row
+
+After "Not this time" in the folder trust prompt (`lib/opencodeTrust.ts`) the
+server refuses every OpenCode request for the folder, so the model and agent
+pickers stay on Loading and a send fails on the missing model before it could
+ask for trust again. `SessionTrustPausedRow` shows while the folder is paused and
+reopens the prompt; once trust is saved it reloads the folder's sessions and
+catalog (`useResumeOpenCodeFolder`). A paused folder stays paused when the user
+opens another folder, unlike the decline that only silences background reads,
+so the row and the sidebar line do not vanish while nothing changed.
 
 `RevertedMessagesStrip` lists the user messages a staged revert hides (see
 "Committing a revert" in `sync/DOCUMENTATION.md`). Its one action is Restore,
@@ -407,7 +419,11 @@ no `image` input gets only the link, since it could not read the attachment
 (#5087), and the modality toast says where the images went. Any other model,
 unknown metadata included, also gets the image attached under the link's name,
 with no second `[name]` citation (#5218). An image that could not be saved
-attaches as before, with an error toast. With the setting off nothing is
+attaches as before, with an error toast. A HEIC the bundled decoder cannot read
+(Apple's HDR gain-map photos) is saved unconverted under its own name and gets
+only its link in both cases: providers refuse HEIC image parts, and the store's
+own fallback for it (`sync/DOCUMENTATION.md`) would write a second copy and add
+a chip that repeats the link. With the setting off nothing is
 saved. One setting covers both cases: a split by model kind read as a puzzle of
 exceptions in Settings, and nobody needs the files for one kind of model only.
 The browser annotation screenshot and comment-field image pastes keep

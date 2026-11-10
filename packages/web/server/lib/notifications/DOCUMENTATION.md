@@ -57,6 +57,7 @@ This module provides notification message preparation utilities for the web serv
   - template resolution and fallback behavior: an empty field in `settings.notificationTemplates` resolves to the default for `settings.locale` (`template-locales.js`), so notification text follows the interface language unless the user wrote their own
   - native notification fanout and web push payload fanout
   - push suppression while any fresh UI visibility heartbeat reports a focused client
+  - the same presence for open windows (`showInOpenClients`): a notification with `requireHidden` goes neither to the desktop shell nor to any connected UI while `isAnyUiVisible()` holds, so a hidden tab, phone browser or second computer stays quiet while the user works in another window. With `notificationMode: 'always'` every window still shows it. See *Why open windows follow the server's presence*
   - no ready notification for a turn that is a step of an auto-review (`isInAutoReview`, answered by `../auto-review`'s `speaksFor`); `notifyAutoReviewEnded` sends the review's one notification when it ends, under the completion toggle, with `review*` texts from `template-locales.js` and APNs type `review`
   - extension notification channels: `deliverToExtensionChannels({ notification, requireHidden })` is called where push is (`sendToChannels`), with the text push gets and the enterprise stripping push applies; see *Extension notification channels* below
   - chats of isolated spaces: `maybeSendPushForTrigger(payload, { spaceId })` reads such a chat's record (title, parent, goal), its last reply and its running subagents inside the space, through `spaceFetchFor(spaceId)`, a `fetch` over the spaces dispatcher (`../spaces/space-fetch.js`), and never asks the host's OpenCode or the host's permission policy about it, since neither knows the chat. What comes back is the space's text, shown as it is shown in the sidebar. A space that cannot be asked gives the generic text, as a host chat whose reads fail does. The host's auto-accept is not consulted for a space's permission request, so such a request notifies after the debounce unless its reply arrives first.
@@ -192,6 +193,10 @@ The `settings` parameter for `prepareNotificationLastMessage` supports `maxLastM
 - Always applies `maxLastMessageLength` truncation to final result.
 
 ## Notes for contributors
+
+### Why open windows follow the server's presence
+
+Each window decides from its own focus, and a hidden one shows a notification because it is not focused, so every open tab and device used to alert while the user worked in one of them. The server already keeps every UI's visibility for push, so it skips the window broadcast while any UI is visible; old clients still cached on a phone follow it too. The alternative, sending only to the device used last, was rejected: it drops the notification when the user walks away with the phone. A visible client that disappears without saying so keeps the others quiet until its report expires (30 seconds), as it does for push.
 
 ### Why interruption suppression is limited to steps
 

@@ -73,6 +73,22 @@ test('shares one absolute deadline across version and session requests', async (
   assert.deepEqual(result, { status: 'unreachable', latencyMs: 2_000 });
 });
 
+test('reports one round trip, the last request, as the latency', async () => {
+  let clock = 0;
+  const result = await baseProbe({
+    expectedServerId: 'server-a',
+    now: () => clock,
+    chromiumFetch: async (url) => {
+      // Health and version take 300ms between them; the session request 40ms.
+      if (url.endsWith('/health')) { clock += 200; return response(200, { serverId: 'server-a' }); }
+      if (url.endsWith('/api/version')) { clock += 100; return response(200, compatibleVersion); }
+      clock += 40;
+      return response(200, {});
+    },
+  });
+  assert.deepEqual(result, { status: 'ok', latencyMs: 40 });
+});
+
 test('checks unauthenticated identity before sending sanitized bearer headers', async () => {
   const calls = [];
   const result = await baseProbe({

@@ -78,6 +78,14 @@ store. The tool description alone is read only when the agent already means to
 call it, so agents told nothing here saved only when the user said "remember".
 The session hears "nothing is stored yet" only when both scopes loaded.
 
+Memory holds what is personal to the user. Project knowledge (decisions,
+rules, recipes, gotchas) goes to the project's own agent docs when it has them
+(`AGENTS.md`, skills, module docs), and to memory only when it has none or the
+fact must stay out of the repository. Told only to skip what the docs already
+held, agents saved every new project rule to memory, the one-call path: a store
+grew to hundreds of entries, many copying module docs, and the rules never
+reached a teammate's agents. Unfinished work goes to project todos and plans.
+
 The save rule also says to save before the final reply. The chat shows only the
 last step's text as the answer, so an agent that answered, then saved, then
 wrote one closing line had its whole answer folded into Activity.
@@ -109,6 +117,15 @@ it with `session.link` (`SESSION_LINK_GUIDANCE`), and only here: the tool's
 description does not repeat it. Stated only in the action's description it went unread: an
 agent handed an issue to investigate saw no reason to open a session-control
 tool, so it never linked anything. It goes into `openchamber.guidance`.
+
+The same sessions are told how to hand work to another session
+(`DISPATCH_GUIDANCE`). Every guidance line that names an action of the
+`openchamber` tool writes the call path out as `tools.openchamber` inside
+`execute`. Told only "the openchamber tool", an agent looked for a direct tool
+of that name, found `openchamber_secret` and `openchamber_render`, and called
+those again and again (#6608). The guidance also sends part of the
+agent's own task to its subagent tool, so a dispatch stays something the user
+asked for.
 
 ## Which branch the session works on
 

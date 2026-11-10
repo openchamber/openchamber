@@ -1,9 +1,11 @@
-import { afterAll, expect, mock, test } from 'bun:test';
+import { afterAll, expect, mock, spyOn, test } from 'bun:test';
 import { strToU8, zipSync } from 'fflate';
 import { attachmentBasename, attachmentWireName } from '@/lib/attachmentIdentity';
 
+let decodeHeic = async (): Promise<Blob> => new Blob(['jpeg-data'], { type: 'image/jpeg' });
+
 mock.module('heic2any', () => ({
-  default: async () => new Blob(['jpeg-data'], { type: 'image/jpeg' }),
+  default: async () => decodeHeic(),
 }));
 
 /**
@@ -34,6 +36,9 @@ Object.defineProperty(globalThis, 'window', {
   configurable: true,
   writable: true,
   value: {
+    // The OpenCode client the store imports subscribes to runtime switches.
+    addEventListener: () => {},
+    removeEventListener: () => {},
     __OPENCHAMBER_ELECTRON__: { runtime: 'electron' },
     __OPENCHAMBER_LOCAL_ORIGIN__: origin,
     __OPENCHAMBER_API_BASE_URL__: origin,
@@ -223,3 +228,30 @@ for (const extension of ['heic', 'heif']) {
     if (file) expect(attachmentBasename(attachmentWireName(file))).toBe(file.filename);
   });
 }
+
+test('a HEIC the decoder cannot read still goes as a note naming its path on desktop', async () => {
+  const { useInputStore } = await import('./input-store');
+  const { opencodeClient } = await import('@/lib/opencode/client');
+  const write = spyOn(opencodeClient, 'writeOpenCodeTempFiles');
+  useInputStore.getState().clearAttachedFiles();
+  decodeHeic = async () => {
+    throw new Error('ERR_LIBHEIF format not supported');
+  };
+  try {
+    // The documented desktop fallback: a file the client cannot prepare goes
+    // as a note naming its path on the shared disk, so the agent can convert
+    // it with its own tools.
+    expect(
+      await useInputStore.getState().addAttachedFile(new File(['heic-data'], 'IMG_4015.heic', { type: 'image/heic' })),
+    ).toBe(true);
+    const [file] = useInputStore.getState().attachedFiles;
+    expect(file?.mimeType).toBe('text/plain');
+    expect(file?.filename).toBe('IMG_4015.heic');
+    expect(await file?.file?.text()).toContain('/Users/me/Documents/IMG_4015.heic');
+    // The file is already on the shared disk, so nothing is copied.
+    expect(write).not.toHaveBeenCalled();
+  } finally {
+    write.mockRestore();
+    decodeHeic = async () => new Blob(['jpeg-data'], { type: 'image/jpeg' });
+  }
+});

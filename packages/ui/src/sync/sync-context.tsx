@@ -113,6 +113,7 @@ import { requestHostTurnStarts } from "./host-session-status-seed"
 import { setHostTurnStartRequester } from "./session-activity-timing"
 import { applyBackgroundShellEvents, directoriesWithRunningShells, refreshBackgroundShells } from "./background-shells"
 import { applyBackgroundImageEvents, refreshBackgroundImages } from "./background-images"
+import { applySessionLiveWorkEvents } from "./session-live-work"
 import { applyReplyCommandEvents } from "./reply-commands"
 import {
   CHAT_LOCATION_RELEASE_DELAY_MS,
@@ -332,6 +333,7 @@ const publishDirectoryEventBatch = (batch: DirectoryEventBatch): void => {
     // flush must see the command.
     applyBackgroundShellEvents(directory, events)
     applyBackgroundImageEvents(directory, events)
+    applySessionLiveWorkEvents(events)
     applyReplyCommandEvents(events)
     applyGlobalSessionStatusEvents(directory, events)
     applyGlobalBlockingRequestEvents(directory, events)
@@ -2232,6 +2234,7 @@ export function handleEvent(
       // indexes cover unopened directories and list/status races.
       applyBackgroundShellEvents(directory, [payload])
       applyBackgroundImageEvents(directory, [payload])
+      applySessionLiveWorkEvents([payload])
       applyReplyCommandEvents([payload])
       applyGlobalSessionStatusEvent(directory, payload)
       if (!heldForAutoAnswer) applyGlobalBlockingRequestEvents(directory, [payload])
