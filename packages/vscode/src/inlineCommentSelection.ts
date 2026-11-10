@@ -249,6 +249,10 @@ export type ComposingThreadFate = 'wait' | 'create' | 'drop';
  * never arrives, or is cancelled before anything was written, leaves no thread
  * behind.
  *
+ * The same answer takes the thread away again when a written field is emptied:
+ * the comment still exists, only its text does not, so the anchor waits for
+ * text again rather than ending the comment with the field.
+ *
  * @param text the draft's text in the snapshot, or undefined when absent
  * @param confirmed whether a snapshot has shown the draft at least once
  */

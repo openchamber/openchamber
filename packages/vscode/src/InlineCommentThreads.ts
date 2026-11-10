@@ -46,6 +46,8 @@ interface OpenChamberCommentThread extends vscode.CommentThread {
     /** Whether the rendered comment still carries the "not delivered" label. */
     commentPending?: boolean;
     draftId?: string;
+    /** Whether this thread's text is written in the chat composer. */
+    composedInChat?: boolean;
     /** Diff identity captured while the thread's editor is authoritative. */
     commentOrigin?: CommentOrigin;
     /** Last body written to this thread, so reconciliation can skip no-op renders. */
@@ -211,6 +213,11 @@ export class InlineCommentThreads implements vscode.Disposable {
             }, DELIVERY_CONFIRMATION_TIMEOUT_MS),
         };
         this.compositionsByDraftId.set(payload.draftId, pending);
+        this.ensurePendingAnchorListener();
+    }
+
+    /** Watches the documents of pending comments, once there is one to watch. */
+    private ensurePendingAnchorListener(): void {
         this.pendingAnchorListener ??= vscode.workspace.onDidChangeTextDocument((event) => {
             this.shiftPendingAnchors(event.document.uri, event.contentChanges);
         });
@@ -323,7 +330,31 @@ export class InlineCommentThreads implements vscode.Disposable {
         thread.collapsibleState = vscode.CommentThreadCollapsibleState.Expanded;
         // The snapshot that carried the text already confirmed the delivery.
         thread.confirmed = true;
+        thread.composedInChat = true;
         this.markAttached(thread, pending.surfaceId, draftId, text);
+    }
+
+    /**
+     * Takes a composed thread off screen without dropping the comment.
+     *
+     * Emptying the field leaves the draft in place, so its anchor goes back to
+     * waiting for text instead of being disposed with it: retyping re-creates
+     * the thread on the same lines, and only a draft that is actually gone ends
+     * the comment.
+     */
+    private parkComposition(thread: OpenChamberCommentThread, surfaceId: string): void {
+        const draftId = thread.draftId;
+        const range = thread.range;
+        if (!draftId || !range) return;
+        this.compositionsByDraftId.set(draftId, {
+            uri: thread.uri,
+            range,
+            origin: thread.commentOrigin ?? { source: 'file' },
+            surfaceId,
+            // The composer already reported holding this draft.
+            confirmed: true,
+        });
+        this.ensurePendingAnchorListener();
     }
 
     /** Turns an editor thread into the read-only view of an attached draft. */
@@ -436,6 +467,20 @@ export class InlineCommentThreads implements vscode.Disposable {
         for (const [draftId, thread] of [...this.threadsByDraftId]) {
             if (!snapshotOwnsThread(thread.surfaceId, surfaceId)) continue;
             const text = byId.get(draftId);
+
+            // A comment written in the composer is only on screen while it has
+            // text. Emptying the field takes the thread away, not the comment:
+            // the anchor waits for text, so retyping brings the thread back and
+            // only a gone draft ends it.
+            if (thread.composedInChat) {
+                const emptied = composingThreadFate(text, true);
+                if (emptied !== 'create') {
+                    if (emptied === 'wait') this.parkComposition(thread, surfaceId);
+                    this.disposeThread(thread);
+                    continue;
+                }
+            }
+
             const fate = reconcileThreadFate(text, Boolean(thread.confirmed));
 
             if (fate === 'wait') continue;
