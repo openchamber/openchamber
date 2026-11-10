@@ -28,6 +28,7 @@ export const createNotificationTriggerRuntime = (deps) => {
     sendPushToAllUiSessions,
     sendApnsToAllUiSessions,
     isAnyInteractiveClientVisible,
+    isAnyUiVisible = () => false,
     buildOpenCodeUrl,
     getOpenCodeAuthHeaders,
     // OpenChamber's own session metadata (the goal lives there, not on the
@@ -176,6 +177,17 @@ export const createNotificationTriggerRuntime = (deps) => {
             console.warn('[APNs] fanout failed:', error?.message ?? error);
           }),
     ]);
+  };
+
+  // The notification open windows and the desktop shell show. Each window only
+  // knows its own focus, so a hidden tab or phone browser would show it while
+  // the user works in another window. Unless the mode shows notifications in
+  // focus too, it reaches no window while any UI reports itself visible: the
+  // same presence web push and extension channels read.
+  const showInOpenClients = (payload) => {
+    if (payload.requireHidden && isAnyUiVisible()) return;
+    const desktopNotificationDelivered = emitDesktopNotification(payload);
+    broadcastUiNotification(payload, { desktopNotificationDelivered });
   };
 
   /**
@@ -624,8 +636,7 @@ export const createNotificationTriggerRuntime = (deps) => {
             directory: notificationDirectory,
             requireHidden: settings.notificationMode !== 'always',
           };
-          const desktopNotificationDelivered = emitDesktopNotification(notificationPayload);
-          broadcastUiNotification(notificationPayload, { desktopNotificationDelivered });
+          showInOpenClients(notificationPayload);
         }
 
         await fanoutPush(
@@ -708,8 +719,7 @@ export const createNotificationTriggerRuntime = (deps) => {
             directory: notificationDirectory,
             requireHidden: settings.notificationMode !== 'always',
           };
-          const desktopNotificationDelivered = emitDesktopNotification(notificationPayload);
-          broadcastUiNotification(notificationPayload, { desktopNotificationDelivered });
+          showInOpenClients(notificationPayload);
         }
 
         await fanoutPush(
@@ -801,8 +811,7 @@ export const createNotificationTriggerRuntime = (deps) => {
             directory: notificationDirectory,
             requireHidden: settings.notificationMode !== 'always',
           };
-          const desktopNotificationDelivered = emitDesktopNotification(notificationPayload);
-          broadcastUiNotification(notificationPayload, { desktopNotificationDelivered });
+          showInOpenClients(notificationPayload);
         }
 
         void fanoutPush(
@@ -942,8 +951,7 @@ export const createNotificationTriggerRuntime = (deps) => {
             directory: notificationDirectory,
             requireHidden: settings.notificationMode !== 'always',
           };
-          const desktopNotificationDelivered = emitDesktopNotification(notificationPayload);
-          broadcastUiNotification(notificationPayload, { desktopNotificationDelivered });
+          showInOpenClients(notificationPayload);
         }
 
         if (requestKey) {
@@ -1042,8 +1050,7 @@ export const createNotificationTriggerRuntime = (deps) => {
     const tag = `review-${sessionId}`;
     if (settings.nativeNotificationsEnabled) {
       const payload = { title, body, tag, kind: 'review', sessionId, directory, requireHidden: settings.notificationMode !== 'always' };
-      const desktopNotificationDelivered = emitDesktopNotification(payload);
-      broadcastUiNotification(payload, { desktopNotificationDelivered });
+      showInOpenClients(payload);
     }
     await sendSettlePush({ sessionId, directory, type: 'review', tag, title, body });
   };
@@ -1060,8 +1067,7 @@ export const createNotificationTriggerRuntime = (deps) => {
     const tag = `pull-request-${createHash('sha256').update(`${item.instance}\n${body}`).digest('hex').slice(0, 16)}-${event}`;
     const payload = { title, body, tag, kind: 'pull-request', requireHidden: settings.notificationMode !== 'always' };
     if (settings.nativeNotificationsEnabled) {
-      const desktopNotificationDelivered = emitDesktopNotification(payload);
-      broadcastUiNotification(payload, { desktopNotificationDelivered });
+      showInOpenClients(payload);
     }
     await fanoutPush({ title, body, phoneBody: `${title}: ${body}`, tag, data: { url: '/', type: 'pull-request' } }, { requireNoSse: true });
     sendToChannels({ kind: 'pull-request', title, body, tag }, settings);
