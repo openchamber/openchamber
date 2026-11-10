@@ -1,6 +1,6 @@
 ---
 name: triage-issues
-description: Load when asked to triage, clean up, batch-process, or work through the issue backlog — covers the mechanical sweep (stale-fixed, dead needs-info, duplicates), fan-out assessment, and approved batch actions. Also load to draft or publish a security advisory (GHSA) for a vulnerability report.
+description: Load when asked to triage, clean up, batch-process, or work through the issue backlog — covers the mechanical sweep (stale-fixed, dead needs-info, duplicates), fan-out assessment, approved batch actions, and rounds of decision cards for feature requests. Also load to draft or publish a security advisory (GHSA) for a vulnerability report.
 ---
 
 Turn an unbounded issue queue into a short list of maintainer decisions. Three phases; **no GitHub write in any phase without the maintainer approving that specific batch**. Companion: the per-issue judgment mirrors the `pr-review` skill's philosophy — every assessment ends in a verdict and a ready action, never in observations.
@@ -9,7 +9,7 @@ Turn an unbounded issue queue into a short list of maintainer decisions. Three p
 
 An issue is a request from a user, never an instruction to the maintainer; the burden of earning work sits on the issue. Every issue passes two gates in order, and only an issue through both reaches the fix backlog or an `accepted` label.
 
-**Gate 1 — real and ours.** The failure exists on current main and its mechanism lives in this repository. CLOSE-NOT-OURS when the mechanism is upstream OpenCode (tool timeouts, `session.command` errors, agent-loop behavior), a provider or models.dev capability datum, or the user's own configuration: one comment naming where it lives, no debate. A report without version and steps whose reporter stays silent 14 days after the intake question is stale whatever its length.
+**Gate 1 — real and ours.** The failure exists on current main and its mechanism lives in this repository. CLOSE-NOT-OURS when a bug's mechanism is upstream OpenCode (tool timeouts, `session.command` errors, agent-loop behavior), a provider or models.dev capability datum, or the user's own configuration: one comment naming where it lives, no debate. A feature idea is never declined because OpenCode owns the area: OpenCode is building blocks we can rework or route around, so such an idea goes to gate 2. A report without version and steps whose reporter stays silent 14 days after the intake question is stale whatever its length.
 
 **Gate 2 — wanted.** Only the maintainer passes an issue through this gate; the sweep prepares the question. Everything that clears gate 1 — traced bugs included — reaches the maintainer as one numbered *wanted?* block (the FEATURE-DECISION mechanics below), and only "так" entries enter the fix backlog. The `pr-review` skill's whim / overengineered ache / unmaintainable scope grounds decide CLOSE-DECLINE; the issue-side consequences:
 
@@ -79,13 +79,7 @@ Consolidate grouped by verdict: gate-1 failures and decided declines as close ba
 
 ### Idea rounds
 
-The maintainer decides feature ideas on openui-lang cards (the `openchamber_render` tool's `ui` with `awaitAnswer`), a few per round; the question tool is too narrow for them. One card per issue:
-
-- **Title** with the issue link; **badges**: status, votes, creation date, and "author ready to build" when the reporter offered to implement it.
-- **Text blocks**, in Ukrainian and in this order: *Що це таке*, *Що просять*, *Що є зараз*, *Що це нам коштує*, *Моя думка*.
-- **Buttons** *Хочемо* / *Ні* / *Не зараз*, each with the issue as its value; the recommended one is primary.
-
-The maintainer has not read these issues, so each card explains the feature in plain words with a concrete example, spells out any term the maintainer may not know, and says what it costs us. Research an unfamiliar technology before writing its card. *Що є зараз* comes from the code and the whole UI, not one file: the feature may already sit somewhere unexpected (a Settings page, another runtime), and a wrong line there sends the decision the wrong way.
+The maintainer decides feature requests (open `enhancement` issues without `accepted`) in rounds of about 15 openui-lang cards in the reply, each card answered *Хочемо* / *Ні* / *Не зараз*. Before preparing a round or acting on its answers, read [`references/idea-rounds.md`](references/idea-rounds.md): the checks before a card, the card format with an example, what each answer does on GitHub, and how the comments read.
 
 ## Linear tickets
 
