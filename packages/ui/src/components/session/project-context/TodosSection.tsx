@@ -83,6 +83,8 @@ const SortableTodoItem: React.FC<{
 };
 
 export const TodosSection: React.FC<{
+  /** The project whose todos these are; the add field keeps its draft there. */
+  projectPath: string;
   todos: ProjectTodoItem[];
   /** Panel-wide filter. Mutations still act on the full list. */
   query: string;
@@ -98,6 +100,7 @@ export const TodosSection: React.FC<{
   onSendToNewSession: (todoId: string, todoText: string) => void;
   onSendToNewWorktreeSession: (todoId: string, todoText: string) => void;
 }> = ({
+  projectPath,
   todos,
   query,
   disabled,
@@ -202,6 +205,8 @@ export const TodosSection: React.FC<{
         placeholder={t('rightSidebar.contextNotesTodo.todo.inputPlaceholder')}
         addLabel={t('rightSidebar.contextNotesTodo.todo.addAria')}
         maxLength={PROJECT_TODO_TEXT_MAX_LENGTH}
+        projectPath={projectPath}
+        draftKind="todo"
         disabled={disabled}
         onSubmit={handleAddTodo}
       />
