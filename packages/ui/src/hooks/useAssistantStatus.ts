@@ -186,6 +186,7 @@ const OPENCHAMBER_STATUS = new Map(Object.entries<ToolActionStatus>({
             'session.fork': 'chat.agentStatus.sessions.fork',
             'session.moveToWorktree': 'chat.agentStatus.sessions.moveToWorktree',
             'session.link': 'chat.agentStatus.sessions.link',
+            'session.unlink': 'chat.agentStatus.sessions.unlink',
             'session.markDone': 'chat.agentStatus.sessions.markDone',
             'session.track': 'chat.agentStatus.sessions.track',
             'file.open': 'chat.agentStatus.sessions.openFile',

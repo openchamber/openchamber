@@ -802,9 +802,9 @@ disabled styling; those pins are the behavioural precedent — the panel that
 shows what is attached can detach it — not the visual one. Pressing it sends
 the removal through the same server operation (`setLinkedIssue(…, false)`) the
 attach flows use — one writer for the list, so a link cannot be dropped by a
-path that does not know the others. The write
-is deliberately user-initiated: an agent links but never removes, so it cannot
-drop a link the user set (`packages/web/server/lib/openchamber-sessions/session-link.js`).
+path that does not know the others. An agent removes a link with the
+`openchamber` tool's `session.unlink`, which runs the same list transform on
+the server (`packages/web/server/lib/openchamber-sessions/session-link.js`).
 A failed removal reports `chat.workStatus.linkedIssues.unlinkFailed` rather than
 leaving the row looking removed.
 

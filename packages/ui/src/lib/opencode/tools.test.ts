@@ -88,6 +88,8 @@ describe("tool row description", () => {
       action: "session.link",
       parameters: { sessionId: "ses_1", link: { identifier: "#3998", title: "Keep PR badges after rebases", url: "https://x", kind: "change" } },
     }, undefined)).toEqual({ kind: "text", value: "session.link · #3998 Keep PR badges after rebases" })
+    expect(toolDescription("openchamber", { action: "session.unlink", parameters: { identifier: "ENG-7" } }, undefined))
+      .toEqual({ kind: "text", value: "session.unlink · ENG-7" })
     expect(toolDescription("openchamber", {
       action: "session.send",
       parameters: { sessionId: "ses_1", prompt: "Addition from the maintainer\nmore" },

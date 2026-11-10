@@ -473,9 +473,21 @@ other.
   A change request or issue address that a source-control provider's
   `urls.thread` names (GitLab's `/-/merge_requests/N` shape on any host) is
   keyed by the thread, so linking it again from a tab like `/diffs` or with a
-  query refreshes the one entry. It only adds or refreshes links, never removes
-  one: the user owns removal. A missing field or a non-http(s) URL is a 400 and
-  nothing is written.
+  query refreshes the one entry. A missing field or a non-http(s) URL is a 400
+  and nothing is written.
+- `session.unlink` removes a link from a session, defaulting to the calling
+  session, whoever made the link. The agent names it the way it linked it: the
+  control tool's `url` or `identifier` input (also read beside the action), or
+  the same complete `link` it linked with; the tool schema requires `title` and
+  `kind` in `link`, so a bare identifier goes in `identifier`. A url removes
+  every entry that linking the address would key the same (a `/files` or `/diffs` tab names its thread) or that is
+  stored under the same address; an identifier matches an entry's
+  `identifier`, its id, or a github.com entry's `#N`, in any case. The removal is
+  the Work Status unlink's own transform (`buildLinkedIssuesPatch` in
+  `../openchamber-sessions/session-linked-issues.js`), decided inside the
+  session's metadata write turn. No match is a 404 that lists the session's
+  links; an identifier that names more than one is a 409 that removes nothing
+  and asks for the url.
 - `file.open` shows a file in the user's viewer. `file-open.js` resolves a
   relative path against the session directory (an explicit `directory` wins),
   refuses a relative path with no directory at all, checks the target is an
@@ -578,6 +590,15 @@ used.
 Session titles belong to OpenCode or the user. A metadata ownership marker
 cannot distinguish a generated title from a user rename made in another
 client or an older release, so `work.name` has no session-title write path.
+
+### Why session.unlink names a link by url or identifier and not by entry id
+
+The agent knows the address and label it linked, while the stored id depends
+on how the server keyed it (`acme/app#7`, `linear:ENG-12`,
+`link:<thread address>`) and on who linked it. Matching what the agent can name
+lets it remove links the user or the UI made too. An identifier such as `#7`
+can name links in two repositories, so an ambiguous one removes nothing and
+the url decides.
 
 ### Why selection is checked before creating a session
 

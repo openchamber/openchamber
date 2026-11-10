@@ -209,8 +209,10 @@ const CONTROL_PARAMETER_PROPERTIES = {
       && !SCHEDULE_ONLY_PARAMETER_NAMES.includes(name)
     )),
   ),
-  // The web tool's `url` is a page to load; here it names what pr.watch follows.
-  url: { type: 'string', description: 'pr.watch: the pull or merge request address' },
+  // The web tool's `url` is a page to load; here it names what pr.watch
+  // follows or which link session.unlink removes.
+  url: { type: 'string', description: 'pr.watch: the pull or merge request address. session.unlink: the address of the link to remove' },
+  identifier: { type: 'string', description: 'session.unlink: the identifier of the link to remove, when no url' },
 };
 const SCHEDULE_PARAMETER_PROPERTIES = {
   ...pickParameters(SCHEDULE_PARAMETER_NAMES),

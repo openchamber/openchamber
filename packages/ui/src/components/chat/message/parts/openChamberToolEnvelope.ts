@@ -54,15 +54,16 @@ export const parseOpenChamberEnvelope = (output: string | undefined): OpenChambe
 
 const text = z.string().trim().min(1).optional().catch(undefined);
 
-export const linkedSchema = z.object({
-  linked: z.object({
-    id: text,
-    number: z.number().optional().catch(undefined),
-    title: text,
-    url: z.string().url(),
-    kind: text,
-  }),
+const linkedEntrySchema = z.object({
+  id: text,
+  number: z.number().optional().catch(undefined),
+  title: text,
+  url: z.string().url(),
+  kind: text,
 });
+
+export const linkedSchema = z.object({ linked: linkedEntrySchema });
+export const unlinkedSchema = z.object({ unlinked: z.array(linkedEntrySchema).min(1) });
 
 export const dispatchedSchema = z.object({
   sessionId: z.string().min(1),
@@ -328,6 +329,7 @@ export const workflowSavedSchema = z.object({ name: z.string(), path: z.string()
 
 const VIEW_SCHEMAS: ReadonlyMap<string, z.ZodType> = new Map<string, z.ZodType>([
   ['session.link', linkedSchema],
+  ['session.unlink', unlinkedSchema],
   ['session.create', dispatchedSchema],
   ['session.send', dispatchedSchema],
   ['session.fork', dispatchedSchema],
@@ -472,6 +474,7 @@ export const OPENCHAMBER_ACTION_VERB_KEYS = {
   'session.messages': 'chat.toolPart.openchamber.action.sessionMessages',
   'session.moveToWorktree': 'chat.toolPart.openchamber.action.sessionMoveToWorktree',
   'session.link': 'chat.toolPart.openchamber.action.sessionLink',
+  'session.unlink': 'chat.toolPart.openchamber.action.sessionUnlink',
   'session.markDone': 'chat.toolPart.openchamber.action.sessionMarkDone',
   'session.track': 'chat.toolPart.openchamber.action.sessionTrack',
   'pr.watch': 'chat.toolPart.openchamber.action.prWatch',

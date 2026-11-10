@@ -175,6 +175,7 @@ const inputSchema = z
         taskId: optionalText,
         providerId: optionalText,
         body: optionalText,
+        identifier: optionalText,
         link: z.object({ identifier: optionalText, title: optionalText }).optional().catch(undefined),
       })
       .optional()
@@ -785,6 +786,7 @@ function openChamberDetail(parsed: ParsedInput): string | undefined {
   const link = parameters?.link
   const linked = link ? [link.identifier, link.title].filter(Boolean).join(" ") : undefined
   const detail = linked
+    || parameters?.identifier
     || parameters?.title
     || parameters?.name
     || parameters?.path

@@ -1331,7 +1331,7 @@ export const createOpenChamberControlService = (dependencies) => {
       if (action === 'session.create' || action === 'session.send' || action === 'session.fork') {
         return executeSessionAction(action, input, contextDirectory, options.signal, options.contextSessionId, options.startedByExtension);
       }
-      if (action === 'session.link') {
+      if (action === 'session.link' || action === 'session.unlink') {
         if (!sessionLinks) throw new OpenChamberControlError('Linking is not available on this server', 503);
         assertSingleScope(input);
         // An explicit session is linked where it lives; the calling session
@@ -1342,8 +1342,9 @@ export const createOpenChamberControlService = (dependencies) => {
           || (explicitSessionID ? await resolveSessionDirectory(explicitSessionID) : null)
           || asNonEmptyString(contextDirectory);
         // Models put the link's fields beside the action as often as inside
-        // `link`; session.link has no other use for them, so both are read.
+        // `link`; these actions have no other use for them, so both are read.
         const link = input.link ?? { url: input.url, title: input.title, kind: input.kind, identifier: input.identifier };
+        if (action === 'session.unlink') return sessionLinks.unlink({ sessionId: sessionID, directory, target: link });
         return sessionLinks.link({ sessionId: sessionID, directory, link });
       }
       if (action === 'pr.watch' || action === 'pr.unwatch') {
