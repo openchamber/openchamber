@@ -1976,8 +1976,6 @@ export const dict = {
   'rightSidebar.contextNotesTodo.todo.addAria': 'إضافة مهمة',
   'rightSidebar.contextNotesTodo.todo.empty': 'لا توجد مهام بعد. أضف قائمة تحقق صغيرة لهذا المشروع.',
   'rightSidebar.contextNotesTodo.todo.actions.markComplete': "وضع علامة مكتملة على \"{text}\"",
-  'rightSidebar.contextNotesTodo.todo.actions.collapse': "طي المهمة \"{text}\"",
-  'rightSidebar.contextNotesTodo.todo.actions.expand': "توسيع المهمة \"{text}\"",
   'rightSidebar.contextNotesTodo.todo.actions.send': "إرسال \"{text}\"",
   'rightSidebar.contextNotesTodo.todo.actions.reorder': "إعادة ترتيب \"{text}\"",
   'rightSidebar.contextNotesTodo.todo.sendMenu.currentSession': 'إرسال إلى الجلسة الحالية',

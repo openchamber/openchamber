@@ -1976,8 +1976,6 @@ export const dict = {
   'rightSidebar.contextNotesTodo.todo.addAria': 'הוסף משימה',
   'rightSidebar.contextNotesTodo.todo.empty': 'אין עדיין משימות. אפשר להוסיף רשימת משימות קצרה לפרויקט הזה.',
   'rightSidebar.contextNotesTodo.todo.actions.markComplete': "סמן את \"{text}\" כהושלמה",
-  'rightSidebar.contextNotesTodo.todo.actions.collapse': "כווץ את המשימה \"{text}\"",
-  'rightSidebar.contextNotesTodo.todo.actions.expand': "הרחב את המשימה \"{text}\"",
   'rightSidebar.contextNotesTodo.todo.actions.send': "שלח את \"{text}\"",
   'rightSidebar.contextNotesTodo.todo.actions.reorder': "שנה את מיקום \"{text}\"",
   'rightSidebar.contextNotesTodo.todo.sendMenu.currentSession': 'שלח להפעלה הנוכחית',

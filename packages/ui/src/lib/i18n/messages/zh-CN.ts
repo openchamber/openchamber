@@ -2032,8 +2032,6 @@ export const dict: Record<I18nKey, string> = {
   'rightSidebar.contextNotesTodo.todo.addAria': '添加待办',
   'rightSidebar.contextNotesTodo.todo.empty': '还没有待办。为此项目添加一个简短清单吧。',
   'rightSidebar.contextNotesTodo.todo.actions.markComplete': '将“{text}”标记为已完成',
-  'rightSidebar.contextNotesTodo.todo.actions.collapse': '折叠待办“{text}”',
-  'rightSidebar.contextNotesTodo.todo.actions.expand': '展开待办“{text}”',
   'rightSidebar.contextNotesTodo.todo.actions.send': '发送“{text}”',
   'rightSidebar.contextNotesTodo.todo.actions.reorder': '重新排序"{text}"',
   'rightSidebar.contextNotesTodo.todo.sendMenu.currentSession': '发送到当前会话',

@@ -13,16 +13,17 @@ import {
   type ProjectPlanProgress,
   type ProjectRef,
 } from '@/lib/projectContextApi';
-import { openSessionLink } from '@/lib/router/openSessionFromRoute';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { cn } from '@/lib/utils';
 import { useProjectContextStore } from '@/stores/useProjectContextStore';
 import { KnowledgeComposer } from './KnowledgeComposer';
-import { KNOWLEDGE_ICON_BUTTON_CLASS } from './knowledgeRowStyle';
+import { KNOWLEDGE_ICON_BUTTON_CLASS, useKnowledgeYieldClass } from './knowledgeRowStyle';
 import { KnowledgeMenu, KnowledgePinToggle, KnowledgeRowContextMenu } from './KnowledgeActions';
 import { ButtonTooltip } from '@/components/ui/action-toolbar';
 import { formatKnowledgeDate } from './knowledgeFormat';
-import { planDeleteKey, scheduleKnowledgeDelete, usePendingKnowledgeDeletes } from './pendingKnowledgeDeletes';
+import { planDeleteKey, usePendingKnowledgeDeletes } from './pendingKnowledgeDeletes';
+import { usePlanActions } from './usePlanActions';
+import { useUIStore } from '@/stores/useUIStore';
 
 /**
  * Agents tick plan steps with their own file tools, which announce nothing,
@@ -31,13 +32,15 @@ import { planDeleteKey, scheduleKnowledgeDelete, usePendingKnowledgeDeletes } fr
  */
 const PLAN_LIST_REFRESH_MS = 10_000;
 
-/** Ticked steps of the plan's `## Steps` checklist, or Done once all are. */
-const PlanProgressLabel: React.FC<{ progress: ProjectPlanProgress }> = ({ progress }) => {
+/** Ticked steps of the plan's `## Steps` checklist, or a check once all are. */
+export const PlanProgressLabel: React.FC<{ progress: ProjectPlanProgress }> = ({ progress }) => {
   const { t } = useI18n();
   if (progress.done >= progress.total) {
+    const done = t('rightSidebar.contextNotesTodo.plans.progress.done');
     return (
-      <span className="shrink-0 typography-micro px-1 rounded leading-none pb-px text-[var(--status-success)] bg-[var(--status-success)]/15">
-        {t('rightSidebar.contextNotesTodo.plans.progress.done')}
+      <span className="inline-flex shrink-0 items-center" title={done}>
+        <Icon name="check" className="size-3.5 text-[var(--status-success)]" />
+        <span className="sr-only">{done}</span>
       </span>
     );
   }
@@ -69,15 +72,17 @@ export const PlansSection: React.FC<{
   onTogglePinned: (planId: string, pinned: boolean) => Promise<boolean>;
   /** The plan open beside the list (split layout), marked as selected. */
   selectedPlanId: string | null;
-}> = ({ projectRef, plans, query, onOpenPlan, pinnedPlanIds, onTogglePinned, selectedPlanId }) => {
+  /** A plan moved to or from the team's folder: its project, and its id before and after. */
+  onPlanMoved: (projectId: string, previousId: string, movedId: string) => void;
+}> = ({ projectRef, plans, query, onOpenPlan, pinnedPlanIds, onTogglePinned, selectedPlanId, onPlanMoved }) => {
   const { t } = useI18n();
   const fileInputRef = React.useRef<HTMLInputElement | null>(null);
   const [isImporting, setIsImporting] = React.useState(false);
   const createPlan = useProjectContextStore((state) => state.createPlan);
-  const removePlan = useProjectContextStore((state) => state.deletePlan);
-  const movePlan = useProjectContextStore((state) => state.movePlan);
-  const [movingPlanId, setMovingPlanId] = React.useState<string | null>(null);
   const pendingDeletes = usePendingKnowledgeDeletes();
+  const { actionsFor, movingPlanId } = usePlanActions(projectRef, onPlanMoved);
+  const yieldToActions = useKnowledgeYieldClass();
+  const isMobile = useUIStore((state) => state.isMobile);
   const loadContext = useProjectContextStore((state) => state.load);
 
   React.useEffect(() => {
@@ -87,36 +92,6 @@ export const PlansSection: React.FC<{
     }, PLAN_LIST_REFRESH_MS);
     return () => window.clearInterval(timer);
   }, [loadContext, projectRef]);
-
-  // A plan changes id when it moves between the two folders; the list reloads
-  // from the returned context, so nothing here tracks the new id.
-  const handleMovePlan = React.useCallback(
-    async (plan: ProjectPlanLink) => {
-      if (movingPlanId) return;
-      const direction = plan.source === 'shared' ? 'unshare' : 'share';
-      setMovingPlanId(plan.id);
-      try {
-        const ok = await movePlan(projectRef, plan.id, direction);
-        if (!ok) {
-          const detail = useProjectContextStore.getState().getEntry(projectRef).error;
-          toast.error(t('rightSidebar.contextNotesTodo.toast.movePlanFailed'), detail ? { description: detail } : undefined);
-        }
-      } finally {
-        setMovingPlanId(null);
-      }
-    },
-    [movePlan, movingPlanId, projectRef, t],
-  );
-
-  const handleDeletePlan = React.useCallback((planId: string) => {
-    scheduleKnowledgeDelete({
-      key: planDeleteKey(projectRef, planId),
-      message: t('rightSidebar.contextNotesTodo.deleted.plan'),
-      undoLabel: t('rightSidebar.contextNotesTodo.undo'),
-      run: () => removePlan(projectRef, planId),
-      onFailure: () => toast.error(t('rightSidebar.contextNotesTodo.toast.deletePlanFailed')),
-    });
-  }, [projectRef, removePlan, t]);
 
   // Imported files arrive as a whole markdown document; split it the same way
   // the server would so the stored plan keeps the author's heading.
@@ -281,88 +256,76 @@ export const PlansSection: React.FC<{
         )}
       />
 
-      <div className="rounded-lg border border-edge bg-background/40">
-        {visiblePlans.length === 0 ? (
-          <p className="px-3 py-3 typography-meta text-muted-foreground">
-            {query.trim()
-              ? t('rightSidebar.contextNotesTodo.search.noResults', { query: query.trim() })
-              : t('rightSidebar.contextNotesTodo.plans.empty')}
-          </p>
-        ) : (
-          <ul className="divide-y divide-edge">
-            {visiblePlans.map((plan) => {
-              const pinned = pinnedPlanIds.has(plan.id);
-              const shared = plan.source === 'shared';
-              const sessionId = plan.session?.sessionId;
-              const menuItems = [
-                {
-                  id: 'move',
-                  label: shared
-                    ? t('rightSidebar.contextNotesTodo.plans.menu.makePersonal')
-                    : t('rightSidebar.contextNotesTodo.plans.menu.share'),
-                  hint: shared
-                    ? t('rightSidebar.contextNotesTodo.plans.makePersonal')
-                    : t('rightSidebar.contextNotesTodo.plans.share'),
-                  onSelect: () => void handleMovePlan(plan),
-                },
-                {
-                  id: 'delete',
-                  label: t('rightSidebar.contextNotesTodo.plans.deletePlan'),
-                  destructive: true,
-                  onSelect: () => handleDeletePlan(plan.id),
-                },
-              ];
-              return (
-                <KnowledgeRowContextMenu
-                  key={plan.id}
-                  items={menuItems}
-                  disabled={movingPlanId === plan.id}
-                  render={(
-                    <li
-                      data-knowledge-entry-id={plan.id}
-                      aria-current={plan.id === selectedPlanId ? 'true' : undefined}
-                      className={cn('group/knowledge flex items-center gap-1 py-1 pe-1.5 ps-1', plan.id === selectedPlanId && 'bg-interactive-selection/40')}
-                    />
+      {visiblePlans.length === 0 ? (
+        <p className="px-1 typography-meta text-muted-foreground">
+          {query.trim()
+            ? t('rightSidebar.contextNotesTodo.search.noResults', { query: query.trim() })
+            : t('rightSidebar.contextNotesTodo.plans.empty')}
+        </p>
+      ) : (
+        <ul className="flex flex-col">
+          {visiblePlans.map((plan) => {
+            const pinned = pinnedPlanIds.has(plan.id);
+            const selected = plan.id === selectedPlanId;
+            const menuItems = actionsFor(plan);
+            return (
+              <KnowledgeRowContextMenu
+                key={plan.id}
+                items={menuItems}
+                disabled={movingPlanId === plan.id}
+                render={(
+                  <li
+                    data-knowledge-entry-id={plan.id}
+                    aria-current={selected ? 'true' : undefined}
+                    className={cn('group/knowledge relative flex items-center rounded-md', selected && 'bg-interactive-selection/40')}
+                  />
+                )}
+              >
+                <button
+                  type="button"
+                  onClick={() => handleOpenPlan(plan)}
+                  className={cn(
+                    'flex min-h-8 min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1 text-start transition-colors focus-visible:outline-none',
+                    selected ? 'text-foreground' : 'oc-title-rest hover:text-foreground',
                   )}
                 >
-                  <button
-                    type="button"
-                    onClick={() => handleOpenPlan(plan)}
-                    className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-1.5 py-1 text-start text-foreground/85 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                  >
-                    <span className="min-w-0 truncate typography-ui-label" dir="auto">{plan.title}</span>
-                    {shared ? (
-                      <span className="shrink-0 typography-micro px-1 rounded leading-none pb-px text-muted-foreground bg-[var(--surface-subtle)]">
-                        {t('rightSidebar.contextNotesTodo.plans.sharedBadge')}
+                  <span className="min-w-0 truncate typography-ui-label" dir="auto" title={plan.title}>{plan.title}</span>
+                  {plan.source === 'shared' ? (
+                    <span className="shrink-0 typography-micro text-muted-foreground">
+                      {t('rightSidebar.contextNotesTodo.plans.sharedBadge')}
+                    </span>
+                  ) : null}
+                  {plan.progress ? <PlanProgressLabel progress={plan.progress} /> : null}
+                  {/* The date keeps its place; the actions show over it. */}
+                  <span className={cn('ms-auto flex flex-shrink-0 items-center gap-1 typography-micro text-muted-foreground transition-opacity', yieldToActions)}>
+                    {pinned && !isMobile ? (
+                      <span className="inline-flex" title={t('rightSidebar.contextNotesTodo.pin.attached')}>
+                        <Icon name="pushpin-2-fill" className="size-3" />
+                        <span className="sr-only">{t('rightSidebar.contextNotesTodo.pin.attached')}</span>
                       </span>
                     ) : null}
-                    {plan.progress ? <PlanProgressLabel progress={plan.progress} /> : null}
-                    <span className="ms-auto flex-shrink-0 typography-micro text-muted-foreground">
-                      {formatKnowledgeDate(plan.createdAt)}
-                    </span>
-                  </button>
-                  {sessionId ? (
-                    <button
-                      type="button"
-                      onClick={() => void openSessionLink(sessionId, null)}
-                      className={KNOWLEDGE_ICON_BUTTON_CLASS}
-                      aria-label={t('rightSidebar.contextNotesTodo.plans.session.open')}
-                      data-row-tooltip={t('rightSidebar.contextNotesTodo.plans.session.open')}
-                    >
-                      <Icon name="chat-3" className="h-3.5 w-3.5" />
-                    </button>
-                  ) : null}
+                    {formatKnowledgeDate(plan.createdAt)}
+                  </span>
+                </button>
+                {/* Over the date, so it takes clicks only while it shows: an
+                    invisible pin under the date would toggle on a plain click. */}
+                <div
+                  className={cn(
+                    'flex flex-shrink-0 items-center gap-0.5 pe-1',
+                    !isMobile && 'pointer-events-none absolute inset-y-0 end-0 group-hover/knowledge:pointer-events-auto group-has-[:focus-visible]/knowledge:pointer-events-auto',
+                  )}
+                >
                   <KnowledgePinToggle
                     pinned={pinned}
                     onToggle={() => void handleTogglePinned(plan.id, !pinned)}
                   />
                   <KnowledgeMenu disabled={movingPlanId === plan.id} items={menuItems} />
-                </KnowledgeRowContextMenu>
-              );
-            })}
-          </ul>
-        )}
-      </div>
+                </div>
+              </KnowledgeRowContextMenu>
+            );
+          })}
+        </ul>
+      )}
     </div>
   );
 };

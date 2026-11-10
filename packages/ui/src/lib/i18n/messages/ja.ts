@@ -2062,8 +2062,6 @@ export const dict: Record<I18nKey, string> = {
   'rightSidebar.contextNotesTodo.todo.addAria': 'TODOを追加',
   'rightSidebar.contextNotesTodo.todo.empty': 'まだTODOはありません。このプロジェクトのチェックリストを追加してください。',
   'rightSidebar.contextNotesTodo.todo.actions.markComplete': '「{text}」を完了にする',
-  'rightSidebar.contextNotesTodo.todo.actions.collapse': 'TODO「{text}」を折りたたむ',
-  'rightSidebar.contextNotesTodo.todo.actions.expand': 'TODO「{text}」を展開',
   'rightSidebar.contextNotesTodo.todo.actions.send': '「{text}」を送信',
   'rightSidebar.contextNotesTodo.todo.actions.reorder': '「{text}」を並び替え',
   'rightSidebar.contextNotesTodo.todo.sendMenu.currentSession': '現在のセッションに送信',

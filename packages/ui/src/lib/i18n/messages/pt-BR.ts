@@ -2034,8 +2034,6 @@ export const dict: Record<I18nKey, string> = {
   "rightSidebar.contextNotesTodo.todo.addAria": "Adicionar tarefa pendente",
   "rightSidebar.contextNotesTodo.todo.empty": "Ainda não há tarefas pendentes. Adicione uma pequena lista de verificação para este projeto.",
   "rightSidebar.contextNotesTodo.todo.actions.markComplete": "Marcar \"{text}\" como concluída",
-  "rightSidebar.contextNotesTodo.todo.actions.collapse": "Recolher tarefa pendente \"{text}\"",
-  "rightSidebar.contextNotesTodo.todo.actions.expand": "Expandir tarefa pendente \"{text}\"",
   "rightSidebar.contextNotesTodo.todo.actions.send": "Enviar \"{text}\"",
   "rightSidebar.contextNotesTodo.todo.actions.reorder": "Reordenar \"{text}\"",
   "rightSidebar.contextNotesTodo.todo.sendMenu.currentSession": "Enviar à sessão atual",

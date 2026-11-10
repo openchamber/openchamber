@@ -2061,8 +2061,6 @@ export const dict = {
   'rightSidebar.contextNotesTodo.todo.addAria': 'Taak toevoegen',
   'rightSidebar.contextNotesTodo.todo.empty': 'Nog geen taken. Voeg een kleine checklist toe voor dit project.',
   'rightSidebar.contextNotesTodo.todo.actions.markComplete': '"{text}" als afgerond markeren',
-  'rightSidebar.contextNotesTodo.todo.actions.collapse': 'Taak "{text}" samenvouwen',
-  'rightSidebar.contextNotesTodo.todo.actions.expand': 'Taak "{text}" uitvouwen',
   'rightSidebar.contextNotesTodo.todo.actions.send': '"{text}" sturen',
   'rightSidebar.contextNotesTodo.todo.actions.reorder': '"{text}" herordenen',
   'rightSidebar.contextNotesTodo.todo.sendMenu.currentSession': 'Naar huidige sessie sturen',

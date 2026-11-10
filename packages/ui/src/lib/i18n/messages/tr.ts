@@ -1928,8 +1928,6 @@ export const dict = {
   'rightSidebar.contextNotesTodo.todo.addAria': 'Yapılacak ekle',
   'rightSidebar.contextNotesTodo.todo.empty': 'Henüz yapılacak yok. Bu proje için küçük bir kontrol listesi ekleyin.',
   'rightSidebar.contextNotesTodo.todo.actions.markComplete': 'Tamamlandı olarak işaretle: "{text}"',
-  'rightSidebar.contextNotesTodo.todo.actions.collapse': 'Daralt: "{text}"',
-  'rightSidebar.contextNotesTodo.todo.actions.expand': 'Genişlet: "{text}"',
   'rightSidebar.contextNotesTodo.todo.actions.send': 'Gönder: "{text}"',
   'rightSidebar.contextNotesTodo.todo.actions.reorder': 'Yeniden sırala: "{text}"',
   'rightSidebar.contextNotesTodo.todo.sendMenu.currentSession': 'Mevcut session\'a gönder',

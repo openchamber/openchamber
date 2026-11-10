@@ -2066,8 +2066,6 @@ export const dict = {
   'rightSidebar.contextNotesTodo.todo.addAria': 'Add todo',
   'rightSidebar.contextNotesTodo.todo.empty': 'No todos yet. Add a small checklist for this project.',
   'rightSidebar.contextNotesTodo.todo.actions.markComplete': 'Mark "{text}" complete',
-  'rightSidebar.contextNotesTodo.todo.actions.collapse': 'Collapse todo "{text}"',
-  'rightSidebar.contextNotesTodo.todo.actions.expand': 'Expand todo "{text}"',
   'rightSidebar.contextNotesTodo.todo.actions.send': 'Send "{text}"',
   'rightSidebar.contextNotesTodo.todo.actions.reorder': 'Reorder "{text}"',
   'rightSidebar.contextNotesTodo.todo.sendMenu.currentSession': 'Send to current session',

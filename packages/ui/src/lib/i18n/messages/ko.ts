@@ -2066,8 +2066,6 @@ export const dict: Record<I18nKey, string> = {
   'rightSidebar.contextNotesTodo.todo.addAria': 'Todo 추가',
   'rightSidebar.contextNotesTodo.todo.empty': '아직 Todo가 없습니다. 이 프로젝트용 체크리스트를 추가해 보세요.',
   'rightSidebar.contextNotesTodo.todo.actions.markComplete': '"{text}" 완료로 표시',
-  'rightSidebar.contextNotesTodo.todo.actions.collapse': '접기 todo "{text}"',
-  'rightSidebar.contextNotesTodo.todo.actions.expand': '펼치기 todo "{text}"',
   'rightSidebar.contextNotesTodo.todo.actions.send': '보내기 "{text}"',
   'rightSidebar.contextNotesTodo.todo.actions.reorder': '재정렬 "{text}"',
   'rightSidebar.contextNotesTodo.todo.sendMenu.currentSession': '현재 세션으로 보내기',

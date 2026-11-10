@@ -739,6 +739,7 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
             <ErrorBoundary>
               <PlanView
                 savedProjectPlan={{ projectRef: openPlan.projectRef, planId: openPlan.id }}
+                onClose={() => setOpenPlan(null)}
                 onNavigatedToChat={() => {
                   closeSurface();
                   closeWorkspace();

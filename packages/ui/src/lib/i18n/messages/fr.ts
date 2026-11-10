@@ -1820,8 +1820,6 @@ export const dict = {
   'rightSidebar.contextNotesTodo.todo.addAria': 'Ajouter une tâche',
   'rightSidebar.contextNotesTodo.todo.empty': 'Aucune tâche pour l\'instant. Ajoutez une petite liste de contrôle pour ce projet.',
   'rightSidebar.contextNotesTodo.todo.actions.markComplete': 'Marquer "{text}" comme terminée',
-  'rightSidebar.contextNotesTodo.todo.actions.collapse': 'Réduire la tâche "{text}"',
-  'rightSidebar.contextNotesTodo.todo.actions.expand': 'Développer la tâche "{text}"',
   'rightSidebar.contextNotesTodo.todo.actions.send': 'Envoyer "{text}"',
   'rightSidebar.contextNotesTodo.todo.actions.reorder': 'Réordonner "{text}"',
   'rightSidebar.contextNotesTodo.todo.sendMenu.currentSession': 'Envoyer à la session en cours',

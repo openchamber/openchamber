@@ -1806,8 +1806,6 @@ export const dict = {
   'rightSidebar.contextNotesTodo.todo.addAria': 'Aufgabe hinzufügen',
   'rightSidebar.contextNotesTodo.todo.empty': 'Noch keine Aufgaben. Fügen Sie eine kleine Checkliste für dieses Projekt hinzu.',
   'rightSidebar.contextNotesTodo.todo.actions.markComplete': 'Markiere "{text}" als erledigt',
-  'rightSidebar.contextNotesTodo.todo.actions.collapse': 'Aufgabe "{text}" einklappen',
-  'rightSidebar.contextNotesTodo.todo.actions.expand': 'Aufgabe "{text}" ausklappen',
   'rightSidebar.contextNotesTodo.todo.actions.send': 'Sende "{text}"',
   'rightSidebar.contextNotesTodo.todo.actions.reorder': 'Ordne "{text}" neu',
   'rightSidebar.contextNotesTodo.todo.sendMenu.currentSession': 'An aktuelle Sitzung senden',

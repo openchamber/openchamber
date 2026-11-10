@@ -31,9 +31,9 @@ export const KnowledgeCard: React.FC<{
     <li
       data-knowledge-entry-id={entryId}
       className={cn(
-        'group/knowledge oc-surface-elevated flex cursor-pointer flex-col gap-1 rounded-lg border border-edge bg-surface-elevated px-2.5 py-2 transition-colors',
-        'hover:border-[var(--interactive-border)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-        selected && 'border-[var(--interactive-selection)] bg-interactive-selection/40',
+        // A flat tile, set off by tone: layout carries no border.
+        'group/knowledge flex cursor-pointer flex-col gap-1 rounded-lg px-2.5 py-2 transition-colors focus-visible:outline-none',
+        selected ? 'bg-interactive-selection/40' : 'oc-tile oc-tile-hover focus-visible:bg-interactive-hover',
       )}
       aria-current={selected ? 'true' : undefined}
       onClick={onOpen}
