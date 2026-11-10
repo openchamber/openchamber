@@ -61,8 +61,13 @@ test('a slow prompt save preserves and then persists the newer blurred draft', a
     if (pathname === '/api/config/settings') {
       if (request.method === 'GET') return Response.json({});
       const body = await request.text();
+      const reply = () => new Response(body, { headers: { 'Content-Type': 'application/json' } });
+      // The directory store loads with Settings and saves the home folder it
+      // resolves; on a slow run that write misses the prompt's debounce window.
+      const keys = Object.keys(JSON.parse(body));
+      if (keys.length === 1 && keys[0] === 'homeDirectory') return reply();
       return new Promise<Response>((resolve) => {
-        settingsWrites.push(() => resolve(new Response(body, { headers: { 'Content-Type': 'application/json' } })));
+        settingsWrites.push(() => resolve(reply()));
       });
     }
     throw new Error(`Unexpected request: ${request.method} ${pathname}`);
