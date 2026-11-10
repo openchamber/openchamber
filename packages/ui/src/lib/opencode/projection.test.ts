@@ -225,12 +225,12 @@ describe("projectMessage (other roles)", () => {
     const model = { providerID: "summary-provider", id: "summary-model" }
     const entry = projectMessage({
       id: "compact", type: "compaction", time: { created: 1 }, status: "completed",
-      reason: "auto", summary: "Summary", recent: "", model,
+      reason: "auto", summary: "Summary", model,
     }, "ses_1")
     expect(entry.message).toMatchObject({ role: "compaction", model })
     const legacy = projectMessage({
       id: "old", type: "compaction", time: { created: 1 }, status: "completed",
-      reason: "auto", summary: "Summary", recent: "",
+      reason: "auto", summary: "Summary",
     }, "ses_1")
     expect(legacy.message).toMatchObject({ role: "compaction", summary: "Summary" })
     expect(legacy.message).not.toHaveProperty("model")
