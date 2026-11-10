@@ -1,128 +1,149 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Rows carry equal weights so the list fills whatever height the launcher gives the widget;
+     a wrap_content list left the bottom of a taller cell empty. -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
+    android:background="@drawable/widget_background"
     android:orientation="vertical"
-    android:padding="10dp"
-    android:background="@drawable/widget_background">
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:gravity="center_vertical">
-            <TextView
-                android:id="@+id/widget_attention"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:textSize="12sp"
-                android:textStyle="bold"
-                android:textColor="#FF9F0A"
-                tools:ignore="HardcodedText"
-                android:text="" />
-            <TextView
-                android:layout_width="0dp"
-                android:layout_weight="1"
-                android:layout_height="wrap_content"
-                android:gravity="end"
-                android:textSize="11sp"
-                android:textColor="#8E8E93"
-                android:text="OpenChamber" />
-        </LinearLayout>
+    android:padding="10dp">
 
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
+
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:ellipsize="end"
+            android:singleLine="true"
+            android:text="OpenChamber"
+            android:textColor="#FF8E8E93"
+            android:textSize="12sp"
+            android:textStyle="normal" />
+
+        <TextView
+            android:id="@+id/widget_attention"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text=""
+            android:textColor="#FFFF9F0A"
+            android:textSize="12sp"
+            android:textStyle="bold" />
+        <TextView
+            android:id="@+id/widget_new"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="10dp"
+            android:paddingStart="4dp"
+            android:paddingEnd="4dp"
+            android:text="+"
+            android:textColor="#FF64B5FF"
+            android:textSize="18sp"
+            android:textStyle="bold" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:id="@+id/widget_rows"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_marginTop="4dp"
+        android:layout_weight="1"
+        android:orientation="vertical">
         <LinearLayout
             android:id="@+id/r1"
             android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:paddingTop="3dp"
-            android:paddingBottom="3dp"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:background="@android:color/transparent"
             android:gravity="center_vertical"
-            android:background="@android:color/transparent">
+            android:orientation="horizontal">
+
             <ImageView
                 android:id="@+id/r1_dot"
-                android:layout_width="6dp"
-                android:layout_height="6dp"
+                android:layout_width="7dp"
+                android:layout_height="7dp"
                 android:layout_marginEnd="6dp"
-                android:src="@drawable/widget_dot_unread"
-                android:contentDescription="@null" />
+                android:contentDescription="@null"
+                android:src="@drawable/widget_dot_unread" />
+
             <TextView
                 android:id="@+id/r1_title"
                 android:layout_width="0dp"
-                android:layout_weight="1"
                 android:layout_height="wrap_content"
-                android:singleLine="true"
+                android:layout_weight="1"
                 android:ellipsize="end"
-                android:textSize="12sp"
-                android:textColor="#FFFFFF" />
+                android:singleLine="true"
+                android:textColor="#FFFFFFFF"
+                android:textSize="14sp" />
         </LinearLayout>
         <LinearLayout
             android:id="@+id/r2"
             android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:paddingTop="3dp"
-            android:paddingBottom="3dp"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:background="@android:color/transparent"
             android:gravity="center_vertical"
-            android:background="@android:color/transparent">
+            android:orientation="horizontal">
+
             <ImageView
                 android:id="@+id/r2_dot"
-                android:layout_width="6dp"
-                android:layout_height="6dp"
+                android:layout_width="7dp"
+                android:layout_height="7dp"
                 android:layout_marginEnd="6dp"
-                android:src="@drawable/widget_dot_unread"
-                android:contentDescription="@null" />
+                android:contentDescription="@null"
+                android:src="@drawable/widget_dot_unread" />
+
             <TextView
                 android:id="@+id/r2_title"
                 android:layout_width="0dp"
-                android:layout_weight="1"
                 android:layout_height="wrap_content"
-                android:singleLine="true"
+                android:layout_weight="1"
                 android:ellipsize="end"
-                android:textSize="12sp"
-                android:textColor="#FFFFFF" />
+                android:singleLine="true"
+                android:textColor="#FFFFFFFF"
+                android:textSize="14sp" />
         </LinearLayout>
         <LinearLayout
             android:id="@+id/r3"
             android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:paddingTop="3dp"
-            android:paddingBottom="3dp"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:background="@android:color/transparent"
             android:gravity="center_vertical"
-            android:background="@android:color/transparent">
+            android:orientation="horizontal">
+
             <ImageView
                 android:id="@+id/r3_dot"
-                android:layout_width="6dp"
-                android:layout_height="6dp"
+                android:layout_width="7dp"
+                android:layout_height="7dp"
                 android:layout_marginEnd="6dp"
-                android:src="@drawable/widget_dot_unread"
-                android:contentDescription="@null" />
+                android:contentDescription="@null"
+                android:src="@drawable/widget_dot_unread" />
+
             <TextView
                 android:id="@+id/r3_title"
                 android:layout_width="0dp"
-                android:layout_weight="1"
                 android:layout_height="wrap_content"
-                android:singleLine="true"
+                android:layout_weight="1"
                 android:ellipsize="end"
-                android:textSize="12sp"
-                android:textColor="#FFFFFF" />
+                android:singleLine="true"
+                android:textColor="#FFFFFFFF"
+                android:textSize="14sp" />
         </LinearLayout>
-        <TextView
-            android:id="@+id/widget_empty"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:textSize="12sp"
-            android:textColor="#8E8E93"
-            android:visibility="gone"
-            android:text="@string/widget_no_sessions" />
-        <TextView
-            android:id="@+id/widget_new"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="6dp"
-            android:textSize="12sp"
-            android:textStyle="bold"
-            android:textColor="#0A84FF"
-            android:text="@string/widget_new_session" />
+    </LinearLayout>
+
+    <TextView
+        android:id="@+id/widget_empty"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:gravity="center"
+        android:text="@string/widget_no_sessions"
+        android:textColor="#FF8E8E93"
+        android:textSize="12sp"
+        android:visibility="gone" />
 </LinearLayout>
