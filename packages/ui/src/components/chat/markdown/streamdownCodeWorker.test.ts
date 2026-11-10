@@ -32,6 +32,14 @@ test('incremental worker matches a full WASM pass through appends and edits', as
   native.dispose();
 }, 15000);
 
+// Highlights drops ANSI escapes and merges the text around them, which the
+// offset-packed transfer cannot carry; ANSI keeps the source text on Shiki.
+test('ANSI blocks keep every character of the source', async () => {
+  const code = '\x1b[31ma\x1b[31mb\x1b[0m plain\nnext \x1b[32mgreen\x1b[0m';
+  const result = await client.highlight(code, 'ansi', false);
+  expect(result?.tokens.map((line) => line.map((token) => token.content).join('')).join('\n')).toBe(code);
+}, 15000);
+
 test('completed results retain identity on remount while recent streaming results can settle', async () => {
   const code = 'const cached = "重用";';
   const result = await client.highlight(code, 'purescript', false);

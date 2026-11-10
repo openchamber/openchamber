@@ -326,13 +326,18 @@ rendering keeps its direct-child rules. This CSS alternative still needs its
 own browser performance comparison; the explicit-metadata experiment does not
 establish its invalidation cost.
 
-Markdown code in languages with a `@pierre/highlights` lexer (about 80, every
+Markdown code in languages with a `@pierre/highlights` lexer (about 170, every
 common one) is tokenized on the main thread, synchronously, in one pass over
 the whole block with `MARKDOWN_HIGHLIGHTS_THEME`, so the block paints
 highlighted on its first commit. The rest run in `streamdown-code.worker.ts`
 on Shiki/Oniguruma with the same grammar sanitization as the shared code
 worker and `MARKDOWN_SHIKI_THEME`. Until the Highlights import settles, the
 first blocks wait for it and then take the same split. Both themes resolve to the same `--md-*` variables.
+ANSI is the exception: Highlights has a lexer for it, but its tokens drop the
+escape sequences and merge the text around them, so token text no longer
+matches the source. Everything here places tokens by source offset (the packed
+transfer ranges, CodeMirror decorations), so `isHighlightsLanguage` in
+`highlightsEngine.ts` keeps ANSI on Shiki.
 For Shiki languages, complete-line grammar state stays in eight bounded worker
 lineages; edits restart from a matching prefix or a full pass. The client preserves the pre-migration cache
 policy: four recent streaming results, four complete-line snapshots, and a
