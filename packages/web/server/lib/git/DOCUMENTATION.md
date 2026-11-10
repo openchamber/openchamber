@@ -382,6 +382,8 @@ contributor worktrees and no agent tool, so the parameter does not exist there;
 a server without the pipeline answers 501 and never falls back to a plain
 branch worktree.
 
+Providers with service-only login, such as Codebase, fetch MR heads through the selected primary remote's existing transport using the ordinary network-operation planner and executor. This path accepts only same-repository heads, never requests an exported provider credential, and leaves the managed contributor-transfer path unchanged for providers offering token login. The provider revalidates the requested head after fetch; existing worktree creation verifies the exact revision before attaching the checkout. Hydration uses the primary remote URL that supplied the objects. Public operation snapshots retain the ordinary `fetch` schema.
+
 The agent tool's `session.moveToWorktree` makes a plain branch worktree
 through `createWorktree` for a session that already exists
 (`../openchamber-sessions/worktree-move.js`): a new branch, or with
