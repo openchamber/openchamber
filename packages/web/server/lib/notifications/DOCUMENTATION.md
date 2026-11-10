@@ -40,7 +40,7 @@ This module provides notification message preparation utilities for the web serv
   - `GET /api/sessions/snapshot`
   - `GET /api/sessions/status`
   - `GET /api/sessions/:id/status`
-  - `POST /api/sessions/:id/view` and `POST /api/sessions/:id/message-sent`: only reset the native push badge. Whether a session is unread is OpenCode's own `time.viewed`.
+  - `POST /api/sessions/:id/view` and `POST /api/sessions/:id/message-sent`: reset the native push badge and clear the session's pushed notifications (*Clearing handled notifications*). Whether a session is unread is OpenCode's own `time.viewed`.
 
 ### Trigger runtime API (runtime.js)
 
@@ -61,6 +61,42 @@ This module provides notification message preparation utilities for the web serv
   - no ready notification for a turn that is a step of an auto-review (`isInAutoReview`, answered by `../auto-review`'s `speaksFor`); `notifyAutoReviewEnded` sends the review's one notification when it ends, under the completion toggle, with `review*` texts from `template-locales.js` and APNs type `review`
   - extension notification channels: `deliverToExtensionChannels({ notification, requireHidden })` is called where push is (`sendToChannels`), with the text push gets and the enterprise stripping push applies; see *Extension notification channels* below
   - chats of isolated spaces: `maybeSendPushForTrigger(payload, { spaceId })` reads such a chat's record (title, parent, goal), its last reply and its running subagents inside the space, through `spaceFetchFor(spaceId)`, a `fetch` over the spaces dispatcher (`../spaces/space-fetch.js`), and never asks the host's OpenCode or the host's permission policy about it, since neither knows the chat. What comes back is the space's text, shown as it is shown in the sidebar. A space that cannot be asked gives the generic text, as a host chat whose reads fail does. The host's auto-accept is not consulted for a space's permission request, so such a request notifies after the debounce unless its reply arrives first.
+
+### Clearing handled notifications (runtime.js, apns-runtime.js)
+
+A pushed notification is removed from the phones and browsers once its cause is handled anywhere. Every push has a tag that names its cause, and the same tag is the APNs collapse id, the Android notification tag, the web notification tag and `data.tag` on the phone:
+
+| Tag | Cleared when |
+|---|---|
+| `ready-<sessionId>`, `error-<sessionId>`, `goal-<sessionId>`, `review-<sessionId>` | the session's next turn starts (`session.status` busy with `turnStartedAt`, which only `session.execution.started` carries), or the session is viewed or sent a message from any OpenChamber client (`POST /api/sessions/:id/view`, `/message-sent`) |
+| `question-<sessionId>` | the form it shows settles (`form.settled`) or the page it shows stops waiting (`openchamber:page-settled`), or as above |
+| `permission-<sessionId>` | the request it shows is replied to (`permission.replied`), or as above |
+
+Pull request notifications have no cause the server can see handled, and stay until dismissed.
+
+The trigger runtime keeps the open tags (`openPushTags`: the session, the request a tag shows, whether it went to the phone apps, the id of its latest push) and the 20 most recently cleared ones, and saves both to `push-open-tags.json` in the data directory on every change, one write at a time, so a notification pushed before a restart is still cleared after it. One tag can show several requests in turn (two permissions of one session), so a reply clears the tag only when it answers the request the tag shows now. Clearing a tag also takes it out of the badge count, and the clearing push carries the new count.
+
+- **Nothing stale is sent.** A notification claims its tag before its text is prepared (`claimPushTag`), and a cause handled meanwhile takes the claim away, so the push is dropped: a form or page that settles inside the 500 ms debounce or while the session name is read, a permission replied to during the auto-accept lookup or later. A notification is also dropped when the session's notifications were cleared (`sessionClearedAt`) after its turn ended or its ask arrived.
+- **A late clearing never removes a newer notification.** Every push carries `nid` (in `data` for web push), a time-based id that rises with each push. A clearing names `tag@nid`, the newest push it covers, and the phone or browser keeps a notification under that tag whose `nid` is higher. A clearing push and a later visible push with the same tag can arrive in either order: background pushes and normal-priority FCM messages are delayed on their own schedule.
+- **iOS and Android:** `clearApnsNotifications` sends the entries and the remaining badge to every registered device through the relay's `POST /v1/push/clear`, signed over `ts.sortedTokens.clear.tags`. The relay sends an APNs background push (`content-available`, priority 5, no alert), which `AppDelegate` handles, and an FCM data message of type `clear` at normal priority, which `SealedPushMessagingService` handles. Direct mode sends the background push itself. A relay without the route answers 404, logged once.
+- **Every later push** carries the recently cleared entries (`clear`, comma-separated in `data` for the phones, an array for web push), minus its own tag. The iOS notification service extension, Android's messaging service and the service worker remove those before showing the new one.
+- **This browser:** opening a session closes its web-push notifications on the device that opened it (`markSessionViewed`), next to the desktop's own (`clearDesktopSessionNotifications`).
+
+#### Why a background push and not a visible push the phone hides
+
+iOS shows every alert push; a notification service extension cannot drop one without the filtering entitlement Apple grants by request. A background push shows nothing. It wakes the app unless the user swiped the app away, and iOS may hold or drop it to save power, which is why later pushes repeat the cleared tags.
+
+#### Why the open tags are saved to a file
+
+The desktop app's server stops whenever the app quits, and the phones keep what it pushed. Without the file, a question answered after a restart would stay on the phone until another push with its tag replaced it. The file holds tags and ids only (`ready-<sessionId>`, a request key), at most 500 entries.
+
+#### Why web push has no clearing push
+
+A push that shows no notification costs the subscription: Safari revokes it after a few, Chrome shows its own "updated in the background" notice. So browsers learn of handled notifications from the next push, and from the user opening the session.
+
+#### Why viewing a session clears its question and permission too
+
+The desktop already removes all of a session's notifications when it is viewed (`clearDesktopSessionNotifications`). The user has the request in front of them on that device, so the copy on the phone only duplicates it.
 
 ### Extension notification channels (extension-channels.js, channel-accounts.js, channel-routes.js)
 
@@ -134,6 +170,7 @@ The relay has no route for it, and sends only ever start from this server's list
   - `removeApnsToken(uiSessionToken, deviceToken)`
   - `removeApnsTokenFromAllSessions(deviceToken)`
   - `removeApnsDevicesOfSessions(sessionKeys, keep)`
+  - `clearApnsNotifications({ tags, badge })` — removes the notifications with these tags from every registered device with a push that shows nothing; see *Clearing handled notifications*.
   - `sendApnsToAllUiSessions(payload)` — `payload.sealed` (`{ title, body }`, optional) is what a phone with a push key opens; it is never sent in the clear. Signs + sends to all registered tokens (no UI-visibility gate; iOS suppresses the foreground banner). No-ops with a single warning when APNs is unconfigured. Drops tokens on `410` / `BadDeviceToken` / `Unregistered`. Relay sends run in parallel, each limited to 15 s and sent once more only when the request never left this machine, since the relay does not deduplicate (`APNS.md`, *When the relay cannot be reached*).
   - `resolveApnsConfig()`
 - Configuration (env first, then `settings.apnsConfig`): `OPENCHAMBER_APNS_KEY_ID`, `OPENCHAMBER_APNS_TEAM_ID`, `OPENCHAMBER_APNS_P8` (PEM contents; literal `\n` accepted) or `OPENCHAMBER_APNS_P8_PATH`, `OPENCHAMBER_APNS_BUNDLE_ID` (default `com.openchamber.app`), `OPENCHAMBER_APNS_ENVIRONMENT` (optional override forcing every send to `sandbox` or `production`; when unset, each token is delivered to the environment it registered with, defaulting to `production` for tokens without one).

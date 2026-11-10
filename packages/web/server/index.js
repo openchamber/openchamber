@@ -413,6 +413,7 @@ const SETTINGS_FILE_PATH = path.join(OPENCHAMBER_DATA_DIR, 'settings.json');
 const pluginSwitchStore = createPluginSwitchStore({ filePath: path.join(OPENCHAMBER_DATA_DIR, 'plugin-switches.json') });
 const PUSH_SUBSCRIPTIONS_FILE_PATH = path.join(OPENCHAMBER_DATA_DIR, 'push-subscriptions.json');
 const APNS_TOKENS_FILE_PATH = path.join(OPENCHAMBER_DATA_DIR, 'apns-tokens.json');
+const PUSH_OPEN_TAGS_FILE_PATH = path.join(OPENCHAMBER_DATA_DIR, 'push-open-tags.json');
 const openCodeTrust = createOpenCodeTrust({
   storePath: path.join(OPENCHAMBER_DATA_DIR, 'opencode-trust.json'),
   // Declared further down; first read on the first check, after startup.
@@ -599,6 +600,7 @@ const apnsRuntime = createApnsRuntime({
 const addOrUpdateApnsToken = (...args) => apnsRuntime.addOrUpdateApnsToken(...args);
 const removeApnsToken = (...args) => apnsRuntime.removeApnsToken(...args);
 const sendApnsToAllUiSessions = (...args) => apnsRuntime.sendApnsToAllUiSessions(...args);
+const clearApnsNotifications = (...args) => apnsRuntime.clearApnsNotifications(...args);
 
 const TERMINAL_INPUT_WS_MAX_REBINDS_PER_WINDOW = 128;
 const TERMINAL_INPUT_WS_REBIND_WINDOW_MS = 60 * 1000;
@@ -1053,6 +1055,22 @@ const notificationTriggerRuntime = createNotificationTriggerRuntime({
   broadcastUiNotification,
   sendPushToAllUiSessions,
   sendApnsToAllUiSessions,
+  clearApnsNotifications,
+  // Pushed notifications nobody handled yet, so a restart can still clear them.
+  openPushTagsStore: {
+    read: async () => {
+      try {
+        return JSON.parse(await fsPromises.readFile(PUSH_OPEN_TAGS_FILE_PATH, 'utf8'));
+      } catch (error) {
+        if (error?.code === 'ENOENT') return null;
+        throw error;
+      }
+    },
+    write: async (state) => {
+      await fsPromises.mkdir(path.dirname(PUSH_OPEN_TAGS_FILE_PATH), { recursive: true });
+      await fsPromises.writeFile(PUSH_OPEN_TAGS_FILE_PATH, JSON.stringify({ version: 1, ...state }), { encoding: 'utf8', mode: 0o600 });
+    },
+  },
   isAnyInteractiveClientVisible,
   isAnyUiVisible,
   buildOpenCodeUrl,
@@ -2304,6 +2322,7 @@ const openChamberControlService = createOpenChamberControlService({
       properties: { sessionID: change.sessionId, pageID: change.callId },
     };
     broadcastOpenChamberUiEvent(settled);
+    void maybeSendPushForTrigger(settled);
     extensionSessionEvents.processPayload(settled, change.directory);
   },
   // The tool is off by default; a plugin generated before it was switched off
@@ -2905,6 +2924,7 @@ async function main(options = {}) {
     removeApnsToken,
     updateUiVisibility,
     clearPendingPushBadge: () => clearPendingPushBadge(),
+    clearSessionPushNotifications: (sessionId) => notificationTriggerRuntime.clearSessionPushNotifications(sessionId),
     isUiVisible,
     getUiNotificationClients: () => uiNotificationClients,
     writeSseEvent,
