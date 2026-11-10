@@ -1,7 +1,17 @@
-import { beforeEach, describe, expect, test } from "bun:test"
+import { beforeEach, describe, expect, mock, test } from "bun:test"
 import { strToU8, zipSync } from "fflate"
 import { useInputStore } from "./input-store"
 import { getChatDraftIdentityKey } from "@/lib/chatDraftPersistence"
+
+// A HEIC conversion that fails the way the vendored decoder does for Apple's
+// HDR gain-map photos.
+const decodeHeic = async (): Promise<Blob> => {
+  throw new Error("ERR_LIBHEIF format not supported")
+}
+
+mock.module("heic2any", () => ({
+  default: async () => decodeHeic(),
+}))
 
 class MockFileReader {
   result: string | ArrayBuffer | null = null
@@ -121,6 +131,15 @@ describe("input-store attachments", () => {
 
     expect(message.includes("map.png")).toBe(true)
     expect(message.includes("@")).toBe(false)
+    expect(pendingReaders).toHaveLength(0)
+    expect(useInputStore.getState().attachedFiles).toEqual([])
+  })
+
+  testWithMockFileReader("names a HEIC the decoder cannot read instead of only failing", async () => {
+    await expect(
+      useInputStore.getState().addAttachedFile(new File(["heic-data"], "IMG_4015.heic", { type: "image/heic" })),
+    ).rejects.toThrow("IMG_4015.heic could not be converted from HEIC to JPEG")
+
     expect(pendingReaders).toHaveLength(0)
     expect(useInputStore.getState().attachedFiles).toEqual([])
   })

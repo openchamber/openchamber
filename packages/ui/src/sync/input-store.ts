@@ -460,10 +460,13 @@ export const useInputStore = create<InputState>()((set, get) => ({
       try {
         attachedFiles = await prepareLocalAttachments(file, reservedFilenames)
       } catch (error) {
-        // A HEIC the bundled decoder cannot read (Apple HDR gain-map photos)
-        // used to fall through to the generic "failed to attach" toast. Name
-        // the cause: the photo needs to be saved as JPEG to attach.
         if (error instanceof HeicConversionError) {
+          // On desktop the file has a path on the shared disk, and a note
+          // naming it is the documented fallback for a file that cannot be
+          // prepared: the agent converts it with its own tools. Everywhere
+          // else there is no such path, so name the cause — the photo has to
+          // be saved as JPEG — instead of the generic "failed to attach".
+          if (referencePath) return attachReference(referencePath)
           throw new Error(formatMessage(useI18nStore.getState().dictionary, 'chat.fileAttachment.toast.heicConversionFailed', {
             name: file.name,
           }))
