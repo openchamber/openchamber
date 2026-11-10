@@ -74,6 +74,14 @@ export const VERCEL_JEV_MODEL = 'typesafe-ai/jev';
 export const JEV_TIMEOUT_MS = 4000;
 
 /**
+ * How long one timed-out request per endpoint keeps running before it is
+ * aborted. A local model loads on its first request and Ollama cancels the
+ * load when the client disconnects, so a 4 s abort kept a 5-7 s cold load
+ * from ever finishing (#6743).
+ */
+export const JEV_LINGER_MS = 5 * 60_000;
+
+/**
  * The third line keeps a hard turn from dragging its follow-ups up. With a
  * plain "classify request only" wording, "дякую, все працює" after a hard fix
  * came back hard at ~40% and "запуш" trivial at ~50%, both under the threshold,
