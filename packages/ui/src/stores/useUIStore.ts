@@ -1168,6 +1168,11 @@ interface UIStore {
   agentImageToolEnabled: boolean;
   /** `provider/model` the image tool draws with; empty until the user picks one. */
   agentImageModel: string;
+  /** The agent memory tidies itself in the background (`agent-memory/dreaming.js`); off until turned on. */
+  agentMemoryDreamingEnabled: boolean;
+  /** `provider/model` dreaming runs on; empty runs it on the default model. */
+  agentMemoryDreamingModel: string;
+  agentMemoryDreamingVariant: string;
   agentRenderToolEnabled: boolean;
   agentSecretToolEnabled: boolean;
   agentWorkflowToolEnabled: boolean;
@@ -1476,6 +1481,9 @@ interface UIStore {
   setAgentUsageToolEnabled: (value: boolean) => void;
   setAgentImageToolEnabled: (value: boolean) => void;
   setAgentImageModel: (value: string) => void;
+  setAgentMemoryDreamingEnabled: (value: boolean) => void;
+  setAgentMemoryDreamingModel: (value: string) => void;
+  setAgentMemoryDreamingVariant: (value: string) => void;
   setAgentRenderToolEnabled: (value: boolean) => void;
   setAgentSecretToolEnabled: (value: boolean) => void;
   setAgentWorkflowToolEnabled: (value: boolean) => void;
@@ -1734,6 +1742,9 @@ export const useUIStore = create<UIStore>()(
         agentUsageToolEnabled: false,
         agentImageToolEnabled: false,
         agentImageModel: '',
+        agentMemoryDreamingEnabled: false,
+        agentMemoryDreamingModel: '',
+        agentMemoryDreamingVariant: '',
         agentRenderToolEnabled: true,
         agentSecretToolEnabled: true,
         agentWorkflowToolEnabled: false,
@@ -3426,6 +3437,15 @@ export const useUIStore = create<UIStore>()(
         setAgentImageModel: (value) => {
           set({ agentImageModel: value });
         },
+        setAgentMemoryDreamingEnabled: (value) => {
+          set({ agentMemoryDreamingEnabled: value });
+        },
+        setAgentMemoryDreamingModel: (value) => {
+          set({ agentMemoryDreamingModel: value });
+        },
+        setAgentMemoryDreamingVariant: (value) => {
+          set({ agentMemoryDreamingVariant: value });
+        },
         setAgentRenderToolEnabled: (value) => {
           set({ agentRenderToolEnabled: value });
         },
@@ -4002,6 +4022,9 @@ export const useUIStore = create<UIStore>()(
           agentUsageToolEnabled: state.agentUsageToolEnabled,
           agentImageToolEnabled: state.agentImageToolEnabled,
           agentImageModel: state.agentImageModel,
+          agentMemoryDreamingEnabled: state.agentMemoryDreamingEnabled,
+          agentMemoryDreamingModel: state.agentMemoryDreamingModel,
+          agentMemoryDreamingVariant: state.agentMemoryDreamingVariant,
           agentRenderToolEnabled: state.agentRenderToolEnabled,
           agentSecretToolEnabled: state.agentSecretToolEnabled,
           agentWorkflowToolEnabled: state.agentWorkflowToolEnabled,

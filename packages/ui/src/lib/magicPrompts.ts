@@ -883,11 +883,11 @@ Read diffs selectively, file by file; do not print every attempt in full.
     ],
     template: `You are tidying up the memory you keep through the openchamber_memory tool. Agents save entries as they work and rarely revisit them, while the code and the decisions behind them keep moving. Your job is to bring the store back in line with what is true now. Every stored entry is listed in full below, so you do not need memory.read or memory.list.
 
-During this session, save no new memories: you only restructure what is already stored, whatever the usual memory rules say.
+During this session, save no new memories: you only restructure what is already stored, whatever the usual memory rules say. The one save allowed is moving an entry to its right scope.
 
 1. Go through every entry. For project entries, check the files, flags, commands, routes and decisions they name against the project: the code, git history, docs, instructions and skills, plans and notes, and whatever else you can reach, such as issues and linked trackers. A reference to something that is gone is a sign the entry is stale, not proof: a decision can outlive renamed code.
 
-2. Decide what changes. The first test for every entry: would an agent that reads the relevant code, docs and skills learn everything this entry says, including why it is so and whether it may be changed? If yes, the entry only duplicates the project and drifts from it over time: delete it. Where the entry and a doc or skill disagree, the doc or skill is current. Code shows what was done, not why, nor that it was deliberate: an entry that holds a decision, its reason, a rejected alternative or a "leave this as it is" that the project does not state stays, trimmed to that part if the rest is readable elsewhere. Do not move anything into docs or skills; this session changes memory only.
+2. Decide what changes. The first test for every entry: would an agent that reads the relevant code, docs and skills learn everything this entry says, including why it is so and whether it may be changed? If yes, the entry only duplicates the project and drifts from it over time: delete it. Where the entry and a doc or skill disagree, the doc or skill is current. Who wrote an entry does not protect it: the user's own corrections go too once a newer entry or the project contradicts them. Code shows what was done, not why, nor that it was deliberate: an entry that holds a decision, its reason, a rejected alternative or a "leave this as it is" that the project does not state stays, trimmed to that part if the rest is readable elsewhere. Do not move anything into docs or skills; this session changes memory only.
 - Obsolete: what it describes is gone. Delete it.
 - Reversed: a decision the project or a later entry replaced. Rewrite it by memoryId to the decision that holds now, with one line on what it replaced and why when the reason is known: the abandoned choice and the reason for leaving it are what the code will never show.
 - Contradicting entries: the dates settle most of them. When the newer one records a decision or a correction, it holds: merge the two into one entry as under Reversed. When the newer one only discusses or proposes a change, the older one still holds; that pair is a question for the user.
@@ -897,6 +897,7 @@ During this session, save no new memories: you only restructure what is already 
 - One-off task state and anything the save rules exclude: delete.
 - A title with a date, or cut off mid-word: rewrite it by memoryId without the date, in at most 60 characters. The store keeps the dates, and they are what settles a contradiction.
 - A title that names only a topic ("Product decisions, part 2", "Feedback: what is still open"): rewrite it by memoryId to name what the entry holds, so an agent can tell from the session index whether to read it. Do not split the entry to do so.
+- Too many titles: sessions are given every title, newest first, in about 8,000 characters (roughly 150 titles). When the store holds more, merge related entries into topical ones, a short title with every still-true detail in the body, until the titles fit. Never delete what is still true just to fit.
 - Entries marked flagged: leave them alone; the user decides on those.
 An entry nothing contradicts still holds. Leave it as it is.
 

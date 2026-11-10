@@ -5,6 +5,7 @@ import type { IconName } from '@/components/icon/icons';
 import { SettingsControlGroup, SettingsSection } from '@/components/sections/shared/SettingsSection';
 import { SettingsInfoHint } from '@/components/sections/shared/SettingsInfoHint';
 import { Switch } from '@/components/ui/switch';
+import { Checkbox } from '@/components/ui/checkbox';
 import {
   Select,
   SelectContent,
@@ -12,12 +13,17 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { ModelSelector } from '@/components/sections/agents/ModelSelector';
 import { BUILTIN_BROWSER_PROVIDER, browserProviderGuests } from '@/lib/guests/browser-providers';
 import { loadGuestCatalog } from '@/lib/guests/load-catalog';
 import { useGuestsStore } from '@/lib/guests/store';
 import { opencodeClient } from '@/lib/opencode/client';
 import { updateDesktopSettings } from '@/lib/persistence';
 import { useAgentMemoryStore } from '@/stores/useAgentMemoryStore';
+import { useConfigStore } from '@/stores/useConfigStore';
+import { listModelVariantIds } from '@/lib/modelVariants';
+import { parseModelIdentifier } from '@/lib/modelIdentifier';
+import { ModelVariantSelect } from './ModelVariantSelect';
 import { useUIStore } from '@/stores/useUIStore';
 import { useI18n } from '@/lib/i18n';
 
@@ -95,6 +101,13 @@ export const OpenChamberToolsSettings: React.FC = () => {
   // Absent where no OpenChamber server answers settings (VS Code).
   const agentMemoryAvailable = useUIStore((state) => state.agentMemoryFeatureAvailable);
   const setAgentMemoryToolEnabled = useUIStore((state) => state.setAgentMemoryToolEnabled);
+  const agentMemoryDreamingEnabled = useUIStore((state) => state.agentMemoryDreamingEnabled);
+  const setAgentMemoryDreamingEnabled = useUIStore((state) => state.setAgentMemoryDreamingEnabled);
+  const agentMemoryDreamingModel = useUIStore((state) => state.agentMemoryDreamingModel);
+  const setAgentMemoryDreamingModel = useUIStore((state) => state.setAgentMemoryDreamingModel);
+  const agentMemoryDreamingVariant = useUIStore((state) => state.agentMemoryDreamingVariant);
+  const setAgentMemoryDreamingVariant = useUIStore((state) => state.setAgentMemoryDreamingVariant);
+  const providers = useConfigStore((state) => state.providers);
   const agentKnowledgeToolEnabled = useUIStore((state) => state.agentKnowledgeToolEnabled);
   const setAgentKnowledgeToolEnabled = useUIStore((state) => state.setAgentKnowledgeToolEnabled);
   const agentNotifyToolEnabled = useUIStore((state) => state.agentNotifyToolEnabled);
@@ -218,6 +231,32 @@ export const OpenChamberToolsSettings: React.FC = () => {
         }
       });
   }, [setAgentMemoryToolEnabled]);
+
+  // Read by the server on its next look; dreaming runs a few minutes after start and hourly after.
+  const handleDreamingChange = React.useCallback((enabled: boolean) => {
+    setAgentMemoryDreamingEnabled(enabled);
+    void updateDesktopSettings({ agentMemoryDreamingEnabled: enabled });
+  }, [setAgentMemoryDreamingEnabled]);
+
+  // Cleared, dreaming runs on the default model. A thinking level belongs to the model it was picked for.
+  const handleDreamingModelChange = React.useCallback((providerId: string, modelId: string) => {
+    const value = providerId && modelId ? `${providerId}/${modelId}` : '';
+    setAgentMemoryDreamingModel(value);
+    setAgentMemoryDreamingVariant('');
+    void updateDesktopSettings({ agentMemoryDreamingModel: value, agentMemoryDreamingVariant: '' });
+  }, [setAgentMemoryDreamingModel, setAgentMemoryDreamingVariant]);
+
+  const handleDreamingVariantChange = React.useCallback((variant: string | undefined) => {
+    setAgentMemoryDreamingVariant(variant ?? '');
+    void updateDesktopSettings({ agentMemoryDreamingVariant: variant ?? '' });
+  }, [setAgentMemoryDreamingVariant]);
+
+  const dreamingModel = parseModelIdentifier(agentMemoryDreamingModel) ?? { providerId: '', modelId: '' };
+  const dreamingVariants = React.useMemo(() => {
+    if (!dreamingModel.providerId || !dreamingModel.modelId) return [];
+    const provider = providers.find((candidate) => candidate.id === dreamingModel.providerId);
+    return listModelVariantIds(provider?.models.find((model) => model.id === dreamingModel.modelId)?.variants);
+  }, [dreamingModel.modelId, dreamingModel.providerId, providers]);
 
   return (
     <SettingsSection title={t('settings.openchamber.tools.title')} contentClassName="space-y-6">
@@ -393,7 +432,45 @@ export const OpenChamberToolsSettings: React.FC = () => {
             title={t('settings.openchamber.tools.name.memory')}
             summary={t('settings.openchamber.tools.field.agentMemoryToolSummary')}
             ariaLabel={t('settings.openchamber.tools.field.agentMemoryToolAria')}
-          />
+          >
+            {agentMemoryToolEnabled ? (
+              // One row that never changes height: the checkbox turns organizing on, and
+              // the model beside it stays in place, disabled, while it is off.
+              <div data-settings-item="sessions.agent-memory-dreaming" className="mt-2 flex min-w-0 items-center gap-2 ps-7">
+                <Checkbox
+                  checked={agentMemoryDreamingEnabled}
+                  onChange={handleDreamingChange}
+                  ariaLabel={t('settings.openchamber.tools.dreaming.aria')}
+                />
+                <button
+                  type="button"
+                  className="truncate typography-meta text-muted-foreground"
+                  onClick={() => handleDreamingChange(!agentMemoryDreamingEnabled)}
+                >
+                  {t('settings.openchamber.tools.dreaming.label')}
+                </button>
+                <SettingsInfoHint>{t('settings.openchamber.tools.dreaming.info')}</SettingsInfoHint>
+                <div data-settings-item="sessions.agent-memory-dreaming-model" className="ms-auto flex min-w-0 items-center gap-2">
+                  <ModelSelector
+                    providerId={dreamingModel.providerId}
+                    modelId={dreamingModel.modelId}
+                    onChange={handleDreamingModelChange}
+                    placeholder={t('settings.openchamber.tools.dreamingModel.default')}
+                    className="min-w-0 max-w-[16rem]"
+                    disabled={!agentMemoryDreamingEnabled}
+                  />
+                  <ModelVariantSelect
+                    variants={dreamingVariants}
+                    value={agentMemoryDreamingVariant || undefined}
+                    onChange={handleDreamingVariantChange}
+                    ariaLabel={t('settings.openchamber.tools.dreamingModel.thinking')}
+                    triggerClassName="w-auto min-w-0"
+                    disabled={!agentMemoryDreamingEnabled}
+                  />
+                </div>
+              </div>
+            ) : null}
+          </ToolRow>
         ) : null}
         <ToolRow
           icon="sticky-note"

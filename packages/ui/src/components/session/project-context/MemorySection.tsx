@@ -13,8 +13,8 @@ import { KnowledgeMenu } from './KnowledgeActions';
 import { ButtonTooltip } from '@/components/ui/action-toolbar';
 import { memoryDeleteKey, scheduleKnowledgeDelete, usePendingKnowledgeDeletes } from './pendingKnowledgeDeletes';
 import { Icon } from '@/components/icon/Icon';
-import { useI18n } from '@/lib/i18n';
-import { AGENT_MEMORY_BODY_MAX_LENGTH, AGENT_MEMORY_TITLE_MAX_LENGTH, type AgentMemoryEntry, type AgentMemoryScope } from '@/lib/agentMemoryApi';
+import { getCurrentIntlLocale, useI18n } from '@/lib/i18n';
+import { AGENT_MEMORY_BODY_MAX_LENGTH, AGENT_MEMORY_TITLE_MAX_LENGTH, type AgentMemoryDream, type AgentMemoryEntry, type AgentMemoryScope } from '@/lib/agentMemoryApi';
 import { classifyMemory, memoryViewKey, type MemoryBadge } from '@/lib/agentMemoryBadges';
 import { cn } from '@/lib/utils';
 import { selectProjectMemoryForPath, useAgentMemoryStore } from '@/stores/useAgentMemoryStore';
@@ -75,6 +75,53 @@ const MemoryTidyButton: React.FC<{ projectPath: string | null }> = ({ projectPat
         {t('rightSidebar.contextNotesTodo.memory.tidy.action')}
       </Button>
     </ButtonTooltip>
+  );
+};
+
+/**
+ * The last dreaming pass of the scope on show: one quiet line with an undo,
+ * never a review. Dreaming runs on its own, so this is the only place it shows.
+ */
+const DreamLine: React.FC<{ dream: AgentMemoryDream; onUndo: () => void; undoing: boolean }> = ({ dream, onUndo, undoing }) => {
+  const { t } = useI18n();
+  const date = new Intl.DateTimeFormat(getCurrentIntlLocale(), { day: 'numeric', month: 'long' }).format(dream.finishedAt);
+  const changed = dream.merged + dream.removed + dream.rewritten > 0;
+  const summary = dream.undone
+    ? t('rightSidebar.contextNotesTodo.memory.dream.undone', { date })
+    : dream.status === 'failed'
+      ? t('rightSidebar.contextNotesTodo.memory.dream.failed', { date })
+      : changed
+        ? t('rightSidebar.contextNotesTodo.memory.dream.tidied', { date })
+        : t('rightSidebar.contextNotesTodo.memory.dream.nothing', { date });
+  const counts = dream.undone || !changed ? [] : [
+    dream.merged > 0 ? t('rightSidebar.contextNotesTodo.memory.dream.merged', { count: dream.merged }) : null,
+    dream.removed > 0 ? t('rightSidebar.contextNotesTodo.memory.dream.removed', { count: dream.removed }) : null,
+    dream.rewritten > 0 ? t('rightSidebar.contextNotesTodo.memory.dream.rewritten', { count: dream.rewritten }) : null,
+  ].filter((part): part is string => part !== null);
+  return (
+    <p className="flex min-w-0 flex-wrap items-center gap-x-1.5 typography-micro text-muted-foreground">
+      <Icon name="moon" className="size-3 shrink-0" />
+      <span>{summary}</span>
+      {counts.map((part) => (
+        <React.Fragment key={part}>
+          <span aria-hidden="true">·</span>
+          <span>{part}</span>
+        </React.Fragment>
+      ))}
+      {dream.canUndo ? (
+        <>
+          <span aria-hidden="true">·</span>
+          <button
+            type="button"
+            disabled={undoing}
+            onClick={onUndo}
+            className="text-foreground/80 hover:text-foreground disabled:opacity-50"
+          >
+            {t('rightSidebar.contextNotesTodo.memory.dream.undo')}
+          </button>
+        </>
+      ) : null}
+    </p>
   );
 };
 
@@ -395,6 +442,19 @@ export const MemorySection: React.FC<{
     }
   }, [saveEntry, scope, t]);
 
+  const dream = useAgentMemoryStore((state) => state.dream);
+  const undoDream = useAgentMemoryStore((state) => state.undoDream);
+  // A project's line shows only while the store holds that project's entries.
+  const dreamOwner = useAgentMemoryStore((state) => state.projectPath);
+  const scopeDream = scope === 'global' ? dream.global : dreamOwner === projectPath ? dream.project : null;
+  const [undoing, setUndoing] = React.useState(false);
+  const handleUndoDream = React.useCallback(async () => {
+    setUndoing(true);
+    const undone = await undoDream(scope, projectPath);
+    setUndoing(false);
+    if (!undone) toast.error(t('rightSidebar.contextNotesTodo.memory.dream.undoFailed'));
+  }, [projectPath, scope, t, undoDream]);
+
   const scopeOptions: Array<{ id: AgentMemoryScope; label: string; tooltip: string; count: number }> = [
     {
       id: 'project',
@@ -454,6 +514,8 @@ export const MemorySection: React.FC<{
         </div>
         <MemoryTidyButton projectPath={projectPath} />
       </div>
+
+      {scopeDream ? <DreamLine dream={scopeDream} undoing={undoing} onUndo={() => void handleUndoDream()} /> : null}
 
       {scope === 'project' && !projectPath ? (
         <p className="typography-meta text-muted-foreground">

@@ -332,6 +332,18 @@ The button is disabled until both scopes are loaded for this project and hold at
 least one entry. A scope that failed to load would reach the agent as an empty
 list, and it would tidy against half the store.
 
+### Dreaming
+
+With Organize memory on (Settings, under the memory tool), the server tidies the store
+on its own in a session nobody sees (`packages/web/server/lib/agent-memory/DOCUMENTATION.md`).
+The panel shows only the last pass of the scope on show, one line under the
+chips: when it ran, how many entries it merged, removed and rewrote, and Undo.
+There is no review and no notification: checking memories by hand is the chore
+dreaming removes. Undo puts back the store as the pass found it and keeps what
+was written after the pass. The line comes with `/api/agent-memory/all`, so it is
+as fresh as the list, and a pass that ends announces itself with the same
+`openchamber:agent-memory-changed` event a tool write does.
+
 ## Data flow
 
 Storage is server-owned; see

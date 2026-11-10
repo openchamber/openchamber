@@ -1011,6 +1011,23 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     isAvailable: (ctx) => !ctx.isVSCode && useUIStore.getState().agentMemoryFeatureAvailable,
   },
   {
+    id: 'sessions.agent-memory-dreaming',
+    page: 'general',
+    titleKey: 'settings.openchamber.tools.dreaming.label',
+    descriptionKey: 'settings.openchamber.tools.dreaming.info',
+    keywords: ['memory', 'organize', 'dream', 'dreaming', 'tidy', 'consolidate', 'clean up', 'background'],
+    // Rendered only while memory is on.
+    isAvailable: (ctx) => !ctx.isVSCode && useUIStore.getState().agentMemoryFeatureAvailable && useUIStore.getState().agentMemoryToolEnabled,
+  },
+  {
+    id: 'sessions.agent-memory-dreaming-model',
+    page: 'general',
+    titleKey: 'settings.openchamber.tools.dreamingModel.searchTitle',
+    keywords: ['memory', 'organize', 'dream', 'dreaming', 'model', 'tidy'],
+    isAvailable: (ctx) => !ctx.isVSCode && useUIStore.getState().agentMemoryFeatureAvailable
+      && useUIStore.getState().agentMemoryToolEnabled,
+  },
+  {
     id: 'sessions.agent-workflow-tool',
     page: 'general',
     titleKey: 'settings.openchamber.tools.field.agentWorkflowTool',
