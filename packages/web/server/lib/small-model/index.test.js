@@ -875,6 +875,48 @@ describe('describeSmallModel', () => {
     expect(await describeSmallModel({ directory: '/proj' })).toBeNull();
   });
 
+  describe('free zen models without a login', () => {
+    const zen = (id, apiKey = 'public') => MODEL({ id, modelID: id, providerID: 'opencode', family: id, settings: { apiKey } });
+
+    afterEach(() => fs.rmSync(path.join(TEMP_DATA_DIR, 'settings.json'), { force: true }));
+
+    it('answers null on a setup with no login, where OpenCode\'s default is a free zen model', async () => {
+      state.models = [zen('big-pickle'), zen('deepseek-v4.1-flash-free')];
+      state.defaultModel = state.models[0];
+
+      expect(await describeSmallModel({ directory: '/proj' })).toBeNull();
+      expect(await describeSmallModel({ directory: '/proj', preferredProviderID: 'opencode', preferredModelID: 'big-pickle' })).toBeNull();
+    });
+
+    it('moves past a saved free zen model as if none were saved', async () => {
+      state.models = [MODEL(), zen('deepseek-v4.1-flash-free')];
+      fs.writeFileSync(
+        path.join(TEMP_DATA_DIR, 'settings.json'),
+        JSON.stringify({ smallModelUseDefault: false, smallModelOverride: 'opencode/deepseek-v4.1-flash-free' }),
+      );
+
+      expect(await describeSmallModel({ directory: '/proj' })).toMatchObject({ providerID: 'anthropic', source: 'default' });
+    });
+
+    it('moves past a free zen walkthrough model and OpenCode title model', async () => {
+      state.models = [MODEL(), zen('big-pickle')];
+      state.titleModel = { id: 'big-pickle', providerID: 'opencode' };
+
+      expect(await describeSmallModel({ directory: '/proj', overrideModel: 'opencode/big-pickle' }))
+        .toMatchObject({ providerID: 'anthropic', source: 'default' });
+    });
+
+    it('keeps a zen model behind a real zen credential', async () => {
+      state.models = [MODEL(), zen('gpt-5-nano', 'zen-key')];
+      fs.writeFileSync(
+        path.join(TEMP_DATA_DIR, 'settings.json'),
+        JSON.stringify({ smallModelUseDefault: false, smallModelOverride: 'opencode/gpt-5-nano' }),
+      );
+
+      expect(await describeSmallModel({ directory: '/proj' })).toMatchObject({ providerID: 'opencode', modelID: 'gpt-5-nano', source: 'settings' });
+    });
+  });
+
   it.each([
     ['http://127.0.0.1:8080/v1', true],
     ['http://localhost:1234/v1', true],
@@ -912,6 +954,18 @@ describe('listAuthenticatedProviders', () => {
     state.providers = [];
 
     expect(await listAuthenticatedProviders()).toEqual(['anthropic']);
+  });
+
+  it('leaves out zen without a login and offers it with a real credential', async () => {
+    const zen = (apiKey) => MODEL({ id: 'big-pickle', modelID: 'big-pickle', providerID: 'opencode', settings: { apiKey } });
+    state.providers = [{ id: 'opencode', name: 'OpenCode', activation: 'enabled', package: 'x' }];
+
+    state.models = [zen('public')];
+    expect(await listAuthenticatedProviders()).toEqual([]);
+
+    resetOpenCodeRuntimeProviders();
+    state.models = [zen('zen-key')];
+    expect(await listAuthenticatedProviders()).toEqual(['opencode']);
   });
 
   it('offers Claude Code', async () => {

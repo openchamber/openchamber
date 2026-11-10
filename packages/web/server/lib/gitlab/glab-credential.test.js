@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { getGlabToken } from './glab-credential.js';
+import { getGlabToken, getGlabTokenResult } from './glab-credential.js';
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -26,6 +26,24 @@ describe('glab credential lookup', () => {
     expect(execFile).toHaveBeenLastCalledWith('glab', ['auth', 'status', '--hostname', 'gitlab.example.com', '--show-token'], expect.any(Object));
   });
 
+  it.each([
+    'Token found in operating system keyring: glpat-current',
+    'Token found in environment variable GITLAB_TOKEN: glpat-current',
+    'Token found in configuration file (plaintext): glpat-current',
+  ])('reads the token line of current glab versions: %s', async (line) => {
+    const execFile = vi.fn()
+      .mockResolvedValueOnce({ stdout: '\n', stderr: '' })
+      .mockRejectedValueOnce(exitError({ code: 1, stdout: '', stderr: `gitlab.example.com\n  x API call failed\n  ✓ ${line}\n` }));
+    await expect(getGlabToken('https://gitlab.example.com', { execFile })).resolves.toBe('glpat-current');
+  });
+
+  it('leaves a logout that keeps the host in the config unsettled', async () => {
+    const execFile = vi.fn()
+      .mockResolvedValueOnce({ stdout: '', stderr: '' })
+      .mockRejectedValueOnce(exitError({ code: 1, stdout: '', stderr: 'gitlab.example.com\n  ! No token found (checked config file, keyring, and environment variables).\n' }));
+    await expect(getGlabTokenResult('https://gitlab.example.com', { execFile })).resolves.toEqual({ unknown: true, reason: 'unrecognized' });
+  });
+
   it('treats a masked or missing token as no login', async () => {
     const execFile = vi.fn()
       .mockResolvedValueOnce({ stdout: '' })
@@ -45,5 +63,24 @@ describe('glab credential lookup', () => {
     await expect(getGlabToken('https://gitlab.com', { execFile: silent })).resolves.toBeNull();
     expect(warn).toHaveBeenCalledWith('[gitlab] glab credential lookup failed (timeout)');
     expect(JSON.stringify(warn.mock.calls)).not.toContain('secret');
+  });
+
+  it('says when glab answered that the host has no login', async () => {
+    const execFile = vi.fn(async () => { throw exitError({ code: 1, stdout: '', stderr: '  x  gitlab.example.com has not been authenticated with glab. Run `glab auth login --hostname gitlab.example.com` to authenticate.  \n' }); });
+    await expect(getGlabTokenResult('https://gitlab.example.com', { execFile })).resolves.toEqual({ gone: true });
+  });
+
+  it('says a locked keyring or a missing glab leave the question unsettled', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const keyring = vi.fn(async () => { throw exitError({ code: 1, stdout: '', stderr: '  x could not read the token: secret storage is locked\n' }); });
+    await expect(getGlabTokenResult('https://gitlab.example.com', { execFile: keyring })).resolves.toEqual({ unknown: true, reason: 'unrecognized' });
+
+    const missing = vi.fn(async () => { throw exitError({ code: 'ENOENT' }); });
+    await expect(getGlabTokenResult('https://gitlab.example.com', { execFile: missing })).resolves.toEqual({ unknown: true, reason: 'missing' });
+    expect(warn).not.toHaveBeenCalled();
+
+    const hung = vi.fn(async () => { throw exitError({ killed: true, signal: 'SIGKILL' }); });
+    await expect(getGlabTokenResult('https://gitlab.example.com', { execFile: hung })).resolves.toEqual({ unknown: true, reason: 'timeout' });
+    expect(warn).toHaveBeenCalledWith('[gitlab] glab credential lookup failed (timeout)');
   });
 });

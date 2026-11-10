@@ -15,13 +15,14 @@ const sessionResponseSchema = z.union([
 /**
  * The folder a session runs in, read from OpenCode's global session route,
  * which starts no location. Null for a session OpenCode does not know;
- * throws when OpenCode cannot answer.
+ * throws when OpenCode cannot answer. `fresh` skips the cache, for a check
+ * that resolves another folder against this one (a relative move).
  */
 export const createSessionDirectoryResolver = ({ fetchImpl, buildOpenCodeUrl, getOpenCodeAuthHeaders, now = Date.now }) => {
   const cache = new Map();
-  return async (sessionID) => {
+  return async (sessionID, { fresh = false } = {}) => {
     const cached = cache.get(sessionID);
-    if (cached && now() - cached.at < SESSION_DIRECTORY_CACHE_MS) return cached.directory;
+    if (!fresh && cached && now() - cached.at < SESSION_DIRECTORY_CACHE_MS) return cached.directory;
     const response = await fetchImpl(buildOpenCodeUrl(`/api/session/${encodeURIComponent(sessionID)}`, ''), {
       headers: { Accept: 'application/json', ...getOpenCodeAuthHeaders() },
       signal: AbortSignal.timeout(SESSION_LOOKUP_TIMEOUT_MS),

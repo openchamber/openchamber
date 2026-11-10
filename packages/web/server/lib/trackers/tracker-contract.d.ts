@@ -69,11 +69,29 @@ export type TrackerAccount = {
   user?: TrackerPerson | null;
   current: boolean;
   authorizedAt?: number | null;
+  /** An extension tracker's account: whether its server still takes the credential, and how it signed in. */
+  status?: 'valid' | 'invalid';
+  invalidReason?: string;
+  method?: 'oauth' | 'token';
 };
 
+/**
+ * What an extension tracker's card needs beside the accounts (`extension-tracker.js`):
+ * the server the accounts live on (null until a `user` instance is connected),
+ * whether an OAuth client is saved, and where the browser sign-in returns.
+ * A built-in tracker answers no `connect`.
+ */
+export type TrackerConnectInfo = {
+  instance: string | null;
+  instances: { kind: 'fixed'; origin: string } | { kind: 'user'; label: string; placeholder?: string };
+  hasClient: boolean;
+  redirectUri: string | null;
+};
+
+/** Disconnected with `accounts` means every stored account is written off: the card shows them so the user can reconnect or remove them. */
 export type TrackerAuthStatus =
-  | { connected: false }
-  | { connected: true; account?: TrackerAccount | null; accounts?: TrackerAccount[] };
+  | { connected: false; accounts?: TrackerAccount[]; connect?: TrackerConnectInfo }
+  | { connected: true; account?: TrackerAccount | null; accounts?: TrackerAccount[]; connect?: TrackerConnectInfo };
 
 export type Connected<T> = { connected: false } | ({ connected: true } & T);
 
@@ -100,8 +118,13 @@ export type TrackerDescriptor = {
   };
   /** In menu order: `open`, `all`, categories, then provider extras (`inReview`, `duplicate`). */
   stateFilters: string[];
-  /** `host` compared to the URL host without `www.`; `path` is a regex source tested on the pathname, group 1 = identifier. */
-  urlPatterns: { host: string; path: string }[];
+  /**
+   * `host` compared to the URL host without `www.`; `path` is a regex source
+   * tested on the pathname, group 1 = identifier. With `query`, the path names
+   * no identifier and the parameter `query.name` carries it, checked against
+   * `identifierPattern` (an extension tracker's `?selectedIssue={id}` template).
+   */
+  urlPatterns: { host: string; path: string; query?: { name: string } }[];
   identifierPattern: string;
 };
 
@@ -131,14 +154,34 @@ export interface TrackerSessionStatusRuntime {
   stop(): void;
 }
 
-/** Server-side implementation a registry entry loads. JSON in, JSON out. */
+/** The public view of an extension tracker's accounts (`extension-accounts.js`). */
+export type TrackerAccountsView = {
+  instance: string | null;
+  accounts: Array<{ id: string; login: string | null; name?: string; avatarUrl?: string; connectedAt: number; status: 'valid' | 'invalid'; invalidReason?: string; method: 'oauth' | 'token' }>;
+  activeAccountId: string | null;
+  hasClient: boolean;
+};
+
+/**
+ * Server-side implementation a registry entry loads. JSON in, JSON out. A
+ * rejection that is a `TrackerRouteError` (`route-error.js`) answers its status
+ * and code on the route; any other rejection is 500.
+ */
 export interface TrackerImplementation {
   auth: {
-    status(): Promise<TrackerAuthStatus>;
-    start(input?: { origin?: 'desktop' | 'web' }): Promise<{ authorizationUrl: string; expiresIn: number }>;
+    /** `origin` is the address this OpenChamber is opened at, for an extension tracker's redirect URI. */
+    status(input?: { origin?: string | null }): Promise<TrackerAuthStatus>;
+    /** `callbackOrigin` and `instance` matter to an extension tracker only: where the sign-in returns, and which server a `user` instance is. */
+    start(input?: { origin?: 'desktop' | 'web'; callbackOrigin?: string | null; instance?: string }): Promise<{ authorizationUrl: string; expiresIn: number }>;
     disconnect(): Promise<{ removed: boolean }>;
     /** Null when the account is not stored. */
     activate(accountId: string): Promise<TrackerAuthStatus | null>;
+    /** An extension tracker that takes a pasted token (`authMethods` has `token`). */
+    connectToken?(input: { instance?: string; token: string; username?: string }): Promise<TrackerAccountsView>;
+    /** An extension tracker that signs in through the browser (`authMethods` has `oauth`): the client the user registered. */
+    setOAuthClient?(input: { instance?: string; clientId: string; clientSecret?: string }): Promise<TrackerAccountsView>;
+    /** The browser's return from that sign-in. */
+    completeAuthorization?(input: { code: string; state: string; error: string; errorDescription: string }): Promise<TrackerAccountsView>;
   };
   list(options: TrackerListOptions): Promise<Connected<{ items: TrackerItemSummary[]; cursor: string | null; hasMore: boolean }>>;
   get(id: string): Promise<Connected<{ item: TrackerItem | null }>>;

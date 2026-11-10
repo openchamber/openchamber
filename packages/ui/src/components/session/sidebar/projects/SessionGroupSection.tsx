@@ -8,6 +8,7 @@ import type { Session } from '@/lib/opencode/model';
 const EMPTY_FOLDERS: readonly never[] = [];
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { Button } from '@/components/ui/button';
+import { useOpenCodeTrustPausedDirectory, useResumeOpenCodeFolder } from '@/components/projects/useOpenCodeTrustPause';
 import { Icon } from "@/components/icon/Icon";
 import { Spinner } from "@/components/ui/spinner";
 import { FileTreeChevron } from '@/components/views/files/FileTreeRowParts';
@@ -345,6 +346,8 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
       : childStores.getInitializationFailure(failedBootstrapDirectory)
     : undefined;
   const canGrantBootstrapAccess = bootstrapFailure === 'os-permission' && canRequestNativeDirectoryAccess();
+  const trustPausedDirectory = useOpenCodeTrustPausedDirectory(bootstrapDirectories);
+  const resumeFolder = useResumeOpenCodeFolder();
   const [isRequestingBootstrapAccess, setIsRequestingBootstrapAccess] = React.useState(false);
 
   const retryFailedBootstrap = React.useCallback(() => {
@@ -808,7 +811,21 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
       </>}
     </span>
   );
-  const bootstrapFailureNotice = failedBootstrapDirectory ? (
+  // A folder the user declined to trust lists its sessions but runs no agent;
+  // that says more than whatever its load failed with.
+  const bootstrapFailureNotice = trustPausedDirectory ? (
+    <span className="inline-flex flex-wrap items-center gap-1.5">
+      {t('sessions.sidebar.group.empty.trustPaused')}
+      <Button
+        variant="link"
+        size="xs"
+        className="h-auto p-0 typography-micro"
+        onClick={() => void resumeFolder(trustPausedDirectory)}
+      >
+        {t('sessions.sidebar.group.empty.reviewTrust')}
+      </Button>
+    </span>
+  ) : failedBootstrapDirectory ? (
     <span className="inline-flex flex-wrap items-center gap-1.5">
       {bootstrapFailure === 'os-permission'
         ? t('sessions.sidebar.group.empty.permissionDenied')
@@ -925,16 +942,17 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
         <button
           type="button"
           onClick={() => showMoreGroupSessions(groupKey, visibleSessions.length, sessionBatchSize ?? 7)}
-          className="mt-0.5 flex items-center justify-start rounded-md ps-[26px] pe-1.5 py-0.5 text-start text-xs text-muted-foreground leading-tight hover:text-foreground hover:underline"
+          className="mt-0.5 flex items-center justify-start gap-1.5 rounded-md ps-[26px] pe-1.5 py-0.5 text-start typography-micro text-muted-foreground leading-tight hover:text-foreground hover:underline"
         >
           {t('sessions.sidebar.group.showMore')}
+          <CollapsedSessionActivityIndicator nodes={ungroupedSessions.slice(visibleSessions.length)} />
         </button>
       ) : null}
       {canShowLess ? (
         <button
           type="button"
           onClick={() => resetGroupSessionLimit(groupKey)}
-          className="mt-0.5 flex items-center justify-start rounded-md ps-[26px] pe-1.5 py-0.5 text-start text-xs text-muted-foreground leading-tight hover:text-foreground hover:underline"
+          className="mt-0.5 flex items-center justify-start rounded-md ps-[26px] pe-1.5 py-0.5 text-start typography-micro text-muted-foreground leading-tight hover:text-foreground hover:underline"
         >
           {t('sessions.sidebar.group.showFewer')}
         </button>
@@ -1012,7 +1030,7 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
                 // level in, under the label.
                 <span className="flex w-full min-w-0 items-center gap-0.5">
                   {headerSlot(
-                    <Icon name="git-branch"
+                    <Icon name="worktree"
                       className={cn('h-3 w-3 shrink-0', groupPrColor ? 'oc-ref-tint' : 'text-muted-foreground')}
                       style={groupPrColor ? refTintStyle(groupPrColor) : undefined}
                     />,

@@ -1,5 +1,6 @@
 import { applyTone, type Tone } from './badge.ts';
-import { el, ensureStyle, setText, type Handle } from './dom.ts';
+import { el, ensureStyle, setAttr, setText, type Handle } from './dom.ts';
+import { icon } from './icons.ts';
 import { UI_CSS } from './style.ts';
 
 export type ProgressProps = {
@@ -11,8 +12,12 @@ export type ProgressProps = {
 
 export type ProgressHandle = Handle<ProgressProps>;
 
+/**
+ * The whole percent shown: rounded down, so it never reads 100% before the
+ * work is done (99.6 shows 99), and 100 only once the value reaches it.
+ */
 export const clampProgress = (value: number): number => (
-  Number.isFinite(value) ? Math.min(100, Math.max(0, Math.round(value))) : 0
+  Number.isFinite(value) ? Math.min(100, Math.max(0, Math.floor(value))) : 0
 );
 
 export const mountProgress = (root: Element, initial: ProgressProps): ProgressHandle => {
@@ -21,7 +26,10 @@ export const mountProgress = (root: Element, initial: ProgressProps): ProgressHa
   const node = el('div', 'oc-sdk oc-sdk-progress');
   const caption = el('div', 'oc-sdk-progress-label');
   const label = el('span');
-  const percent = el('span');
+  const percent = el('span', 'oc-sdk-progress-value');
+  const percentText = el('span');
+  const doneMark = icon('check', 14);
+  percent.append(doneMark, percentText);
   caption.append(label, percent);
   const track = el('div', 'oc-sdk-progress-track');
   track.setAttribute('role', 'progressbar');
@@ -39,7 +47,12 @@ export const mountProgress = (root: Element, initial: ProgressProps): ProgressHa
     track.setAttribute('aria-valuenow', String(value));
     if (props.label) track.setAttribute('aria-label', props.label); else track.removeAttribute('aria-label');
     setText(label, props.label);
-    setText(percent, `${value}%`);
+    setText(percentText, `${value}%`);
+    // Done reads as done: the app's progress turns green with a check. A bar
+    // the extension tinted keeps its tone, as the served look keeps its fill.
+    const done = value === 100 && (!props.tone || props.tone === 'neutral');
+    setAttr(node, 'data-done', done ? 'true' : null);
+    doneMark.style.display = done ? '' : 'none';
     caption.hidden = !props.label;
   };
   paint();

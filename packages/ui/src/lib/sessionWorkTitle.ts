@@ -2,18 +2,18 @@ import { z } from 'zod';
 import type { Metadata } from '@/lib/opencode/model';
 
 /**
- * Who named a task in the main checkout, under `metadata.openchamber.workTitle`
- * of its root session: the agent through the openchamber tool's `work.name`,
- * or the user by renaming the session. The server reads it so an agent never
- * renames what the user named (`web/server/lib/openchamber-sessions/work-naming.js`).
+ * Session-title ownership, retained for carrying a user's explicit title into
+ * a new worktree. `work.name` never changes session titles.
  */
 const openchamberSchema = z.object({ openchamber: z.record(z.string(), z.json()) });
 
 const workTitleSchema = z.object({ title: z.string().trim().min(1) });
+const userWorkTitleSchema = workTitleSchema.extend({ by: z.literal('user') });
 
-/** Whether someone named the task this session leads, the agent or the user. */
-export function hasWorkTitle(metadata: Metadata | undefined): boolean {
-  return workTitleSchema.safeParse(openchamberSchema.safeParse(metadata).data?.openchamber.workTitle).success;
+/** Ownership of a session title carried into a new worktree. */
+export function carriedWorkTitleOwner(metadata: Metadata | undefined): 'user' | 'agent' {
+  const value = userWorkTitleSchema.safeParse(openchamberSchema.safeParse(metadata).data?.openchamber.workTitle);
+  return value.success ? 'user' : 'agent';
 }
 
 /** The metadata after the user named the session `title`. */

@@ -16,7 +16,9 @@ performs its own fresh safety reads through RuntimeAPIs, outside this UI owner.
   complete `read` as stale, along with the original Error and its metadata.
 - A read of a worktree whose checkout is still running waits for its `git-ready`
   phase first and stays `loading` meanwhile. Reading earlier fails, and that
-  error would stay until a manual retry. A failed checkout settles as `error`.
+  error would stay until a manual retry. A failed checkout is read at once: it
+  is still a repository, and its binding is what the recovery controls
+  (Remote, Download again) need to repair it.
 - `contexts` grants provider-read demand only while the owner read is ready and
   the selected association's readiness is `ready` with a matching approved fetch
   fingerprint. Aggregate `needs-attention` does not suppress healthy siblings.
@@ -95,8 +97,8 @@ One repository works as one identity. `applyIdentity.ts` turns a chosen
 provider association through the exact-target mutation, writes the primary
 remote's transport grant from the identity's transport (`account`, `ssh`,
 `system`, or `anonymous`), and applies the author with
-`setGitIdentity(directory, profileId)`. A repository with no remote, and a
-runtime that holds no bindings (VS Code), receive the signature alone. The `global` profile is the System
+`setGitIdentity(directory, profileId)`. A repository with no remote receives the signature alone.
+VS Code mounts no identity surface, so it never applies an identity. The `global` profile is the System
 identity — it removes the provider association and clears the repository-local
 author so the person's own Git configuration answers, and OpenChamber never
 writes the machine's own (global or system) configuration. No choice asks for
@@ -110,7 +112,14 @@ unbinding removes those entries.
 an account identity whose instance host differs from the remote host, an
 account or anonymous identity on a non-HTTPS remote, or an SSH-key identity on a
 non-SSH remote is disabled with a localized reason (`describeIdentityApplicability`)
-and never proposed. `proposeIdentityForHost` proposes, among applicable identities,
+and never proposed. The instance's separate SSH address (`instanceSshUrl`) counts as
+its host for an SSH remote, so a Gitea or Forgejo instance whose `SSH_DOMAIN`
+differs from its web address still serves its own repositories.
+Remote recognition compares the separate SSH address only with SSH remotes,
+using normalized hostname and SSH port. SCP, omitted port and explicit port 22
+have the same default-port identity. An HTTP(S) remote on an SSH-only host
+produces neither a provider identity nor a repository link.
+`proposeIdentityForHost` proposes, among applicable identities,
 the one whose account answers for the remote host, then the default identity,
 then the System identity — the repository as it is. The add screen shows the
 repository as it is signed today, its own local author included, and writes
@@ -287,6 +296,8 @@ storage context.
 
 ## Provider registry
 
+GitHub live summaries carry optional `isInMergeQueue`, `mergeQueueEntry` and `autoMergeRequest` fields through tracked-items and the branch-status store. `SourceBoardActions`, shared by the board, tracker and branch preview, reads its PR's tracked state with the reading account and shows the waiting state with Cancel. Existing surfaces retain ownership of visibility-scoped client interest; the actions add no declaration. Background user merge follows belong to the server and do not consume the client's 300-item interest budget. Cancel uses the merge mutation's optional `cancel` intent, sent only when the provider reported waiting-merge fields. Other hosts keep their existing merge controls.
+
 `providers/` owns what the UI knows about each source-control provider. The
 connected server describes its providers as plain data
 (`SourceControlAPI.providers()`, `GET /api/source-control/providers`);
@@ -299,6 +310,7 @@ and never reads the store itself.
 
 Invariants:
 
+- Service-login metadata reuses the SDK's `sourceControlServiceLoginSchema` from `@openchamber/sdk/schemas`. The UI preserves the server's hint and ignores unknown keys; manifest normalization and strictness stay in the SDK manifest parser.
 - `useSourceControlProvider` always returns a descriptor. An id the registry
   does not hold reads as `unknownProviderDescriptor(id)`: its id as the label,
   pull-request wording with `#`, the branch icon, no auth methods, no URL
@@ -443,6 +455,14 @@ Invariants:
   (path data only, checked by the schema, drawn as a `d` attribute), else the
   branch icon. `providerIconSrc` gives the same mark as a data URI for surfaces
   that mask an icon URL.
+
+### Why a GitLab gap is built and not hidden
+
+GitLab is held to full parity with GitHub, a maintainer decision: every surface
+that works for a GitHub pull request works for a GitLab merge request, in
+merge-request wording with `!` numbers. When a surface turns out to have no
+GitLab path (a missing server route, an unread field), the fix is to build it,
+not to hide the surface for GitLab.
 
 ### Why descriptors are fetched and not mirrored in the UI
 

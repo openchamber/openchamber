@@ -2,6 +2,7 @@ import React from 'react';
 
 import { Icon } from '@/components/icon/Icon';
 import type { IconName } from '@/components/icon/icons';
+import { HoverTooltip } from '@/components/ui/row-tooltip';
 import { useI18n } from '@/lib/i18n';
 import { changeRequestCopy } from '@/lib/source-control/changeRequestCopy';
 import { useChangeRequestTerm } from '@/lib/source-control/providers/registry';
@@ -93,19 +94,22 @@ const ContextCard: React.FC<{
                     <Icon name={icon} className="h-3.5 w-3.5 shrink-0" />
                     <span className="truncate">{summary}</span>
                     {reveal ? (
-                        <button
-                            type="button"
-                            className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full hover:bg-interactive-hover hover:text-foreground"
-                            style={{ minHeight: 0, minWidth: 0 }}
-                            onClick={(event) => {
-                                event.stopPropagation();
-                                reveal.onReveal();
-                            }}
-                            aria-label={reveal.label}
-                            title={reveal.label}
-                        >
-                            <Icon name="arrow-up" className="h-3.5 w-3.5" />
-                        </button>
+                        <HoverTooltip label={reveal.label}>
+                            <button
+                                type="button"
+                                className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full hover:bg-interactive-hover hover:text-foreground"
+                                style={{ minHeight: 0, minWidth: 0 }}
+                                onClick={(event) => {
+                                    event.stopPropagation();
+                                    reveal.onReveal();
+                                }}
+                                aria-label={reveal.label}
+                                // Empty: keeps the card's native title off this button.
+                                title=""
+                            >
+                                <Icon name="arrow-up" className="h-3.5 w-3.5" />
+                            </button>
+                        </HoverTooltip>
                     ) : null}
                 </div>
                 {hasBody ? (

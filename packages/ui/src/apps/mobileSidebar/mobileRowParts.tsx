@@ -1,4 +1,6 @@
 import React from 'react';
+import type { SessionNode } from '@/components/session/sidebar/types';
+import { CollapsedSessionActivityIndicator } from '@/components/session/sidebar/sessions/collapsedActivityIndicator';
 import { Icon } from '@/components/icon/Icon';
 import type { IconName } from '@/components/icon/icons';
 import { FileTreeChevron } from '@/components/views/files/FileTreeRowParts';
@@ -79,12 +81,13 @@ export const MobileTwoLineLayout: React.FC<{
 }> = ({ indent, onSelect, ariaLabel, chevron, firstLine, secondLine }) => {
   const lines = <>
     <span className="flex h-5 min-w-0 items-center gap-2">{firstLine}</span>
-    <span className="flex h-4 min-w-0 items-center gap-1.5 text-muted-foreground">
+    {secondLine || chevron ? <span className="flex h-4 min-w-0 items-center gap-1.5 text-muted-foreground">
       {chevron ? <span aria-hidden className="size-3.5 shrink-0" /> : null}
       {secondLine}
-    </span>
+    </span> : null}
   </>;
-  const layoutClass = 'flex min-w-0 flex-1 flex-col gap-1 py-2.5 pe-3 text-start';
+  // 6px above and below, as the desktop's two-line rows.
+  const layoutClass = 'flex min-h-9 min-w-0 flex-1 flex-col gap-1 py-1.5 pe-3 text-start';
   return (
     <div className="relative flex min-w-0 flex-1">
       {onSelect ? (
@@ -100,10 +103,10 @@ export const MobileTwoLineLayout: React.FC<{
       ) : (
         <div className={layoutClass} style={{ paddingInlineStart: indent }}>{lines}</div>
       )}
-      {/* Centred on the second line's first icon: 10px padding, a 20px title
-          line and a 4px gap put that line's middle 42px down. */}
+      {/* Centred on the second line's first icon: 6px padding, a 20px title
+          line and a 4px gap put that line's middle 38px down. */}
       {chevron ? (
-        <span className="absolute z-10 flex h-8 items-center" style={{ insetInlineStart: indent - 9, top: 26 }}>{chevron}</span>
+        <span className="absolute z-10 flex h-8 items-center" style={{ insetInlineStart: indent - 9, top: 22 }}>{chevron}</span>
       ) : null}
     </div>
   );
@@ -145,7 +148,7 @@ export const MobileSwipeAction: React.FC<{
  * Show more and Show less under a list, side by side, aligned with the text of
  * its rows, a step quieter than the muted titles above it, as on the desktop.
  */
-export const MobileShowControl: React.FC<{ more: boolean; fewer: boolean; indent: number; onShow: (control: 'more' | 'fewer') => void }> = ({ more, fewer, indent, onShow }) => {
+export const MobileShowControl: React.FC<{ more: boolean; fewer: boolean; hiddenNodes: SessionNode[]; indent: number; onShow: (control: 'more' | 'fewer') => void }> = ({ more, fewer, hiddenNodes, indent, onShow }) => {
   const { t } = useI18n();
   const control = (kind: 'more' | 'fewer') => (
     <button
@@ -156,6 +159,7 @@ export const MobileShowControl: React.FC<{ more: boolean; fewer: boolean; indent
     >
       <Icon name={kind === 'more' ? 'arrow-down-s' : 'arrow-up-s'} className="size-4" />
       <span className="typography-micro">{t(kind === 'more' ? 'sessions.sidebar.group.showMore' : 'sessions.sidebar.group.showFewer')}</span>
+      {kind === 'more' ? <CollapsedSessionActivityIndicator nodes={hiddenNodes} /> : null}
     </button>
   );
   return (

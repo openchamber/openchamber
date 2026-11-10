@@ -323,6 +323,17 @@ describe('guest surface runtime', () => {
     expect(service.callsTo(SURFACE_INPUT_PATH)).toHaveLength(2);
   });
 
+  test('a key event reaches the service with the keyCode the viewer browser reported', async () => {
+    const { port, service } = await createHarness();
+    const viewer = await openViewer(port);
+    await viewer.next(); await viewer.next();
+    const key = { type: 'key', action: 'down', key: '.', code: 'Period', keyCode: 190, modifiers: { alt: false, ctrl: false, meta: false, shift: false } };
+    viewer.send({ type: 'input', events: [key] });
+    await viewer.next(); // control
+    await settle();
+    expect(service.callsTo(SURFACE_INPUT_PATH)[0].body).toEqual({ events: [key] });
+  });
+
   test('input batches reach the service in socket order even when one is slow', async () => {
     const { port, service } = await createHarness();
     const viewer = await openViewer(port);

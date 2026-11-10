@@ -115,6 +115,12 @@ Another registered project owns its exact checkout. Chats targets must remain
 inside the chats scope. Missing targets return 404; archived or foreign targets
 return 409, including through Run now.
 
+`resolveExecutionDirectory` on the task service returns the project checkout
+or Chats root after scope ID normalization. For a target task it reuses
+`existing-session.js` target validation and returns the session's own directory.
+The task service uses this directory for named-model catalog checks, so a
+target in a linked worktree uses that worktree's configuration.
+
 Target discovery asks the same rule rather than reproducing it:
 `POST /api/projects/:projectId/scheduled-tasks/targets/eligible` takes the
 candidate sessions the editor already holds (at most 500 per request; the
@@ -154,6 +160,18 @@ policy. Only definitive before-send target or task 404 or 409 refusals are
 terminal, including removed or retargeted tasks and moved targets. Model or
 prompt send errors use the ordinary retry path.
 
+## Slash-command prompts
+
+Slash-command prompts share one parser with the session routes. After trimming
+the whole prompt, the first token after `/` names the command. Arguments retain
+interior spaces, tabs, blank lines, indentation and CRLF. Only spaces or tabs
+after the command token and at most one following line break are removed.
+
+### Why arguments are sliced from the prompt
+
+Slicing preserves instructions and formatting in later paragraphs. Splitting
+and rejoining tokens would discard line breaks and collapse argument spacing.
+
 ## New-session selection
 
 A task either pins them (`execution.providerID`, `modelID`, `variant`, `agent`)
@@ -163,6 +181,120 @@ when each run starts (`session-defaults.js`: the project's `defaultModel` /
 reaches it on its next run without editing it. With nothing set, the session is
 created without a model or agent and OpenCode applies its own. A pinned value
 stored next to `useDefaults` is kept only for when the task is pinned again.
+
+## Dispatch outcome
+
+A new-session run persists `lastStatus: 'sent'` after dispatch. Task status does
+not track the session's later outcome. Worktree cleanup waits for execution
+settlement separately.
+A failed or timed-out dispatch records `'error'`. The task-run event preserves
+`sent` through the shared client translator. Stored `success` values from older
+runs remain unchanged.
+
+## Worktree isolation
+
+Project tasks with `runInWorktree: true` create a fresh worktree for each run
+through the New worktree dialog's creation pipeline. `baseBranch` selects its
+source ref; an absent branch uses the project checkout's `HEAD` at run time.
+The editor reuses multi-run's `BranchSelector`, including remote branches, and
+hides it while isolation is off. Chats and existing-session dispatches do not
+use isolation. Setup commands are outside this implementation.
+The agent tool sets the same choices through `schedule.create` and
+`schedule.update` (`runInWorktree`, `baseBranch`, `cleanupWorktree`); it refuses
+any of them together with `targetSessionId`, because that session's own
+directory wins.
+
+- Project config stores `runInWorktree: true`, a nonempty `baseBranch`, and
+  `cleanupWorktree: false`. Omitted fields preserve stored choices. The source
+  branch and cleanup choice survive saving with isolation off and reloading.
+  Whitespace or more than 200 characters in a source branch rejects the write;
+  the stored ref is never truncated.
+- A confirmed non-repository runs in the project directory. An operational Git
+  probe error, an unregistered bridge, or failed worktree creation fails the
+  run before session creation. The strict Git probe preserves the existing
+  unsupported-home/disk-root rule.
+- Cleanup defaults on. After the prompt/command is accepted, background cleanup
+  uses OpenCode's `experimental.session.wait` to wait for execution settlement
+  and checks that no descendant session or Goal Mode goal remains active. It
+  also waits for background commands started during this run by the session or
+  its descendants. Shells from earlier rounds and unrelated sessions do not
+  hold cleanup. Failed metadata, activity, ownership or shell reads keep the
+  worktree. The dispatch response
+  returns immediately with `sent`. Cleanup removes the worktree without deleting
+  its current branch, then explicitly deletes only the branch captured at
+  creation. An agent switching to another branch never makes that branch
+  eligible for deletion. A failed session creation
+  also rolls back both, even with cleanup off. Removal failures are logged
+  without replacing the dispatch result. The session record remains readable;
+  continuing it in a deleted directory returns 404.
+- With cleanup off, the worktree and branch remain available for review. The
+  card names the generated branch only for this choice; cleaned-up runs show
+  just "own worktree". Kept worktrees accumulate across runs.
+- `state.lastRunIsolated` records isolation, and `state.lastRunBranch` records
+  the generated branch when cleanup is off. The session-creation callback
+  captures these before dispatch so timeout state and the task-run event retain
+  them. Successful dispatch still records `sent` as described above.
+
+### Why cleanup follows execution separately
+
+OpenCode accepts a prompt before its agent finishes, so settling the dispatch
+request cannot authorize deleting its files. Cleanup has a separate
+`maxRunDurationMs` wait budget after dispatch settles. Goal Mode may continue a
+session after its first idle, and background commands may still write its files.
+These conditions are rechecked every 5 seconds only while cleanup is pending.
+A failed check or an expired budget retains the journal and logs the path.
+The cleanup signal reaches the idle wait, activity and shell probes, and the
+metadata store's SDK request. Cancelling a metadata reader also releases its
+wait on shared legacy initialization without cancelling other readers. An
+expired budget logs `cleanup-wait-budget-exceeded`; stop cancels quietly and
+leaves the record recoverable.
+
+On dispatch watchdog timeout the request may still be in flight; cleanup starts
+waiting for execution only once that request settles. If it never settles, the
+worktree remains journaled for recovery.
+
+### Why cleanup has a per-run journal
+
+Before sending the prompt, project config stores a `scheduledWorktreeCleanups`
+record with the session id, project and worktree directories, directory identity,
+created branch, start time and owning process. Runs of the same task keep
+separate records. Deleting a task or removing a project from the registry does
+not discard its cleanup records.
+
+Startup scans the project config files and resumes these waits without sending
+the prompt again. Another live server's records are left to that server. Stop
+aborts local waits while preserving the journal. Failed or timed-out cleanup is
+retried on the next start.
+
+Successful removal clears the record. If the user already removed or replaced
+the worktree directory, a waiting record is discarded without touching the
+replacement or deleting a branch. A short project-locked claim marks physical
+removal as `removing`; slow Git operations run outside the config lock.
+The finalizer checks the cleanup signal after acquiring the lock and after the
+last directory identity read, before physical removal. Cancellation retains the
+record and releases any claimed owner for recovery; releasing that claim is not
+itself cancelled. Journal clearing also checks cancellation under the lock.
+
+A crash between directory and branch deletion resumes that phase and deletes only the
+captured branch, tolerating a branch already gone. It never removes a replacement
+directory at the old path.
+
+### Why owners include a process instance
+
+`ownerPID` is paired with `ownerInstance`, a native creation fingerprint from
+`process-instance.js`. Linux uses the boot UUID and `/proc/<pid>/stat` start
+ticks; macOS uses the boot-session UUID and the process creation time from `ps`
+in UTC; Windows uses the process's UTC creation ticks through hidden PowerShell.
+Native commands have a 2-second deadline. No heartbeat or periodic owner writes
+are needed.
+
+A matching live instance is skipped with an info log. A dead process or a
+different creation fingerprint resumes recovery even when the PID exists.
+Unreadable identities retain the record and log a warning. Records without
+`ownerInstance` remain recoverable; their PID alone cannot establish ownership.
+Startup reads each distinct owner PID once. Only this process's immutable
+identity and boot identity are retained beyond that scan; other PIDs are read
+fresh before a removal claim.
 
 ## Files
 
@@ -194,7 +326,7 @@ Portable, git-commit-able scheduled-task definitions:
 name: daily-digest
 schedule: "0 9 * * *"
 enabled: true
-model: anthropic/claude-sonnet-4-5
+model: opencode/big-pickle
 agent: plan
 timezone: Europe/Kyiv
 ---
@@ -213,11 +345,30 @@ Field mapping (model: `packages/ui/src/lib/scheduledTasksApi.ts`):
 | `timezone` | `schedule.timezone` (optional, IANA; defaults to the server zone) |
 | body | `execution.prompt` (required) |
 
+A stored `model` is checked against the model catalog when it is written. The
+agent tool and the Scheduled tasks editor both save through
+`scheduledTaskService.upsert`, so both reject a `provider/model` the catalog
+does not serve, with `unknown model: provider/model`. The check follows the
+directory the run will happen in — a target-session task against that session's
+worktree, everything else against the project — and stands down when there is
+nothing to compare against: a catalog that is empty because OpenCode has not
+started in that location yet, or because the runtime cannot be reached at all.
+A folder the user has not trusted is the exception to standing down — the save
+is refused with the same 403 the control layer gives, since the user can act on
+it. Only a model the call changes is checked: a task whose stored model has
+since disappeared stays editable, retimeable and deletable. A task that follows
+session defaults is not checked at all, because the pair it stores is whatever
+the editor prefilled and the fire path ignores it — the check lands on the save
+that turns defaults off, where that stored pair starts to run. A loop file's
+model is checked when the
+loop is enabled from the app, since that is the point a person is present to be
+told.
+
 `thinking_level` and `goalEnabled`/`goalTokenBudget` are not part of the portable
 format (UI/JSON-only today); `daily`/`weekly`/`once` schedules remain UI/JSON-only.
 Runtime state (`lastRunAt`, `nextRunAt`, `lastStatus`, `lastError`, `lastSessionId`,
-`lastDurationMs`) is never written to the markdown file — it continues to live in
-the project config state store.
+`lastDurationMs`, `lastRunIsolated`, `lastRunBranch`) is never written to the markdown file —
+it continues to live in the project config state store.
 
 ## Loop reconciliation rules
 

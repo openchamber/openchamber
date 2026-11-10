@@ -39,7 +39,7 @@ export function useSessionDraftRow(draft: SessionDraft, onNavigate: () => void) 
     // Thrown away while in the composer: its text goes too, and the composer
     // starts a fresh draft in the same place.
     const identity = createChatDraftIdentity(getRuntimeKey(), draft.directory, workDraftComposerKey(draft.id));
-    if (identity) clearChatDraft(identity);
+    if (identity) clearChatDraft(identity, true);
     useSessionUIStore.getState().openNewSessionDraft({ selectedProjectId: draft.projectId ?? undefined, directoryOverride: draft.directory });
   };
   return { isOpen, firstLine, attachmentCount, label, open, discard };

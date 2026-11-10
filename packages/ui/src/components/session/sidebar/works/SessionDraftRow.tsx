@@ -32,17 +32,17 @@ type Props = {
  * rows its second line says where it will go: the project (in a zone) and
  * the branch, as a detailed session row's does.
  */
-export function SessionDraftRow({ draft, depth, detailed, mixed, alwaysShowActions, mobileVariant, setSessionSwitcherOpen }: Props): React.ReactNode {
+export function SessionDraftRow({ draft, depth, detailed: detailedRequested, mixed, alwaysShowActions, mobileVariant, setSessionSwitcherOpen }: Props): React.ReactNode {
   const { t } = useI18n();
   const { isOpen, firstLine, attachmentCount, label, open, discard: discardDraft } = useSessionDraftRow(draft, () => {
     if (mobileVariant) setSessionSwitcherOpen(false);
   });
   const project = useProjectsStore(React.useCallback(
-    (state) => (detailed && mixed && draft.projectId ? state.projects.find((entry) => entry.id === draft.projectId) ?? null : null),
-    [detailed, mixed, draft.projectId],
+    (state) => (detailedRequested && mixed && draft.projectId ? state.projects.find((entry) => entry.id === draft.projectId) ?? null : null),
+    [detailedRequested, mixed, draft.projectId],
   ));
-  // Known once the directory's git status has been read; the line keeps its height without it.
-  const branch = useGitBranchLabel(detailed ? draft.directory : null);
+  const branch = useGitBranchLabel(detailedRequested ? draft.directory : null);
+  const detailed = detailedRequested && Boolean(project || branch || (firstLine && attachmentCount > 0));
   const discard = (event: React.MouseEvent): void => {
     event.stopPropagation();
     discardDraft();
@@ -56,7 +56,8 @@ export function SessionDraftRow({ draft, depth, detailed, mixed, alwaysShowActio
         if (isRowBoxClick(event)) open();
       }}
       className={cn(
-        'group/draft relative my-0.5 flex cursor-pointer select-none rounded-md py-1.5 pe-2.5',
+        'group/draft relative my-0.5 flex cursor-pointer select-none rounded-md pe-2.5',
+        detailed ? 'py-1.5' : 'py-[5px]',
         detailed ? 'flex-col gap-px' : 'items-center gap-1.5',
         isOpen ? 'bg-interactive-selection/70 text-interactive-selection-foreground' : 'hover:bg-interactive-hover/60',
       )}
@@ -107,7 +108,7 @@ export function SessionDraftRow({ draft, depth, detailed, mixed, alwaysShowActio
         <div className="flex h-4 w-full min-w-0 items-center gap-1">
           {project ? <TimelineProjectIcon project={project} label={formatProjectLabel(project.label?.trim() || project.path)} /> : null}
           <Icon name="edit" className="h-3 w-3 flex-shrink-0 text-muted-foreground" />
-          {branch ? <span className="min-w-0 truncate typography-micro text-muted-foreground">{branch}</span> : null}
+          {branch ? <span dir="ltr" className="min-w-0 truncate typography-micro text-muted-foreground">{branch}</span> : null}
           {firstLine && attachmentCount > 0 ? <Icon name="attachment-2" className="ms-auto h-3 w-3 flex-shrink-0 text-muted-foreground" /> : null}
         </div>
       ) : null}

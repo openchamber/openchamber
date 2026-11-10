@@ -31,7 +31,9 @@ import { CdpClient, createPageTarget, evaluateValue, launchChrome, reservePort, 
 import { buildIdleProbeSource, IDLE_PROBE_GLOBAL } from "./perf/idle-probe.mjs"
 import { summarizeCpuProfile } from "./perf/cpu-profile.mjs"
 import { buildRenderProbeSource, printRenderProbe, readRenderProbe, RENDER_PROBE_GLOBAL, summarizeRenderProbe } from "./perf/render-probe.mjs"
-import { expandProjects, expandSessionLists } from "./perf/scenario.mjs"
+import { buildPageSignalsSource, startPageSignals } from "./perf/page-signals.mjs"
+import { createProcessCpuSampler, openBrowserClient, resolveServerProcesses } from "./perf/process-cpu.mjs"
+import { expandProjects, expandSessionLists, settlePage } from "./perf/scenario.mjs"
 import { startFrameCount } from "./perf/frame-count.mjs"
 import { growthPerSecond, metricMap, round } from "./perf/metrics.mjs"
 
@@ -58,7 +60,11 @@ Options:
                            file, diff, plan, context, browser, walkthrough).
                            Repeatable; the first entry becomes the active tab.
   --duration <seconds>     Idle recording window (default: 30)
-  --settle <seconds>       Wait after load before recording (default: 15)
+  --settle <seconds>       Longest wait after load for the app to be ready and
+                           its main thread quiet (default: 15)
+  --timing                 Timing run: no sampler and no scheduled-work probe.
+                           The figures to compare between builds; attribution
+                           needs a run without this flag.
   --output <directory>     Artifact directory (default: artifacts/idle-profile-<time>)
   --label <text>           Human label stored in the summary
   --chrome <path>          Chrome/Chromium executable
@@ -102,6 +108,7 @@ const parseArgs = (argv) => {
     expandSessions: false,
     duration: 30,
     settle: 15,
+    timing: false,
     output: null,
     label: null,
     chrome: null,
@@ -133,6 +140,7 @@ const parseArgs = (argv) => {
     else if (value === "--label") options.label = argv[++index]
     else if (value === "--duration") options.duration = Number(argv[++index])
     else if (value === "--settle") options.settle = Number(argv[++index])
+    else if (value === "--timing") options.timing = true
     else if (value === "--output") options.output = argv[++index]
     else if (value === "--chrome") options.chrome = argv[++index]
     else if (value === "--profile-dir") options.profileDir = argv[++index]
@@ -367,10 +375,14 @@ const main = async () => {
   const port = await reservePort()
   const chromeProcess = launchChrome({ chrome, profileDir, port, headless: options.headless })
   let client
+  let browserClient
   try {
     const target = await createPageTarget(port)
     client = new CdpClient(target.webSocketDebuggerUrl)
     await client.connect()
+    browserClient = await openBrowserClient(port)
+    const serverPort = Number(new URL(options.url).port)
+    const processCpu = createProcessCpuSampler({ browserClient, serverProcesses: serverPort ? await resolveServerProcesses(serverPort) : [] })
     await Promise.all([
       client.send("Page.enable"),
       client.send("Runtime.enable"),
@@ -381,7 +393,8 @@ const main = async () => {
     // Measure the current local build, never a service-worker-cached bundle
     // from an earlier optimization run.
     await client.send("Network.setBypassServiceWorker", { bypass: true })
-    await client.send("Page.addScriptToEvaluateOnNewDocument", { source: buildIdleProbeSource() })
+    if (!options.timing) await client.send("Page.addScriptToEvaluateOnNewDocument", { source: buildIdleProbeSource() })
+    await client.send("Page.addScriptToEvaluateOnNewDocument", { source: buildPageSignalsSource() })
     if (options.renderProbe) await client.send("Page.addScriptToEvaluateOnNewDocument", { source: buildRenderProbeSource({ traceHook: options.renderProbeHook }) })
     if (options.injectScript) await client.send("Page.addScriptToEvaluateOnNewDocument", { source: await readFile(resolve(options.injectScript), "utf8") })
     // A fixed viewport keeps runs comparable and guarantees a compositor in
@@ -409,19 +422,25 @@ const main = async () => {
       await reloaded
     }
 
-    console.log(`Loaded ${options.url}; settling for ${options.settle}s before recording.`)
-    await wait(options.settle * 1000)
+    console.log(`Loaded ${options.url}; settling for up to ${options.settle}s before recording.`)
+    const settle = await settlePage(client, options.settle)
+    console.log(`Settled after ${settle.seconds}s.`)
 
     if (options.expandSessions) {
       const expanded = await expandSessionLists(client)
-      console.log(`Expanded ${expanded} collapsed session lists; settling ${options.settle}s again.`)
-      await wait(options.settle * 1000)
+      console.log(`Expanded ${expanded} collapsed session lists; settling again.`)
+      await settlePage(client, options.settle, { afterLoad: false })
     }
 
-    await evaluateValue(client, `globalThis[${JSON.stringify(IDLE_PROBE_GLOBAL)}]?.start()`)
+    if (!options.timing) await evaluateValue(client, `globalThis[${JSON.stringify(IDLE_PROBE_GLOBAL)}]?.start()`)
     if (options.renderProbe) await evaluateValue(client, `globalThis[${JSON.stringify(RENDER_PROBE_GLOBAL)}]?.start()`)
-    await client.send("Profiler.setSamplingInterval", { interval: options.samplingInterval })
-    await client.send("Profiler.start")
+    if (!options.timing) {
+      await client.send("Profiler.setSamplingInterval", { interval: options.samplingInterval })
+      await client.send("Profiler.start")
+    }
+    await processCpu.sampleWakeups()
+    await processCpu.sample()
+    const pageSignals = await startPageSignals(client)
     const before = metricMap((await client.send("Performance.getMetrics")).metrics)
     const frameCount = await startFrameCount(client)
     const startedAt = Date.now()
@@ -443,6 +462,9 @@ const main = async () => {
     // Stopped before the liveness probe below, whose animation frames would
     // count as drawn frames.
     const frames = await frameCount.stop()
+    const signals = await pageSignals.stop()
+    await processCpu.sample()
+    await processCpu.sampleWakeups()
 
     // A renderer that is throttled or occluded reports near-zero rendering work
     // no matter what the page does. Measuring frame liveness turns that failure
@@ -461,9 +483,9 @@ const main = async () => {
 
     const elapsedSeconds = (Date.now() - startedAt) / 1000
     const after = metricMap((await client.send("Performance.getMetrics")).metrics)
-    const { profile } = await client.send("Profiler.stop")
-    await evaluateValue(client, `globalThis[${JSON.stringify(IDLE_PROBE_GLOBAL)}]?.stop()`)
-    const probe = await evaluateValue(client, `globalThis[${JSON.stringify(IDLE_PROBE_GLOBAL)}]?.snapshot() ?? null`)
+    const profile = options.timing ? null : (await client.send("Profiler.stop")).profile
+    if (!options.timing) await evaluateValue(client, `globalThis[${JSON.stringify(IDLE_PROBE_GLOBAL)}]?.stop()`)
+    const probe = options.timing ? null : await evaluateValue(client, `globalThis[${JSON.stringify(IDLE_PROBE_GLOBAL)}]?.snapshot() ?? null`)
     if (options.renderProbe) await evaluateValue(client, `globalThis[${JSON.stringify(RENDER_PROBE_GLOBAL)}]?.stop()`)
     const renderProbeRaw = options.renderProbe ? await readRenderProbe((expression) => evaluateValue(client, expression)) : null
 
@@ -472,12 +494,16 @@ const main = async () => {
       before,
       after,
       samples,
-      cpu: summarizeCpuProfile(profile),
+      cpu: profile ? summarizeCpuProfile(profile) : null,
       probe,
       frames,
       elapsedSeconds,
     })
     summary.frameLiveness = frameLiveness
+    summary.timing = options.timing
+    summary.settle = settle
+    summary.pageSignals = signals
+    summary.processCpu = processCpu.summarize()
     summary.injectedScript = options.injectScript
     summary.renderProbe = renderProbeRaw ? summarizeRenderProbe(JSON.parse(renderProbeRaw)) : null
     if (Number(frameLiveness?.framesPerSecond ?? 0) < 10) {
@@ -488,7 +514,7 @@ const main = async () => {
     }
 
     await writeFile(join(output, "idle-summary.json"), JSON.stringify(summary, null, 2))
-    await writeFile(join(output, "cpu-profile.cpuprofile"), JSON.stringify(profile))
+    if (profile) await writeFile(join(output, "cpu-profile.cpuprofile"), JSON.stringify(profile))
     if (renderProbeRaw) await writeFile(join(output, "render-probe.json"), renderProbeRaw)
 
     if (options.json) console.log(JSON.stringify(summary, null, 2))
@@ -506,6 +532,7 @@ const main = async () => {
     }
   } finally {
     client?.close()
+    browserClient?.close()
     if (!chromeProcess.killed) chromeProcess.kill("SIGTERM")
     profile.removeAfter(chromeProcess)
   }

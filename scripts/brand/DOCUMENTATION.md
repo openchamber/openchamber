@@ -13,15 +13,17 @@ The logo has four drawings, each for a kind of place:
 | In-app logo: the open shell in one colour | Every splash, About, sign-in, empty states, README |
 | Glyph: cube outline and two roof rings, one colour | macOS menu bar, favicon, VS Code activity bar and title buttons, model picker sprite, Android notification and themed icon, iOS Control Center |
 
+OpenChamber Canary, the nightly build, has its own icons in `packages/electron/resources/icons-canary`, drawn by `canary.mjs`: the release cube on a blue tile with a yellow canary at its side. Its Icon Composer document `AppIcon.icon` is the master and is edited in Icon Composer; the Windows and Linux icon (the release icon without a tile, its cube flat in blue, with the rendered document's bird in front in a black outline), the `.ico` (blue pixel cubes below 32 px, each with a round pixel chick kept as text in `raster.mjs`), the menu bar templates (the glyph with the canary redrawn per pixel, kept as text in `canary.mjs`, standing over its lower right corner with a thin clear gap around it, in every state) and `Assets.car`/`icon.icns` come from it.
+
 The macOS menu bar animation lives in `packages/electron/tray.mjs`; this module only draws its frames. `OpenChamberLogo.tsx` renders the in-app logo from the generated `openChamberLogoArt.ts` and owns its loading animation.
 
 ## Invariants
 
-- Every logo file in the repository comes out of `generate.mjs`. A change to the logo is a change to `geometry.mjs` and a run of `bun run brand:generate`, never an edit of an output. One exception: the iOS widgets draw the in-app logo in SwiftUI (`CubeLogoView` in `packages/mobile/ios/App/OpenChamberWidget/WidgetShared.swift`), by hand from the same numbers. A change to the in-app logo updates it in the same change; `--check` does not cover it.
+- Every logo file in the repository comes out of `generate.mjs`, except Canary's `AppIcon.icon`, the master its other files are generated from. A change to the logo is a change to `geometry.mjs` and a run of `bun run brand:generate`, never an edit of an output. One exception: the iOS widgets draw the in-app logo in SwiftUI (`CubeLogoView` in `packages/mobile/ios/App/OpenChamberWidget/WidgetShared.swift`), by hand from the same numbers. A change to the in-app logo updates it in the same change; `--check` does not cover it.
 - The four HTML documents that show before React (the web `index.html`, the Electron splash in `early-startup.mjs`, the VS Code loader in `webviewHtml.ts`, the headless server page in `static-routes-runtime.js`) and `OpenChamberLogo.tsx` draw the same in-app logo. The HTML documents carry it between `<!-- brand:flat-logo:start -->` and `<!-- brand:flat-logo:end -->`; the generator rewrites only that region.
 - The in-app logo is drawn in `currentColor` (or the splash stroke colour), never a fixed colour, so it follows every theme.
 - Text outputs are checked by `generate.test.mjs`; image bytes are not, because they depend on the libvips build.
-- On macOS with Xcode 26 the generator also compiles `Assets.car` and `icon.icns` with `actool`, renders `dev-icon.png` with Icon Composer's `ictool`, and writes the Control Center SF Symbol with `swiftdraw`. Elsewhere those files stay as they are.
+- On macOS with Xcode 26 the generator also compiles `Assets.car` and `icon.icns` with `actool`, renders `dev-icon.png` with Icon Composer's `ictool`, writes every Canary icon, and writes the Control Center SF Symbol with `swiftdraw`. Elsewhere those files stay as they are.
 
 ## Decisions
 
@@ -40,3 +42,11 @@ At 16 to 24 px the 30 degree edges fall between pixels and the cube blurs. `pixe
 ### Why the macOS dev icon is rendered by ictool and not drawn
 
 The release Dock icon is glass rendered by the system. A flat drawing next to it looked like a different app. `ictool` renders the real document the way the Dock does, and the tape goes on top.
+
+### Why Canary's icon is a picture and not geometry
+
+Its bird and glass were drawn in Icon Composer, and the look that was approved is the one Icon Composer renders. Redrawing it as vector art would change it. The other Canary files are cut from that rendering, so a change to the document is one edit and one run, like the release icons.
+
+### Why Canary's Windows and Linux cube is drawn flat and not cut from the document
+
+The cube cut out of the rendered document carried its glass: a thin pale edge line under the black outline and glass on the top face, next to the release icon's thick white edges. On a taskbar the two apps looked like different families. `canary.mjs` draws the release icon without a tile in the Canary blues (`CANARY_NO_TILE`) and takes only the bird from the document, so the two icons differ in colour and bird alone.

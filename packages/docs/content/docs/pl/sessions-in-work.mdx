@@ -51,12 +51,12 @@ Czaty nie mają oka: to zwykłe rozmowy.
 
 ### „Ta praca wygląda na skończoną.”
 
-Gdy masz skonfigurowanego [dostawcę klasyfikacji](/pl/classification-providers/), Jev sprawdza każdą turę sesji w toku. Gdy tura wygląda na koniec pracy (podziękowałeś, poprosiłeś o commit, potwierdziłeś, że działa), Jev niczego nie zamyka, tylko zostawia wskazówkę:
+Gdy masz skonfigurowanego [dostawcę klasyfikacji](/pl/classification-providers/), Jev sprawdza każdą turę sesji w toku. Gdy tura wygląda na koniec pracy (agent zgłasza skończoną pracę, nie kontynuuje sam, nie czeka na Twoją odpowiedź i nie proponuje nic więcej), Jev niczego nie zamyka, tylko zostawia wskazówkę:
 
 - szary ptaszek przy wierszu sesji w pasku bocznym
 - pasek nad polem wiadomości: **Ta praca wygląda na skończoną.** z przyciskiem **Oznacz jako gotowe**
 
-Kliknij **Oznacz jako gotowe**, jeśli Jev ma rację. Jeśli nie, po prostu pracuj dalej: wskazówka zniknie z Twoją następną wiadomością. Bez dostawcy klasyfikacji wskazówki nie ma, a sesje oznaczasz jako gotowe sam.
+Wskazówka pojawia się dopiero po 10 minutach bez Twojej wiadomości po turze, żeby nie przeszkadzała, gdy przechodzisz od kroku do kroku. Kliknij **Oznacz jako gotowe**, jeśli Jev ma rację. Jeśli nie, po prostu pracuj dalej: wskazówka zniknie z Twoją następną wiadomością. Bez dostawcy klasyfikacji wskazówki nie ma, a sesje oznaczasz jako gotowe sam.
 
 ## Podsumowanie i podpowiedź następnej wiadomości
 
@@ -71,9 +71,11 @@ Włączysz je i wyłączysz w **Ustawienia → Czat → Wsparcie sesji**.
 
 ## Ustawienia
 
-Otwórz **Ustawienia → Sesje → Sesje w toku**. Jest tam jedna opcja, **Pokazuj sesje w toku**, domyślnie włączona. Po jej wyłączeniu wyłącza się cała funkcja: nie ma bloku, a wysłana wiadomość nie przenosi już sesji do toku.
+Otwórz **Ustawienia → Sesje → Sesje w toku**. **Pokazuj sesje w toku** jest domyślnie włączone. Po wyłączeniu wyłącza się cała funkcja: nie ma bloku, a wysłana wiadomość nie przenosi już sesji do toku.
 
 Żeby ukryć tylko blok, użyj **Pokaż sekcję W toku** w menu widoku paska bocznego.
+
+Czyszczenie sesji zachowuje sesje z bloku W toku. Żeby wygasały jak każda inna sesja, włącz **Uwzględniaj sesje „W toku”** w **Ustawienia → Sesje → Przechowywanie sesji**. Ta opcja jest domyślnie wyłączona, a przypięte sesje zostają w każdym przypadku.
 
 ## Gdzie to działa
 

@@ -1,14 +1,16 @@
 import React from 'react';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
-import { selectAvailableSkillsForDirectory, useSkillsStore } from '@/stores/useSkillsStore';
+import { selectAvailableSkillsForDirectory, selectSkillsLoadedForDirectory, useSkillsStore } from '@/stores/useSkillsStore';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
+import { useComposerConfigDirectory } from '@/hooks/useComposerConfigDirectory';
 import { useUIStore } from '@/stores/useUIStore';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { useMobileAutocompleteMaxHeight } from './useMobileAutocompleteMaxHeight';
-import { AutocompleteRowDetail } from './composer/ui/AutocompleteRowParts';
+import { AutocompleteLoadingRow, AutocompleteRowDetail, type AutocompleteScope } from './composer/ui/AutocompleteRowParts';
 import { useAutocompleteSelectionScroll } from './composer/ui/useAutocompleteSelectionScroll';
 import { rankSkillAutocompleteItems } from './skillAutocompleteItems';
+import { useHeightMorph } from '@/lib/motion/useSizeMorph';
 
 interface SkillInfo {
   name: string;
@@ -16,6 +18,8 @@ interface SkillInfo {
   source?: string;
   description?: string;
 }
+
+const EMPTY_SKILLS: SkillInfo[] = [];
 
 export interface SkillAutocompleteHandle {
   handleKeyDown: (key: string) => void;
@@ -28,6 +32,12 @@ interface SkillAutocompleteProps {
   style?: React.CSSProperties;
 }
 
+/** Our authoring skill is delivered as a skill on disk, but it comes with the app. */
+const skillRowScope = (skill: SkillInfo): AutocompleteScope => {
+  if (skill.name === 'openchamber-extensions') return 'openchamber';
+  return skill.scope === 'project' ? 'project' : 'user';
+};
+
 export const SkillAutocomplete = React.forwardRef<SkillAutocompleteHandle, SkillAutocompleteProps>(({
   searchQuery,
   onSkillSelect,
@@ -36,28 +46,40 @@ export const SkillAutocomplete = React.forwardRef<SkillAutocompleteHandle, Skill
 }, ref) => {
   const { t } = useI18n();
   const containerRef = React.useRef<HTMLDivElement | null>(null);
+  // Narrowing as the user types, the box eases into its new height; its
+  // bottom edge stays on the composer (`bottom-full`), so it moves upward.
+  useHeightMorph(containerRef);
   const isMobile = useUIStore((state) => state.isMobile);
-  const mobileMaxHeight = useMobileAutocompleteMaxHeight(containerRef, true, 240);
+  // A caret placement brings its own max-height.
+  const mobileMaxHeight = useMobileAutocompleteMaxHeight(containerRef, style?.maxHeight === undefined, 240);
   const [selectedIndex, setSelectedIndex] = React.useState(0);
   const selectedIndexRef = React.useRef(0);
-  const [filteredSkills, setFilteredSkills] = React.useState<SkillInfo[]>([]);
   const itemRefs = React.useRef<(HTMLDivElement | null)[]>([]);
   const { listRef, onKeyboardNavigate } = useAutocompleteSelectionScroll(selectedIndex, itemRefs);
   // Skills of the directory the composer sends to (session directory, or the
   // Chats root for a chat draft), not of the project the app was on last.
   const effectiveDirectory = useEffectiveDirectory();
-  const skills = useSkillsStore((s) => selectAvailableSkillsForDirectory(s, effectiveDirectory));
+  const target = useComposerConfigDirectory(effectiveDirectory);
+  const directory = target.status === 'resolved' ? target.directory : null;
+  const skills = useSkillsStore((s) => target.status === 'pending'
+    ? EMPTY_SKILLS
+    : selectAvailableSkillsForDirectory(s, target.directory));
+  // An empty list before the first read is not "no skills".
+  const skillsLoading = useSkillsStore((s) => target.status === 'pending'
+    || (Boolean(directory) && !selectSkillsLoadedForDirectory(s, target.directory)));
   const loadSkills = useSkillsStore((s) => s.loadSkills);
 
   React.useEffect(() => {
-    // Always trigger loadSkills when autocomplete opens to ensure the directory's skills are fresh
-    void loadSkills(effectiveDirectory);
-  }, [effectiveDirectory, loadSkills]);
+    if (directory) void loadSkills(directory);
+  }, [directory, loadSkills]);
+
+  // Ranked in the render that shows them: an effect painted the last query's
+  // rows first, so the box moved twice per keystroke.
+  const filteredSkills = React.useMemo(() => rankSkillAutocompleteItems(skills, searchQuery), [skills, searchQuery]);
 
   React.useEffect(() => {
-    setFilteredSkills(rankSkillAutocompleteItems(skills, searchQuery));
     setSelectedIndex(0);
-  }, [skills, searchQuery]);
+  }, [filteredSkills]);
 
   React.useEffect(() => {
     selectedIndexRef.current = selectedIndex;
@@ -130,7 +152,7 @@ export const SkillAutocomplete = React.forwardRef<SkillAutocompleteHandle, Skill
         }}
       >
         <span className="max-w-[60%] shrink-0 truncate font-semibold">{skill.name}</span>
-        <AutocompleteRowDetail scope={skill.scope === 'project' ? 'project' : 'user'} description={skill.description} />
+        <AutocompleteRowDetail scope={skillRowScope(skill)} description={skill.description} />
       </div>
     );
   };
@@ -146,6 +168,8 @@ export const SkillAutocomplete = React.forwardRef<SkillAutocompleteHandle, Skill
           <div>
             {filteredSkills.map((skill, index) => renderSkill(skill, index))}
           </div>
+        ) : skillsLoading ? (
+          <AutocompleteLoadingRow />
         ) : (
           <div className="px-2 py-1.5 typography-ui-label text-muted-foreground">
             {t('chat.autocomplete.skillsEmpty')}

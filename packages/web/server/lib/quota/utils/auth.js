@@ -1,14 +1,11 @@
 import fs from 'fs';
 import path from 'path';
-import os from 'os';
-import { OPENCODE_CONFIG_DIR } from '../../opencode/shared.js';
+import { getOpenCodeDataDir, OPENCODE_CONFIG_DIR } from '../../opencode/shared.js';
 import { asNonEmptyString } from './transformers.js';
-
-const OPENCODE_DATA_DIR = path.join(os.homedir(), '.local', 'share', 'opencode');
 
 export const ANTIGRAVITY_ACCOUNTS_PATHS = [
   path.join(OPENCODE_CONFIG_DIR, 'antigravity-accounts.json'),
-  path.join(OPENCODE_DATA_DIR, 'antigravity-accounts.json')
+  path.join(getOpenCodeDataDir(), 'antigravity-accounts.json')
 ];
 
 export const readJsonFile = (filePath) => {

@@ -1,4 +1,5 @@
 import {
+  eventMatchesHeldSequenceKey,
   eventMatchesShortcut,
   normalizeCombo,
   parseShortcut,
@@ -144,11 +145,10 @@ export class ShortcutDispatcher {
   }
 
   private getPrefixMatches(matches: BindingMatch[], event: KeyboardEvent): BindingMatch[] {
-    return matches.filter((match) => (
-      match.chords.length === 2
-      && match.chords[0] === this.prefix
-      && eventMatchesShortcut(event, match.chords[1])
-    ));
+    const sequences = matches.filter((match) => match.chords.length === 2 && match.chords[0] === this.prefix);
+    const exact = sequences.filter((match) => eventMatchesShortcut(event, match.chords[1]));
+    if (exact.length > 0) return exact;
+    return sequences.filter((match) => eventMatchesHeldSequenceKey(event, match.chords[0], match.chords[1]));
   }
 
   private getMatches(): BindingMatch[] {

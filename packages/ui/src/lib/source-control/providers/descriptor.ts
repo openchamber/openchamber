@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { sourceControlServiceLoginSchema } from '@openchamber/sdk/schemas';
 
 /**
  * What the UI knows about one source-control provider, as the connected
@@ -100,6 +101,7 @@ const descriptorSchema = z.object({
     methods: z.array(z.union([authMethodSchema, z.string().transform((): null => null)]))
       .transform((methods) => methods.filter((method): method is SourceControlAuthMethod => method !== null)),
     cliName: z.string().min(1).max(32).optional(),
+    login: sourceControlServiceLoginSchema.optional(),
     cliTransport: z.boolean(),
     token: z.object({
       scopes: z.array(z.string().min(1).max(64)).max(32),
@@ -131,6 +133,9 @@ const descriptorSchema = z.object({
     listStatuses: z.boolean().default(false),
     referencesAcross: z.boolean().default(false),
     startThread: z.boolean().default(false),
+    // The viewer's review draft on the host: comments on lines, sent with a verdict.
+    reviewDrafts: z.boolean().default(false),
+    reviewDraftFileComments: z.boolean().default(false),
     authorCanReview: z.boolean().default(false),
     projectUploads: z.boolean().default(false),
     issueCloseReason: z.boolean().default(false),
@@ -218,7 +223,7 @@ export const unknownProviderDescriptor = (id: string): SourceControlProviderDesc
     urls: { changeRequest: [], issue: [], discussion: [], commit: [], user: [] },
     features: {
       referenceSearch: false, referenceDetail: false, listStatuses: false, referencesAcross: false,
-      startThread: false, authorCanReview: false, projectUploads: false, issueCloseReason: false,
+      startThread: false, reviewDrafts: false, reviewDraftFileComments: false, authorCanReview: false, projectUploads: false, issueCloseReason: false,
       changeRequestTemplates: [], changeRequestPatch: false, reviewModel: 'verdict', revisions: false,
       submitRequirements: false, createByPush: false, branchHeads: true, discussions: false,
     },

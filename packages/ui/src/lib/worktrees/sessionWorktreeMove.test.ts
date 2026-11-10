@@ -51,7 +51,7 @@ const metadataWrites: Array<{ sessionId: string; metadata: WorktreeMetadata | nu
 const toastSuccesses: string[] = [];
 const toastErrors: Array<{ title: string; description?: string }> = [];
 const toastWarnings: string[] = [];
-const titleWrites: Array<{ directory: string; title: string }> = [];
+const titleWrites: Array<{ directory: string; title: string; by: 'agent' | 'user' }> = [];
 const directoryStates = new Map<string, DirectoryState>();
 const storedMetadata = new Map<string, WorktreeMetadata | null>();
 const originalConsoleWarn = console.warn;
@@ -123,8 +123,8 @@ mock.module('@/components/ui', () => ({
 mock.module('@/lib/gitApi', () => ({
   checkIsGitRepository: (directory: string) => isGitRepositoryImplementation(directory),
   getGitStatus: (directory: string) => getGitStatusImplementation(directory),
-  setGitWorktreeTitle: (directory: string, title: string) => {
-    titleWrites.push({ directory, title });
+  setGitWorktreeTitle: (directory: string, title: string, by: 'agent' | 'user') => {
+    titleWrites.push({ directory, title, by });
     return Promise.resolve({ applied: true, title });
   },
   deleteRemoteBranch: mock(),
@@ -150,6 +150,9 @@ mock.module('@/lib/gitApi', () => ({
 mock.module('@/lib/openchamberConfig', () => ({
   substituteCommandVariables: (command: string) => command,
 }));
+mock.module('@/lib/sharedTrustConfirmation', () => ({
+  resolveWorktreeTeardownCommands: async () => [],
+}));
 
 mock.module('@/lib/worktreeSessionCreator', () => ({
   createQuickWorktree: mock((project: ProjectRef, options: CreateQuickWorktreeOptions) => {
@@ -164,6 +167,7 @@ mock.module('@/lib/worktreeSessionCreator', () => ({
 mock.module('@/lib/worktrees/worktreeBootstrap', () => ({
   waitForWorktreeGitReady: mock((directory: string) => waitForWorktreeGitReadyImplementation(directory)),
   clearWorktreeBootstrapState: mock(),
+  getWorktreeBootstrapState: () => null,
   markWorktreeBootstrapPending: mock(),
   setWorktreeBootstrapState: mock(),
   startWorktreeBootstrapWatcher: mock(),
@@ -205,7 +209,10 @@ mock.module('@/sync/session-actions', () => ({
     moveCalls.push({ sessionId: session.id, sourceDirectory, destinationDirectory });
     return moveSessionImplementation(session, sourceDirectory, destinationDirectory);
   },
-  getSessionLiveActivity,
+  readSessionsLiveActivity: async (sessionIds: string[]) => {
+    const activities = sessionIds.map(getSessionLiveActivity);
+    return activities.find((activity) => activity === 'active') ?? activities.find((activity) => activity === 'unknown') ?? 'idle';
+  },
   isSessionBusyNow: (sessionId: string) => getSessionLiveActivity(sessionId) === 'active',
 }));
 
@@ -291,7 +298,7 @@ const setStatuses = (directory: string, statuses: Record<string, State['session_
 };
 
 const waitFor = async (predicate: () => boolean): Promise<void> => {
-  for (let attempt = 0; attempt < 20; attempt += 1) {
+  for (let attempt = 0; attempt < 50; attempt += 1) {
     if (predicate()) return;
     await Promise.resolve();
   }
@@ -876,16 +883,23 @@ describe('moveSessionTreeToExistingWorktree', () => {
     expect(refreshCalls).toEqual([['/source', '/created-worktree']]);
   });
 
-  test('a named task keeps its name in the new worktree; an unnamed one leaves it unnamed', async () => {
+  test('a new worktree carries the current session title and explicit user ownership', async () => {
     setStatuses('/source', { named: 'idle', plain: 'idle' });
     const named = { ...makeSession('named'), title: 'Login fix', metadata: { openchamber: { workTitle: { title: 'Login fix', by: 'agent' } } } };
 
     requestSessionTreeMove({ ...makeQuickIntent(), root: named });
     await waitFor(() => toastSuccesses.length === 1);
-    requestSessionTreeMove({ ...makeQuickIntent(), root: makeSession('plain') });
+    requestSessionTreeMove({ ...makeQuickIntent(), root: { ...makeSession('plain'), title: 'Generated title' } });
     await waitFor(() => toastSuccesses.length === 2);
 
-    expect(titleWrites).toEqual([{ directory: '/created-worktree', title: 'Login fix' }]);
+    setStatuses('/source', { user: 'idle' });
+    requestSessionTreeMove({ ...makeQuickIntent(), root: { ...makeSession('user'), title: 'My task', metadata: { openchamber: { workTitle: { title: 'My task', by: 'user' } } } } });
+    await waitFor(() => toastSuccesses.length === 3);
+    expect(titleWrites).toEqual([
+      { directory: '/created-worktree', title: 'Login fix', by: 'agent' },
+      { directory: '/created-worktree', title: 'Generated title', by: 'agent' },
+      { directory: '/created-worktree', title: 'My task', by: 'user' },
+    ]);
   });
 
   test('keeps a newly created worktree when a descendant fails ambiguously before the root moved', async () => {

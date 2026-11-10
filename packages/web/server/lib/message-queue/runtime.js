@@ -13,6 +13,7 @@
 
 import fs from 'fs';
 import path from 'path';
+import { createMessageId } from '../dispatch-results/runtime.js';
 import { assertPromptResponse } from '../opencode/prompt-response.js';
 import { unwrapOpenCodeResponse } from '../opencode/response-envelope.js';
 import { createSessionActivityProbe } from '../opencode/session-activity.js';
@@ -46,6 +47,7 @@ const ATTACHMENT_SOURCES = new Set(['local', 'server', 'vscode']);
 // the other kinds are plain synthetic text.
 const CONTEXT_PART_KINDS = new Set(['context', 'instruction', 'synthetic']);
 const SESSION_ID_PATTERN = /^[A-Za-z0-9_-]{4,128}$/;
+const MESSAGE_ID_PATTERN = /^msg_[A-Za-z0-9]{8,64}$/;
 
 const getQueuedSendRetryDelayMs = (failures) =>
   Math.min(RETRY_BASE_DELAY_MS * 2 ** Math.max(failures - 1, 0), RETRY_MAX_DELAY_MS);
@@ -107,6 +109,8 @@ const parseAttachment = (value) => {
   };
   const serverPath = asNonEmptyString(raw.serverPath);
   if (serverPath) attachment.serverPath = serverPath;
+  const agentPath = asNonEmptyString(raw.agentPath);
+  if (agentPath) attachment.agentPath = agentPath;
   attachment.dataUrl = dataUrl;
   return attachment;
 };
@@ -174,7 +178,11 @@ const parseStoredItem = (value) => {
   const id = raw ? asNonEmptyString(raw.id) : '';
   if (!id) return null;
   try {
-    return { id, createdAt: asCount(raw.createdAt) ?? Date.now(), ...parseQueuedItemInput(raw) };
+    const item = { id, createdAt: asCount(raw.createdAt) ?? Date.now(), ...parseQueuedItemInput(raw) };
+    // Only the file carries these: a delivery mints them, a client never does.
+    const syntheticIds = asList(raw.syntheticIds) ?? [];
+    if (syntheticIds.length > 0 && syntheticIds.every((entry) => MESSAGE_ID_PATTERN.test(asText(entry)))) item.syntheticIds = syntheticIds;
+    return item;
   } catch {
     return null;
   }
@@ -362,18 +370,17 @@ export function createMessageQueueRuntime({
 
   const persist = () => {
     const payload = JSON.stringify(serialize());
-    writePromise = writePromise
-      .then(async () => {
-        await fs.promises.mkdir(dataDir, { recursive: true });
-        const tmpPath = `${filePath}.${process.pid}.tmp`;
-        // Queued prompts are conversation content: readable by the owner only.
-        await fs.promises.writeFile(tmpPath, payload, { encoding: 'utf8', mode: 0o600 });
-        await fs.promises.rename(tmpPath, filePath);
-      })
-      .catch((error) => {
-        console.warn('[message-queue] failed to persist queue:', error?.message ?? error);
-      });
-    return writePromise;
+    const write = writePromise.then(async () => {
+      await fs.promises.mkdir(dataDir, { recursive: true });
+      const tmpPath = `${filePath}.${process.pid}.tmp`;
+      // Queued prompts are conversation content: readable by the owner only.
+      await fs.promises.writeFile(tmpPath, payload, { encoding: 'utf8', mode: 0o600 });
+      await fs.promises.rename(tmpPath, filePath);
+    });
+    writePromise = write.catch((error) => {
+      console.warn('[message-queue] failed to persist queue:', error?.message ?? error);
+    });
+    return write;
   };
 
   // --- snapshots -----------------------------------------------------------
@@ -403,7 +410,7 @@ export function createMessageQueueRuntime({
   /** Every mutation goes through here: bump, persist, broadcast. */
   const commit = (sessionId) => {
     revision += 1;
-    void persist();
+    persist().catch(() => undefined);
     broadcast(sessionId);
     return { revision, session: sessionSnapshot(sessionId) };
   };
@@ -511,7 +518,7 @@ export function createMessageQueueRuntime({
   // v2 takes prompt attachments as URIs; a data URL is one.
   const toPromptFile = (attachment) => ({
     uri: attachment.dataUrl,
-    ...(attachment.filename ? { name: attachment.filename } : {}),
+    ...(attachment.agentPath || attachment.filename ? { name: attachment.agentPath || attachment.filename } : {}),
   });
 
   /**
@@ -529,12 +536,36 @@ export function createMessageQueueRuntime({
       : [withMetadata];
   };
 
+  /**
+   * Gives what an item admits ahead of its message stable ids, saved before the
+   * first attempt: a retry, also after a restart, reuses them and OpenCode keeps
+   * the first admission. They end one millisecond apart at the mint time, so
+   * they sort in admission order and ahead of the message, whose id OpenCode
+   * assigns later.
+   */
+  const ensureSyntheticIds = async (item, count) => {
+    if (item.syntheticIds?.length === count) return;
+    const firstAt = now() - count + 1;
+    item.syntheticIds = Array.from({ length: count }, (_, index) => createMessageId(firstAt + index));
+    try {
+      await persist();
+    } catch (error) {
+      // Unsaved, a crash would mint them again and admit everything twice.
+      delete item.syntheticIds;
+      throw error;
+    }
+  };
+
   const sendItem = async (sessionId, directory, item) => {
     const { providerID, modelID, variant } = item.sendConfig;
     let agent = item.sendConfig.agent;
     let model = { id: modelID, providerID, ...(variant ? { variant } : {}) };
     const promptFiles = item.attachments.map(toPromptFile);
-    const contextMessages = item.context.flatMap(toContextMessages);
+    // The goal briefing goes last, right before the message the goal is about.
+    const synthetics = [
+      ...item.context.flatMap(toContextMessages),
+      ...(item.goal ? [{ text: buildGoalIntroText(item.goal.tokenBudget), resume: false }] : []),
+    ];
 
     // Jev routing, when the queued send named the Auto sentinel. A failure
     // inside resolves to the fallback model; only a missing fallback throws.
@@ -566,12 +597,28 @@ export function createMessageQueueRuntime({
     }
 
     // Resolved before anything is admitted: a failed command lookup fails the
-    // whole send, so a retry does not admit the context twice.
+    // whole send with nothing in the session.
     const command = await resolveSlashCommand(item.text, directory);
 
     // Standing project context is written into the session first, exactly as
     // a UI send does it; a failed write sends without it rather than not at all.
+    // The response style is left out: a queued message is the user's own, and
+    // this server delivery has no style text of its own, so the entry the
+    // session already holds stays as it is.
     if (sessionKnowledgeRuntime) await sessionKnowledgeRuntime.sync(sessionId, directory);
+
+    // OpenCode's commit of a staged revert deletes everything admitted past the
+    // revert's boundary, so a staged revert is committed before the first
+    // synthetic message, and before the goal save so a failure here leaves no
+    // goal behind. A plain prompt leaves the commit to OpenCode, as a UI send does.
+    if (synthetics.length > 0) {
+      await ensureSyntheticIds(item, synthetics.length);
+      const session = asRecord(await openCodeFetch(`/api/session/${encodeURIComponent(sessionId)}`, { directory }));
+      if (!session) throw new Error(`OpenCode returned no record for session ${sessionId}`);
+      if (session.revert) {
+        await openCodeFetch(`/api/session/${encodeURIComponent(sessionId)}/revert/commit`, { directory, method: 'POST' });
+      }
+    }
 
     // A message queued as a goal starts it now, as a direct send would. The
     // goal is saved before anything is admitted, so a failed save leaves
@@ -594,20 +641,11 @@ export function createMessageQueueRuntime({
     // holds for a command too: its route takes file attachments only, and
     // sending "/name args" as a prompt instead would skip the template
     // OpenCode 2.x expands only on the command route.
-    for (const synthetic of contextMessages) {
+    for (const [index, synthetic] of synthetics.entries()) {
       await openCodeFetch(`/api/session/${encodeURIComponent(sessionId)}/synthetic`, {
         directory,
         method: 'POST',
-        body: synthetic,
-      });
-    }
-
-    // The goal briefing goes last, right before the message the goal is about.
-    if (item.goal) {
-      await openCodeFetch(`/api/session/${encodeURIComponent(sessionId)}/synthetic`, {
-        directory,
-        method: 'POST',
-        body: { text: buildGoalIntroText(item.goal.tokenBudget), resume: false },
+        body: { id: item.syntheticIds[index], ...synthetic },
       });
     }
 

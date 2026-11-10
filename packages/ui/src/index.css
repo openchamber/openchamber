@@ -91,6 +91,117 @@
   }
 }
 
+/* A detailed sidebar row whose second line opens with text, not an icon:
+   the hover chevron sits over the line's start, and the text's first letters
+   fade away under it. */
+@utility oc-lead-mask {
+  mask-image: linear-gradient(var(--oc-to-inline-end), transparent 0.875rem, #000 1.5rem);
+}
+
+/* File tree rows keep the whole name on one line, and a tree wider than its
+   pane scrolls sideways. Every row ends in a lane (its git marks) that sticks
+   to the pane's end while long rows scroll under it; a row's hover menu is a
+   second lane that fades in over it. The name fades out over 1rem before the
+   lane, and the lane redraws the row's rounded end, so a row running past the
+   pane looks like a row that fits. The lane paints the row's fill
+   (--oc-file-tree-row-fill, set with its hover and selection, and the hover
+   fill keyboard focus adds, see :focus-visible in design-system.css) over the
+   pane colour, --background where the tree sits, and the row's drop ring
+   (--oc-file-tree-row-ring) over both. Over the last 1rem of the sideways
+   scroll the fade narrows away, so at the end the widest name shows whole. */
+@property --oc-file-tree-row-fill {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: transparent;
+}
+
+/* How much of the 1rem fade is left, 1 to 0. A number, because a registered
+   length cannot start at 1rem. */
+@property --oc-file-tree-fade {
+  syntax: "<number>";
+  inherits: false;
+  initial-value: 1;
+}
+
+@keyframes oc-file-tree-fade-clear {
+  to {
+    --oc-file-tree-fade: 0;
+  }
+}
+
+@utility oc-file-tree-row {
+  min-width: max-content;
+  transition-property: color, background-color, --oc-file-tree-row-fill;
+  transition-duration: 150ms;
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+
+  &:focus-visible {
+    --oc-file-tree-row-focus: var(--interactive-hover);
+  }
+}
+
+@utility oc-file-tree-row-name {
+  flex: 1 0 auto;
+  white-space: nowrap;
+}
+
+@utility oc-file-tree-row-end {
+  position: sticky;
+  inset-inline-end: 0;
+  z-index: 1;
+  flex: none;
+  align-self: stretch;
+  display: flex;
+  align-items: center;
+
+  &::before,
+  &::after {
+    content: "";
+    position: absolute;
+    inset-block: 0;
+    z-index: -1;
+    pointer-events: none;
+  }
+
+  /* The pane past the lane, under the rounded end's corners, up to the
+     scroller's edge. Shadows, because a box reaching past the row widened the
+     scroll of a tree whose rows all fit; two of them leave no gap after a lane
+     narrower than the reach. */
+  &::before {
+    inset-inline: 0;
+    background: var(--background);
+    box-shadow: 0.375rem 0 var(--background), 0.75rem 0 var(--background);
+  }
+
+  &:where(:root[dir="rtl"] *)::before {
+    box-shadow: -0.375rem 0 var(--background), -0.75rem 0 var(--background);
+  }
+
+  /* The row's colour, fill over pane, faded in as a whole by the mask: fading
+     the fill and the pane apart darkened the middle of the fade. */
+  &::after {
+    inset-inline: -1rem 0;
+    border-start-end-radius: var(--radius-md);
+    border-end-end-radius: var(--radius-md);
+    background:
+      linear-gradient(var(--oc-file-tree-row-focus, transparent), var(--oc-file-tree-row-focus, transparent)),
+      linear-gradient(var(--oc-file-tree-row-fill), var(--oc-file-tree-row-fill)),
+      var(--background);
+    /* The ring's start side would show through the start of the fade. */
+    border: 2px solid var(--oc-file-tree-row-ring, transparent);
+    border-inline-start-width: 0;
+    mask-image: linear-gradient(var(--oc-to-inline-end), transparent calc(1rem * (1 - var(--oc-file-tree-fade))), #000 1rem);
+  }
+
+  @supports (animation-timeline: scroll()) {
+    &::after {
+      animation: oc-file-tree-fade-clear linear both;
+      animation-timeline: scroll(nearest inline);
+      animation-range: calc(100% - 1rem) 100%;
+    }
+  }
+}
+
 /* A PR or issue mark coloured by its state (--oc-ref-tint). The mark alone
    carries the state, its number stays neutral, so the colour shows at full
    strength: blended into the muted text a 12px glyph read as grey. */
@@ -163,6 +274,15 @@ button,
 .markdown-content details > summary {
   unicode-bidi: plaintext;
   text-align: start;
+}
+
+/* A text field takes the direction of what is typed into it, line by line in a
+   textarea, so Persian in an English interface runs from the right. An empty
+   field keeps the interface's direction: with plaintext on a field showing its
+   placeholder, Gecko draws the placeholder outside the box in a right-to-left
+   interface. A field that sets dir keeps it. */
+:where(input, textarea):not([dir]):not(:placeholder-shown) {
+  unicode-bidi: plaintext;
 }
 
 /* Markdown's explicit column alignment still wins over automatic alignment. */
@@ -542,11 +662,19 @@ div[data-chat-input-footer="true"] {
    data-top-bottom-scroll when content is both above and below. */
 .oc-sticky-fade-overlay {
   opacity: 0;
+  /* Hidden, it must not catch the clicks meant for the rows under it. */
+  pointer-events: none;
 }
 
 .oc-sticky-fade-root:has(.oc-sticky-fade-scroller[data-top-scroll="true"]) .oc-sticky-fade-overlay,
 .oc-sticky-fade-root:has(.oc-sticky-fade-scroller[data-top-bottom-scroll="true"]) .oc-sticky-fade-overlay {
   opacity: 1;
+}
+
+/* The model picker's sticky caption folds its section, once it shows. */
+.oc-sticky-fade-root:has(.oc-sticky-fade-scroller[data-top-scroll="true"]) .oc-sticky-fade-overlay[data-model-picker-sticky-header],
+.oc-sticky-fade-root:has(.oc-sticky-fade-scroller[data-top-bottom-scroll="true"]) .oc-sticky-fade-overlay[data-model-picker-sticky-header] {
+  pointer-events: auto;
 }
 
 [data-scroll-shadow="true"][data-orientation="vertical"][data-bottom-scroll="true"]:not(.chat-scroll) {
@@ -816,6 +944,30 @@ html:not(.dark) .chat-scroll {
   background: transparent !important;
 }
 
+/* While the user drags a column beside the chat to a new width
+   (`holdLayoutAnimation`, lib/layoutAnimation.ts) the transcript re-wraps on
+   every pointer frame, and a row
+   is a whole turn, so most of the text it lays out is off screen. The
+   timeline marks itself `data-columns-moving` meanwhile (useChatTimelineScroll),
+   and the messages outside the viewport skip layout at the size they last
+   had: `contain-intrinsic-size: auto` records it at rest, so turning the skip
+   on changes no height. With an accessibility client on, re-wrapping that
+   text also rebuilt its accessibility nodes on every frame.
+   The selector ends in the attribute the skipped elements carry, so the flag
+   restyles only them: ending in `*`, flipping it restyled the whole
+   transcript (80,000 elements, 60 to 90 ms) on every sidebar and panel
+   toggle. Only whole messages skip: a skipped element is contained, so its
+   children's margins stop collapsing through it, and markdown blocks grew
+   as the flag turned on (21 px for a code block, 28 for display math). A
+   message's text already sits in a layout-contained root (MessageBody). */
+[data-scrollbar="chat"] [data-message-id] {
+  contain-intrinsic-size: auto 120px;
+}
+
+[data-scrollbar="chat"][data-columns-moving] [data-message-id] {
+  content-visibility: auto;
+}
+
 /* Hide native scrollbars for overlay targets (all browsers) */
 .overlay-scrollbar-target {
   scrollbar-width: none !important;
@@ -853,18 +1005,18 @@ html:not(.dark) .chat-scroll {
 }
 
 /* Overlay scrollbar styling (custom thumb) */
-/* Reserve the thumb's 6px width, 4px right inset and a 4px content gap.
-   Follow overflow, not hover visibility, so showing the thumb never shifts text.
-   Direct-child matching prevents nested scrollers from reserving space twice. */
-.overlay-scrollbar-wrapper:has(> .overlay-scrollbar > .overlay-scrollbar__thumb--vertical:not([hidden])) {
+/* Every overlay scroller reserves the thumb's room up front, whether or not
+   its content overflows now: a list that crosses the threshold (projects
+   folding and opening, a catalog loading) must not shift its text sideways
+   when the thumb appears. */
+.overlay-scrollbar-wrapper {
   padding-right: 6px;
 }
 
-/* Settings pages cross the overflow threshold all the time (collapsible
-   sections, catalogs loading), so they reserve the thumb's space up front
-   instead of shifting content the moment a scrollbar appears. */
-.overlay-scrollbar-wrapper--stable-gutter {
-  padding-right: 6px;
+/* A wrapper that only frames other scrollers takes none, so a nested
+   scroller's thumb stays at the edge. */
+.overlay-scrollbar-wrapper.overlay-scrollbar-wrapper--no-gutter {
+  padding-right: 0;
 }
 
 .overlay-scrollbar {
@@ -882,11 +1034,18 @@ html:not(.dark) .chat-scroll {
   opacity: 1;
 }
 
+/* The thumb is drawn 4px thick (6px under the pointer) inside a 10px hit
+   area: transparent borders on its long sides take the grab, and the fill
+   stops at the padding box. */
 .overlay-scrollbar__thumb {
   pointer-events: none;
   position: absolute;
-  width: 6px;
+  box-sizing: border-box;
+  width: 10px;
+  border: 0 solid transparent;
+  border-inline-width: 3px;
   background: var(--oc-scrollbar-thumb);
+  background-clip: padding-box;
   border-radius: 9999px;
   opacity: 0.8;
   transition: background-color 0.15s ease, opacity 0.15s ease;
@@ -900,12 +1059,22 @@ html:not(.dark) .chat-scroll {
 .overlay-scrollbar__thumb:hover,
 .overlay-scrollbar__thumb:active {
   background: var(--oc-scrollbar-thumb-hover);
+  background-clip: padding-box;
+  border-inline-width: 2px;
   opacity: 1;
 }
 
 .overlay-scrollbar__thumb--horizontal {
-  height: 6px;
+  height: 10px;
+  border-inline-width: 0;
+  border-block-width: 3px;
   margin: 0;
+}
+
+.overlay-scrollbar__thumb--horizontal:hover,
+.overlay-scrollbar__thumb--horizontal:active {
+  border-inline-width: 0;
+  border-block-width: 2px;
 }
 
 .overlay-scrollbar__thumb--vertical {
@@ -952,6 +1121,28 @@ html:not(.dark) .chat-scroll {
 @keyframes oc-fade-in-only {
   from {
     opacity: 0;
+  }
+}
+
+/* A UI block's bar grows from its start once, when it first appears. */
+.oc-bar-grow {
+  transform-origin: left center;
+  animation: oc-bar-grow 0.7s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+[dir="rtl"] .oc-bar-grow {
+  transform-origin: right center;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .oc-bar-grow {
+    animation: none;
+  }
+}
+
+@keyframes oc-bar-grow {
+  from {
+    transform: scaleX(0);
   }
 }
 
@@ -1073,13 +1264,19 @@ diffs-container {
    Minimal overrides - fonts only, using Streamdown defaults
    ============================================ */
 
-/* VS Code webviews can inject default pre/code/blockquote backgrounds; tool input/output should inherit the card surface. */
+/* VS Code webviews can inject default pre/code backgrounds; tool input/output should inherit the card surface. */
 .tool-input-surface pre,
 .tool-input-surface code,
-.tool-input-surface blockquote,
 .tool-input-text {
   background: transparent !important;
   background-color: transparent !important;
+}
+
+/* Plain-text prose in an expanded tool (a subagent's prompt), set like tool and reasoning markdown. */
+.tool-prose-text {
+  font-family: var(--font-sans);
+  font-size: var(--text-meta);
+  line-height: round(1.625em, 1px);
 }
 
 /* VSCode: tool cards should honor semantic code sizing, even when syntax themes inject sizes. */
@@ -1106,9 +1303,19 @@ diffs-container {
   }
 }
 
+/* The effort trigger is "/ medium" after the model; collapsed, its icon stands in. */
+.model-controls__variant-icon {
+  display: none;
+}
+
 @container model-controls (max-width: 14rem) {
-  :root:not(.vscode-runtime) .model-controls__variant-label {
+  :root:not(.vscode-runtime) .model-controls__variant-label,
+  :root:not(.vscode-runtime) .model-controls__variant-slash {
     display: none;
+  }
+
+  :root:not(.vscode-runtime) .model-controls__variant-icon {
+    display: block;
   }
 }
 
@@ -1126,8 +1333,13 @@ diffs-container {
 }
 
 @container model-controls (max-width: 9rem) {
-  :root.vscode-runtime .model-controls__variant-label {
+  :root.vscode-runtime .model-controls__variant-label,
+  :root.vscode-runtime .model-controls__variant-slash {
     display: none;
+  }
+
+  :root.vscode-runtime .model-controls__variant-icon {
+    display: block;
   }
 }
 
@@ -1302,7 +1514,8 @@ diffs-container {
   display: flex;
   align-items: center;
   min-width: 0;
-  flex: 1 1 auto;
+  /* As wide as its facts, so the actions sit right after them. */
+  flex: 0 1 auto;
   overflow: hidden;
 }
 
@@ -1465,6 +1678,46 @@ diffs-container {
   margin: var(--markdown-paragraph-spacing) 0;
 }
 
+/* A collapsed user message keeps its two lines: code blocks run inline with
+   the text and blocks lose their margins. A data attribute, not utility classes:
+   classes spelling out "code-block" fell under the phone's [class*="code"] font
+   rule (mobile.css) and shrank the whole message to code size. */
+@layer utilities {
+  [data-user-message-collapsed] > .markdown-content .markdown-content > * {
+    margin-block: 0;
+  }
+  [data-user-message-collapsed] > .markdown-content [data-oc-streamdown] > *,
+  [data-user-message-collapsed] > .markdown-content [data-oc-markdown-block] > * {
+    margin-block: 0 !important;
+  }
+  [data-user-message-collapsed] > .markdown-content [data-streamdown='code-block'] {
+    display: inline !important;
+    margin-block: 0 !important;
+    border-width: 0 !important;
+    background-color: transparent !important;
+  }
+  [data-user-message-collapsed] > .markdown-content [data-streamdown='code-block-header'],
+  [data-user-message-collapsed] > .markdown-content [data-streamdown='code-block-actions'] {
+    display: none !important;
+  }
+  [data-user-message-collapsed] > .markdown-content [data-streamdown='code-block-body'],
+  [data-user-message-collapsed] > .markdown-content [data-streamdown='code-block-body'] pre {
+    display: inline !important;
+    padding: 0 !important;
+  }
+  [data-user-message-collapsed] > .markdown-content [data-streamdown='code-block-body'] code {
+    display: inline !important;
+    padding-inline-start: 0 !important;
+    background-image: none !important;
+  }
+  [data-user-message-collapsed] > .markdown-content [data-streamdown='code-block-body'] code > span {
+    display: block !important;
+  }
+  [data-user-message-collapsed] > .markdown-content [data-streamdown='code-block-body'] code > span::before {
+    display: none !important;
+  }
+}
+
 /* The native root and arrival wrappers add no rhythm of their own. Static
    mode renders blocks directly; streaming mode wraps each official Block. */
 .markdown-content > [data-oc-streamdown],
@@ -1529,11 +1782,22 @@ diffs-container {
   margin-block-start: var(--oc-block-edge-start, var(--oc-block-margin-start)) !important;
 }
 
+/* A long answer's later rows (`timelineRows.ts`) start at a paragraph or a
+   heading, whose top margin is the whole gap the answer had there: they keep
+   it at their top edge. */
+[data-answer-continues] .markdown-content [data-oc-streamdown] > [data-oc-markdown-block]:first-child {
+  --oc-block-edge-start: initial;
+}
+
+[data-answer-continues] .markdown-content [data-oc-streamdown] > :first-child:not([data-oc-markdown-block]) {
+  margin-block-start: var(--oc-block-margin-start) !important;
+}
+
 .markdown-content [data-oc-markdown-block] > :last-child {
   margin-block-end: var(--oc-block-edge-end, var(--oc-block-margin-end)) !important;
 }
 
-/* Tool cards (code size) and reasoning (meta size, dimmed) are intentionally
+/* Tool and reasoning markdown (meta size) are intentionally
    compact — keep their paragraphs tight, matching prior behavior. */
 .markdown-content.markdown-tool p,
 .markdown-content.markdown-reasoning p {
@@ -1541,9 +1805,9 @@ diffs-container {
   margin-bottom: 0;
 }
 
-/* Tool markdown should render at code size to match tool card typography. */
+/* Prose in an expanded chat block (tool markdown, reasoning) shares the meta size. */
 .markdown-content.markdown-tool {
-  font-size: var(--text-code) !important;
+  font-size: var(--text-meta) !important;
 }
 
 .form-markdown > .markdown-content.markdown-tool {
@@ -1552,7 +1816,7 @@ diffs-container {
 
 /* Reasoning markdown renders at meta size, dimmed. */
 .markdown-content.markdown-reasoning {
-  font-size: var(--text-markdown);
+  font-size: var(--text-meta);
   color: var(--surface-muted-foreground);
   --markdown-link: inherit;
   --markdown-link-hover: var(--surface-foreground);
@@ -1635,6 +1899,34 @@ diffs-container {
   font-size: 0.875rem;
 }
 
+/* The Files preview sizes its body from the editor font, an inline px
+   --text-markdown, while tables and headings above are authored in rem and
+   would keep their size when Cmd +/- changes the editor font. Derive them
+   from the body there; the ratios are the old rem sizes over the 0.875rem
+   body, so the default rendering stays on desktop, and on touch screens,
+   where mobile.css sets a 16px body, tables and headings scale from it. */
+.oc-file-preview .markdown-content table {
+  font-size: 1em;
+}
+
+.oc-file-preview .markdown-content h1 {
+  font-size: 1.4286em;
+}
+
+.oc-file-preview .markdown-content h2 {
+  font-size: 1.2857em;
+}
+
+.oc-file-preview .markdown-content h3 {
+  font-size: 1.1429em;
+}
+
+.oc-file-preview .markdown-content h4,
+.oc-file-preview .markdown-content h5,
+.oc-file-preview .markdown-content h6 {
+  font-size: 1em;
+}
+
 /* GitHub writes `<summary><h3>Findings</h3></summary>`: like GitHub, the
    heading keeps its size but sits on the chevron's line without margins. */
 .markdown-content details > summary h1,
@@ -1666,7 +1958,7 @@ diffs-container {
   color: var(--markdown-inline-code, var(--foreground)) !important;
   padding: 0.1rem 0.35rem;
   border-radius: 0.375rem;
-  word-break: break-all;
+  word-break: normal;
   overflow-wrap: break-word;
 }
 
@@ -1692,6 +1984,13 @@ diffs-container {
   cursor: pointer;
   text-decoration: underline;
   text-underline-offset: 2px;
+  user-select: text !important;
+  -webkit-user-select: text !important;
+}
+
+/* An identifier an extension claims is a word in the sentence: a selection
+   across it keeps it, though its button role is unselectable app-wide. */
+.markdown-content [data-oc-guest-link] {
   user-select: text !important;
   -webkit-user-select: text !important;
 }
@@ -1786,7 +2085,10 @@ diffs-container {
   background: transparent;
 }
 
-.markdown-content [data-streamdown="table-wrapper"] > div:has(> table) {
+/* The frame goes on the scroller, or on the overlay wrapper around it, so the
+   overlay thumb sits inside the frame. */
+.markdown-content [data-streamdown="table-wrapper"] > div:has(> table),
+.markdown-content [data-streamdown="table-wrapper"] > .overlay-scrollbar-wrapper {
   border: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
   border-radius: 0.5rem;
   background: var(--surface-elevated);
@@ -1813,7 +2115,6 @@ diffs-container {
 
 .markdown-content [data-streamdown="table-cell"],
 .markdown-content [data-streamdown="table-header-cell"] {
-  min-width: 120px;
   padding: 0.625rem 1rem;
   border-inline-end: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
   vertical-align: middle;
@@ -1825,6 +2126,10 @@ diffs-container {
 
 .markdown-content [data-streamdown="table-header-cell"] {
   color: var(--foreground);
+  /* A header breaks between words only: split mid-word it read as two
+     words ("Встановлен ня"). A long one widens its column, and the table
+     scrolls sideways when the row no longer fits. */
+  overflow-wrap: normal;
 }
 
 .markdown-content td:last-child,
@@ -1836,6 +2141,13 @@ diffs-container {
    (or shrinks to the column when cells wrap) until the reply settles. */
 .markdown-content [data-table-wrap="false"] [data-streamdown="table"][data-oc-table-layout="pending"] {
   width: max-content;
+}
+
+/* Cells break anywhere, so an unmeasured wrapping table could squeeze a
+   column to a letter. A measured one gets its widths from MarkdownTable,
+   where a short column (row numbers) keeps its own width. */
+.markdown-content [data-table-wrap="true"] [data-streamdown="table"][data-oc-table-layout="pending"] :is(td, th) {
+  min-width: 120px;
 }
 
 .markdown-content [data-streamdown="table"][data-oc-table-layout="pending"] code {
@@ -1901,6 +2213,11 @@ diffs-container {
 
 [data-streamdown="code-block-header"] > span {
   margin: 0;
+}
+
+/* The run button is a third action in the header. */
+[data-streamdown="code-block"]:has([data-reply-command-run]) [data-streamdown="code-block-header"] {
+  padding-inline-end: 7.25rem;
 }
 
 /* Disable Streamdown's code block virtualization and keep block chrome fixed */
@@ -2056,20 +2373,16 @@ diffs-container {
   }
 }
 
-/* A block committed mid-stream enters with a fade and a gentle rise —
-   compositor-only properties, deliberately nothing heavier: during a long
-   stream the follow scroll masks the entrance anyway, so the effect only
-   really shows on short replies, and those must not pay for a GPU filter.
-   Blocks committed in the same tick cascade via --oc-md-enter-delay set
-   inline by the renderer. */
+/* A block committed mid-stream fades in where it stands. Text never moves on
+   arrival: a rise made the reply look like it slid up into place. Opacity is
+   compositor-only, so short replies pay nothing for it. Blocks committed in
+   the same tick cascade via --oc-md-enter-delay set inline by the renderer. */
 @keyframes oc-md-block-enter {
   from {
     opacity: 0;
-    transform: translateY(10px);
   }
   to {
     opacity: 1;
-    transform: none;
   }
 }
 
@@ -2171,25 +2484,6 @@ diffs-container {
   min-width: 0;
 }
 
-/* Like code-block actions: hidden until hover only where a pointer can
-   hover; on touch screens the zoom controls stay visible. */
-[data-streamdown="mermaid-block"] [data-streamdown="mermaid-toolbar"] {
-  transition: opacity 0.15s ease;
-}
-
-@media (hover: hover) and (pointer: fine) {
-  [data-streamdown="mermaid-block"] [data-streamdown="mermaid-toolbar"] {
-    opacity: 0;
-    pointer-events: none;
-  }
-
-  [data-streamdown="mermaid-block"]:hover [data-streamdown="mermaid-toolbar"],
-  [data-streamdown="mermaid-block"]:focus-within [data-streamdown="mermaid-toolbar"] {
-    opacity: 1;
-    pointer-events: auto;
-  }
-}
-
 [data-streamdown="mermaid-block"][data-mermaid-render="svg"] [data-streamdown="mermaid-scroll"] {
   overflow: hidden;
 }
@@ -2258,10 +2552,18 @@ diffs-container {
   min-height: 0;
 }
 
+/* The controls row stays above the diagram; the diagram takes the rest. */
+.markdown-mermaid-fullscreen [data-streamdown="mermaid-frame"] {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
 .markdown-mermaid-fullscreen [data-streamdown="mermaid-block"] {
   width: 100%;
-  height: 100%;
-  min-height: 100%;
+  flex: 1 1 0;
+  min-height: 0;
   padding: 0.75rem;
   border: 0;
   border-radius: 0;
@@ -2362,6 +2664,17 @@ textarea[data-terminal-hidden-input="true"]::placeholder {
   pointer-events: none;
   caret-color: transparent !important;
   outline: none !important;
+}
+
+/* What the IME is composing, drawn over the cursor. The hidden textarea holds
+   the same text but cannot show it. Font and colors come from the surface. */
+.terminal-viewport-container .oc-terminal-preedit {
+  position: absolute;
+  max-width: calc(100% - 8px);
+  overflow: hidden;
+  white-space: pre;
+  text-decoration: underline;
+  pointer-events: none;
 }
 
 .terminal-viewport-container .oc-terminal-scrollbar {

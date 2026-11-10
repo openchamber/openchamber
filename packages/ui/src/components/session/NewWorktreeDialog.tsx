@@ -24,6 +24,7 @@ import { ProviderIcon } from '@/components/sourceControl/ProviderIcon';
 import { changeRequestCopy } from '@/lib/source-control/changeRequestCopy';
 import { useUIStore } from '@/stores/useUIStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
+import { getRuntimeKey } from '@/lib/runtime-switch';
 import { validateWorktreeCreate } from '@/lib/worktrees/worktreeManager';
 import { createWorktreeWithDefaults } from '@/lib/worktrees/worktreeCreate';
 import { waitForWorktreeBootstrap } from '@/lib/worktrees/worktreeBootstrap';
@@ -213,7 +214,7 @@ export function NewWorktreeDialog({
   const canFetchBranches = Boolean(projectDirectory && git);
   const handleFetchBranches = React.useCallback(() => {
     if (!projectDirectory || !git) return;
-    void fetchBranches(projectDirectory, git);
+    void fetchBranches(projectDirectory, git, { remote: 'live' });
   }, [projectDirectory, git, fetchBranches]);
 
   React.useEffect(() => {
@@ -404,6 +405,9 @@ export function NewWorktreeDialog({
       useInputStore.getState().setPendingGuestIssue(item.guest);
       return;
     }
+    const draft = useSessionUIStore.getState().newSessionDraft;
+    if (!draft.open || !draft.workDraftId) return;
+    const target = { kind: 'draft', workDraftId: draft.workDraftId, runtimeKey: getRuntimeKey() } as const;
     void resolveComposerReferences([item.selection], {
       sourceControl,
       context: item.kind === 'pr' ? item.context : (repositoryContext && repositoryContext !== 'missing' ? repositoryContext : null),
@@ -412,7 +416,9 @@ export function NewWorktreeDialog({
         : Promise.reject(new Error('Trackers are not available here'))),
       trackerName: (provider) => readTrackerDescriptor(provider).name,
     }).then(({ references, failures }) => {
-      if (references.length > 0) usePendingComposerReferences.getState().push(references);
+      if (references.length > 0) {
+        usePendingComposerReferences.getState().push(references, target);
+      }
       const failure = failures[0];
       if (failure) {
         toast.error(t('session.newWorktree.error.attachLinkedFailed', { item: failure.label }), { description: failure.error });
@@ -692,7 +698,7 @@ export function NewWorktreeDialog({
 
   // One row, the height of a field, whether empty or holding the chosen item.
   const itemPicker = linkedView ? (
-    <div className={cn('flex h-8 min-w-0 items-center gap-2 rounded-lg border border-border/60 px-2.5', itemPickerDisabled && 'opacity-50')}>
+    <div className={cn('flex h-8 min-w-0 items-center gap-2 rounded-lg border border-edge px-2.5', itemPickerDisabled && 'opacity-50')}>
       {linkedView.icon}
       <span className="shrink-0 typography-micro text-muted-foreground">{linkedView.id}</span>
       <span className="min-w-0 flex-1 truncate typography-ui-label text-foreground">{linkedView.title}</span>

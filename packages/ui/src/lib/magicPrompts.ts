@@ -895,7 +895,8 @@ During this session, save no new memories: you only restructure what is already 
 - Partly outdated: rewrite it by memoryId with what is true now.
 - Wrong scope: something about this project filed under the user (global), or the other way round. Save it in the right scope, then delete the original.
 - One-off task state and anything the save rules exclude: delete.
-- A date in a title that only records when a decision was made: keep the decision; drop the date if the title needs the room.
+- A title with a date, or cut off mid-word: rewrite it by memoryId without the date, in at most 60 characters. The store keeps the dates, and they are what settles a contradiction.
+- A title that names only a topic ("Product decisions, part 2", "Feedback: what is still open"): rewrite it by memoryId to name what the entry holds, so an agent can tell from the session index whether to read it. Do not split the entry to do so.
 - Entries marked flagged: leave them alone; the user decides on those.
 An entry nothing contradicts still holds. Leave it as it is.
 

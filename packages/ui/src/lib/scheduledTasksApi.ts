@@ -37,6 +37,12 @@ export type ScheduledTask = {
     goalTokenBudget?: number;
     permissionAutoAccept?: boolean;
   };
+  /** Opt into a fresh worktree for each project run. */
+  runInWorktree?: boolean;
+  /** Absent means the run's worktree and branch are removed when it ends. */
+  cleanupWorktree?: boolean;
+  /** Source ref, preserved while isolation is off. Absent uses the checkout's HEAD. */
+  baseBranch?: string;
   state: {
     createdAt: number;
     updatedAt: number;
@@ -45,6 +51,10 @@ export type ScheduledTask = {
     lastError?: string;
     lastDurationMs?: number;
     lastSessionId?: string;
+    /** Whether the latest run created its own worktree. */
+    lastRunIsolated?: boolean;
+    /** Generated branch of a run configured to keep its worktree. */
+    lastRunBranch?: string;
     nextRunAt?: number;
   };
 };

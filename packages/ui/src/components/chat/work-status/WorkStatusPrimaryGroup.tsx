@@ -18,7 +18,7 @@ import { useSessionUIStore } from '@/sync/session-ui-store';
 import { resolveUsageTone } from '@/lib/quota';
 import { sessionEvents } from '@/lib/sessionEvents';
 import { normalizePath } from '@/lib/pathNormalization';
-import { computeContextUsage } from './contextUsage';
+import { computeContextUsage, computeLastReplyCacheHit } from './contextUsage';
 import { formatCost } from './subagentCost';
 import { useSubagentCostRollup } from './useSubagentCostRollup';
 import {
@@ -35,9 +35,6 @@ import { WorkStatusWarmingToggle } from './WorkStatusWarmingToggle';
 import { changeRequestCopy } from '@/lib/source-control/changeRequestCopy';
 import { formatChangeRequestReference } from '@/lib/source-control/providers/terminology';
 import { useSourceControlProvider } from '@/lib/source-control/providers/registry';
-import { ProjectActionsButton } from '@/components/layout/ProjectActionsButton';
-import { OpenInAppButton } from '@/components/desktop/OpenInAppButton';
-import { useProjectActionsContext } from '@/hooks/useProjectActionsContext';
 import { PrChecksValue } from './PrChecksValue';
 import { useMobileAppActions } from '@/apps/mobileAppContext';
 import { useOpenTrackerItem } from '@/components/sourceBoard/openTrackerItem';
@@ -68,13 +65,10 @@ const UNKNOWN_PERCENT = '\u2014';
  */
 export const WorkStatusPrimaryGroup: React.FC<Props> = ({ sessionId, directory, goalRow, showSession, showRepository, children }) => {
   const { t } = useI18n();
-  // On the phone the rows lead to the phone's own pages, and the project's
-  // app and run controls, which need a desktop host, are left out.
+  // On the phone the rows lead to the phone's own pages.
   const mobile = useMobileAppActions();
   const leaveWorkStatus = useLeaveWorkStatus();
   const openTrackerItem = useOpenTrackerItem();
-  const desktopProjectActionsContext = useProjectActionsContext();
-  const projectActionsContext = mobile ? null : desktopProjectActionsContext;
   const { git } = useRuntimeAPIs();
   const ensureStatus = useGitStore((state) => state.ensureStatus);
   const fetchStatus = useGitStore((state) => state.fetchStatus);
@@ -204,6 +198,9 @@ export const WorkStatusPrimaryGroup: React.FC<Props> = ({ sessionId, directory, 
     [sessionMessages, contextLimit],
   );
 
+  // What the provider caches right now, from the reply the context reading comes from.
+  const lastReplyCacheHit = React.useMemo(() => computeLastReplyCacheHit(sessionMessages), [sessionMessages]);
+
   const openContextSurface = useUIStore((state) => state.openContextSurface);
   const openContextOverview = useUIStore((state) => state.openContextOverview);
   const openContextPanelTab = useUIStore((state) => state.openContextPanelTab);
@@ -294,7 +291,7 @@ export const WorkStatusPrimaryGroup: React.FC<Props> = ({ sessionId, directory, 
   // restate the number directly above it.
   const showCostBreakdown = cost !== null && subagentCount > 0 && subagentCost > 0;
   const hasSession = showSession && (contextUsage !== null || cost !== null || Boolean(goalRow));
-  const hasRepository = showRepository && Boolean(branch || changed || prSummary || attentionLabel || projectActionsContext);
+  const hasRepository = showRepository && Boolean(branch || changed || prSummary || attentionLabel);
 
   useReportWorkStatusPresence('session-repository', hasSession || hasRepository);
 
@@ -337,6 +334,14 @@ export const WorkStatusPrimaryGroup: React.FC<Props> = ({ sessionId, directory, 
               ) : null}
             </>
           ) : null}
+          {/* Under the meter, from the same reply, so it reads as the cache right now. */}
+          {lastReplyCacheHit !== null ? (
+            <WorkStatusRow
+              muted
+              label={t('contextSidebar.tokens.cacheHit')}
+              value={<WorkStatusValue>{`${lastReplyCacheHit.toFixed(1)}%`}</WorkStatusValue>}
+            />
+          ) : null}
           {/* Below the context readout: the goal is a standing instruction,
               while context is the live number the reader came for. */}
           {goalRow}
@@ -347,9 +352,6 @@ export const WorkStatusPrimaryGroup: React.FC<Props> = ({ sessionId, directory, 
         <WorkStatusSection
           title={t('chat.workStatus.section.project')}
           subject={projectLabel}
-          summary={projectActionsContext?.directory
-            ? <OpenInAppButton directory={projectActionsContext.directory} />
-            : null}
         >
           {attentionLabel ? <WorkStatusCallout>{attentionLabel}</WorkStatusCallout> : null}
 
@@ -361,6 +363,7 @@ export const WorkStatusPrimaryGroup: React.FC<Props> = ({ sessionId, directory, 
               onClick={directory ? () => openSurface('git') : undefined}
               ariaLabel={t('chat.workStatus.action.openGit')}
               label={branch}
+              labelDir="ltr"
               value={(gitStatus?.ahead ?? 0) > 0 || (gitStatus?.behind ?? 0) > 0 ? (
                 <>
                   {(gitStatus?.ahead ?? 0) > 0
@@ -378,6 +381,7 @@ export const WorkStatusPrimaryGroup: React.FC<Props> = ({ sessionId, directory, 
               onClick={directory ? () => openSurface('git') : undefined}
               ariaLabel={t('chat.workStatus.action.openGit')}
               label={nestedRepoLabel}
+              labelDir="ltr"
               muted
             />
           ) : null}
@@ -412,6 +416,7 @@ export const WorkStatusPrimaryGroup: React.FC<Props> = ({ sessionId, directory, 
                 ariaLabel={t(changeRequestCopy('chat.workStatus.action.openPr', prTerm))}
                 iconColor={`var(--pr-${prSummary.visualState})`}
                 label={prSummary.title ?? t(changeRequestCopy('chat.workStatus.pr.untitled', prTerm))}
+                labelDir={prSummary.title ? 'auto' : undefined}
                 value={(
                   <WorkStatusPill
                     color={`var(--pr-${prSummary.visualState})`}
@@ -434,9 +439,6 @@ export const WorkStatusPrimaryGroup: React.FC<Props> = ({ sessionId, directory, 
               ) : null}
             </>
           ) : null}
-
-          {/* Last: the readouts above describe the project, this runs something in it. */}
-          {projectActionsContext ? <ProjectActionsButton /> : null}
         </WorkStatusSection>
       ) : null,
   });

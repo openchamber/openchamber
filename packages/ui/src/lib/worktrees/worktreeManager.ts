@@ -1,6 +1,7 @@
 import { substituteCommandVariables } from '@/lib/openchamberConfig';
+import { resolveWorktreeTeardownCommands } from '@/lib/sharedTrustConfirmation';
 import { normalizePath as normalizePathImpl } from '@/lib/pathNormalization';
-import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
+import { captureRuntimeInstance, getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
 import { toast } from '@/components/ui';
 import { formatMessage, useI18nStore } from '@/lib/i18n';
 import type { WorktreeMetadata } from '@/types/worktree';
@@ -8,6 +9,7 @@ import { git } from '@/lib/gitApi';
 import { runBoundRemoteBranchDelete } from '@/lib/boundGitNetworkOperation';
 import {
   clearWorktreeBootstrapState,
+  getWorktreeBootstrapState,
   markWorktreeBootstrapPending,
   setWorktreeBootstrapState,
   startWorktreeBootstrapWatcher,
@@ -205,13 +207,14 @@ const deriveSdkWorktreeNameFromDirectory = (directory: string): string => {
   return parts[parts.length - 1] ?? normalized;
 };
 
-const buildSdkStartCommand = (args: {
+/** The commands as one `&&` chain for the server, so the first failure stops the rest. */
+const joinWorktreeCommands = (args: {
   projectDirectory: string;
-  setupCommands: string[];
+  commands: string[];
 }): string | undefined => {
   const commands: string[] = [];
 
-  for (const raw of args.setupCommands) {
+  for (const raw of args.commands) {
     const trimmed = raw.trim();
     if (!trimmed) continue;
     commands.push(
@@ -254,9 +257,9 @@ const toCreatePayload = (args: {
   const startRef = (args.startRef || '').trim();
 
   const commands = Array.isArray(args.setupCommands) ? args.setupCommands : [];
-  const startCommand = buildSdkStartCommand({
+  const startCommand = joinWorktreeCommands({
     projectDirectory,
-    setupCommands: commands,
+    commands,
   });
 
   const payload: CreateGitWorktreePayload = { mode };
@@ -328,7 +331,8 @@ export const worktreeMapsEqual = (
         // unchanged and the sidebar kept the old name.
         || next.title !== current.title
         // Pinning changes it the same way.
-        || next.pinnedAt !== current.pinnedAt) return false;
+        || next.pinnedAt !== current.pinnedAt
+        || next.pinList !== current.pinList) return false;
     }
   }
   return true;
@@ -529,8 +533,8 @@ const invalidateWorktreeList = (projectDirectory: string): void => {
 };
 
 // The list and root caches are keyed by path, and two instances can have a
-// project at the same path. Bumping every generation also makes a read still
-// in flight against the previous instance retry instead of caching its answer.
+// project at the same path. Transport changes may retry a read; instance
+// changes retire its owner before another request or cache write.
 subscribeRuntimeEndpointChanged(() => {
   const directories = new Set([..._worktreeListGeneration.keys(), ..._worktreeListCache.keys(), ..._worktreeListInflight.keys()]);
   for (const directory of directories) invalidateWorktreeList(directory);
@@ -538,8 +542,9 @@ subscribeRuntimeEndpointChanged(() => {
   invalidateResolvedProjectRootCache();
 });
 
-const readProjectWorktrees = async (projectDirectory: string): Promise<WorktreeMetadata[]> => {
+const readProjectWorktrees = async (projectDirectory: string, isCurrent: () => boolean): Promise<WorktreeMetadata[]> => {
   const metadataProjectDirectory = await resolveProjectRoot(projectDirectory).catch(() => projectDirectory);
+  if (!isCurrent()) throw new Error('Runtime instance changed');
   const normalizedProjectDirectory = normalizePath(projectDirectory);
 
   const worktrees = await git.worktree.list(projectDirectory);
@@ -566,6 +571,7 @@ const readProjectWorktrees = async (projectDirectory: string): Promise<WorktreeM
         worktreeSource: canonical.worktreeSource,
         title: entry.title?.trim() || undefined,
         pinnedAt: (entry.pinnedAt ?? 0) > 0 ? entry.pinnedAt : undefined,
+        pinList: (entry.pinnedAt ?? 0) > 0 ? entry.pinList || undefined : undefined,
         ...(entry.provenance ? { provenance: entry.provenance } : {}),
       };
     })
@@ -582,9 +588,11 @@ const readStableProjectWorktrees = async (
   projectDirectory: string,
   minimumGeneration = getWorktreeListGeneration(projectDirectory),
 ): Promise<WorktreeMetadata[]> => {
+  const isCurrent = captureRuntimeInstance();
   for (let attempt = 0; attempt < WORKTREE_LIST_MAX_CONVERGENCE_ATTEMPTS; attempt += 1) {
     const generation = getWorktreeListGeneration(projectDirectory);
-    const worktrees = await readProjectWorktrees(projectDirectory);
+    const worktrees = await readProjectWorktrees(projectDirectory, isCurrent);
+    if (!isCurrent()) throw new Error('Runtime instance changed');
 
     if (generation >= minimumGeneration && generation === getWorktreeListGeneration(projectDirectory)) {
       _worktreeListCache.set(projectDirectory, { value: worktrees, at: Date.now() });
@@ -813,6 +821,27 @@ const forgetRemovedWorktree = (project: ProjectRef, worktree: WorktreeMetadata):
 };
 
 /**
+ * What the server runs in the worktree before it goes; may ask for trust
+ * first, unless `ask` is false (a removal nobody started by hand), where
+ * untrusted shared commands reject instead. Nothing is asked for a checkout
+ * the server runs no teardown in: one whose bootstrap failed never ran its
+ * setup, and a contributor fork runs no project command before its checkout
+ * trust passes.
+ */
+export const resolveWorktreeTeardownCommand = async (
+  project: ProjectRef,
+  worktree: WorktreeMetadata,
+  { ask = true }: { ask?: boolean } = {},
+): Promise<string | undefined> => {
+  if (getWorktreeBootstrapState(worktree.path)?.status === 'failed') return undefined;
+  if (worktree.provenance?.kind === 'contributor-fork') return undefined;
+  return joinWorktreeCommands({
+    projectDirectory: normalizePath(project.path),
+    commands: await resolveWorktreeTeardownCommands(project, { ask }),
+  });
+};
+
+/**
  * Archives the worktree: the server records its state with `sessionIds` (the
  * sessions the caller archived for it) under a private ref and removes the
  * folder, keeping the branch. The row shows the removal until git answers.
@@ -842,6 +871,8 @@ export async function removeProjectWorktree(project: ProjectRef, worktree: Workt
     sourceControl: Pick<SourceControlAPI, 'repositoryBinding'>;
     git: Pick<GitAPI, 'planNetworkOperation' | 'executeNetworkOperation' | 'getNetworkOperation'>;
   };
+  /** Only from the failure toast's "Delete without teardown" after the teardown failed. */
+  skipTeardown?: boolean;
 }): Promise<void> {
   const projectDirectory = normalizePath(project.path);
 
@@ -854,18 +885,28 @@ export async function removeProjectWorktree(project: ProjectRef, worktree: Workt
   }
   markWorktreeRemoving(worktree.path);
   try {
+    let teardownCommand = options?.skipTeardown === true ? undefined : await resolveWorktreeTeardownCommand(project, worktree);
     if (deleteRemote && branchName && remoteName && options?.network) {
+      // The teardown runs on its own once the remote is known ready (a remote
+      // that refuses stops nothing) and before the remote branch goes (a
+      // failing teardown deletes nothing); the removal then has nothing left to run.
+      const teardownFirst = teardownCommand;
       await runBoundRemoteBranchDelete({
+        beforePlan: teardownFirst
+          ? async () => { await git.worktree.teardown(projectDirectory, { directory: worktree.path, teardownCommand: teardownFirst }); }
+          : undefined,
         branch: branchName,
         directory: projectDirectory,
         remoteName,
         sourceControl: options.network.sourceControl,
         git: options.network.git,
       });
+      teardownCommand = undefined;
     }
     const raw = await git.worktree.remove(projectDirectory, {
       directory: worktree.path,
       deleteLocalBranch,
+      teardownCommand,
     });
     if (!raw?.success) {
       throw new Error('Worktree removal failed');

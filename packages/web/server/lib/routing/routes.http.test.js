@@ -151,6 +151,41 @@ describe('routing send rewrite', () => {
   });
 
 
+  it('routes a form reply in a routed session onto the real model before forwarding the answer', async () => {
+    const order = [];
+    const { app, forwarded } = createApp({
+      autoSessions: new Set(['s1']),
+      routeSend: vi.fn(async () => { order.push(`switched with ${forwarded.length} forwarded`); }),
+    });
+    await request(app)
+      .post('/api/session/s1/form/f1/reply?directory=%2Frepo')
+      .send({ answer: { choice: 'ship it' } })
+      .expect(204);
+    expect(order).toEqual(['switched with 0 forwarded']);
+    expect(forwarded).toEqual([{ path: '/session/s1/form/f1/reply', parsed: true, body: { answer: { choice: 'ship it' } } }]);
+  });
+
+  it('leaves a form unanswered when its reply cannot be routed', async () => {
+    const { app, forwarded } = createApp({
+      autoSessions: new Set(['s1']),
+      routeSend: vi.fn(async () => { throw Object.assign(new Error('no fallback'), { status: 400 }); }),
+    });
+    const response = await request(app).post('/api/session/s1/form/f1/reply').send({ answer: { choice: 'ship it' } });
+    expect(response.status).toBe(400);
+    expect(forwarded).toEqual([]);
+  });
+
+  it('passes a form reply outside a routed session through as a stream', async () => {
+    const { app, runtime, forwarded } = createApp();
+    await request(app)
+      .post('/api/session/global/form/f1/reply')
+      .set('content-type', 'application/json')
+      .send('{"answer":{"choice":"ok"}}')
+      .expect(204);
+    expect(runtime.routeSend).not.toHaveBeenCalled();
+    expect(forwarded).toEqual([{ path: '/session/global/form/f1/reply', parsed: false, raw: '{"answer":{"choice":"ok"}}' }]);
+  });
+
   it('answers with the runtime error instead of forwarding an unroutable send', async () => {
     const { app, forwarded } = createApp({
       autoSessions: new Set(['s1']),

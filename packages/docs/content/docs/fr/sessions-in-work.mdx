@@ -51,12 +51,12 @@ Les discussions n’ont pas d’œil : ce sont de simples conversations.
 
 ### « Ce travail semble terminé. »
 
-Avec un [fournisseur de classification](/fr/classification-providers/) configuré, Jev examine chaque tour d’une session en cours. Quand un tour ressemble à la fin du travail (vous avez dit merci, demandé un commit, confirmé que ça marche), Jev ne ferme rien et laisse une indication :
+Avec un [fournisseur de classification](/fr/classification-providers/) configuré, Jev examine chaque tour d’une session en cours. Quand un tour ressemble à la fin du travail (l’agent rend compte d’un travail terminé, ne continue pas de lui-même, n’attend pas votre réponse et ne propose rien de plus), Jev ne ferme rien et laisse une indication :
 
 - une coche grise sur la ligne de la session dans la barre latérale
 - un bandeau au-dessus du champ de saisie : **Ce travail semble terminé.** avec un bouton **Marquer comme terminé**
 
-Cliquez sur **Marquer comme terminé** si Jev a raison. Sinon, continuez simplement : l’indication disparaît avec votre prochain message. Sans fournisseur de classification, il n’y a pas d’indication et vous marquez les sessions comme terminées vous-même.
+L’indication n’apparaît qu’après 10 minutes sans nouveau message de votre part, pour ne pas gêner pendant que vous passez d’une étape à l’autre. Cliquez sur **Marquer comme terminé** si Jev a raison. Sinon, continuez simplement : l’indication disparaît avec votre prochain message. Sans fournisseur de classification, il n’y a pas d’indication et vous marquez les sessions comme terminées vous-même.
 
 ## Récapitulatif et suggestion du prochain message
 
@@ -71,9 +71,11 @@ Activez-les ou désactivez-les dans **Paramètres → Chat → Assistance de ses
 
 ## Paramètres
 
-Ouvrez **Paramètres → Sessions → Sessions en cours**. Il n’y a qu’un réglage, **Afficher les sessions en cours**, activé par défaut. Désactivé, il coupe toute la fonction : plus de bloc, et envoyer un message ne fait plus passer la session en cours.
+Ouvrez **Paramètres → Sessions → Sessions en cours**. **Afficher les sessions en cours** est activé par défaut. Désactivé, ce réglage coupe toute la fonction : plus de bloc, et envoyer un message ne fait plus passer la session en cours.
 
 Pour masquer seulement le bloc, utilisez **Afficher la section en cours** dans le menu d’affichage de la barre latérale.
+
+Le nettoyage des sessions conserve les sessions du bloc En cours. Pour qu’elles expirent comme toute autre session, activez **Inclure les sessions « En cours »** dans **Paramètres → Sessions → Conservation des sessions**. Ce réglage est désactivé par défaut, et les sessions épinglées restent conservées dans tous les cas.
 
 ## Où ça fonctionne
 

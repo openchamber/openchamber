@@ -22,11 +22,13 @@ const tagged = (tag, message = tag) => Object.assign(new Error(message), { _tag:
 const setup = ({ settings = { agentImageToolEnabled: true, agentImageModel: 'openrouter/openai/gpt-image-2' }, answer } = {}) => {
   const requests = [];
   const client = {
-    generate: {
-      image: async (request, options) => {
-        requests.push({ request, options });
-        if (answer) return answer(request);
-        return { images: Array.from({ length: request.n ?? 1 }, () => ({ type: 'image', data: PNG.toString('base64'), mime: 'image/png' })), cost: 0.04 };
+    experimental: {
+      generate: {
+        image: async (request, options) => {
+          requests.push({ request, options });
+          if (answer) return answer(request);
+          return { images: Array.from({ length: request.n ?? 1 }, () => ({ type: 'image', data: PNG.toString('base64'), mime: 'image/png' })), cost: 0.04 };
+        },
       },
     },
   };

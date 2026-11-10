@@ -218,6 +218,57 @@ describe('createOpenCodeTrust', () => {
     expect((await trust.refusalFor({ ...prompt, resolveSessionDirectory: async () => { throw new Error('down'); } }))?.status).toBe(503);
   });
 
+  it('checks the folder a session moves into and the folder it leaves', async () => {
+    await write('.opencode/plugins/probe.js', 'export default {}');
+    const plain = path.join(home, 'projects', 'plain');
+    await mkdir(path.join(plain, 'sub'), { recursive: true });
+    const trust = makeTrust();
+    const move = (from, directory) => trust.refusalFor({
+      method: 'POST',
+      path: '/api/session/ses_1/move',
+      headers: {},
+      resolveSessionDirectory: async () => from,
+      readBody: async () => ({ directory }),
+    });
+
+    const into = await move(plain, repo);
+    expect(into).toMatchObject({ status: 403, body: { code: OPENCODE_TRUST_REQUIRED, directory: repo } });
+    // Relative to the session's folder and from home, the way OpenCode resolves it.
+    expect((await move(path.join(home, 'projects', 'plain'), '../repo'))?.body.directory).toBe(repo);
+    expect((await move(plain, '~/projects/repo'))?.body.directory).toBe(repo);
+    expect((await move(repo, plain))?.body.directory).toBe(repo);
+
+    expect(await move(plain, path.join(plain, 'sub'))).toBeNull();
+    // A folder that is gone opens nothing: OpenChamber moves sessions out of those.
+    expect(await move(path.join(home, 'projects', 'gone'), plain)).toBeNull();
+
+    const shown = await trust.handleRoute({ method: 'GET', query: { directory: repo } });
+    await trust.handleRoute({ method: 'POST', body: { directory: repo, fingerprint: shown.body.fingerprint } });
+    expect(await move(plain, repo)).toBeNull();
+  });
+
+  it('refuses a move whose destination it cannot read', async () => {
+    const move = { method: 'POST', path: '/api/session/ses_1/move', headers: {}, resolveSessionDirectory: async () => repo };
+    expect((await makeTrust().refusalFor({ ...move, readBody: async () => ({}) }))?.status).toBe(400);
+    expect((await makeTrust().refusalFor({ ...move, readBody: async () => { throw new SyntaxError('bad json'); } }))?.status).toBe(400);
+    expect((await makeTrust().refusalFor(move))?.status).toBe(400);
+  });
+
+  it('checks an MCP form reply against the folder it names, without looking up a session', async () => {
+    const resolveSessionDirectory = async () => { throw new Error('global is not a session'); };
+    const reply = {
+      method: 'POST',
+      path: '/api/session/global/form/frm_1/reply',
+      headers: { 'x-opencode-directory': encodeURIComponent(repo) },
+      resolveSessionDirectory,
+    };
+    expect(await makeTrust().refusalFor(reply)).toBeNull();
+    expect(await makeTrust().refusalFor({ ...reply, method: 'DELETE', path: '/api/session/global/form/frm_1' })).toBeNull();
+
+    await write('.opencode/plugins/probe.js', 'export default {}');
+    expect((await makeTrust().refusalFor(reply))?.status).toBe(403);
+  });
+
   it('reads the folder from the location query as well', async () => {
     await write('.opencode/plugins/probe.js', 'export default {}');
     const refusal = await makeTrust().refusalFor({

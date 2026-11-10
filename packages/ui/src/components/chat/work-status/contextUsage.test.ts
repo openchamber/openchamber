@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { computeContextUsage, DEFAULT_CONTEXT_LIMIT } from './contextUsage';
+import { computeContextUsage, computeLastReplyCacheHit, computeSessionTokenTotals, DEFAULT_CONTEXT_LIMIT } from './contextUsage';
 
 const assistant = (tokens: Record<string, unknown>, id = 'msg') => ({ id, role: 'assistant', tokens });
 
@@ -114,5 +114,47 @@ describe('computeContextUsage', () => {
       200_000,
     );
     expect(measured(usage).totalTokens).toBe(12_100);
+  });
+});
+
+describe('computeLastReplyCacheHit', () => {
+  test('reads the newest reply, never an average', () => {
+    const result = computeLastReplyCacheHit([
+      assistant({ total: 10, input: 10, output: 0, cache: { read: 0, write: 0 } }, 'old'),
+      assistant({ total: 100, input: 20, output: 5, cache: { read: 60, write: 20 } }, 'new'),
+    ]);
+    expect(result).toBe(60);
+  });
+
+  test('has nothing to say after a compaction until the next reply', () => {
+    // The compaction record's tokens describe the summarizing request.
+    const result = computeLastReplyCacheHit([
+      assistant({ total: 100, input: 20, output: 5, cache: { read: 80, write: 0 } }, 'reply'),
+      compaction({ total: 50, input: 50, output: 10 }),
+    ]);
+    expect(result).toBeNull();
+    expect(computeLastReplyCacheHit([])).toBeNull();
+  });
+});
+
+describe('computeSessionTokenTotals', () => {
+  test('reads the session counters, with the cache hit rate over all prompt tokens', () => {
+    const result = computeSessionTokenTotals({
+      tokens: { input: 200, output: 50, reasoning: 30, cache: { read: 700, write: 100 } },
+    });
+    // The prompt counts cached tokens too; OpenCode's `input` is only the uncached part.
+    expect(result).toEqual({ prompt: 1000, output: 50, reasoning: 30, cacheRead: 700, cacheWrite: 100, cacheHitPercent: 70 });
+  });
+
+  test('has no cache hit rate without prompt tokens', () => {
+    expect(computeSessionTokenTotals({ tokens: { input: 0, output: 5, reasoning: 0, cache: { read: 0, write: 0 } } })?.cacheHitPercent).toBeNull();
+  });
+
+  test('has nothing to say before the session reports usage', () => {
+    // A persisted snapshot strips the counters until the live record arrives.
+    expect(computeSessionTokenTotals({})).toBeNull();
+    expect(computeSessionTokenTotals(null)).toBeNull();
+    // A new session carries only zeros.
+    expect(computeSessionTokenTotals({ tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } } })).toBeNull();
   });
 });

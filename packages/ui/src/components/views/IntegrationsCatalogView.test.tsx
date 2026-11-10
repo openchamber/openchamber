@@ -1,7 +1,8 @@
-import { afterAll, afterEach, beforeEach, expect, test } from 'bun:test';
+import { afterAll, afterEach, beforeEach, expect, spyOn, test } from 'bun:test';
 import React, { act } from 'react';
 import type { Root } from 'react-dom/client';
 import { Element as HappyElement, HTMLElement, Window } from 'happy-dom';
+import type { IntegrationInfo } from '@opencode/client';
 
 /** A card or button found by text, narrowed to happy-dom's clickable element. */
 const findClickable = (elements: HappyElement[], text: string): HTMLElement | undefined =>
@@ -35,6 +36,7 @@ const { useMcpStore } = await import('@/stores/useMcpStore');
 const { usePluginsStore } = await import('@/stores/usePluginsStore');
 const { useSkillsStore } = await import('@/stores/useSkillsStore');
 const { useDirectoryStore } = await import('@/stores/useDirectoryStore');
+const { opencodeClient } = await import('@/lib/opencode/client');
 const { IntegrationsCatalogView } = await import('./IntegrationsCatalogView');
 const initialUI = useUIStore.getState();
 const initialMcpConfig = useMcpConfigStore.getState();
@@ -193,6 +195,123 @@ test('a needs-auth server shows the sign-in state on its detail page', async () 
   if (!linearCard) throw new Error('Linear card missing');
   await act(async () => linearCard.click());
   expect(browser.document.body.textContent?.includes('Waiting for sign-in')).toBe(true);
+});
+
+test('a failed OAuth server offers a fresh sign-in on its detail page', async () => {
+  // The service rejected the stored token: Connect would only retry it.
+  const linearSignIn: IntegrationInfo = {
+    id: 'mcp_0123456789abcdef',
+    name: 'linear',
+    metadata: { source: 'mcp' },
+    methods: [{ id: 'mcp_0123456789abcdef', type: 'oauth', label: 'Sign in to Linear' }],
+    connections: [],
+  };
+  const lists = [opencodeClient.getSdkClient(), opencodeClient.getScopedSdkClient(useDirectoryStore.getState().currentDirectory ?? '')]
+    .map((client) => spyOn(client.integration, 'list').mockImplementation(async () => ({ location: { directory: '/repo' }, data: [linearSignIn] })));
+  try {
+    useMcpConfigStore.setState({
+      mcpServers: [{ name: 'linear', type: 'remote', url: 'https://mcp.linear.app/mcp', scope: 'user' }],
+    });
+    useMcpStore.setState({
+      byDirectory: { [useDirectoryStore.getState().currentDirectory ?? '__global__']: { linear: { name: 'linear', status: { status: 'failed', error: 'Token refresh was rejected (access_denied)' } } } },
+    });
+    await act(async () => root.render(<I18nProvider><IntegrationsCatalogView /></I18nProvider>));
+    const linearCard = findClickable([...browser.document.body.querySelectorAll('[role="button"], button')], 'Linear');
+    if (!linearCard) throw new Error('Linear card missing');
+    await act(async () => linearCard.click());
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
+    expect(browser.document.body.textContent?.includes('Sign in to Linear')).toBe(true);
+    expect(browser.document.body.textContent?.includes('Sign in again')).toBe(true);
+    // The line about a sign-in in progress belongs to `needs_auth` only.
+    expect(browser.document.body.textContent?.includes('Waiting for sign-in')).toBe(false);
+  } finally {
+    for (const list of lists) list.mockRestore();
+  }
+});
+
+test('a connected OAuth server offers Authorize on its detail page', async () => {
+  // Connected does not prove user authorization: the tools may still wait on
+  // the consent this sign-in collects.
+  const linearSignIn: IntegrationInfo = {
+    id: 'mcp_0123456789abcdef',
+    name: 'linear',
+    metadata: { source: 'mcp' },
+    methods: [{ id: 'mcp_0123456789abcdef', type: 'oauth', label: 'Sign in to Linear' }],
+    connections: [],
+  };
+  const lists = [opencodeClient.getSdkClient(), opencodeClient.getScopedSdkClient(useDirectoryStore.getState().currentDirectory ?? '')]
+    .map((client) => spyOn(client.integration, 'list').mockImplementation(async () => ({ location: { directory: '/repo' }, data: [linearSignIn] })));
+  try {
+    useMcpConfigStore.setState({
+      mcpServers: [{ name: 'linear', type: 'remote', url: 'https://mcp.linear.app/mcp', scope: 'user' }],
+    });
+    useMcpStore.setState({
+      byDirectory: { [useDirectoryStore.getState().currentDirectory ?? '__global__']: { linear: { name: 'linear', status: { status: 'connected' } } } },
+    });
+    await act(async () => root.render(<I18nProvider><IntegrationsCatalogView /></I18nProvider>));
+    const linearCard = findClickable([...browser.document.body.querySelectorAll('[role="button"], button')], 'Linear');
+    if (!linearCard) throw new Error('Linear card missing');
+    await act(async () => linearCard.click());
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
+    expect(browser.document.body.textContent?.includes('Authorize')).toBe(true);
+    expect(browser.document.body.textContent?.includes('Waiting for sign-in')).toBe(false);
+  } finally {
+    for (const list of lists) list.mockRestore();
+  }
+});
+
+test('a started sign-in survives the server reconnecting as pending', async () => {
+  // Starting from another machine writes the redirect, and OpenCode reconnects the server.
+  const linearSignIn: IntegrationInfo = {
+    id: 'mcp_0123456789abcdef',
+    name: 'linear',
+    metadata: { source: 'mcp' },
+    methods: [{ id: 'mcp_0123456789abcdef', type: 'oauth', label: 'Sign in to Linear' }],
+    connections: [],
+  };
+  const clients = [opencodeClient.getSdkClient(), opencodeClient.getScopedSdkClient(useDirectoryStore.getState().currentDirectory ?? '')];
+  const lists = clients.map((client) => spyOn(client.integration, 'list')
+    .mockImplementation(async () => ({ location: { directory: '/repo' }, data: [linearSignIn] })));
+  const time = { created: 1, expires: 2 };
+  let finishStart!: (result: Awaited<ReturnType<typeof clients[0]['integration']['oauth']['connect']>>) => void;
+  const startResult = new Promise<Awaited<ReturnType<typeof clients[0]['integration']['oauth']['connect']>>>((resolve) => {
+    finishStart = resolve;
+  });
+  const connects = clients.map((client) => spyOn(client.integration.oauth, 'connect').mockImplementation(() => startResult));
+  const statuses = clients.map((client) => spyOn(client.integration.oauth, 'status')
+    .mockImplementation(async () => ({ location: { directory: '/repo' }, data: { status: 'pending', time } })));
+  const cancels = clients.map((client) => spyOn(client.integration.oauth, 'cancel').mockImplementation(async () => {}));
+  const statusKey = useDirectoryStore.getState().currentDirectory ?? '__global__';
+  try {
+    useMcpConfigStore.setState({
+      mcpServers: [{ name: 'linear', type: 'remote', url: 'https://mcp.linear.app/mcp', scope: 'user' }],
+    });
+    useMcpStore.setState({
+      byDirectory: { [statusKey]: { linear: { name: 'linear', status: { status: 'needs_auth', error: 'Authorization required' } } } },
+    });
+    await act(async () => root.render(<I18nProvider><IntegrationsCatalogView /></I18nProvider>));
+    const linearCard = findClickable([...browser.document.body.querySelectorAll('[role="button"], button')], 'Linear');
+    if (!linearCard) throw new Error('Linear card missing');
+    await act(async () => linearCard.click());
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
+    const start = [...browser.document.body.querySelectorAll('button')]
+      .find((button) => button.textContent?.trim() === 'Connect');
+    if (!(start instanceof HTMLElement)) throw new Error('sign-in Connect button missing');
+    await act(async () => start.click());
+    await act(async () => {
+      useMcpStore.setState({ byDirectory: { [statusKey]: { linear: { name: 'linear', status: { status: 'pending' } } } } });
+    });
+    await act(async () => {
+      finishStart({
+        location: { directory: '/repo' },
+        data: { attemptID: 'remote-attempt', mode: 'auto', url: '', instructions: 'Finish signing in', time },
+      });
+    });
+    expect(cancels.reduce((count, cancel) => count + cancel.mock.calls.length, 0)).toBe(0);
+    expect(browser.document.body.textContent?.includes('Waiting for authorization')).toBe(true);
+  } finally {
+    for (const spy of [...lists, ...connects, ...statuses, ...cancels]) spy.mockRestore();
+  }
 });
 
 test('a same-named skill outside the catalog folder does not count as installed', async () => {

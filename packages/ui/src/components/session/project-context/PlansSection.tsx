@@ -19,7 +19,8 @@ import { cn } from '@/lib/utils';
 import { useProjectContextStore } from '@/stores/useProjectContextStore';
 import { KnowledgeComposer } from './KnowledgeComposer';
 import { KNOWLEDGE_ICON_BUTTON_CLASS } from './knowledgeRowStyle';
-import { KnowledgeMenu, KnowledgePinToggle } from './KnowledgeActions';
+import { KnowledgeMenu, KnowledgePinToggle, KnowledgeRowContextMenu } from './KnowledgeActions';
+import { ButtonTooltip } from '@/components/ui/action-toolbar';
 import { formatKnowledgeDate } from './knowledgeFormat';
 import { planDeleteKey, scheduleKnowledgeDelete, usePendingKnowledgeDeletes } from './pendingKnowledgeDeletes';
 
@@ -143,8 +144,8 @@ export const PlansSection: React.FC<{
     const result = await requestFileAccess({
       defaultPath: projectRef.path,
       filters: [
-        { name: 'Plan files', extensions: ['md', 'markdown', 'txt'] },
-        { name: 'All files', extensions: ['*'] },
+        { name: t('contextTooltips.workspace.plans.filterPlanFiles'), extensions: ['md', 'markdown', 'txt'] },
+        { name: t('contextTooltips.workspace.plans.filterAllFiles'), extensions: ['*'] },
       ],
     });
 
@@ -264,20 +265,21 @@ export const PlansSection: React.FC<{
         dictation={false}
         onSubmit={handleCreatePlan}
         extraActions={(
-          <button
-            type="button"
-            onClick={handleTriggerImport}
-            disabled={isImporting}
-            className={KNOWLEDGE_ICON_BUTTON_CLASS}
-            aria-label={t('rightSidebar.contextNotesTodo.plans.importFromFile')}
-            title={t('rightSidebar.contextNotesTodo.plans.importFromFile')}
-          >
-            <Icon name="upload-2" className="h-3.5 w-3.5" />
-          </button>
+          <ButtonTooltip label={t('rightSidebar.contextNotesTodo.plans.importFromFile')} className="shrink-0">
+            <button
+              type="button"
+              onClick={handleTriggerImport}
+              disabled={isImporting}
+              className={KNOWLEDGE_ICON_BUTTON_CLASS}
+              aria-label={t('rightSidebar.contextNotesTodo.plans.importFromFile')}
+            >
+              <Icon name="upload-2" className="h-3.5 w-3.5" />
+            </button>
+          </ButtonTooltip>
         )}
       />
 
-      <div className="rounded-lg border border-border/60 bg-background/40">
+      <div className="rounded-lg border border-edge bg-background/40">
         {visiblePlans.length === 0 ? (
           <p className="px-3 py-3 typography-meta text-muted-foreground">
             {query.trim()
@@ -285,17 +287,41 @@ export const PlansSection: React.FC<{
               : t('rightSidebar.contextNotesTodo.plans.empty')}
           </p>
         ) : (
-          <ul className="divide-y divide-border/50">
+          <ul className="divide-y divide-edge">
             {visiblePlans.map((plan) => {
               const pinned = pinnedPlanIds.has(plan.id);
               const shared = plan.source === 'shared';
               const sessionId = plan.session?.sessionId;
+              const menuItems = [
+                {
+                  id: 'move',
+                  label: shared
+                    ? t('rightSidebar.contextNotesTodo.plans.menu.makePersonal')
+                    : t('rightSidebar.contextNotesTodo.plans.menu.share'),
+                  hint: shared
+                    ? t('rightSidebar.contextNotesTodo.plans.makePersonal')
+                    : t('rightSidebar.contextNotesTodo.plans.share'),
+                  onSelect: () => void handleMovePlan(plan),
+                },
+                {
+                  id: 'delete',
+                  label: t('rightSidebar.contextNotesTodo.plans.deletePlan'),
+                  destructive: true,
+                  onSelect: () => handleDeletePlan(plan.id),
+                },
+              ];
               return (
-                <li
+                <KnowledgeRowContextMenu
                   key={plan.id}
-                  data-knowledge-entry-id={plan.id}
-                  aria-current={plan.id === selectedPlanId ? 'true' : undefined}
-                  className={cn('group/knowledge flex items-center gap-1 py-1 pe-1.5 ps-1', plan.id === selectedPlanId && 'bg-interactive-selection/40')}
+                  items={menuItems}
+                  disabled={movingPlanId === plan.id}
+                  render={(
+                    <li
+                      data-knowledge-entry-id={plan.id}
+                      aria-current={plan.id === selectedPlanId ? 'true' : undefined}
+                      className={cn('group/knowledge flex items-center gap-1 py-1 pe-1.5 ps-1', plan.id === selectedPlanId && 'bg-interactive-selection/40')}
+                    />
+                  )}
                 >
                   <button
                     type="button"
@@ -319,7 +345,7 @@ export const PlansSection: React.FC<{
                       onClick={() => void openSessionLink(sessionId, null)}
                       className={KNOWLEDGE_ICON_BUTTON_CLASS}
                       aria-label={t('rightSidebar.contextNotesTodo.plans.session.open')}
-                      title={t('rightSidebar.contextNotesTodo.plans.session.open')}
+                      data-row-tooltip={t('rightSidebar.contextNotesTodo.plans.session.open')}
                     >
                       <Icon name="chat-3" className="h-3.5 w-3.5" />
                     </button>
@@ -328,28 +354,8 @@ export const PlansSection: React.FC<{
                     pinned={pinned}
                     onToggle={() => void handleTogglePinned(plan.id, !pinned)}
                   />
-                  <KnowledgeMenu
-                    disabled={movingPlanId === plan.id}
-                    items={[
-                      {
-                        id: 'move',
-                        label: shared
-                          ? t('rightSidebar.contextNotesTodo.plans.menu.makePersonal')
-                          : t('rightSidebar.contextNotesTodo.plans.menu.share'),
-                        hint: shared
-                          ? t('rightSidebar.contextNotesTodo.plans.makePersonal')
-                          : t('rightSidebar.contextNotesTodo.plans.share'),
-                        onSelect: () => void handleMovePlan(plan),
-                      },
-                      {
-                        id: 'delete',
-                        label: t('rightSidebar.contextNotesTodo.plans.deletePlan'),
-                        destructive: true,
-                        onSelect: () => handleDeletePlan(plan.id),
-                      },
-                    ]}
-                  />
-                </li>
+                  <KnowledgeMenu disabled={movingPlanId === plan.id} items={menuItems} />
+                </KnowledgeRowContextMenu>
               );
             })}
           </ul>

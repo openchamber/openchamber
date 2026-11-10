@@ -4,6 +4,8 @@ import { SimpleMarkdownRenderer } from '@/components/chat/MarkdownRenderer';
 import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
+import { HoverTooltip } from '@/components/ui/row-tooltip';
+import { useAvatarImage } from '@/hooks/useAvatarImage';
 import { useEmojiShortcodes } from '@/lib/emoji/shortcodes';
 import { useI18n } from '@/lib/i18n';
 import { isIMECompositionEvent } from '@/lib/ime';
@@ -29,15 +31,18 @@ export type ReferenceThreadActions = {
 // Text actions under a thread: a colour change on hover, no fill.
 const THREAD_ACTION_CLASS = cn('h-6 px-1.5 hover:bg-transparent hover:text-foreground', REFERENCE_META_TEXT);
 
-const Avatar: React.FC<{ comment: ReferenceCommentItem; className: string }> = ({ comment, className }) => (
-    <div className={cn('flex shrink-0 items-center justify-center overflow-hidden rounded-full border border-border/60 bg-surface-elevated typography-micro text-muted-foreground', className)}>
-        {comment.avatarUrl ? (
-            <img src={comment.avatarUrl} alt="" className="size-full object-cover" loading="lazy" />
-        ) : (
-            <span>{(comment.author ?? '?').slice(0, 1).toUpperCase()}</span>
-        )}
-    </div>
-);
+const Avatar: React.FC<{ comment: ReferenceCommentItem; className: string }> = ({ comment, className }) => {
+    const { broken, onError } = useAvatarImage(comment.avatarUrl);
+    return (
+        <div className={cn('flex shrink-0 items-center justify-center overflow-hidden rounded-full border border-edge bg-surface-elevated typography-micro text-muted-foreground', className)}>
+            {comment.avatarUrl && !broken ? (
+                <img src={comment.avatarUrl} alt="" className="size-full object-cover" loading="lazy" onError={onError} />
+            ) : (
+                <span>{(comment.author ?? '?').slice(0, 1).toUpperCase()}</span>
+            )}
+        </div>
+    );
+};
 
 /** A comment's text; on a review line, its ```suggestion fences draw as diffs of that line. */
 const CommentBody: React.FC<{ comment: ReferenceCommentItem }> = ({ comment }) => {
@@ -54,6 +59,7 @@ const CommentBody: React.FC<{ comment: ReferenceCommentItem }> = ({ comment }) =
                 className="mt-1 [&_img]:h-auto [&_img]:max-w-full"
                 enableFileReferences={false}
                 allowRawHtml
+                singleTilde
                 repositoryLinks={links.repository}
                 emojiShortcodes={emojiShortcodes}
                 directory={links.directory}
@@ -96,16 +102,20 @@ const ThreadRest: React.FC<{
 
     if (!open) {
         return (
-            <button
-                type="button"
-                onClick={() => setOpen(true)}
-                className={cn('mt-1 inline-flex items-center gap-1 typography-meta hover:text-foreground', REFERENCE_META_TEXT)}
-                aria-expanded={false}
-            >
-                <Icon name="check" className="size-3.5 text-[var(--status-success)]" />
-                {summary}
-                <Icon name="arrow-right-s" className="size-3.5 opacity-70" />
-            </button>
+            <HoverTooltip label={t('contextTooltips.tracker.showThread')}>
+                <span className="inline-flex">
+                    <button
+                        type="button"
+                        onClick={() => setOpen(true)}
+                        className={cn('mt-1 inline-flex items-center gap-1 typography-meta hover:text-foreground', REFERENCE_META_TEXT)}
+                        aria-expanded={false}
+                    >
+                        <Icon name="check" className="size-3.5 text-[var(--status-success)]" />
+                        {summary}
+                        <Icon name="arrow-right-s" className="size-3.5 opacity-70" />
+                    </button>
+                </span>
+            </HoverTooltip>
         );
     }
 
@@ -147,7 +157,7 @@ const ThreadRest: React.FC<{
         <>
             <CommentBody comment={comment} />
             {count > 0 ? (
-                <ul className="mt-2 flex flex-col gap-3 border-s border-border/60 ps-3">
+                <ul className="mt-2 flex flex-col gap-3 border-s border-edge ps-3">
                     {thread.replies.map((reply) => (
                         <li key={reply.key} className="group/reply min-w-0">
                             <div className={cn('flex min-w-0 items-center gap-1.5 typography-meta', REFERENCE_META_TEXT)}>
@@ -155,14 +165,18 @@ const ThreadRest: React.FC<{
                                 <span className="font-medium text-muted-foreground">{reply.author ?? '—'}</span>
                                 {relativeLabel(t, reply.createdAt, now) ? <span>{relativeLabel(t, reply.createdAt, now)}</span> : null}
                                 {onAttachComment ? (
-                                    <button
-                                        type="button"
-                                        onClick={() => onAttachComment(reply)}
-                                        className="ms-auto inline-flex items-center gap-1 opacity-0 transition-opacity hover:text-foreground focus-visible:opacity-100 group-hover/reply:opacity-100"
-                                    >
-                                        <Icon name="attachment-2" className="size-3.5" />
-                                        {t('gitView.pr.actions.sendToAgent')}
-                                    </button>
+                                    <HoverTooltip label={t('contextTooltips.tracker.attachComment')}>
+                                        <span className="inline-flex ms-auto">
+                                            <button
+                                                type="button"
+                                                onClick={() => onAttachComment(reply)}
+                                                className="inline-flex items-center gap-1 opacity-0 transition-opacity hover:text-foreground focus-visible:opacity-100 group-hover/reply:opacity-100"
+                                            >
+                                                <Icon name="attachment-2" className="size-3.5" />
+                                                {t('gitView.pr.actions.sendToAgent')}
+                                            </button>
+                                        </span>
+                                    </HoverTooltip>
                                 ) : null}
                             </div>
                             <CommentBody comment={reply} />
@@ -204,35 +218,60 @@ const ThreadRest: React.FC<{
             ) : null}
             <div className="mt-1 flex flex-wrap items-center gap-1 -ms-1.5">
                 {actions && thread.canReply && !replying ? (
-                    <Button size="xs" variant="ghost" className={THREAD_ACTION_CLASS} onClick={() => setReplying(true)} disabled={busy !== null}>
-                        <Icon name="chat-1" className="size-3.5" />
-                        {t('references.picker.thread.reply')}
-                    </Button>
+                    <HoverTooltip label={t('contextTooltips.tracker.replyToThread')}>
+                        <span className="inline-flex">
+                            <Button size="xs" variant="ghost" className={THREAD_ACTION_CLASS} onClick={() => setReplying(true)} disabled={busy !== null}>
+                                <Icon name="chat-1" className="size-3.5" />
+                                {t('references.picker.thread.reply')}
+                            </Button>
+                        </span>
+                    </HoverTooltip>
                 ) : null}
                 {actions && thread.canResolve ? (
-                    <Button size="xs" variant="ghost" className={THREAD_ACTION_CLASS} onClick={() => void toggleResolved()} disabled={busy !== null || settling}>
-                        {busy === 'resolve' || settling
-                            ? <Icon name="loader-4" className="size-3.5 animate-spin" />
-                            : <Icon name={thread.resolved ? 'arrow-go-back' : 'check'} className="size-3.5" />}
-                        {t(thread.resolved ? 'references.picker.thread.unresolve' : 'references.picker.thread.resolve')}
-                    </Button>
+                    <HoverTooltip label={t(thread.resolved ? 'contextTooltips.tracker.reopenThread' : 'contextTooltips.tracker.resolveThread')}>
+                        <span className="inline-flex">
+                            <Button size="xs" variant="ghost" className={THREAD_ACTION_CLASS} onClick={() => void toggleResolved()} disabled={busy !== null || settling}>
+                                {busy === 'resolve' || settling
+                                    ? <Icon name="loader-4" className="size-3.5 animate-spin" />
+                                    : <Icon name={thread.resolved ? 'arrow-go-back' : 'check'} className="size-3.5" />}
+                                {t(thread.resolved ? 'references.picker.thread.unresolve' : 'references.picker.thread.resolve')}
+                            </Button>
+                        </span>
+                    </HoverTooltip>
                 ) : null}
                 {setAnswer && answer?.canChange ? (
-                    <Button size="xs" variant="ghost" className={THREAD_ACTION_CLASS} onClick={() => void toggleAnswer()} disabled={busy !== null || settling}>
-                        {busy === 'answer' || settling
-                            ? <Icon name="loader-4" className="size-3.5 animate-spin" />
-                            : <Icon name={answer.chosen ? 'arrow-go-back' : 'checkbox-circle'} className="size-3.5" />}
-                        {t(answer.chosen ? 'references.picker.discussion.unmarkAnswer' : 'references.picker.discussion.markAnswer')}
-                    </Button>
+                    <HoverTooltip label={t(answer.chosen ? 'contextTooltips.tracker.unmarkAnswer' : 'contextTooltips.tracker.markAnswer')}>
+                        <span className="inline-flex">
+                            <Button size="xs" variant="ghost" className={THREAD_ACTION_CLASS} onClick={() => void toggleAnswer()} disabled={busy !== null || settling}>
+                                {busy === 'answer' || settling
+                                    ? <Icon name="loader-4" className="size-3.5 animate-spin" />
+                                    : <Icon name={answer.chosen ? 'arrow-go-back' : 'checkbox-circle'} className="size-3.5" />}
+                                {t(answer.chosen ? 'references.picker.discussion.unmarkAnswer' : 'references.picker.discussion.markAnswer')}
+                            </Button>
+                        </span>
+                    </HoverTooltip>
                 ) : null}
                 {thread.resolved ? (
-                    <Button size="xs" variant="ghost" className={THREAD_ACTION_CLASS} onClick={() => setOpen(false)}>
-                        <Icon name="arrow-up-s" className="size-3.5" />
-                        {t('references.picker.thread.collapse')}
-                    </Button>
+                    <HoverTooltip label={t('contextTooltips.tracker.hideThread')}>
+                        <span className="inline-flex">
+                            <Button size="xs" variant="ghost" className={THREAD_ACTION_CLASS} onClick={() => setOpen(false)}>
+                                <Icon name="arrow-up-s" className="size-3.5" />
+                                {t('references.picker.thread.collapse')}
+                            </Button>
+                        </span>
+                    </HoverTooltip>
                 ) : null}
             </div>
         </>
+    );
+};
+
+const CommitAuthorAvatar: React.FC<{ name: string; avatarUrl: string }> = ({ name, avatarUrl }) => {
+    const { broken, onError } = useAvatarImage(avatarUrl);
+    return broken ? (
+        <span className="flex size-3.5 shrink-0 items-center justify-center rounded-full bg-surface-muted leading-none">{name.slice(0, 1).toUpperCase()}</span>
+    ) : (
+        <img src={avatarUrl} alt="" className="size-3.5 shrink-0 rounded-full" loading="lazy" onError={onError} />
     );
 };
 
@@ -250,7 +289,7 @@ const CommitGroup: React.FC<{ group: ReferenceCommitGroup; now: number }> = ({ g
     const count = group.commits.length;
     return (
         <>
-            <div className="absolute inset-s-0 top-0 flex size-6 items-center justify-center rounded-full border border-border/60 bg-surface-elevated text-muted-foreground">
+            <div className="absolute inset-s-0 top-0 flex size-6 items-center justify-center rounded-full border border-edge bg-surface-elevated text-muted-foreground">
                 <Icon name="git-commit" className="size-3.5" />
             </div>
             <div className={cn('flex h-6 items-center typography-meta', REFERENCE_META_TEXT)}>
@@ -279,11 +318,11 @@ const CommitGroup: React.FC<{ group: ReferenceCommitGroup; now: number }> = ({ g
                             ) : (
                                 <span className={cn('shrink-0 font-mono typography-micro', REFERENCE_META_TEXT)}>{sha}</span>
                             )}
-                            <span className="min-w-0 flex-1 truncate text-foreground" title={commit.headline}>{commit.headline}</span>
+                            <span dir="auto" className="oc-ui-start-align min-w-0 flex-1 truncate text-foreground" title={commit.headline}>{commit.headline}</span>
                             {commit.author ? (
                                 <span className={cn('inline-flex min-w-0 max-w-[40%] shrink-0 items-center gap-1 self-center typography-micro', REFERENCE_META_TEXT)}>
                                     {commit.avatarUrl ? (
-                                        <img src={commit.avatarUrl} alt="" className="size-3.5 shrink-0 rounded-full" loading="lazy" />
+                                        <CommitAuthorAvatar name={commit.author} avatarUrl={commit.avatarUrl} />
                                     ) : null}
                                     <span className="truncate">{commit.author}</span>
                                 </span>
@@ -317,7 +356,7 @@ export const ReferenceComments: React.FC<{
                 const isLast = index === entries.length - 1;
                 return (
                     <div key={entry.key} className="group relative pb-4 ps-9 last:pb-0">
-                        {!isLast ? <div className="absolute bottom-1 inset-s-3 top-8 w-px bg-border/60" /> : null}
+                        {!isLast ? <div className="absolute bottom-1 inset-s-3 top-8 w-px bg-edge" /> : null}
                         {entry.kind === 'commits' ? <CommitGroup group={entry} now={now} /> : (
                             <>
                                 <Avatar comment={entry} className="absolute inset-s-0 top-0 size-6" />
@@ -332,14 +371,18 @@ export const ReferenceComments: React.FC<{
                                         </span>
                                     ) : null}
                                     {onAttachComment ? (
-                                        <button
-                                            type="button"
-                                            onClick={() => onAttachComment(entry)}
-                                            className="ms-auto inline-flex items-center gap-1 opacity-0 transition-opacity hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100"
-                                        >
-                                            <Icon name="attachment-2" className="size-3.5" />
-                                            {t('gitView.pr.actions.sendToAgent')}
-                                        </button>
+                                        <HoverTooltip label={t('contextTooltips.tracker.attachComment')}>
+                                            <span className="inline-flex ms-auto">
+                                                <button
+                                                    type="button"
+                                                    onClick={() => onAttachComment(entry)}
+                                                    className="inline-flex items-center gap-1 opacity-0 transition-opacity hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100"
+                                                >
+                                                    <Icon name="attachment-2" className="size-3.5" />
+                                                    {t('gitView.pr.actions.sendToAgent')}
+                                                </button>
+                                            </span>
+                                        </HoverTooltip>
                                     ) : null}
                                 </div>
                                 {entry.thread ? (

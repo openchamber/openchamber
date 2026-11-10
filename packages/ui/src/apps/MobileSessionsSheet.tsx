@@ -1,4 +1,5 @@
 import React from 'react';
+import { setSidebarSectionHidden } from '@/components/session/sidebar/sections/sectionActions';
 import { createPortal } from 'react-dom';
 import { isIMECompositionEvent } from '@/lib/ime';
 import {
@@ -20,6 +21,7 @@ import { CSS } from '@dnd-kit/utilities';
 
 import { DirectoryExplorerDialog } from '@/components/session/DirectoryExplorerDialog';
 import { Icon } from '@/components/icon/Icon';
+import type { IconName } from '@/components/icon/icons';
 import { NewWorktreeDialog } from '@/components/session/NewWorktreeDialog';
 import { SessionSidebar } from '@/components/session/SessionSidebar';
 import { SessionSearchInput } from '@/components/session/SessionSearchInput';
@@ -34,7 +36,6 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { ScrollShadow } from '@/components/ui/ScrollShadow';
 import { isChatDirectoryPath } from '@/lib/chatDirectories';
 import { useI18n, type I18nKey } from '@/lib/i18n';
 import { updateDesktopSettings } from '@/lib/persistence';
@@ -43,8 +44,13 @@ import { refreshGlobalSessions, useGlobalSessionsStore } from '@/stores/useGloba
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { resolveSidebarGrouping, useSessionDisplayStore, type ProjectSortOrder } from '@/stores/useSessionDisplayStore';
 import { useUIStore } from '@/stores/useUIStore';
+import { TooltipLabelWithShortcut } from '@/components/ui/action-toolbar';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { formatShortcutForDisplay, getEffectiveShortcutCombo } from '@/lib/shortcuts';
 import { seedGlobalSessionStatusFromHost } from '@/sync/host-session-status-seed';
 import { useSessionUIStore } from '@/sync/session-ui-store';
+import { markAllSessionsViewed } from '@/sync/notification-store';
+import { useHasUnreadSession } from '@/sync/session-unread';
 import { useAllLiveSessions } from '@/sync/sync-context';
 import type { WorktreeMetadata } from '@/types/worktree';
 
@@ -56,6 +62,8 @@ import { getProjectLabel, normalizePath } from './mobilePaths';
 import { MobileSessionList } from './mobileSidebar/MobileSessionList';
 import { MobileSidebarActionsProvider, useMobileSidebarRowsStore, type MobileSidebarActions } from './mobileSidebar/mobileSidebarState';
 import { useEdgeSwipe } from './useEdgeSwipe';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
+import { MOBILE_HEADER_BUTTON_CLASS, MOBILE_HEADER_CLASS } from '@/components/ui/mobileHeader';
 
 type MobileSessionsSheetProps = {
   open: boolean;
@@ -102,6 +110,20 @@ const GROUPING_OPTIONS = [
 /** Menu rows tall enough for a thumb. */
 const MOBILE_MENU_ITEM_CLASS = 'min-h-10 items-center justify-between';
 
+/** Mounts only with the open menu, so the sheet does not watch every session for it. */
+function MobileMarkAllReadItem(): React.ReactNode {
+  const { t } = useI18n();
+  const hasUnread = useHasUnreadSession();
+  return (
+    <DropdownMenuItem disabled={!hasUnread} onClick={markAllSessionsViewed} className={MOBILE_MENU_ITEM_CLASS}>
+      <span className="flex items-center gap-2">
+        <Icon name="check-double" className="size-4" />
+        {t('sessions.sidebar.header.actions.markAllRead')}
+      </span>
+    </DropdownMenuItem>
+  );
+}
+
 type ReorderProject = {
   id: string;
   label: string;
@@ -122,7 +144,7 @@ const SortableProjectRow: React.FC<{ project: ReorderProject }> = ({ project }) 
       ref={setNodeRef}
       style={{ transform: CSS.Transform.toString(transform), transition, zIndex: isDragging ? 10 : 1 }}
       className={cn(
-        'flex items-center gap-1 rounded-2xl border border-border/70 bg-[var(--surface-elevated)] px-1.5 py-1.5 transition-colors',
+        'flex items-center gap-1 rounded-2xl border border-edge bg-[var(--surface-elevated)] px-1.5 py-1.5 transition-colors',
         isDragging && 'shadow-lg shadow-black/20',
       )}
     >
@@ -150,6 +172,7 @@ const SortableProjectRow: React.FC<{ project: ReorderProject }> = ({ project }) 
  */
 export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, onOpenChange, variant = 'drawer', footer }) => {
   const { t } = useI18n();
+  const listActive = useActiveAfterSlideStarts(open);
   const liveSessions = useAllLiveSessions();
   const projects = useProjectsStore((state) => state.projects);
   const manualProjectOrder = useProjectsStore((state) => state.manualProjectOrder);
@@ -170,6 +193,10 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
   const worktreeNameByBranch = useSessionDisplayStore((state) => state.worktreeNameByBranch);
   const setWorktreeNameByBranch = useSessionDisplayStore((state) => state.setWorktreeNameByBranch);
   const sessionWorkEnabled = useUIStore((state) => state.sessionWorkEnabled);
+  const savedSections = useSessionDisplayStore((state) => state.sections);
+  const customSections = React.useMemo(() => savedSections.filter((entry) => entry.kind === 'custom'), [savedSections]);
+  const hiddenSections = useSessionDisplayStore((state) => state.hiddenSections);
+  const shortcutOverrides = useUIStore((state) => state.shortcutOverrides);
   const hasChats = useGlobalSessionsStore((state) => state.activeSessions.some((session) => isChatDirectoryPath(getSessionDirectory(session))));
   const [query, setQuery] = React.useState('');
   const [editingProjectId, setEditingProjectId] = React.useState<string | null>(null);
@@ -195,7 +222,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
   }, [searchOpen, variant]);
 
   React.useEffect(() => {
-    if (!open) {
+    if (!listActive) {
       setQuery('');
       setSearchOpen(false);
       setEditingOrder(false);
@@ -212,7 +239,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
     void refreshGlobalSessions(liveSessions).then(() => seedGlobalSessionStatusFromHost());
     // intentionally only on open transition — session events keep the list current after that
     // oxlint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
+  }, [listActive]);
 
   const close = React.useCallback(() => onOpenChange(false), [onOpenChange]);
   const sidebarActions = React.useMemo<MobileSidebarActions>(() => ({
@@ -325,6 +352,13 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
         {sessionWorkEnabled ? renderMenuChoice('work', 'sessions.sidebar.header.displayMode.showWork', showWorkSection, toggleSetting(showWorkSection, setShowWorkSection, (next) => {
           void updateDesktopSettings({ sidebarShowWorkSection: next });
         })) : null}
+        {/* The user's own sections, made on the desktop or the web; the phone only shows or hides them. */}
+        {customSections.map((section) => (
+          <DropdownMenuItem key={`section:${section.id}`} onClick={() => setSidebarSectionHidden(section.id, !hiddenSections.includes(section.id))} className={MOBILE_MENU_ITEM_CLASS}>
+            <span className="min-w-0 truncate" dir="auto">{section.name}</span>
+            {!hiddenSections.includes(section.id) ? <Icon name="check" className="size-4 text-primary" /> : null}
+          </DropdownMenuItem>
+        ))}
         {/* A work in In work leaves its project unless asked. */}
         {sessionWorkEnabled && showWorkSection ? renderMenuChoice('in-place', 'sessions.sidebar.header.displayMode.keepWorkInPlace', keepWorkInPlace, toggleSetting(keepWorkInPlace, setKeepWorkInPlace, (next) => {
           void updateDesktopSettings({ sidebarKeepWorkInPlace: next });
@@ -335,17 +369,17 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
         {renderMenuChoice('branch-names', 'sessions.sidebar.header.displayMode.worktreeNameByBranch', worktreeNameByBranch, toggleSetting(worktreeNameByBranch, setWorktreeNameByBranch, (next) => {
           void updateDesktopSettings({ sidebarWorktreeNameByBranch: next });
         }))}
+        <DropdownMenuSeparator />
         {canEditOrder ? (
-          <>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem onClick={() => setEditingOrder(true)} className={MOBILE_MENU_ITEM_CLASS}>
-              <span className="flex items-center gap-2">
-                <Icon name="drag-move-2" className="size-4" />
-                {t('mobile.sessions.editOrder')}
-              </span>
-            </DropdownMenuItem>
-          </>
+          <DropdownMenuItem onClick={() => setEditingOrder(true)} className={MOBILE_MENU_ITEM_CLASS}>
+            <span className="flex items-center gap-2">
+              <Icon name="drag-move-2" className="size-4" />
+              {t('mobile.sessions.editOrder')}
+            </span>
+          </DropdownMenuItem>
         ) : null}
+        <MobileMarkAllReadItem />
+      
       </DropdownMenuContent>
     </DropdownMenu>
   ) : null;
@@ -364,7 +398,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
     </Button>
   ) : null;
 
-  const newChatButton = !editingOrder && projects.length > 0 ? (
+  const newChatButton = !editingOrder ? (
     <Button
       type="button"
       variant="default"
@@ -395,6 +429,40 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
     </Button>
   ) : null;
 
+  // The pages the list opens, last among the list's own controls, as the
+  // desktop header's More menu.
+  const pageItem = (icon: IconName, label: string, onClick: () => void) => (
+    <DropdownMenuItem onClick={onClick} className={MOBILE_MENU_ITEM_CLASS}>
+      <span className="flex items-center gap-2">
+        <Icon name={icon} className="size-4" />
+        {label}
+      </span>
+    </DropdownMenuItem>
+  );
+  const moreMenu = footer && !editingOrder ? (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          type="button"
+          variant="chip"
+          size="sm"
+          aria-label={t('sessions.sidebar.header.actions.more')}
+          title={t('sessions.sidebar.header.actions.more')}
+          style={{ touchAction: 'manipulation' }}
+        >
+          <Icon name="more" className="size-4" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-56">
+        {footer.onOpenOverview ? pageItem('compass-3', t('overview.title'), footer.onOpenOverview) : null}
+        {pageItem('git-pull-request', t('sourceBoard.title'), footer.onOpenSourceBoard)}
+        {pageItem('calendar-schedule', t('sessions.sidebar.header.actions.scheduledTasks'), footer.onOpenScheduled)}
+        {pageItem('archive', t('sessions.sidebar.nav.archive'), footer.onOpenArchive)}
+        {pageItem('bar-chart', t('usageStats.openAction'), footer.onOpenUsage)}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  ) : null;
+
   // The new-session button keeps the outer right edge whatever else is showing:
   // it is the one action people reach for without looking, so it must not slide
   // around as the icons beside it come and go.
@@ -402,6 +470,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
     <>
       {addProjectButton}
       {displayMenu}
+      {moreMenu}
       {doneEditingButton}
       {newChatButton}
     </>
@@ -417,7 +486,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
         {/* The list scrolls under the search field: the list is virtualized
             in its own scroller, which the field cannot join. */}
         {!editingOrder && !empty && searchShown ? (
-          <div className={cn('shrink-0 px-3 pb-2', variant === 'sidebar' ? 'pt-2' : 'pt-1')}>
+          <div className={cn('shrink-0 px-2 pb-1', variant === 'sidebar' ? 'pt-2' : 'pt-1')}>
             <SessionSearchInput
               inputRef={searchInputRef}
               value={query}
@@ -449,7 +518,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
           </div>
         ) : null}
         {editingOrder ? (
-          <ScrollShadow className="min-h-0 flex-1 overflow-y-auto pb-4">
+          <ScrollableOverlay outerClassName="min-h-0 flex-1" className="pb-4" useScrollShadow disableHorizontal>
             <div className="flex flex-col gap-2 px-3 py-2">
               <p className="px-1 typography-micro text-muted-foreground">{t('mobile.sessions.editOrderHint')}</p>
               <DndContext sensors={dndSensors} collisionDetection={closestCenter} onDragEnd={handleReorderDragEnd}>
@@ -460,24 +529,26 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
                 </SortableContext>
               </DndContext>
             </div>
-          </ScrollShadow>
+          </ScrollableOverlay>
         ) : null}
         {/* Mounted while reordering too, so the list comes back as it was. */}
         <div className={cn('flex min-h-0 flex-1 flex-col', (editingOrder || empty) && 'hidden')}>
           <MobileSidebarActionsProvider value={sidebarActions}>
-            <SessionSidebar mobileVariant isVisible={open} phone={phoneList} />
+            <SessionSidebar mobileVariant isVisible={listActive} phone={phoneList} />
           </MobileSidebarActionsProvider>
         </div>
 
-        {/* App-level footer: the connected instance (Capacitor) on the left;
-            on the right the pages opened less often behind "More", then a
-            pending web update, the overview, the issues board and Settings.
-            Settings is the one filled button; the rest are flat, as the
-            header's. Bottom placement keeps the header for list actions and
-            stays thumb-reachable. */}
+        {/* App-level footer, as the desktop sidebar's: the connected
+            instance (Capacitor) on the left, a pending web update and
+            Settings on the right. The pages the list opens are in the
+            header's More menu. */}
         {footer ? (
           <div
-            className="flex shrink-0 items-center justify-between gap-2 border-t border-border/70 px-3 pt-1.5"
+            // At the bottom of the phone's drawer it rides the keyboard. The
+            // iPad's sidebar keeps its height under the raised keyboard
+            // (mobile.css), so its footer stays where it is.
+            data-keyboard-rider={variant === 'drawer' ? '' : undefined}
+            className="oc-sessions-footer flex shrink-0 items-center justify-between gap-2 border-t border-edge bg-background px-3 pt-1.5"
             style={{ paddingBottom: 'calc(0.375rem + var(--oc-safe-area-bottom, 0px))' }}
           >
             <div className="flex min-w-0 items-center">
@@ -497,47 +568,12 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
               ) : null}
             </div>
             <div className="flex shrink-0 items-center gap-1">
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button
-                    type="button"
-                    variant="chip"
-                    size="lg"
-                    className="w-10 shrink-0 px-0"
-                    aria-label={t('mobile.sessions.footer.more')}
-                    title={t('mobile.sessions.footer.more')}
-                    style={{ touchAction: 'manipulation' }}
-                  >
-                    <Icon name="more" className="size-5" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent side="top" align="end" className="w-56">
-                  <DropdownMenuItem onClick={footer.onOpenScheduled} className={MOBILE_MENU_ITEM_CLASS}>
-                    <span className="flex items-center gap-2">
-                      <Icon name="calendar-schedule" className="size-4" />
-                      {t('sessions.sidebar.header.actions.scheduledTasks')}
-                    </span>
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={footer.onOpenArchive} className={MOBILE_MENU_ITEM_CLASS}>
-                    <span className="flex items-center gap-2">
-                      <Icon name="archive" className="size-4" />
-                      {t('sessions.sidebar.nav.archive')}
-                    </span>
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={footer.onOpenUsage} className={MOBILE_MENU_ITEM_CLASS}>
-                    <span className="flex items-center gap-2">
-                      <Icon name="bar-chart" className="size-4" />
-                      {t('usageStats.openAction')}
-                    </span>
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
               {footer.onOpenUpdate ? (
                 <Button
                   type="button"
                   variant="chip"
                   size="lg"
-                  className="w-10 px-0"
+                  className="relative w-10 px-0"
                   onClick={footer.onOpenUpdate}
                   aria-label={t('mobile.menu.update')}
                   title={t('mobile.menu.update')}
@@ -547,32 +583,8 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
                   <span className="absolute inset-e-2 top-2 inline-flex size-2 rounded-full bg-primary" aria-hidden />
                 </Button>
               ) : null}
-              {footer.onOpenOverview ? (
-                <Button
-                  type="button"
-                  variant="chip"
-                  size="lg"
-                  className="w-10 px-0"
-                  onClick={footer.onOpenOverview}
-                  aria-label={t('overview.title')}
-                  title={t('overview.title')}
-                  style={{ touchAction: 'manipulation' }}
-                >
-                  <Icon name="compass-3" className="size-5" />
-                </Button>
-              ) : null}
-              <Button
-                type="button"
-                variant="chip"
-                size="lg"
-                className="w-10 px-0"
-                onClick={footer.onOpenSourceBoard}
-                aria-label={t('sourceBoard.title')}
-                title={t('sourceBoard.title')}
-                style={{ touchAction: 'manipulation' }}
-              >
-                <Icon name="git-pull-request" className="size-5" />
-              </Button>
+              <Tooltip>
+              <TooltipTrigger asChild>
               <Button
                 type="button"
                 variant="default"
@@ -580,11 +592,13 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
                 className="w-10 px-0"
                 onClick={footer.onOpenSettings}
                 aria-label={t('mobile.menu.settings')}
-                title={t('mobile.menu.settings')}
                 style={{ touchAction: 'manipulation' }}
               >
                 <Icon name="settings-3" className="size-5" />
               </Button>
+              </TooltipTrigger>
+              <TooltipContent side="top"><TooltipLabelWithShortcut label={t('mobile.menu.settings')} shortcut={formatShortcutForDisplay(getEffectiveShortcutCombo('open_settings', shortcutOverrides), '')} /></TooltipContent>
+              </Tooltip>
             </div>
           </div>
         ) : null}
@@ -627,7 +641,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
       <div className="flex h-full min-h-0 flex-col">
         {/* No title: the list below says what this is, and the actions need
             the width. Search opens from the leading button, as on the desktop. */}
-        <div className="flex h-[var(--oc-header-height,56px)] shrink-0 items-center gap-2 border-b border-border/70 px-3">
+        <div className={cn(MOBILE_HEADER_CLASS, 'border-b border-edge')}>
           {!editingOrder && !empty ? (
             <Button
               type="button"
@@ -666,10 +680,10 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
       }}
       ariaLabel={t('mobile.sessions.sheet.title')}
     >
-      <div className="flex h-[var(--oc-header-height,56px)] shrink-0 items-center gap-2 px-3">
+      <div className={MOBILE_HEADER_CLASS}>
         <button
           type="button"
-          className="flex size-10 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-interactive-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className={MOBILE_HEADER_BUTTON_CLASS}
           aria-label={t('mobile.surface.closeAria')}
           onClick={close}
           style={{ touchAction: 'manipulation' }}
@@ -689,6 +703,37 @@ const DRAWER_ENTER_DELAY_MS = 16;
 // sides feel like the same piece of chrome.
 const DRAWER_ENTER_DURATION_MS = 320;
 const DRAWER_EASING = 'cubic-bezier(0.22, 1, 0.36, 1)';
+
+/**
+ * `open`, turning true only once the drawer's slide is under way. Waking the
+ * list (its polling, ordering and the refresh on open) rebuilds every row,
+ * and done in the tap's own frame it held the slide back by about 65 ms on
+ * an iPhone. The slide is a transform the compositor runs, so the same work
+ * a few frames later neither delays nor stutters it; the list shows its
+ * last state until then. Closing turns it off at once.
+ */
+const useActiveAfterSlideStarts = (open: boolean): boolean => {
+  const [active, setActive] = React.useState(open);
+  React.useEffect(() => {
+    if (!open) {
+      setActive(false);
+      return;
+    }
+    let frame = 0;
+    // After the container's enter delay, plus a frame for the transition to
+    // reach the compositor.
+    const timer = window.setTimeout(() => {
+      frame = window.requestAnimationFrame(() => {
+        frame = window.requestAnimationFrame(() => setActive(true));
+      });
+    }, DRAWER_ENTER_DELAY_MS);
+    return () => {
+      window.clearTimeout(timer);
+      window.cancelAnimationFrame(frame);
+    };
+  }, [open]);
+  return active;
+};
 
 /** Full-width left drawer for the phone sessions list: covers the whole app
     and slides in from the left edge. Closes via the header X, a right-edge
@@ -776,7 +821,7 @@ const MobileSessionsDrawerContainer: React.FC<{
       aria-modal="true"
       aria-label={ariaLabel}
       aria-hidden={!open}
-      className="oc-keyboard-inset-surface fixed inset-0 z-50 flex flex-col bg-background text-foreground"
+      className="oc-keyboard-inset-surface oc-side-safe-area fixed inset-0 z-50 flex flex-col bg-background text-foreground"
       style={{
         paddingTop: 'var(--oc-safe-area-top, 0px)',
         // Settled state drops the transform entirely so the drawer isn't kept

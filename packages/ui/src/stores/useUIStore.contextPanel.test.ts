@@ -23,6 +23,32 @@ beforeEach(() => {
 describe('useUIStore preview file tabs', () => {
   const fileTabs = () => getContextPanelTabs('/repo').filter((tab) => tab.mode === 'file');
 
+  test('keeps edge spaces in file targets, navigation, and restored tab identity', async () => {
+    const paths = ['/repo/report.md', '/repo/  report.md', '/repo/report.md  '];
+    for (const path of paths) {
+      useUIStore.getState().openContextFile('/repo', path);
+      expect(useUIStore.getState().pendingFileFocusPath).toBe(path);
+    }
+    useUIStore.getState().openContextFileAtLine('/repo', paths[2], 12, 3);
+    useUIStore.getState().openContextPanelTab('/repo', { mode: 'file', targetPath: paths[2], dedupeKey: paths[2] });
+    expect(useUIStore.getState().pendingFileNavigation).toEqual({ path: paths[2], line: 12, column: 3 });
+    expect(fileTabs().map((tab) => tab.targetPath)).toEqual(paths);
+    expect(fileTabs().map((tab) => tab.id)).toEqual(paths.map((path) => `file:${path}`));
+    const state = useUIStore.getState();
+    useUIStore.persist.setOptions({ storage: {
+      getItem: () => ({ state, version: originalPersistOptions.version }),
+      setItem: () => undefined,
+      removeItem: () => undefined,
+    } });
+    try {
+      await useUIStore.persist.rehydrate();
+      expect(fileTabs().map((tab) => tab.targetPath)).toEqual(paths);
+      expect(fileTabs().map((tab) => tab.id)).toEqual(paths.map((path) => `file:${path}`));
+    } finally {
+      useUIStore.persist.setOptions(originalPersistOptions);
+    }
+  });
+
   test('a preview replaces the previous preview in its slot instead of adding a tab', () => {
     const store = useUIStore.getState();
     store.openContextFile('/repo', '/repo/kept.ts');
@@ -1139,7 +1165,9 @@ describe('useUIStore contextRailOrder', () => {
     const ordered = sortContextSurfaces(['browser', 'unknown-id', 'diff']);
     const ids = ordered.map((surface) => surface.id);
 
-    expect(ids.slice(0, 2)).toEqual(['browser', 'diff']);
+    // The saved order places each group where its first surface stands, and
+    // the group's other surfaces follow it: Browser brings the tools.
+    expect(ids.slice(0, 4)).toEqual(['browser', 'editor', 'terminal', 'diff']);
     // Assert against the registry itself so this test cannot go stale when a
     // surface is added or removed.
     expect(new Set(ids)).toEqual(new Set(CONTEXT_SURFACES.map((surface) => surface.id)));

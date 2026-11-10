@@ -38,7 +38,7 @@ bunx openchamber-guest-bundle panel/main.ts panel/main.js
 
 OpenChamber がマニフェストを読み、拡張機能が求めているものの一覧をダイアログで表示します([権限](#権限) を参照)。承認すると、レールにアイコンが現れます。クリックするとページが読み込まれます。
 
-ローカルの `.zip` や、git リポジトリまたは zip ファイルへの https リンクも追加できます。更新できるのは git からのインストールだけです。`package.json` の `version` を上げてプッシュすると、ユーザーが次に 設定 → 拡張機能 を開いたときに OpenChamber が更新を提案します。URL の `#tag` や `#branch` で、どれを追従するかを固定できます。これらは OpenChamber のデータフォルダにコピーされ、そのコピーから実行されます。そのため `node_modules` や TypeScript のソースではなく、ビルド済みファイルを同梱してください。拡張機能を削除するとコピーも消えます。フォルダからのインストールはそのフォルダから直接動くので、編集、再ビルド、再読み込みができます。
+ローカルの `.zip` や、git リポジトリまたは zip ファイルへの https リンクも追加できます。更新できるのは git からのインストールだけです。`package.json` の `version` を上げてプッシュすると、OpenChamber は起動の直後と数時間ごとに確認し、ユーザーに一度だけ知らせて、設定 → 拡張機能 で更新を提案します。任意のページに `openchamber://extensions/install?url=<encoded repository URL>` へのリンクを置くと、そのリポジトリが追加ダイアログに入った状態でデスクトップアプリが開くので、インストールボタンを用意できます。URL の `#tag` や `#branch` で、どれを追従するかを固定できます。これらは OpenChamber のデータフォルダにコピーされ、そのコピーから実行されます。そのため `node_modules` や TypeScript のソースではなく、ビルド済みファイルを同梱してください。拡張機能を削除するとコピーも消えます。フォルダからのインストールはそのフォルダから直接動くので、編集、再ビルド、再読み込みができます。
 
 ## マニフェスト
 
@@ -49,13 +49,11 @@ OpenChamber がマニフェストを読み、拡張機能が求めているも�
   "openchamber": {
     "apiVersion": 1,
     "engines": { "openchamber": ">=1.24.0" },
+    "id": "acme-hello",
+    "name": "Hello",
+    "icon": "window",
     "contributes": {
-      "panel": {
-        "id": "acme-hello",
-        "name": "Hello",
-        "icon": "window",
-        "entry": "panel/index.html"
-      },
+      "panel": { "entry": "panel/index.html" },
       "attach": "dialog",
       "page": true,
       "capabilities": ["prompt", "sessions"],
@@ -80,7 +78,7 @@ OpenChamber がマニフェストを読み、拡張機能が求めているも�
 
 `engines.openchamber` は任意です。拡張機能が動作する最も古い OpenChamber のバージョンを、`1.24.0` または `>=1.24.0` の形で指定します。古いビルドは、後で失敗する代わりにインストール自体を拒否します。
 
-`contributes.panel` はレールの項目を記述します。`id` は kebab-case で、インストール済みの拡張機能の中で一意でなければなりません。`icon` は Remixicon の名前(`RiWindowLine` なら `window`)か、フォルダ内の SVG ファイル(`icon.svg` など)です。`entry` はフォルダ内の HTML ファイルです。`tools` だけを宣言する拡張機能では省略してください([チャットに表示されるあなたのツール](#チャットに表示されるあなたのツール) を参照)。
+`id`、`name`、`icon` で拡張機能を識別します。`id` は kebab-case で、インストール済みの拡張機能の中で一意でなければなりません。`icon` は Remixicon の名前(`RiWindowLine` なら `window`)か、フォルダ内の SVG ファイル(`icon.svg` など)です。`contributes.panel` はレールに表示される拡張機能のパネルで、その `entry` はフォルダ内の HTML ファイルです。レールのパネルがない拡張機能では `panel` を省略します。古いパッケージでは `id`、`name`、`icon` が `panel` の中にありますが、引き続き動作します。
 
 `contributes.attach` は任意です。チャット欄の横にある + メニューに拡張機能を追加し、ユーザーがタスクを選んでセッションに添付できるようにします。
 
@@ -89,15 +87,15 @@ OpenChamber がマニフェストを読み、拡張機能が求めているも�
 - `{ "mode": "dialog", "entry": "panel/attach.html" }` はあなたの別ページをウィンドウで開くので、選択画面がレールのパネルとコードを共有する必要がなくなる
 - 省略すると拡張機能はそのメニューに出ない
 
-`ctx.surface` は `panel`、`dialog`、`page`、`status` のいずれかです。添付項目をクリックすると、そのデータが `ctx.item` に入り、それ以外は `null` です。
+`ctx.surface` は `panel`、`dialog`、`page`、`status`、`block` のいずれかです。添付項目をクリックすると、そのデータが `ctx.item` に入り、それ以外は `null` です。
 
-`contributes.page: true` を指定すると、セッション一覧の上にある拡張機能のページメニューから全画面で開けます。`{ "entry": "panel/page.html", "title": "Board" }` で別の HTML と任意のタイトルを指定できます。`panel.entry` は必須で、サンドボックスと権限は共通です。ページを開くのはユーザーだけです。再読み込み、一時停止、削除、サーバー切り替えで閉じます。
+`contributes.page: true` を指定すると、セッション一覧の上にある拡張機能のページメニューから全画面で開けます。`{ "entry": "panel/page.html", "title": "Board" }` で別の HTML と任意のタイトルを指定できます。`true` は `panel.entry` をそのまま使います。独自の `entry` を持つページにはレールのパネルが不要なので、全画面ページだけの拡張機能にもできます。サンドボックスと権限は共通です。ページを開くのはユーザーだけです。再読み込み、一時停止、削除、サーバー切り替えで閉じます。
 
 ボードには `host.storage` と、プロジェクト、worktree、セッションの一覧およびライブ状態を使えます。`startSession` はボードを閉じずに別のプロジェクトを指定できます。[Host API](/sdk/host/) を参照してください。
 
 `contributes.integration` は任意です。設定 → 連携 にカードを追加し、ユーザーがそこでアカウントを接続します。[アカウントとネットワーク](#アカウントとネットワーク) を参照してください。
 
-`contributes.service` は任意です。Docker ソケットのようにウェブページからは届かないもののために、OpenChamber が拡張機能の隣で起動するローカルプロセスを宣言します。そのプロセスはユーザーのフルアクセス権限で、サンドボックスなしに動くため、承認ダイアログはそれについて警告します。ページでは対応できない場合にのみ宣言してください。パッケージ内のファイル `GUEST_SERVICES.md` を参照してください。 `provides: ["browser"]` を持つサービスはエージェントのブラウザーの代わりも務められます。サーバー上で `browser.*` 操作に応答するので、デスクトップアプリを開かなくてもエージェントがブラウズでき、ユーザーは設定 → OpenChamber ツールで選択します。このようなサービスにパネルは不要です。
+`contributes.service` は任意です。Docker ソケットのようにウェブページからは届かないもののために、OpenChamber が拡張機能の隣で起動するローカルプロセスを宣言します。そのプロセスはユーザーのフルアクセス権限で、サンドボックスなしに動くため、承認ダイアログはそれについて警告します。ページでは対応できない場合にのみ宣言してください。パッケージ内のファイル `GUEST_SERVICES.md` を参照してください。 `provides: ["browser"]` を持つサービスはエージェントのブラウザーの代わりも務められます。サーバー上で `browser.*` 操作に応答するので、デスクトップアプリを開かなくてもエージェントがブラウズでき、ユーザーは設定 → OpenChamber ツールで選択します。このようなサービスにパネルは不要です。サービスはユーザーのセッションで起きたことを受け取ることもできます。その隣に `contributes.sessionEvents` を宣言すると、OpenChamber は完了または失敗した各ターンと、エージェントが求めた各許可や質問を、すべてのプロジェクトから、ウィンドウを開いていなくてもサービスに送ります。[セッションイベント](/sdk/host/#セッションイベント) を参照してください。また、`provides: ["notifications"]` を持つサービスは、デスクトップとスマートフォンに加えて、Slack、Matrix、または自前のサーバーにユーザーの通知を届けます。ユーザーは設定 → 連携 でアカウントを接続し、トークンは OpenChamber に保持されます。[通知チャネル](/sdk/host/#通知チャネル) を参照してください。 `provides: ["tracker"]` を持つサービスは Linear の隣に並ぶ作業アイテムのトラッカーで、そのアカウントカードは拡張機能のアカウントの下に出ます。[トラッカー](/sdk/host/#トラッカー) を参照してください。そして `provides: ["quota"]` を持つサービスは、マニフェストに列挙したプロバイダーについて OpenCode が保持する認証情報を読み、組み込みのプロバイダーの隣で使用量を報告します。[使用量プロバイダー](/sdk/host/#使用量プロバイダー) を参照してください。
 
 ## 権限
 
@@ -110,9 +108,47 @@ OpenChamber がマニフェストを読み、拡張機能が求めているも�
 | `files` | 開いているプロジェクト内のファイルを読み書きする(相対パス付きの `readFile`、`writeFile`、`listDir`、`stat`) |
 | `model` | セッションの外で、ユーザーの Small Model による一回限りのテキスト生成を行う(`generate`) |
 
-さらに 5 つが自動で追加されます。`integration` を宣言すると `network`、`service` を宣言すると `service`、`filesystem` パターンを宣言すると `filesystem`、`origins` を宣言すると `origins`、セッションのアクションがメッセージを求めると `conversation` です([アクション、コマンド、バッジ](#アクションコマンドバッジ) を参照)。
+さらに 12 個が自動で追加されます。`integration` を宣言すると `network`、`service` を宣言すると `service`、`filesystem` パターンを宣言すると `filesystem`、`origins` を宣言すると `origins`、セッションのアクションがメッセージを求めると `conversation`([アクション、コマンド、バッジ](#アクションコマンドバッジ) を参照)、`sessionEvents` または `sessionControl` が `content` を求めると `transcript`([セッションイベント](/sdk/host/#セッションイベント) を参照)、サービスがセッションを操作すると `sessionControl`([OpenChamber の呼び出し](/sdk/host/#サービスから-openchamber-を呼び出す) を参照)、サービスがユーザーの代わりにエージェントの権限リクエストやフォームに応答すると `sessionAnswers`(`sessionControl: { answers: true }`)、エージェントが読む内容に追加すると `instructions`、`contributes.skills` を宣言すると `skills` です。`contributes.skills` はパッケージ内のスキルのフォルダーで、拡張機能がオンの間、すべてのエージェントに届きます。`contributes.opencodePlugin` を宣言すると `opencodePlugin`（下記参照）、`contributes.links` を宣言すると `links`（[チャットメッセージ内のリンク](#チャットメッセージ内のリンク) を参照）も追加されます。
 
 ユーザーは拡張機能をインストールするときに一覧を一度だけ見て、承認するか拡張機能を削除するかを選びます。新しいバージョンがより多くを求める場合、ダイアログが再び表示されます。ユーザーが承認していない権限を必要とする呼び出しは `NOT_GRANTED` で失敗します。
+
+## パッケージに OpenCode プラグインを同梱する
+
+拡張機能は OpenCode プラグインを同梱できます。利用者は 2 つではなく 1 つをインストールするだけで済みます。`"opencodePlugin": "plugin"` を宣言してください。これはパッケージ内のフォルダーで、そのルートに `index.js` または `server.js` を置きます。OpenCode は `main` を読まないため、エントリーを別の場所に置く場合はフォルダーの `package.json` に `name` と `exports` を指定してください。エントリーは OpenCode が読み込む形 `{ id, setup }` をデフォルトエクスポートします。OpenCode は何もインストールされていないあなたのフォルダーから素の `import()` で読み込むため、エントリーは何もインポートしません。ツールの `input` は素の JSON Schema で、`execute` は `{ content }` を返します。
+
+```json
+{
+  "contributes": {
+    "panel": { "id": "teapot-tools", "name": "Teapot Tools", "icon": "cup" },
+    "opencodePlugin": "plugin"
+  }
+}
+```
+
+承認ダイアログに **OpenCode にプラグインを追加** という行が増え、プラグインのコードが利用者の全権限で OpenCode の中で実行されることをはっきり伝えます。許可されると、OpenChamber は自身が管理する OpenCode 設定（`contributes.skills` を載せるのと同じファイル）にあなたのフォルダーを載せます。OpenChamber が起動した OpenCode はそのファイルを監視し、数秒以内にプラグインを読み込みます。拡張機能を無効にするか削除すると、同じ経路で取り除かれます。利用者自身の `opencode.json` には何も書き込みません。そのファイルは利用者のものであり、そこにあるプラグインは拡張機能より長く残り、マシン上のすべての OpenCode で動いてしまうからです。
+
+そのファイルが OpenCode に届かない場合、拡張機能の画面がそう伝え、**グローバル設定に追加** を提示します。これはあなたのフォルダーを利用者のグローバル OpenCode 設定に、以後は利用者が所有する項目として書き込みます。これに該当するのは、OpenChamber が通信相手の OpenCode を起動していない場合と、サーバーの環境が独自の `OPENCODE_CONFIG` を設定している場合です（後者ではプラグインは次回の OpenCode 起動時に読み込まれます）。別のマシンの OpenCode はこのマシンのフォルダーを読み込めません。画面はそう伝え、何も提示しません。読み込みに失敗したプラグインは、項目がある場合に設定 → Plugins で OpenCode が報告します。どちらの場合も拡張機能自体は動き続けます。プラグインのフォルダーがない、またはその `package.json` にエントリーファイルの指定がないパッケージは、インストールが拒否されます。
+
+VS Code とモバイルアプリは拡張機能を読み込まないため、プラグインも届きません。隔離スペース内のセッションは独自の OpenCode を実行し、ホストの設定を読むことはありません。エンタープライズモードではプラグインはローカルサービスと同じ扱いで、管理者が登録したリポジトリからのみインストールできます。SDK には動作する例 `examples/opencode-plugin` があります。
+
+## チャットメッセージ内のリンク
+
+拡張機能は、チャットメッセージ内の自分の識別子やリンクをクリックできるようにできます。たとえばエージェントの返信にある `DEMO-12` が、ブラウザーのタブではなくあなたの拡張機能でそのタスクを開きます。何を認識し、クリックで何が起きるかを宣言します。
+
+```json
+"links": {
+  "action": "open",
+  "identifier": { "keys": ["DEMO"] },
+  "urls": { "origin": "https://tasks.example.com", "identifier": "key-number", "item": ["/tasks/{id}"] }
+}
+```
+
+- `identifier.keys` は最大 8 個の大文字の固定キーです。`DEMO` は `DEMO-12` を単語全体として現れたときだけ認識します。コード、リンク、パス、`XDEMO-1` のような語、`DEMO-1.5` のようなバージョンはテキストのままです。
+- `urls` は 1 つの https オリジン上のリンクを認識し、オリジンは完全一致で照合されます。`item` はトラッカー自身のリンク形式で書くリンクテンプレートです。`{id}` はパス内か `?name={id}` として 1 回だけ使い、変わる部分には `{segment}` または `{segments+}` を使います。`identifier` は `{id}` の形を示し、`key-number`、`number`、`short-code` のいずれかです。正規表現を書く必要はなく、OpenChamber がテンプレートをコンパイルします。
+- `action: "open"` は `ready.item`(または `onItem`)を `{ kind: "link", identifier, url? }` にして拡張機能を開きます。`attach` が `"dialog"` ならあなたのダイアログで、それ以外はレールのパネルで開きます。型は `isGuestLinkItem` で絞り込みます。`panel.entry` が必要です。`url` はクリックされたリンクから、フラグメントと、テンプレート自身のもの以外のクエリパラメーターを除いたものです。`{segment}` を含まないテンプレートがあり、識別子が `urls.identifier` で宣言した形をしていれば、テキスト内の識別子にはそのうち最初のテンプレートが示すリンクが入ります（`DEMO-12` が `number` に当てはまることはありません）。
+- `action: "attach"` は代わりに識別子のチップをチャット欄に追加します。チップが自分のリンクを示せるよう、`{segment}` や `{segments+}` を含まないテンプレートが必要です。`identifier.keys` を使う場合、`urls.identifier` を `number` にすることはできません。
+
+認識はエージェントの返信とユーザー自身のメッセージで行われ、推論、ツールの出力、Files ビューでは行われません。メッセージをコピーすると、書かれたままのテキストがコピーされます。OpenChamber が自分で読み取るリンク、つまりトラッカーの項目、リポジトリの issue や pull request、コミットは通常どおりに動作し、修飾キーを押しながらのクリックはブラウザー本来の動作になります。`links` を宣言すると `links` 権限が追加されます。承認ダイアログにはキーとオリジン、クリックで何が起きるかが表示され、そのいずれかを変えるバージョンでは再び承認が求められます。`examples/tasks-demo` は `DEMO-2` と `https://example.com/tasks/DEMO-2` を認識します。
 
 ## テキストを生成する
 
@@ -156,7 +192,7 @@ CDN のフォントや画像、公開 API など、ページが直接必要と�
 | `"bearer"` | `Authorization: Bearer <token>` | API が bearer トークンまたは personal access token を記載している |
 | `"basic"` | `Authorization: Basic base64(username:token)` | API がユーザー名 (多くはメール) と API トークンによる HTTP Basic 認証を記載している。カードは両方を尋ね、`usernameLabel` が最初の欄のラベルになる |
 
-`settings` はカードにプレーンテキストの入力欄を追加します。その値は `ctx.settings` に届きます。
+`settings` はカードにプレーンテキストの入力欄を追加します。その値は `ctx.settings` に届きます。`"secret": true` を指定したフィールドはカード上でマスクされ、ページには届きません。サービスは `readSettings()` で読み取ります。
 
 ## ファイル
 
@@ -192,7 +228,7 @@ const { entries } = await host.listDir(".");
 - `title` はセクション見出しのパネル名を置き換えます。最大 60 文字です。
 - `height` はピクセル単位の初期の高さで、24〜320 (既定は 120) です。内容のサイズが変わったら [`host.setHeight()`](/sdk/host/) を呼んでください。
 
-ページから見た `ctx.surface` は `status` です。OpenChamber は Work Status パネルが表示され、セクションが展開されている間だけページを読み込み、ユーザーがセクションを折りたたむと破棄します。作り直せない状態はそこに置かないでください。セクションだけの拡張機能は権限、サービス、連携、ファイルを使えますが、`page`、`attach`、`actions`、`commands` は使えません。Web とデスクトップのみです。`git-graph-status` の例が完成したセクションです。
+ページから見た `ctx.surface` は `status` です。OpenChamber は Work Status パネルが表示され、セクションが展開されている間だけページを読み込み、ユーザーがセクションを折りたたむと破棄します。作り直せない状態はそこに置かないでください。セクションだけの拡張機能は権限、サービス、連携、ファイル、独自の `entry` を持つページを使えますが、`page: true`、`attach`、`actions`、`commands` は使えません。Web とデスクトップのみです。`git-graph-status` の例が完成したセクションです。
 
 ## あなたのファイル形式のエディター
 
@@ -249,7 +285,7 @@ host.onFileSnapshot(() => ({ bytes: currentBytes(), version: versionOf(currentBy
 
 バイナリエディターは、パターンに一致するファイルならどれでも引き受けられます。画像や PDF など、OpenChamber が自分でプレビューするファイルも含みます。ソース表示はなく、未保存の変更がある状態でユーザーが全画面に切り替えたり全画面から戻したりすると、OpenChamber が先に保存します。形式の読み書きはエディターの役目です。OpenChamber は返されたバイト列をそのまま書き戻します。
 
-ページから見た `ctx.surface` は `file` です。ディスク上でファイルが変わったとき、ユーザーが変更を破棄したとき、エディターが全画面に切り替わるときや全画面から戻るとき、OpenChamber はページを再読み込みし、ファイルを渡し直します。パターンが一致する有効な拡張機能のうち最初のものが優先され、OpenChamber 自身のプレビューよりも先に使われます。エディターだけの拡張機能は権限、サービス、連携、ファイルを使えますが、`page`、`attach`、`actions`、`commands` は使えません。Web とデスクトップのみです。`checklist-editor` の例が完成したエディターです。
+ページから見た `ctx.surface` は `file` です。ディスク上でファイルが変わったとき、ユーザーが変更を破棄したとき、エディターが全画面に切り替わるときや全画面から戻るとき、OpenChamber はページを再読み込みし、ファイルを渡し直します。パターンが一致する有効な拡張機能のうち最初のものが優先され、OpenChamber 自身のプレビューよりも先に使われます。エディターだけの拡張機能は権限、サービス、連携、ファイル、独自の `entry` を持つページを使えますが、`page: true`、`attach`、`actions`、`commands` は使えません。Web とデスクトップのみです。`checklist-editor` の例が完成したエディターです。
 
 ## アクション、コマンド、バッジ
 
@@ -263,6 +299,8 @@ host.onFileSnapshot(() => ({ bytes: currentBytes(), version: versionOf(currentBy
   { "id": "summarize", "label": "Summarize session", "where": "session", "payload": ["messages"] }
 ]
 ```
+
+`where` には `selection` (メッセージ内で選択したテキスト)、`file` (Files の行)、`diff` (ファイルや diff の選択した行) も指定できます。これらの項目には同じ名前の `kind` が付きます。`selection` にはテキスト、`file` にはパス、`diff` にはパスと行の範囲が入ります。選択範囲では、`display` でアクションの表示方法を指定します。`label` (デフォルト)、ラベルをツールチップにする `icon`、または `both` です。
 
 メッセージのアクションは、`kind: "message"` の `ctx.item` を付けて拡張機能を開きます。中身はセッションの id とタイトル、プロジェクトのフォルダ、メッセージの id、そのロールとテキストです。セッションのアクションは `kind: "session"` と、セッションの id、タイトル、フォルダを付けて開きます。`"payload": ["messages"]` を加えると、項目には会話全体も古い順で含まれます。Markdown エクスポートが出力するのと同じテキストです。これには `conversation` 権限が必要で、ユーザーには承認ダイアログで別の行として表示されます。`item.action` でどの項目がクリックされたかが分かります。
 
@@ -281,7 +319,7 @@ host.onResolve(async ({ command, args }) => {
 
 ユーザーがチャット欄に `/task ABC-12` と入力すると、OpenChamber は拡張機能に解決を依頼し、返された内容を何も開かずにチップとして添付します。何も見つからなければ `null` を返してください。パネルが閉じていれば、OpenChamber はこの呼び出しのためにバックグラウンドで読み込みます。OpenChamber や OpenCode がすでに使っている名前は無視されます。
 
-**レールのアイコン上のバッジ。** `host.setBadge(3)` はアイコンに数字(たとえば未処理のタスク数)を表示し、`host.setBadge(null)` はそれを消します。パネルを開いても消えます。
+**レールのアイコン上のバッジ。** `host.setBadge(3)` はアイコンにドットを付け、数字(たとえば未処理のタスク数)をツールチップに表示し、`host.setBadge(null)` はそれを消します。パネルを開いても消えます。
 
 ## チャットに表示されるあなたのツール
 
@@ -303,7 +341,19 @@ host.onResolve(async ({ command, args }) => {
 
 `match` は OpenCode が報告するツール名で、末尾の `*` は前方一致です。`icon` は Remixicon の名前か、パッケージ内の `.svg` ファイルで、`panel.icon` と同じです。`title` と `subtitle` は呼び出しの `input`、`output`、`metadata` を使うテンプレートです。`output` は本文の描画方法を選びます。`text`、`json`(ツリー)、`markdown`、`language` 付きの `code`、`columns` 付きの `table`(行は出力の配列か `output.items` から取られます)、または既定の `auto` です。完全一致の `match` はワイルドカードより優先され、同点なら先にインストールされた拡張機能が勝ちます。権限は要りません。これはすでにチャットにあるデータの描き方を変えるだけです。
 
-ツールの見た目を整えるだけの拡張機能にはページはまったく不要です。`panel.entry` を省略すると、レールにアイコンは出ず、設定 → 拡張機能 にカードが表示されるだけになります。ページがない場合は `tools` だけを宣言して他は何も宣言しなくて構いません。もう一つの例外は、独自の `entry` を持つ Work Status セクションまたはファイルエディターです(上記参照)。
+ツールの見た目を整えるだけの拡張機能にはページはまったく不要です。`panel.entry` を省略すると、レールにアイコンは出ず、設定 → 拡張機能 にカードが表示されるだけになります。ページがない場合に宣言できるのは `tools` と `providerLogos` だけです。もう一つの例外は、独自の `entry` を持つ Work Status セクション、ファイルエディター、または全画面ページです(上記参照)。
+
+## プロバイダーのロゴ
+
+OpenCode プラグインがモデルプロバイダーを登録すると、モデルピッカーや設定には通常、汎用のマークが表示されます。ロゴをパッケージに入れてプロバイダーを指定すれば、コードなしで表示できます。
+
+```json
+"providerLogos": {
+  "acme-cloud": "assets/acme-cloud.svg"
+}
+```
+
+キーは OpenCode が報告するプロバイダー ID です。値はパッケージ内の `.svg` または `.png` で、サイズは 1 MB までです。ファイルがない、空、または大きすぎる場合はインストールに失敗します。1 つのパッケージで指定できるプロバイダーは 256 個までで、2 つの ID が同じファイルを指すこともできます。ロゴは元の色のまま表示され、SVG の `currentColor` はライトまたはダークテーマに従います。その ID にアプリ同梱のロゴがある場合は、それを置き換えます。ユーザーがそのプロバイダーに設定したものがある場合は、そちらが優先されます。競合したときは先にインストールされた拡張機能が優先されます。権限は不要です。VS Code とスマートフォンは拡張機能を読み込まないため、これらのロゴは表示されません。
 
 ## パネルの最初の数行
 

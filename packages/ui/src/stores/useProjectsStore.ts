@@ -16,9 +16,12 @@ import { useSessionUIStore } from '@/sync/session-ui-store';
 import { getArchivedScopeKey } from '@/lib/sessionFolders/folderScopes';
 import { useSessionFoldersStore } from './useSessionFoldersStore';
 import { runtimeFetch } from '@/lib/runtime-fetch';
-import { getRuntimeApiBaseUrl } from '@/lib/runtime-switch';
+import { getRuntimeApiBaseUrl, getRuntimeKey } from '@/lib/runtime-switch';
 import { getVSCodeBootstrapConfig } from '@/lib/vscodeBootstrap';
 import { isVSCodeRuntime } from './utils/vscodeRuntime';
+import { z } from 'zod';
+import { requestOpenCodeTrust } from '@/lib/opencodeTrust';
+import { runBackgroundNetworkTask } from '@/lib/background-network';
 
 /** Pick the preset colour least used among existing projects */
 const pickAutoColor = (projects: ProjectEntry[]): string => {
@@ -57,6 +60,7 @@ interface ProjectsStore {
   manualProjectOrder: string[];
 
   addProject: (path: string, options?: { label?: string; id?: string }) => Promise<ProjectEntry | null>;
+  adoptSessionProject: (sessionId: string, directory: string, isCurrent: () => boolean) => Promise<boolean>;
   addProjects: (paths: string[]) => Promise<ProjectEntry[]>;
   removeProject: (id: string) => void;
   setActiveProject: (id: string) => void;
@@ -184,7 +188,7 @@ const deriveProjectLabel = (path: string): string => {
 };
 
 // Labels auto-derived by older versions were title-cased and persisted. Drop
-// them back to the folder name; labels the user typed themselves are kept.
+// them back to the folder name unless marked as a manual rename.
 const legacyAutoProjectLabel = (path: string): string => {
   const derived = deriveProjectLabel(path);
   return derived.replace(/[-_]/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
@@ -211,7 +215,7 @@ const sanitizeProjectIconImage = (value: unknown): ProjectEntry['iconImage'] | u
   return { mime, updatedAt, source };
 };
 
-const resolveUploadMime = (file: File): 'image/png' | 'image/jpeg' | 'image/svg+xml' | null => {
+export const resolveUploadMime = (file: File): 'image/png' | 'image/jpeg' | 'image/svg+xml' | null => {
   const rawType = typeof file.type === 'string' ? file.type.trim().toLowerCase() : '';
   if (rawType === 'image/png' || rawType === 'image/jpeg' || rawType === 'image/svg+xml') {
     return rawType;
@@ -276,9 +280,13 @@ const sanitizeProjects = (value: unknown): ProjectEntry[] => {
 
     if (typeof candidate.label === 'string' && candidate.label.trim().length > 0) {
       const storedLabel = candidate.label.trim();
-      project.label = storedLabel === legacyAutoProjectLabel(normalizedPath)
-        ? deriveProjectLabel(normalizedPath)
-        : storedLabel;
+      const provenance = candidate.labelSource === 'manual' || candidate.labelSource === 'auto'
+        ? candidate.labelSource
+        : null;
+      const legacyAuto = provenance !== 'manual' && storedLabel === legacyAutoProjectLabel(normalizedPath);
+      project.label = legacyAuto ? deriveProjectLabel(normalizedPath) : storedLabel;
+      const labelSource = legacyAuto ? 'auto' : provenance;
+      if (labelSource) project.labelSource = labelSource;
     }
     if (typeof candidate.icon === 'string' && candidate.icon.trim().length > 0) {
       project.icon = candidate.icon.trim();
@@ -396,6 +404,17 @@ const persistProjects = (projects: ProjectEntry[], activeProjectId: string | nul
   void updateDesktopSettings({ projects, activeProjectId: activeProjectId ?? undefined });
 };
 
+// Discovery looks the project up in the server's list, so it waits for the
+// debounced write that adds these entries. One project at a time, so adding a
+// batch does not walk every folder at once.
+const discoverIconsOnceSaved = async (get: () => ProjectsStore, entries: ProjectEntry[]) => {
+  const saved = await updateDesktopSettings({ projects: get().projects });
+  if (!saved.ok) return;
+  for (const entry of entries) {
+    await get().discoverProjectIcon(entry.id);
+  }
+};
+
 const persistManualProjectOrder = (manualOrder: string[]) => {
   try {
     safeStorage.setItem(getProjectsStorageKey() + ':manualOrder', JSON.stringify(manualOrder));
@@ -439,6 +458,7 @@ const createVSCodeWorkspaceProject = (
     id,
     path: normalizedPath,
     label: deriveProjectLabel(normalizedPath),
+    labelSource: 'auto',
     addedAt: existing?.addedAt ?? now,
     lastOpenedAt: isActive ? now : existing?.lastOpenedAt ?? now,
   };
@@ -534,6 +554,7 @@ const vscodeWorkspaceProjectsEqual = (left: ProjectEntry[], right: ProjectEntry[
     return leftProject.id === rightProject.id
       && leftProject.path === rightProject.path
       && leftProject.label === rightProject.label
+      && leftProject.labelSource === rightProject.labelSource
       && leftProject.icon === rightProject.icon
       && leftProject.color === rightProject.color
       && leftProject.iconBackground === rightProject.iconBackground
@@ -596,6 +617,40 @@ export const useProjectsStore = create<ProjectsStore>()(
       return { ok: true, normalizedPath: normalized };
     },
 
+    adoptSessionProject: async (sessionId, directory, isCurrent) => {
+      if (!isCurrent()) return false;
+      if (isVSCodeProjectsRuntime) {
+        const add = getRegisteredRuntimeAPIs()?.vscode?.addWorkspaceFolder;
+        if (!add) throw new Error('Adding workspace folders is unavailable');
+        const folders = await add(directory);
+        if (!isCurrent()) return false;
+        get().syncVSCodeWorkspaceFolders(folders);
+        if (!get().projects.some((entry) => entry.path === directory)) throw new Error('The session workspace folder was not added');
+        return true;
+      }
+      const response = await runBackgroundNetworkTask(() => isCurrent() ? runtimeFetch('/api/projects/session-directory', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId, directory }),
+      }) : Promise.resolve(null));
+      if (!response) return false;
+      if (!response.ok) throw new Error(`Session project registration answered ${response.status}`);
+      const { project } = z.object({ project: z.object({
+        id: z.string().min(1), path: z.string().min(1), label: z.string().optional(),
+        addedAt: z.number().optional(), lastOpenedAt: z.number().optional(),
+      }) }).parse(await response.json());
+      if (!isCurrent()) return false;
+      // This response owns only an append, never a replacement or activation.
+      if (!get().projects.some((entry) => entry.id === project.id)) {
+        const projects = [...get().projects, project];
+        set({ projects });
+        cacheProjects(projects, get().activeProjectId);
+      }
+      // Join the append to this window's pending full-registry mutations. An
+      // older debounced manual add must not overwrite the confirmed project.
+      void updateDesktopSettings({ projects: get().projects });
+      return true;
+    },
+
     addProject: async (path: string, options?: { label?: string; id?: string }) => {
       if (isVSCodeProjectsRuntime) {
         // Projects are scoped to VS Code workspace folders in this runtime.
@@ -613,6 +668,7 @@ export const useProjectsStore = create<ProjectsStore>()(
         const runtimeApis = getRegisteredRuntimeAPIs();
         if (runtimeApis?.vscode?.addWorkspaceFolder) {
           try {
+            if (!await requestOpenCodeTrust(normalizedPath, { deliberate: true })) return null;
             const folders = await runtimeApis.vscode.addWorkspaceFolder(normalizedPath);
             return get().syncVSCodeWorkspaceFolders(folders, normalizedPath);
           } catch {
@@ -635,12 +691,14 @@ export const useProjectsStore = create<ProjectsStore>()(
       }
 
       const now = Date.now();
-      const label = options?.label?.trim() || deriveProjectLabel(normalizedPath);
+      const requestedLabel = options?.label?.trim();
+      const label = requestedLabel || deriveProjectLabel(normalizedPath);
       const id = createProjectIdFromPath(normalizedPath);
       const entry: ProjectEntry = {
         id,
         path: normalizedPath,
         label,
+        labelSource: requestedLabel ? 'manual' : 'auto',
         color: pickAutoColor(get().projects),
         addedAt: now,
         lastOpenedAt: now,
@@ -654,7 +712,7 @@ export const useProjectsStore = create<ProjectsStore>()(
       }
 
       get().setActiveProject(entry.id);
-      void get().discoverProjectIcon(entry.id);
+      void discoverIconsOnceSaved(get, [entry]);
       return entry;
     },
 
@@ -696,6 +754,7 @@ export const useProjectsStore = create<ProjectsStore>()(
           id: createProjectIdFromPath(normalizedPath),
           path: normalizedPath,
           label: deriveProjectLabel(normalizedPath),
+          labelSource: 'auto',
           color: pickAutoColor([...current.projects, ...entries]),
           addedAt: now,
           lastOpenedAt: now,
@@ -715,9 +774,7 @@ export const useProjectsStore = create<ProjectsStore>()(
 
       // Mirror addProject: the first newly added project becomes active.
       get().setActiveProject(entries[0].id);
-      for (const entry of entries) {
-        void get().discoverProjectIcon(entry.id);
-      }
+      void discoverIconsOnceSaved(get, entries);
       return entries;
     },
 
@@ -823,8 +880,8 @@ export const useProjectsStore = create<ProjectsStore>()(
       }
 
       const { projects, activeProjectId } = get();
-      const nextProjects = projects.map((project) =>
-        project.id === id ? { ...project, label: trimmed } : project
+      const nextProjects = projects.map((project): ProjectEntry =>
+        project.id === id ? { ...project, label: trimmed, labelSource: 'manual' } : project
       );
       set({ projects: nextProjects });
       persistProjects(nextProjects, activeProjectId, get().manualProjectOrder);
@@ -848,7 +905,10 @@ export const useProjectsStore = create<ProjectsStore>()(
         const updated = { ...project };
         if (meta.label !== undefined) {
           const trimmed = meta.label.trim();
-          if (trimmed) updated.label = trimmed;
+          if (trimmed) {
+            updated.label = trimmed;
+            updated.labelSource = 'manual';
+          }
         }
         if (meta.icon !== undefined) updated.icon = meta.icon;
         if (meta.color !== undefined) updated.color = meta.color;
@@ -969,6 +1029,7 @@ export const useProjectsStore = create<ProjectsStore>()(
         return { ok: false, error: 'Custom icons are not supported in this runtime' };
       }
 
+      const runtime = getRuntimeKey();
       try {
         const response = await runtimeFetch(`/api/projects/${encodeURIComponent(id)}/icon/discover`, {
           method: 'POST',
@@ -983,15 +1044,23 @@ export const useProjectsStore = create<ProjectsStore>()(
           error?: string;
           skipped?: boolean;
           reason?: string;
-          settings?: DesktopSettings;
+          project?: { iconImage?: unknown } | null;
         } | null;
 
         if (!response.ok) {
           return { ok: false, error: payload?.error || 'Failed to discover project icon' };
         }
 
-        if (payload?.settings) {
-          get().synchronizeFromSettings(payload.settings, { adoptActiveProject: false });
+        // The search can outlast changes made in this window, so the answer's
+        // settings are already old: only this project's icon is taken from it.
+        // A full-list write still queued or in flight lacks the icon and would
+        // erase it on the server, so the list that has it is written after.
+        const iconImage = sanitizeProjectIconImage(payload?.project?.iconImage);
+        if (iconImage && runtime === getRuntimeKey() && get().projects.some((entry) => entry.id === id)) {
+          const projects = get().projects.map((entry) => (entry.id === id ? { ...entry, iconImage } : entry));
+          set({ projects });
+          cacheProjects(projects, get().activeProjectId);
+          void updateDesktopSettings({ projects });
         }
 
         return {
@@ -1114,7 +1183,7 @@ export const useProjectsStore = create<ProjectsStore>()(
         cacheProjects(result.projects, result.activeProjectId);
       }
 
-      if (result.activeProject) {
+      if (result.activeProject && (activeChanged || activePath)) {
         opencodeClient.setDirectory(result.activeProject.path);
         useDirectoryStore.getState().setDirectory(result.activeProject.path, { showOverlay: false });
       }

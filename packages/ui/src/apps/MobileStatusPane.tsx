@@ -1,7 +1,6 @@
 import React from 'react';
 
 import { Button } from '@/components/ui/button';
-import { ScrollShadow } from '@/components/ui/ScrollShadow';
 import { WorkStatusSectionList } from '@/components/chat/work-status/WorkStatusSectionList';
 import { WorkStatusSectionsDialog } from '@/components/chat/work-status/WorkStatusSectionsDialog';
 import { WorkStatusTouchContext } from '@/components/chat/work-status/touchContext';
@@ -12,6 +11,7 @@ import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { isChatDirectoryPath } from '@/lib/chatDirectories';
 import { useI18n } from '@/lib/i18n';
 import { useSessionUIStore } from '@/sync/session-ui-store';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 
 /**
  * The workspace drawer's Status tab: the desktop Work Status sections for the
@@ -46,9 +46,12 @@ export const MobileStatusPane: React.FC<{
         <LeaveWorkStatusContext.Provider value={onLeave}>
           <WorkStatusTouchContext.Provider value>
             <WorkStatusPresenceProvider onChange={setRenderedSections}>
-              <ScrollShadow
-                size={24}
-                className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-3 pb-4 pt-2"
+              <ScrollableOverlay
+                useScrollShadow
+                scrollShadowSize={24}
+                outerClassName="min-h-0 flex-1"
+                className="px-3 pb-4 pt-2"
+                disableHorizontal
               >
                 <WorkStatusSectionList
                   sessionId={sessionId}
@@ -56,7 +59,7 @@ export const MobileStatusPane: React.FC<{
                   repositoryEnabled={!isChatDirectoryPath(directory)}
                   layout={layout}
                 />
-              </ScrollShadow>
+              </ScrollableOverlay>
             </WorkStatusPresenceProvider>
           </WorkStatusTouchContext.Provider>
         </LeaveWorkStatusContext.Provider>

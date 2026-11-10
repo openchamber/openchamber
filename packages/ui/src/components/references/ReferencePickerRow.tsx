@@ -2,6 +2,7 @@ import * as React from 'react';
 
 import { Icon } from '@/components/icon/Icon';
 import { Checkbox } from '@/components/ui/checkbox';
+import { useAvatarImage } from '@/hooks/useAvatarImage';
 import type { CISummary, Label, ChangeRequestListStatus, RepositoryDiscussionReference, TrackerLabel, TrackerProgress } from '@/lib/api/types';
 import { useI18n } from '@/lib/i18n';
 import { useSourceControlProvider } from '@/lib/source-control/providers/registry';
@@ -39,18 +40,21 @@ const rowAvatarUrl = (url: string): string => {
 };
 
 /** Who an item belongs to: avatar, or the name's initial, then the name. */
-const RowPerson: React.FC<{ name: string; avatarUrl: string | null | undefined }> = ({ name, avatarUrl }) => (
-    <span className="inline-flex min-w-0 items-center gap-1">
-        {avatarUrl ? (
-            <img src={rowAvatarUrl(avatarUrl)} alt="" loading="lazy" className="size-4 shrink-0 rounded-full bg-surface-muted" />
-        ) : (
-            <span className="flex size-4 shrink-0 items-center justify-center rounded-full bg-surface-muted text-[0.625rem] leading-none">
-                {name.slice(0, 1).toUpperCase()}
-            </span>
-        )}
-        <span className="truncate">{name}</span>
-    </span>
-);
+const RowPerson: React.FC<{ name: string; avatarUrl: string | null | undefined }> = ({ name, avatarUrl }) => {
+    const { broken, onError } = useAvatarImage(avatarUrl);
+    return (
+        <span className="inline-flex min-w-0 items-center gap-1">
+            {avatarUrl && !broken ? (
+                <img src={rowAvatarUrl(avatarUrl)} alt="" loading="lazy" className="size-4 shrink-0 rounded-full bg-surface-muted" onError={onError} />
+            ) : (
+                <span className="flex size-4 shrink-0 items-center justify-center rounded-full bg-surface-muted text-[0.625rem] leading-none">
+                    {name.slice(0, 1).toUpperCase()}
+                </span>
+            )}
+            <span className="truncate">{name}</span>
+        </span>
+    );
+};
 
 export const ReferenceLabelChips: React.FC<{ labels: ChipLabel[]; max?: number }> = ({ labels, max }) => {
     if (labels.length === 0) return null;
@@ -173,10 +177,10 @@ export const ReferencePickerRow = React.memo(function ReferencePickerRow({
                     <div className={cn('mb-0.5 flex min-w-0 items-center gap-1 typography-micro', REFERENCE_META_TEXT)}>
                         <Icon name="corner-down-right" className="size-3.5 shrink-0" />
                         <span className="shrink-0 font-mono">{tracker.parent.identifier}</span>
-                        <span className="truncate">{tracker.parent.title}</span>
+                        <span dir="auto" className="truncate">{tracker.parent.title}</span>
                     </div>
                 ) : null}
-                <div className={cn('typography-ui-header font-semibold line-clamp-2 break-words', !highlighted && 'text-foreground')}>{title}</div>
+                <div dir="auto" className={cn('typography-ui-header font-semibold line-clamp-2 break-words', !highlighted && 'text-foreground')}>{title}</div>
                 <div className={cn('mt-0.5 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-0.5 typography-micro', REFERENCE_META_TEXT)}>
                     <span className="font-mono">{id}</span>
                     {item.source === 'repository' && item.reference.author ? (

@@ -10,6 +10,7 @@ import {
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useI18n } from '@/lib/i18n';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
+import { useComposerDraftTarget } from '@/hooks/useComposerAddress';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { focusChatInput } from '@/components/chat/composer/editor/dom';
 import { diffCommentOriginKey, type DiffCommentOrigin } from '@/lib/diffCommentOrigin';
@@ -66,7 +67,6 @@ export function useInlineCommentController<TRange extends LineRangeBase>(
   const originKey = diffCommentOriginKey(origin);
 
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
-  const newSessionDraftOpen = useSessionUIStore((state) => state.newSessionDraft?.open);
   const effectiveDirectory = useEffectiveDirectory();
   const sessionDirectory = useSessionUIStore(
     React.useCallback(
@@ -83,12 +83,7 @@ export function useInlineCommentController<TRange extends LineRangeBase>(
   const [commentText, setCommentText] = React.useState('');
   const [editingDraftId, setEditingDraftId] = React.useState<string | null>(null);
 
-  const sessionKey = currentSessionId ?? (newSessionDraftOpen ? 'draft' : null);
-  const draftDirectory = sessionDirectory ?? effectiveDirectory;
-  const target = React.useMemo(() => {
-    if (!sessionKey || !draftDirectory) return null;
-    return { directory: draftDirectory, sessionKey };
-  }, [draftDirectory, sessionKey]);
+  const target = useComposerDraftTarget(sessionDirectory ?? effectiveDirectory);
   const targetKey = target
     ? getInlineCommentDraftKey(getRuntimeKey(), target.directory, target.sessionKey)
     : null;
@@ -131,14 +126,22 @@ export function useInlineCommentController<TRange extends LineRangeBase>(
     }
   }, [editingDraftId, removeDraft, reset, target]);
 
-  const saveComment = React.useCallback((textToSave: string, rangeOverride?: TRange) => {
+  // True when the editor is done with the text. False keeps it open: a refused
+  // comment exists nowhere but in the field.
+  const saveComment = React.useCallback((textToSave: string, rangeOverride?: TRange): boolean => {
     const targetRange = rangeOverride ?? selection;
     const trimmedText = textToSave.trim();
-    if (!targetRange || !trimmedText || !fileLabel) return;
+    if (!targetRange || !trimmedText || !fileLabel) return false;
 
     if (!target) {
       toast.error(t('inlineComment.toast.selectSessionToSave'));
-      return;
+      return false;
+    }
+
+    // The edited comment was sent or removed meanwhile: nothing left to save to.
+    if (editingDraftId && !useInlineCommentDraftStore.getState().getDrafts(target).some((draft) => draft.id === editingDraftId)) {
+      reset();
+      return true;
     }
 
     const normalizedRange = normalizeLineRange(targetRange);
@@ -146,8 +149,8 @@ export function useInlineCommentController<TRange extends LineRangeBase>(
     const code = getCodeForRange(normalizedRange);
 
     const isNewComment = !editingDraftId;
-    if (editingDraftId) {
-      updateDraft(target, editingDraftId, {
+    const saved = editingDraftId
+      ? updateDraft(target, editingDraftId, {
         fileLabel,
         startLine: normalizedStoreRange.startLine,
         endLine: normalizedStoreRange.endLine,
@@ -156,9 +159,8 @@ export function useInlineCommentController<TRange extends LineRangeBase>(
         language,
         text: trimmedText,
         origin,
-      });
-    } else {
-      addDraft(target, {
+      })
+      : addDraft(target, {
         source,
         fileLabel,
         startLine: normalizedStoreRange.startLine,
@@ -168,17 +170,20 @@ export function useInlineCommentController<TRange extends LineRangeBase>(
         language,
         text: trimmedText,
         origin,
-      });
+      }) !== null;
+    if (!saved) {
+      toast.error(t('inlineComment.toast.noRoom'));
+      return false;
     }
 
     reset();
     if (isNewComment) {
       requestAnimationFrame(focusChatInput);
     }
+    return true;
   }, [addDraft, editingDraftId, fileLabel, getCodeForRange, language, origin, reset, selection, source, t, target, toStoreRange, updateDraft]);
 
   return {
-    sessionKey,
     drafts,
     selection,
     setSelection,

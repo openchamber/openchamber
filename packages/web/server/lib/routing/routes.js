@@ -14,7 +14,9 @@
  *   a switch would.
  * - `POST /session/:id/{prompt,command}` in a routed session asks Jev on the
  *   request text and switches the session onto the chosen model and agent
- *   before the prompt is forwarded.
+ *   before the prompt is forwarded. A form reply resumes a turn the same way,
+ *   so `POST /session/:id/form/:formId/reply` is routed on the answer, and a
+ *   failure leaves the form pending because the answer was never forwarded.
  *
  * Both parse the JSON body only for JSON requests, so a streamed or non-JSON
  * upload reaches the proxy untouched.
@@ -27,6 +29,7 @@ const MODEL_PATH = '/api/session/:sessionId/model';
 const SEND_PATHS = [
   '/api/session/:sessionId/prompt',
   '/api/session/:sessionId/command',
+  '/api/session/:sessionId/form/:formId/reply',
 ];
 
 const sendError = (res, error) => {

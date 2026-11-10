@@ -327,6 +327,68 @@ describe('dispatch results runtime', () => {
     expect(openCode.state.synthetic).toHaveLength(1);
   });
 
+  it('reports one result to a parent that sent several prompts into one run', async () => {
+    const { runtime, openCode, emit } = await createRuntime();
+    openCode.state.active.ses_child = { type: 'running' };
+    openCode.state.records.ses_child.push(user(1), assistant('Earlier run', 2), idle('succeeded', 3));
+    // Seen live: eight sends steered into the running turn, eight identical results.
+    for (let index = 0; index < 8; index += 1) {
+      await runtime.register({ parentSessionId: 'ses_parent', sessionId: 'ses_child', dispatchedAt: 10 + index, afterIdleId: 'msg_i3' });
+    }
+    await runtime.register({ parentSessionId: 'ses_other', sessionId: 'ses_child', dispatchedAt: 20, afterIdleId: 'msg_i3' });
+    // The first delivery fails, so the retry must reuse the one shared id.
+    openCode.state.syntheticStatus.push(500);
+
+    delete openCode.state.active.ses_child;
+    openCode.state.records.ses_child.push(user(11), assistant('Toolbar fixed', 20), idle('succeeded', 30));
+    emit({ type: 'session.status', properties: { sessionID: 'ses_child', status: { type: 'idle' } } });
+    emit({ type: 'session.status', properties: { sessionID: 'ses_child', status: { type: 'idle' } } });
+    await settle();
+
+    expect(openCode.state.synthetic.map(({ sessionID }) => sessionID).sort()).toEqual(['ses_other', 'ses_parent']);
+    expect(openCode.state.synthetic.every(({ text }) => text.includes('Toolbar fixed'))).toBe(true);
+    expect(runtime.pending()).toEqual([]);
+  });
+
+  it('keeps the answer when one of the shared entries has no baseline', async () => {
+    const { runtime, openCode, emit } = await createRuntime();
+    openCode.state.active.ses_child = { type: 'running' };
+    openCode.state.records.ses_child.push(user(1), assistant('Earlier run', 2), idle('succeeded', 3));
+    // Its baseline read failed: it compares clocks and misses the reply that began before it.
+    await runtime.register({ parentSessionId: 'ses_parent', sessionId: 'ses_child', dispatchedAt: 25 });
+    await runtime.register({ parentSessionId: 'ses_parent', sessionId: 'ses_child', dispatchedAt: 26, afterIdleId: 'msg_i3' });
+
+    delete openCode.state.active.ses_child;
+    openCode.state.records.ses_child.push(user(11), assistant('Toolbar fixed', 20), idle('succeeded', 30));
+    emit({ type: 'session.status', properties: { sessionID: 'ses_child', status: { type: 'idle' } } });
+    await settle();
+
+    expect(openCode.state.synthetic).toEqual([expect.objectContaining({ text: expect.stringContaining('Toolbar fixed') })]);
+    expect(runtime.pending()).toEqual([]);
+  });
+
+  it('still reports a newer run next to an entry whose earlier attempt landed', async () => {
+    const dataDir = await makeDataDir();
+    const landed = 'msg_000000000001aaaaaaaaaaaaaa';
+    await fs.writeFile(path.join(dataDir, 'dispatch-results.json'), JSON.stringify({
+      version: 1,
+      entries: [
+        { id: 'dispatch-a', parentSessionId: 'ses_parent', sessionId: 'ses_child', dispatchedAt: 10, afterIdleId: null, messageId: landed },
+        { id: 'dispatch-b', parentSessionId: 'ses_parent', sessionId: 'ses_child', dispatchedAt: 20, afterIdleId: 'msg_i13' },
+      ],
+    }));
+    const openCode = createOpenCode();
+    // The first run's result landed, but its response was lost before the entry was dropped.
+    openCode.state.seenIds.add(landed);
+    openCode.state.records.ses_child.push(user(11), assistant('First', 12), idle('succeeded', 13), user(21), assistant('Second', 22), idle('succeeded', 23));
+    const { runtime } = await createRuntime({ dataDir, openCode });
+    runtime.start();
+    await settle();
+
+    expect(openCode.state.synthetic).toEqual([expect.objectContaining({ text: expect.stringContaining('Second') })]);
+    expect(runtime.pending()).toEqual([]);
+  });
+
   it('delivers after a restart from what was persisted', async () => {
     const dataDir = await makeDataDir();
     const first = await createRuntime({ dataDir });

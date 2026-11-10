@@ -8,9 +8,10 @@ const clone = (value) => JSON.parse(JSON.stringify(value));
 
 /**
  * A fetch double for Gitea's API keyed by `METHOD /path` (the path after
- * `/api/v1`, without the query). A route's value is a response body, a
- * `Response`, or a function `(request) => body | Response`. Every call is
- * recorded with its method, URL, headers, body and redirect mode.
+ * `/api/v1`, without the query; a Forgejo namespace path keeps its namespace,
+ * so `/api/forgejo/v1/version` is `GET /forgejo/version`). A route's value is
+ * a response body, a `Response`, or a function `(request) => body | Response`.
+ * Every call is recorded with its method, URL, headers, body and redirect mode.
  */
 export function fakeGitea(routes = {}) {
   const calls = [];
@@ -21,7 +22,10 @@ export function fakeGitea(routes = {}) {
       body: init.body ? JSON.parse(init.body) : undefined,
     };
     calls.push(call);
-    const key = `${call.method} ${url.pathname.replace(/^\/api\/v1/, '')}`;
+    const path = url.pathname.startsWith('/api/forgejo/v1/')
+      ? `/forgejo${url.pathname.slice('/api/forgejo/v1'.length)}`
+      : url.pathname.replace(/^\/api\/v1/, '');
+    const key = `${call.method} ${path}`;
     if (!Object.hasOwn(routes, key)) return new Response(JSON.stringify({ message: `no fixture for ${key}` }), { status: 404 });
     const value = routes[key] instanceof Function ? await routes[key](call) : routes[key];
     if (value instanceof Response) return value;

@@ -1,6 +1,7 @@
 import React from 'react';
 import { toast } from '@/components/ui';
 import { useI18n } from '@/lib/i18n';
+import { useKeybinds } from '@/hooks/useKeybind';
 import { takeSessionActionFailure } from '@/sync/session-action-failures';
 import { describeSessionActionError } from '../sessions/sessionActionError';
 import { useSessionMultiSelectStore } from '@/stores/useSessionMultiSelectStore';
@@ -20,6 +21,7 @@ type Args = {
    * the scope is missing here it is treated as a plain directory scope.
    */
   getFolderScopesForProject: (projectId: string) => readonly { scopeKey: string; directory: string | null }[];
+  folderOwnerKeyBySessionId: ReadonlyMap<string, string>;
   addSessionsToFolder: (scopeKey: string, folderId: string, sessionIds: string[]) => void;
   removeSessionsFromFolders: (scopeKey: string, sessionIds: string[]) => void;
   createFolderAndStartRename: (scopeKey: string, parentId?: string | null) => { id: string } | null;
@@ -39,6 +41,22 @@ export const resolveSelectionFolderScopes = (
   return projectScopes.length > 0
     ? projectScopes.map((scope) => scope.scopeKey)
     : [selectionScope];
+};
+
+export const resolveSelectionFolderIds = (
+  sessionIds: readonly string[],
+  ownerKey: string | null,
+  folderOwnerKeyBySessionId: ReadonlyMap<string, string>,
+): string[] => {
+  if (!ownerKey) return [];
+  const ids: string[] = [];
+  for (const sessionId of sessionIds) {
+    const owner = folderOwnerKeyBySessionId.get(sessionId);
+    if (!owner) return [];
+    // Subtree selection also includes descendants displayed under another owner.
+    if (owner === ownerKey) ids.push(sessionId);
+  }
+  return ids;
 };
 
 export const resolveBulkDeleteConfirmation = (
@@ -85,6 +103,7 @@ export const useSidebarBulkActions = (args: Args) => {
     showDeletionDialog,
     foldersMap,
     getFolderScopesForProject,
+    folderOwnerKeyBySessionId,
     addSessionsToFolder,
     removeSessionsFromFolders,
     createFolderAndStartRename,
@@ -119,14 +138,21 @@ export const useSidebarBulkActions = (args: Args) => {
     return null;
   }, [selectionScopeKey]);
 
+  const folderSelectionIds = React.useMemo(() => resolveSelectionFolderIds(
+    Array.from(selectedIds), derivedSelectionScope, folderOwnerKeyBySessionId,
+  ), [selectedIds, derivedSelectionScope, folderOwnerKeyBySessionId]);
+
   // The selection scope is a project id; folders live per directory scope
   // (project root + each worktree). Resolve all of them, in project order.
   const selectionFolderScopes = React.useMemo<string[]>(() => {
     return resolveSelectionFolderScopes(derivedSelectionScope, getFolderScopesForProject);
   }, [derivedSelectionScope, getFolderScopesForProject]);
 
+  // The project root's folders, first in project order: a worktree's own
+  // folders hold only that worktree's sessions.
   const bulkScopeFolders = React.useMemo(() => {
-    return selectionFolderScopes.flatMap((scope) => foldersMap[scope] ?? []);
+    const rootScope = selectionFolderScopes[0];
+    return rootScope ? foldersMap[rootScope] ?? [] : [];
   }, [foldersMap, selectionFolderScopes]);
 
   const resolveFolderScope = React.useCallback((folderId: string): string | null => {
@@ -149,7 +175,8 @@ export const useSidebarBulkActions = (args: Args) => {
   }, [foldersMap, selectionFolderScopes, hasSelection, selectedIds]);
 
   const moveSelectionToFolder = React.useCallback((targetScope: string, folderId: string) => {
-    const ids = Array.from(selectedIds);
+    const ids = folderSelectionIds;
+    if (ids.length === 0) return;
     // Clear memberships in every other scope first — the store only dedupes
     // within one scope, and a session must live in a single folder.
     for (const scope of selectionFolderScopes) {
@@ -157,7 +184,7 @@ export const useSidebarBulkActions = (args: Args) => {
       removeSessionsFromFolders(scope, ids);
     }
     addSessionsToFolder(targetScope, folderId, ids);
-  }, [addSessionsToFolder, removeSessionsFromFolders, selectedIds, selectionFolderScopes]);
+  }, [addSessionsToFolder, folderSelectionIds, removeSessionsFromFolders, selectionFolderScopes]);
 
   const handleBulkMoveToFolder = React.useCallback((folderId: string) => {
     if (!hasSelection) return;
@@ -169,18 +196,20 @@ export const useSidebarBulkActions = (args: Args) => {
   const handleBulkCreateFolderAndMove = React.useCallback(() => {
     const targetScope = selectionFolderScopes[0];
     if (!targetScope || !hasSelection) return;
+    if (folderSelectionIds.length === 0) return;
     const newFolder = createFolderAndStartRename(targetScope);
     if (!newFolder) return;
     moveSelectionToFolder(targetScope, newFolder.id);
-  }, [createFolderAndStartRename, hasSelection, moveSelectionToFolder, selectionFolderScopes]);
+  }, [createFolderAndStartRename, folderSelectionIds, hasSelection, moveSelectionToFolder, selectionFolderScopes]);
 
   const handleBulkRemoveFromFolder = React.useCallback(() => {
     if (!hasSelection) return;
-    const ids = Array.from(selectedIds);
+    const ids = folderSelectionIds;
+    if (ids.length === 0) return;
     for (const scope of selectionFolderScopes) {
       removeSessionsFromFolders(scope, ids);
     }
-  }, [removeSessionsFromFolders, selectedIds, selectionFolderScopes, hasSelection]);
+  }, [folderSelectionIds, removeSessionsFromFolders, selectionFolderScopes, hasSelection]);
 
   const executeBulkDelete = React.useCallback(async (ids: string[], archivedBucket: boolean) => {
     if (ids.length === 0) return;
@@ -256,41 +285,39 @@ export const useSidebarBulkActions = (args: Args) => {
     await executeBulkDelete(resolution.value.sessionIds, resolution.value.archivedBucket);
   }, [bulkDeleteConfirm, executeBulkDelete, rowOrderRegistry, setBulkDeleteConfirm]);
 
+  const selectionKeysApply = React.useCallback((event: KeyboardEvent): boolean => {
+    if (bulkDeleteConfirm || isInlineEditing) return false;
+    const target = event.target instanceof HTMLElement ? event.target : null;
+    return !(target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable));
+  }, [bulkDeleteConfirm, isInlineEditing]);
+
   React.useEffect(() => {
     if (!selectionModeEnabled) return;
-    const isMac = /Macintosh|Mac OS X/.test(navigator.userAgent || '');
     const listener = (event: KeyboardEvent) => {
-      if (bulkDeleteConfirm) return;
-      if (isInlineEditing) return;
-      const target = event.target instanceof HTMLElement ? event.target : null;
-      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) {
-        return;
-      }
-      const modifier = isMac ? event.metaKey : event.ctrlKey;
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        useSessionMultiSelectStore.getState().disable();
-        return;
-      }
-      if (modifier && event.key === 'Backspace') {
-        event.preventDefault();
-        handleBulkDelete();
-        return;
-      }
-      if (modifier && (event.key === 'a' || event.key === 'A')) {
-        const selection = deriveSessionRowBulkSelectAll(
-          rowOrderRegistry?.getEntries() ?? [],
-          rowOrderRegistry?.getDescendantIds() ?? [],
-          useSessionMultiSelectStore.getState().scopeKey,
-        );
-        if (!selection) return;
-        event.preventDefault();
-        useSessionMultiSelectStore.getState().replaceAll(selection.ids, selection.scopeKey);
-      }
+      if (!selectionKeysApply(event) || event.key !== 'Escape') return;
+      event.preventDefault();
+      useSessionMultiSelectStore.getState().disable();
     };
     window.addEventListener('keydown', listener);
     return () => window.removeEventListener('keydown', listener);
-  }, [bulkDeleteConfirm, handleBulkDelete, isInlineEditing, rowOrderRegistry, selectionModeEnabled]);
+  }, [selectionKeysApply, selectionModeEnabled]);
+
+  useKeybinds(selectionModeEnabled ? {
+    sessions_bulk_delete: (event) => {
+      if (!selectionKeysApply(event)) return false;
+      handleBulkDelete();
+    },
+    sessions_select_all: (event) => {
+      if (!selectionKeysApply(event)) return false;
+      const selection = deriveSessionRowBulkSelectAll(
+        rowOrderRegistry?.getEntries() ?? [],
+        rowOrderRegistry?.getDescendantIds() ?? [],
+        useSessionMultiSelectStore.getState().scopeKey,
+      );
+      if (!selection) return false;
+      useSessionMultiSelectStore.getState().replaceAll(selection.ids, selection.scopeKey);
+    },
+  } : {});
 
   return {
     selectionModeEnabled,
@@ -299,6 +326,7 @@ export const useSidebarBulkActions = (args: Args) => {
     bulkScopeIsArchived,
     derivedSelectionScope,
     bulkScopeFolders,
+    bulkCanMoveToFolder: folderSelectionIds.length > 0,
     bulkCanRemoveFromFolder,
     handleToggleSelectionMode,
     handleExitSelectionMode,

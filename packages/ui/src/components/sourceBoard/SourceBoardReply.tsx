@@ -3,6 +3,7 @@ import * as React from 'react';
 import { Icon } from '@/components/icon/Icon';
 import { referenceNumberLabel } from '@/components/references/referencePickerItems';
 import { toast } from '@/components/ui';
+import { ButtonTooltip, TooltipLabelWithShortcut } from '@/components/ui/action-toolbar';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
@@ -167,7 +168,7 @@ export const SourceBoardReply: React.FC<{
     const busyIcon = (kind: Busy) => (busy === kind ? <Icon name="loader-4" className="size-3.5 animate-spin" /> : null);
 
     return (
-        <section className="flex flex-col gap-2 border-t border-border/60 pt-4" aria-label={t('sourceBoard.reply.label')}>
+        <section className="flex flex-col gap-2 border-t border-edge pt-4" aria-label={t('sourceBoard.reply.label')}>
             <Textarea
                 value={text}
                 onChange={(event) => setText(event.target.value)}
@@ -186,51 +187,57 @@ export const SourceBoardReply: React.FC<{
             ) : null}
             <div className="flex flex-wrap items-center justify-end gap-2">
                 {openPull && review.model === 'votes' && onLatestRevision && review.labels.some((entry) => entry.permitted.length > 0) ? (
-                    <Button size="sm" variant="outline" onClick={() => void sendVotes()} disabled={busy !== null || Object.keys(votes).length === 0}>
-                        {busyIcon('vote') ?? <Icon name="check" className="size-3.5" />}
-                        {t('sourceBoard.vote.send')}
-                    </Button>
+                    <ButtonTooltip label={t('contextTooltips.tracker.sendVotes')}>
+                        <Button size="sm" variant="outline" onClick={() => void sendVotes()} disabled={busy !== null || Object.keys(votes).length === 0}>
+                            {busyIcon('vote') ?? <Icon name="check" className="size-3.5" />}
+                            {t('sourceBoard.vote.send')}
+                        </Button>
+                    </ButtonTooltip>
                 ) : null}
                 {openPull && review.model === 'verdict' ? (
                     <>
-                        <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => void sendVerdict('request-changes')}
-                            disabled={busy !== null || !body}
-                            // Disabled buttons show no tooltip; the hint is for the enabled one too.
-                            title={t('sourceBoard.reply.requestChangesHint')}
-                        >
-                            {busyIcon('request-changes') ?? <Icon name="file-edit" className="size-3.5" />}
-                            {t('sourceBoard.reply.requestChanges')}
-                        </Button>
-                        <Button size="sm" variant="outline" onClick={() => void sendVerdict('approve')} disabled={busy !== null}>
-                            {busyIcon('approve') ?? <Icon name="check" className="size-3.5" />}
-                            {t('sourceBoard.reply.approve')}
-                        </Button>
+                        <ButtonTooltip label={t('sourceBoard.reply.requestChangesHint')}>
+                            <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => void sendVerdict('request-changes')}
+                                disabled={busy !== null || !body}
+                            >
+                                {busyIcon('request-changes') ?? <Icon name="file-edit" className="size-3.5" />}
+                                {t('sourceBoard.reply.requestChanges')}
+                            </Button>
+                        </ButtonTooltip>
+                        <ButtonTooltip label={t('contextTooltips.tracker.approve')}>
+                            <Button size="sm" variant="outline" onClick={() => void sendVerdict('approve')} disabled={busy !== null}>
+                                {busyIcon('approve') ?? <Icon name="check" className="size-3.5" />}
+                                {t('sourceBoard.reply.approve')}
+                            </Button>
+                        </ButtonTooltip>
                     </>
                 ) : null}
                 {canStartThread ? (
+                    <ButtonTooltip label={t('sourceBoard.reply.startThreadHint')}>
+                        <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => void startThread()}
+                            disabled={busy !== null || !body}
+                        >
+                            {busyIcon('thread') ?? <Icon name="chat-thread" className="size-3.5" />}
+                            {t('sourceBoard.reply.startThread')}
+                        </Button>
+                    </ButtonTooltip>
+                ) : null}
+                <ButtonTooltip label={<TooltipLabelWithShortcut label={t('sourceBoard.reply.comment')} shortcut={shortcut} />}>
                     <Button
                         size="sm"
-                        variant="outline"
-                        onClick={() => void startThread()}
+                        onClick={() => void comment()}
                         disabled={busy !== null || !body}
-                        title={t('sourceBoard.reply.startThreadHint')}
                     >
-                        {busyIcon('thread') ?? <Icon name="chat-thread" className="size-3.5" />}
-                        {t('sourceBoard.reply.startThread')}
+                        {busyIcon('comment') ?? <Icon name="chat-1" className="size-3.5" />}
+                        {t('sourceBoard.reply.comment')}
                     </Button>
-                ) : null}
-                <Button
-                    size="sm"
-                    onClick={() => void comment()}
-                    disabled={busy !== null || !body}
-                    title={t('sourceBoard.reply.commentShortcut', { shortcut })}
-                >
-                    {busyIcon('comment') ?? <Icon name="chat-1" className="size-3.5" />}
-                    {t('sourceBoard.reply.comment')}
-                </Button>
+                </ButtonTooltip>
             </div>
         </section>
     );

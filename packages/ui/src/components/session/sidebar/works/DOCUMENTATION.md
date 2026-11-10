@@ -7,9 +7,8 @@ view, In work, Drafts, Folders with worktrees) describes how they are laid out.
 - `sidebarWorks.ts`: which work each listed session belongs to
   (`buildSidebarWorkIndex`, from the project sections) and works in order
   (`orderSidebarWorks`, by the first of their sessions in the lifecycle order;
-  In work's selection is `orderInWorkWorks`, where a session no section holds
-  belongs to the work of its top-level session, `buildSessionRootIndex`, with
-  no project),
+   In work's selection is `orderInWorkWorks`, where a session must resolve to a
+   registered project work, directly or through its top-level session),
   and where a worktree's archived sessions hold it in that order
   (`buildWorktreeArchiveAnchors`), so archiving does not move a worktree.
   A work is a linked worktree's or an isolated space's group (`isGroupWork`:
@@ -38,8 +37,9 @@ view, In work, Drafts, Folders with worktrees) describes how they are laid out.
 
 Invariants:
 
-- Lineage is display only (`lib/sessionWorkLineage.ts`). Archive, restore,
-  move and the Archive page follow OpenCode's `parentID`.
+- Display lineage belongs to `lib/sessionWorkLineage.ts`. Archive, delete and
+  restore follow OpenCode's `parentID` plus linked reviews. Forks and promoted
+  `/btw` conversations remain independent; move also carries the rendered tree.
 - The folder decides before origin: a session never nests under a session of
   another folder, so a worktree's sessions are all of that worktree's work.
 - A subagent's work state never puts a work in work and is not counted on a

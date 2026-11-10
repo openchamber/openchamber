@@ -53,7 +53,7 @@ export async function fetchPullRequestFile(
   directory: string,
   source: PullRequestSource,
   context: Readonly<SourceControlReadContext>,
-  file: { path: string; previousPath?: string; status: string },
+  file: { path: string; previousPath?: string; status: string; binary?: boolean },
 ) {
   const response = await runtimeFetch('/api/walkthrough/pr-file', {
     query: {
@@ -61,6 +61,7 @@ export async function fetchPullRequestFile(
       path: file.path,
       previousPath: file.previousPath ?? '',
       status: file.status,
+      binary: file.binary ? 'true' : undefined,
     },
     signal: AbortSignal.timeout(30_000),
   });

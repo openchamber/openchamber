@@ -49,9 +49,23 @@ describe('getVisibleContextRailSurfaces', () => {
     expect(getVisibleContextRailSurfaces(baseOptions).some((s) => s.id === 'browser')).toBe(true);
   });
 
-  test('respects the persisted user rail order', () => {
-    const surfaces = getVisibleContextRailSurfaces({ ...baseOptions, railOrder: ['git', 'context'] });
-    expect(surfaces.slice(0, 2).map((surface) => surface.id)).toEqual(['git', 'context']);
+  test('respects the persisted user rail order inside each group', () => {
+    const surfaces = getVisibleContextRailSurfaces({ ...baseOptions, railOrder: ['diff', 'git', 'context'] });
+    expect(surfaces.slice(0, 2).map((surface) => surface.id)).toEqual(['diff', 'git']);
+  });
+
+  test('keeps each group together, placed where its first surface stands', () => {
+    // A saved order from before groups: Notes ahead of Files, Context last.
+    const surfaces = getVisibleContextRailSurfaces({
+      ...baseOptions,
+      railOrder: ['notes', 'git', 'editor', 'pr', 'terminal', 'context'],
+    });
+    expect(surfaces.map((surface) => surface.id)).toEqual([
+      'notes',
+      'git', 'pr', 'diff', 'walkthrough',
+      'editor', 'terminal', 'browser',
+      'context',
+    ]);
   });
 
   test('hides the Tracker until a repository host is connected or an item is open in it', () => {

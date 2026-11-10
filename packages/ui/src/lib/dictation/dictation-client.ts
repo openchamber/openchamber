@@ -21,6 +21,7 @@ export interface DictationStartOptions {
         baseUrl?: string;
         model?: string;
         apiKey?: string;
+        endpointPath?: string;
     };
 }
 

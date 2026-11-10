@@ -26,6 +26,12 @@ import { isVSCodeRuntime } from '@/lib/desktop';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { formatShortcutForDisplay, getEffectiveShortcutCombo } from '@/lib/shortcuts';
+import { TooltipLabelWithShortcut } from '@/components/ui/action-toolbar';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
+
+// One composer owns microphone capture and its keyboard confirmation in a window.
+let recordingOwner: HTMLSpanElement | null = null;
 
 interface ComposerDictationProps {
     radius?: number | string;
@@ -132,13 +138,15 @@ export const ComposerDictation: React.FC<ComposerDictationProps> = ({
     const { t } = useI18n();
     const { currentTheme } = useThemeSystem();
     const dictationEnabled = useConfigStore((state) => state.dictationEnabled);
+    const dictationAutoSend = useConfigStore((state) => state.dictationAutoSend);
     const shortcutOverrides = useUIStore((state) => state.shortcutOverrides);
-    const dictationShortcut = formatShortcutForDisplay(getEffectiveShortcutCombo('toggle_dictation', shortcutOverrides));
+    const dictationShortcut = formatShortcutForDisplay(getEffectiveShortcutCombo('toggle_dictation', shortcutOverrides), '');
     // The dictation server (WebSocket + STT worker) lives in the OpenChamber
     // web server; the VS Code bridge has no server process for it.
     const [supported] = React.useState(() => !isVSCodeRuntime() && isDictationCaptureSupported());
 
     const pendingActionRef = React.useRef<'insert' | 'send' | null>(null);
+    const composerMarkerRef = React.useRef<HTMLSpanElement | null>(null);
     const onInsertRef = React.useRef(onInsert);
     const onInsertAndSendRef = React.useRef(onInsertAndSend);
     React.useEffect(() => {
@@ -178,9 +186,18 @@ export const ComposerDictation: React.FC<ComposerDictationProps> = ({
     const downloadPercent = useModelDownloadProgress(isModelDownloading);
 
     const statusRef = React.useRef(status);
-    React.useEffect(() => {
+    React.useLayoutEffect(() => {
         statusRef.current = status;
-    }, [status]);
+        if (status === 'idle' && recordingOwner === composerMarkerRef.current) {
+            recordingOwner = null;
+        }
+    });
+
+    const startRecording = React.useCallback(() => {
+        if (!supported || !dictationEnabled || disabled || recordingOwner || statusRef.current !== 'idle') return;
+        recordingOwner = composerMarkerRef.current;
+        void startDictation();
+    }, [supported, dictationEnabled, disabled, startDictation]);
 
     // The transcript arrives long after the start; report the start itself so
     // the host can keep the transcript with the draft that was on screen then.
@@ -192,6 +209,16 @@ export const ComposerDictation: React.FC<ComposerDictationProps> = ({
     React.useEffect(() => {
         onSendStartRef.current = onSendStart;
     }, [onSendStart]);
+
+    const confirmWith = React.useCallback((action: 'insert' | 'send') => {
+        pendingActionRef.current = action;
+        // Hold the mobile composer open until the asynchronous submit settles.
+        if (action === 'send') {
+            onSendStartRef.current?.();
+        }
+        void confirmDictation();
+    }, [confirmDictation]);
+
     const wasIdleRef = React.useRef(true);
     React.useLayoutEffect(() => {
         const idle = status === 'idle';
@@ -210,46 +237,61 @@ export const ComposerDictation: React.FC<ComposerDictationProps> = ({
     }, [status, onActiveChange]);
 
     // Keyboard shortcut (toggle_dictation): idle -> start recording,
-    // recording -> confirm and insert. Dispatched by useKeyboardShortcuts.
+    // recording -> confirm. Dispatched by useKeyboardShortcuts.
     React.useEffect(() => {
-        const onToggle = () => {
+        if (!supported || !dictationEnabled) return;
+        const marker = composerMarkerRef.current;
+        const onToggle = (event: Event) => {
+            const requestedForm = (event as CustomEvent<{ composer?: HTMLFormElement }>).detail?.composer;
+            if (requestedForm && (!marker || !requestedForm.contains(marker))) return;
+            const targetForm = requestedForm
+                ?? document.activeElement?.closest('form')
+                ?? Array.from(document.querySelectorAll('[data-composer-dictation]'))
+                    .find((element) => !element.closest('[data-chat-column="pinned"]'))?.closest('form');
+            if (recordingOwner ? recordingOwner !== marker : !marker || !targetForm?.contains(marker)) return;
+            event.stopImmediatePropagation();
             if (statusRef.current === 'idle') {
-                void startDictation();
+                startRecording();
             } else if (statusRef.current === 'recording') {
-                pendingActionRef.current = 'insert';
-                void confirmDictation();
+                confirmWith(dictationAutoSend ? 'send' : 'insert');
             }
         };
         window.addEventListener('openchamber:dictation-toggle', onToggle);
         return () => window.removeEventListener('openchamber:dictation-toggle', onToggle);
-    }, [startDictation, confirmDictation]);
+    }, [supported, dictationEnabled, startRecording, confirmWith, dictationAutoSend]);
 
-    // While recording: Enter confirms (insert), Escape cancels. Capture-phase
+    React.useEffect(() => {
+        const marker = composerMarkerRef.current;
+        return () => {
+            if (recordingOwner === marker) recordingOwner = null;
+        };
+    }, [supported, dictationEnabled]);
+
+    // While recording: Enter confirms, Escape cancels. Capture-phase
     // so the composer's own Enter-to-send never fires underneath the overlay.
     React.useEffect(() => {
         if (status !== 'recording') {
             return;
         }
         const onKeyDown = (event: KeyboardEvent) => {
-            if (event.isComposing) {
+            if (event.isComposing || !composerMarkerRef.current || recordingOwner !== composerMarkerRef.current) {
                 return;
             }
             if (event.key === 'Enter' && !event.shiftKey && !event.metaKey && !event.ctrlKey && !event.altKey) {
                 event.preventDefault();
-                event.stopPropagation();
-                pendingActionRef.current = 'insert';
-                void confirmDictation();
+                event.stopImmediatePropagation();
+                confirmWith(dictationAutoSend ? 'send' : 'insert');
                 return;
             }
             if (event.key === 'Escape') {
                 event.preventDefault();
-                event.stopPropagation();
+                event.stopImmediatePropagation();
                 void cancelDictation();
             }
         };
         window.addEventListener('keydown', onKeyDown, { capture: true });
         return () => window.removeEventListener('keydown', onKeyDown, { capture: true });
-    }, [status, confirmDictation, cancelDictation]);
+    }, [status, confirmWith, cancelDictation, dictationAutoSend]);
 
     // Pixel-parity with the composer: the real footer row is taller than our
     // buttons (its height comes from the tallest control, e.g. the model
@@ -355,17 +397,6 @@ export const ComposerDictation: React.FC<ComposerDictationProps> = ({
 
     const isActive = status !== 'idle';
 
-    const confirmWith = (action: 'insert' | 'send') => {
-        pendingActionRef.current = action;
-        // Record-and-send keeps the composer open until the submit settles:
-        // the transcript arrives asynchronously and the dictation-end collapse
-        // used to fold the composer into the pill mid-send.
-        if (action === 'send') {
-            onSendStartRef.current?.();
-        }
-        void confirmDictation();
-    };
-
     const retry = () => {
         pendingActionRef.current = 'insert';
         void retryFailedDictation();
@@ -400,20 +431,23 @@ export const ComposerDictation: React.FC<ComposerDictationProps> = ({
 
     return (
         <>
+            <span ref={composerMarkerRef} data-composer-dictation hidden />
             {renderTrigger ? (
+                <Tooltip>
+                <TooltipTrigger asChild>
                 <button
                     type="button"
                     {...keepKeyboardFocusProps}
                     className={footerIconButtonClass}
-                    onClick={() => {
-                        void startDictation();
-                    }}
+                    onClick={startRecording}
                     disabled={disabled || isActive}
-                    title={dictationShortcut ? `${t('chat.dictation.start')} (${dictationShortcut})` : t('chat.dictation.start')}
                     aria-label={t('chat.dictation.start')}
                 >
                     <Icon name="mic" className={cn(iconSizeClass, 'text-current')} />
                 </button>
+                </TooltipTrigger>
+                <TooltipContent side="top" sideOffset={8}><TooltipLabelWithShortcut label={t('chat.dictation.start')} shortcut={dictationShortcut} /></TooltipContent>
+                </Tooltip>
             ) : null}
             {isActive ? (
                 <div
@@ -431,7 +465,7 @@ export const ComposerDictation: React.FC<ComposerDictationProps> = ({
                         // an inner layer; this element keeps the surface's
                         // text context.
                         'oc-dictation-overlay absolute inset-0 z-50 flex flex-col overflow-x-hidden overflow-y-hidden',
-                        isMobile && 'oc-surface-elevated border border-border/80 shadow-[0_4px_16px_-4px_rgb(0_0_0_/_0.12)]',
+                        isMobile && 'oc-surface-elevated border border-edge shadow-[0_4px_16px_-4px_rgb(0_0_0_/_0.12)]',
                         // Mobile: the overlay surface shows instantly (riding the
                         // pill → voice morph), its content fades in only after the
                         // shape has grown — otherwise the controls paint clipped
@@ -446,20 +480,21 @@ export const ComposerDictation: React.FC<ComposerDictationProps> = ({
                         <div aria-hidden="true" data-dictation-glass="true" className="oc-surface-floating pointer-events-none absolute inset-0 -z-10" />
                     ) : null}
                     {topAccessory}
-                    <div
+                    <ScrollableOverlay
                         ref={transcriptAreaRef}
+                        // min-h-0 (not a fixed min height): the mobile composer is shorter than
+                        // 52px of text area + footer, and a fixed min pushed the action row 4px
+                        // below the real footer. The area must shrink to whatever space the
+                        // underlying composer actually has.
+                        outerClassName="flex-1 min-h-0"
                         className={cn(
-                            // Text paddings match the composer textarea, plus the
-                            // 4px (pt-1) attachment-chips row that always renders
-                            // above it: desktop 16+4px, mobile 10+4px from the top.
-                            // min-h-0 (not a fixed min height): the mobile composer
-                            // is shorter than 52px of text area + footer, and a
-                            // fixed min pushed the action row 4px below the real
-                            // footer. The area must shrink to whatever space the
-                            // underlying composer actually has.
-                            'flex-1 min-h-0 overflow-y-auto px-3',
+                            // Text paddings match the composer textarea, plus the 4px (pt-1)
+                            // attachment-chips row that always renders above it: desktop 16+4px,
+                            // mobile 10+4px from the top.
+                            'px-3',
                             isMobile ? 'pt-3.5 pb-2.5' : 'pt-5 pb-2',
                         )}
+                        disableHorizontal
                     >
                         {/* Measured for the composer-growth report — keep all
                             transcript/placeholder/error content inside. */}
@@ -484,7 +519,7 @@ export const ComposerDictation: React.FC<ComposerDictationProps> = ({
                                 </p>
                             ) : null}
                         </div>
-                    </div>
+                    </ScrollableOverlay>
                     <div
                         className={cn('flex flex-shrink-0 items-center gap-x-3', footerPaddingClass)}
                         style={footerHeight ? { height: footerHeight } : undefined}

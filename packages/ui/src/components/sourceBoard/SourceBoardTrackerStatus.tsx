@@ -1,6 +1,7 @@
 import * as React from 'react';
 
 import { Icon } from '@/components/icon/Icon';
+import { ButtonTooltip } from '@/components/ui/action-toolbar';
 import { StatePill } from '@/components/references/ReferencePreview';
 import { toast } from '@/components/ui';
 import {
@@ -82,21 +83,23 @@ export const SourceBoardTrackerStatus: React.FC<{ item: TrackerItemSummary; onCh
 
     return (
         <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-                <button
-                    type="button"
-                    disabled={updating}
-                    aria-label={t('sourceBoard.tracker.statusAria', { status: label })}
-                    className="shrink-0 rounded-full outline-none transition-opacity hover:opacity-85 focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
-                >
-                    <StatePill
-                        icon={look.icon}
-                        color={look.color}
-                        label={label}
-                        trailing={<Icon name={updating ? 'loader-4' : 'arrow-down-s'} className={updating ? 'size-3.5 animate-spin' : 'size-3.5 opacity-70'} />}
-                    />
-                </button>
-            </DropdownMenuTrigger>
+            <ButtonTooltip label={t('contextTooltips.tracker.changeStatus')} side="bottom" className="shrink-0">
+                <DropdownMenuTrigger asChild>
+                    <button
+                        type="button"
+                        disabled={updating}
+                        aria-label={t('sourceBoard.tracker.statusAria', { status: label })}
+                        className="shrink-0 rounded-full outline-none transition-opacity hover:opacity-85 focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
+                    >
+                        <StatePill
+                            icon={look.icon}
+                            color={look.color}
+                            label={label}
+                            trailing={<Icon name={updating ? 'loader-4' : 'arrow-down-s'} className={updating ? 'size-3.5 animate-spin' : 'size-3.5 opacity-70'} />}
+                        />
+                    </button>
+                </DropdownMenuTrigger>
+            </ButtonTooltip>
             <DropdownMenuContent align="start" className="w-56">
                 <DropdownMenuRadioGroup value={currentId} onValueChange={(value) => void update(String(value))}>
                     {states.map((state) => {

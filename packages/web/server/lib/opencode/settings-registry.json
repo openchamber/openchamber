@@ -34,6 +34,12 @@
     "opencodeBinary": {
       "scope": "instance"
     },
+    "serverUpdateChannel": {
+      "scope": "instance",
+      "surfaces": [
+        "web"
+      ]
+    },
     "projects": {
       "scope": "instance"
     },
@@ -63,6 +69,12 @@
       ]
     },
     "desktopMinimizeToTrayEnabled": {
+      "scope": "instance",
+      "surfaces": [
+        "desktop"
+      ]
+    },
+    "desktopUpdateChannel": {
       "scope": "instance",
       "surfaces": [
         "desktop"
@@ -168,13 +180,16 @@
     "agentRenderToolEnabled": {
       "scope": "instance"
     },
+    "agentUsageToolEnabled": {
+      "scope": "instance"
+    },
     "agentImageToolEnabled": {
       "scope": "instance"
     },
     "agentImageModel": {
       "scope": "instance"
     },
-    "agentToolsCodeMode": {
+    "agentSecretToolEnabled": {
       "scope": "instance"
     },
     "agentMemoryToolEnabled": {
@@ -223,6 +238,9 @@
     "sessionRetentionOnlyArchived": {
       "scope": "instance"
     },
+    "sessionRetentionIncludeInWork": {
+      "scope": "instance"
+    },
     "sessionRetentionAction": {
       "scope": "instance"
     },
@@ -244,10 +262,16 @@
     "dictationEnabled": {
       "scope": "profile"
     },
+    "dictationAutoSend": {
+      "scope": "profile"
+    },
     "sttProvider": {
       "scope": "instance"
     },
     "sttServerUrl": {
+      "scope": "instance"
+    },
+    "sttEndpointPath": {
       "scope": "instance"
     },
     "sttModel": {
@@ -342,7 +366,20 @@
     "sidebarWorktreeNameByBranch": {
       "scope": "profile"
     },
+    "sidebarSections": {
+      "scope": "profile"
+    },
+    "sidebarPinLists": {
+      "scope": "profile"
+    },
+    "sidebarHiddenSections": {
+      "scope": "profile",
+      "perSurface": true
+    },
     "workStatusSectionOrder": {
+      "scope": "profile"
+    },
+    "workStatusSectionOrderExplicit": {
       "scope": "profile"
     },
     "workStatusPanelEnabled": {
@@ -412,6 +449,9 @@
     "copyMessagesAsPlainText": {
       "scope": "profile"
     },
+    "selectionApprovalText": {
+      "scope": "profile"
+    },
     "showTurnChangedFiles": {
       "scope": "profile"
     },
@@ -458,6 +498,9 @@
       "scope": "profile"
     },
     "autoSaveEnabled": {
+      "scope": "profile"
+    },
+    "fileEditorWrapLines": {
       "scope": "profile"
     },
     "confirmFileTreeMove": {
@@ -572,6 +615,10 @@
       "scope": "profile",
       "perSurface": true
     },
+    "chatFontSize": {
+      "scope": "profile",
+      "perSurface": true
+    },
     "terminalFontSize": {
       "scope": "profile",
       "perSurface": true
@@ -654,6 +701,9 @@
     "customProviderIcons": {
       "scope": "profile"
     },
+    "customProviderLogos": {
+      "scope": "profile"
+    },
     "recentModels": {
       "scope": "profile"
     },
@@ -667,6 +717,9 @@
       "scope": "profile"
     },
     "recentEfforts": {
+      "scope": "profile"
+    },
+    "lastUsedEfforts": {
       "scope": "profile"
     },
     "providerOrder": {
@@ -739,6 +792,9 @@
       "scope": "profile"
     },
     "notifyOnCompletion": {
+      "scope": "profile"
+    },
+    "notifyOnPullRequests": {
       "scope": "profile"
     },
     "notifyOnError": {
@@ -844,6 +900,10 @@
       "local": true
     },
     "contextZoneSizes": {
+      "scope": "device",
+      "local": true
+    },
+    "contextZoneExpandedChatSizes": {
       "scope": "device",
       "local": true
     },

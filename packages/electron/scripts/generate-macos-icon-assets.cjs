@@ -4,7 +4,8 @@ const os = require('node:os');
 const path = require('node:path');
 
 const iconName = 'AppIcon';
-const iconsDir = path.join(__dirname, '..', 'resources', 'icons');
+// The release icons by default; scripts/brand passes resources/icons-canary for Canary.
+const iconsDir = process.argv[2] ? path.resolve(process.argv[2]) : path.join(__dirname, '..', 'resources', 'icons');
 const sourceIconPath = path.join(iconsDir, `${iconName}.icon`);
 const outputAssetsPath = path.join(iconsDir, 'Assets.car');
 const outputIcnsPath = path.join(iconsDir, 'icon.icns');

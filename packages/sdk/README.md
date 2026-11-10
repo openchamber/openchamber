@@ -2,7 +2,7 @@
 
 Build extensions for [OpenChamber](https://openchamber.dev). An extension can show a panel on the right-hand rail or run actions in the background without a panel. It can read the current project and session, show toasts, put text in the chat box, attach a task to a session, and, once the user approves it, start sessions and send prompts. This package is the contract between the extension and the app.
 
-Full guide: [Build an extension](https://openchamber.dev/docs/sdk/). Reference: [Host API](https://openchamber.dev/docs/sdk/host/) and [UI kit](https://openchamber.dev/docs/sdk/ui/). Extensions with a local process: [GUEST_SERVICES.md](./GUEST_SERVICES.md).
+Full guide: [Build an extension](https://docs.openchamber.dev/sdk/). Reference: [Host API](https://docs.openchamber.dev/sdk/host/) and [UI kit](https://docs.openchamber.dev/sdk/ui/). Extensions with a local process: [GUEST_SERVICES.md](./GUEST_SERVICES.md).
 
 Extensions load in OpenChamber web and desktop. VS Code and mobile do not load them yet.
 
@@ -44,7 +44,7 @@ bunx openchamber-guest-bundle panel/main.ts panel/main.js
 
 Then install the folder from Settings → Extensions → Add. Folder installs run from your folder, so edit, rebuild, and reload. A `.zip` or an https git or zip link is copied into OpenChamber's data folder instead; ship the built files only. Git installs can update from Settings → Extensions when the repository's `version` is newer than the installed one, so bump `version` to ship an update; `https://…/panel.git#v1` pins a tag or branch.
 
-A complete three-file example is on the [Build an extension](https://openchamber.dev/docs/sdk/) page. Six examples are at [github.com/openchamber/openchamber/tree/main/packages/sdk/examples](https://github.com/openchamber/openchamber/tree/main/packages/sdk/examples).
+A complete three-file example is on the [Build an extension](https://docs.openchamber.dev/sdk/) page. Six examples are at [github.com/openchamber/openchamber/tree/main/packages/sdk/examples](https://github.com/openchamber/openchamber/tree/main/packages/sdk/examples).
 
 ## Manifest
 
@@ -57,13 +57,11 @@ Git installs also accept SSH addresses such as `git@github.com:owner/extension.g
   "openchamber": {
     "apiVersion": 1,
     "engines": { "openchamber": ">=1.24.0" },
+    "id": "acme-hello",
+    "name": "Hello",
+    "icon": "window",
     "contributes": {
-      "panel": {
-        "id": "acme-hello",
-        "name": "Hello",
-        "icon": "window",
-        "entry": "panel/index.html"
-      },
+      "panel": { "entry": "panel/index.html" },
       "attach": "dialog",
       "capabilities": ["prompt", "sessions"],
       "actions": [
@@ -90,15 +88,15 @@ Git installs also accept SSH addresses such as `git@github.com:owner/extension.g
 - `version` is required semver. Settings → Extensions shows it on the card.
 - `apiVersion` is `1`. Anything else is refused.
 - `engines.openchamber` is optional (`1.24.0` or `>=1.24.0`). Older OpenChamber builds refuse the install.
-- `panel.id` is kebab-case and unique. `icon` is a Remixicon name (`RiWindowLine` becomes `window`) or an SVG inside the folder. `entry` is the visible panel's HTML file. Leave `entry` out to have no rail icon or panel. Add `background.entry` for executable actions and commands; with neither entry, the extension can only declare `tools`, as in `examples/tools-only`.
+- `panel.id` is kebab-case and unique. `icon` is a Remixicon name (`RiWindowLine` becomes `window`) or an SVG inside the folder. `entry` is the visible panel's HTML file. Leave `entry` out to have no rail icon or panel. Add `background.entry` for executable actions and commands; with neither entry, the extension can only declare `tools`, as in `examples/tools-only`, and `providerLogos`.
 - `background: { "entry": "background/index.html" }` supplies separate sandboxed HTML for background actions and slash commands. Its scripts must be built. It runs on demand, not continuously or at installation. A panel can coexist with it.
 - `attach` is optional. `"dialog"` opens the page in a window from the + menu next to the chat box; `true` or `"panel"` opens the rail panel instead. `ctx.surface` tells the page which one it is in. The object form `{ "mode": "dialog", "entry": "panel/attach.html" }` gives the window its own page. When the user clicks the attached chip, the page opens again with that item in `ctx.item` (`null` from the + menu), so it can show the item instead of the list.
 - `actions` is optional: menu entries on messages (`where: "message"`, optionally only `roles: ["assistant"]`) and on sessions (`where: "session"`). By default, picking one opens your page with that message or session in `ctx.item` (`kind: "message"` with the text, or `kind: "session"`; add `payload: ["messages"]` to get the conversation too). Set `mode: "background"` to call `onAction` without opening UI, as shown below. Up to 8.
 - `commands` is optional: slash commands for the chat box, up to 8. `/task DEMO-2` calls your `host.onResolve` handler instead of the model; return a chip to attach it, or `null` for nothing. A name the app already has is ignored.
 - `tools` is optional: how your tool calls look in the chat, up to 16, no code. `match` is the tool name OpenCode reports (`mcp.tasks.*` matches every tool under that prefix); `name` and `icon` (a Remixicon name or an SVG inside the folder, like `panel.icon`) set the header, `title` and `subtitle` are templates like `{input.id}` or `{output.total} open`, and `output` picks the body: `text`, `json`, `markdown`, `code` (with `language`), or `table` (with `columns`, rows from the output array or `output.items`). Leave `output` out to keep the app's own detection.
-- `capabilities` lists what needs the user's approval: `prompt` to send messages, `sessions` to create sessions and worktrees, `files` to read and write inside the open project, `model` for one-off text generation with the user's Small Model (`host.generate`, no session involved). An `integration` adds `network`, a `service` adds `service`, `filesystem` patterns (like `["~/.config/opencode/opencode.json"]`) add `filesystem`, which lets `readFile`, `writeFile`, `listDir`, and `stat` reach those paths outside the project, and a session action with `payload: ["messages"]` adds `conversation`. The user approves the whole list once at install. Calls outside it fail with `NOT_GRANTED`.
+- `capabilities` lists what needs the user's approval: `prompt` to send messages, `sessions` to create sessions and worktrees, `files` to read and write inside the open project, `model` for one-off text generation with the user's Small Model (`host.generate`, no session involved). An `integration` adds `network`, a `service` adds `service`, `filesystem` patterns (like `["~/.config/opencode/opencode.json"]`) add `filesystem`, which lets `readFile`, `writeFile`, `listDir`, and `stat` reach those paths outside the project, a session action with `payload: ["messages"]` adds `conversation`, and `sessionEvents` with `content: true` adds `transcript` (what the agent said or asked, delivered to the service). The user approves the whole list once at install. Calls outside it fail with `NOT_GRANTED`.
 - `integration` is optional. It adds a card at Settings → Integrations. `token` takes a pasted API token (`scheme: "bearer"` for `Authorization: Bearer`, `"basic"` for a username and token pair as Jira Cloud wants), `oauth` runs an authorize flow with a pasted client id, and `host: { "provider": "linear" }` reuses the Linear account already connected in OpenChamber. The page never sees the token; OpenChamber makes the calls through `host.request`.
-- `service` is optional. It declares a local process OpenChamber starts next to the extension. It runs with the user's full access and no sandbox, so declare one only when the page cannot do the job. See [GUEST_SERVICES.md](./GUEST_SERVICES.md). With `provides: ["browser"]` the service can stand in for the agent's browser, so agents browse on the server with no desktop app open; the user picks it in Settings → OpenChamber Tools. With `surface: true` it shows a live picture in the rail that the user can watch and take over, and hand back to the agent; add `panel.entry` (with `panel.dock` and `panel.size`) for your own controls docked beside it.
+- `service` is optional. It declares a local process OpenChamber starts next to the extension. It runs with the user's full access and no sandbox, so declare one only when the page cannot do the job. See [GUEST_SERVICES.md](./GUEST_SERVICES.md). With `provides: ["browser"]` the service can stand in for the agent's browser, so agents browse on the server with no desktop app open; the user picks it in Settings → OpenChamber Tools. With `surface: true` it shows a live picture in the rail that the user can watch and take over, and hand back to the agent; add `panel.entry` (with `panel.dock` and `panel.size`) for your own controls docked beside it. With `contributes.sessionEvents` beside it, OpenChamber tells the service when a turn finishes or fails and when the agent asks permission or a question, in every project and with no window open; `content: true` adds the text of each (the `transcript` capability). With `provides: ["notifications"]` and `contributes.notifications`, the service delivers the user's notifications next to the desktop and the phone; the user connects the account in Settings → Integrations and the token stays in OpenChamber. With `provides: ["tracker"]` and `contributes.tracker`, the service is a work item tracker next to Linear: its items appear in the picker, the composer, New Worktree and linked items, the user connects accounts on its card under Extension accounts, and tokens stay in OpenChamber. An extension is a Git host or a tracker, never both.
 
 ## Actions without opening a panel
 
@@ -129,19 +127,23 @@ Each click runs in a fresh hidden iframe. Await all work inside the handler, inc
 
 `ctx.surface` is `"background"`; skip drawing your UI in that case. `ctx.item` stays `null`, so the action runs only through `onAction`, without repeated `onItem` snapshots. The session and directory context stay with the clicked target even if the user changes chats. OpenChamber loads `background.entry` when declared and falls back to `panel.entry` for existing extensions. Omit `mode`, or use `"open"`, to open a visible panel or dialog. See `examples/hello-kit` for separate panel and background scripts.
 
-To remove the panel and its rail icon entirely, use this `contributes` block:
+To remove the panel and its rail icon entirely, leave `panel` out and name the extension beside `contributes`:
 
 ```json
 {
-  "panel": { "id": "message-tools", "name": "Message Tools", "icon": "apps" },
-  "background": { "entry": "background/index.html" },
-  "actions": [
-    { "id": "message-length", "label": "Show message length", "where": "message", "mode": "background" }
-  ]
+  "id": "message-tools",
+  "name": "Message Tools",
+  "icon": "apps",
+  "contributes": {
+    "background": { "entry": "background/index.html" },
+    "actions": [
+      { "id": "message-length", "label": "Show message length", "where": "message", "mode": "background" }
+    ]
+  }
 }
 ```
 
-The `panel` object retains the extension's identity for Settings and approval dialogs; only `panel.entry` creates a visible panel. Without it, every action must use `mode: "background"`, and `attach` and `page` cannot open a view. Slash commands call `onResolve` in the background entry, with `ctx.surface` also set to `"background"`. Capabilities, services, integrations, storage, and file access use the same approval checks. An attached chip can still be sent to the model or opened with its browser button; clicking to reopen the extension shows a no-panel notice.
+Only `panel.entry` creates a rail icon.
 
 This addition requires a matching OpenChamber build. For unreleased SDK preview builds, use the app built from the same revision.
 
@@ -222,7 +224,7 @@ host.onItem((item) => {
 });
 ```
 
-Every method, its limits, and the error codes are on the [Host API](https://openchamber.dev/docs/sdk/host/) page.
+Every method, its limits, and the error codes are on the [Host API](https://docs.openchamber.dev/sdk/host/) page.
 
 ## Popovers outside the extension frame
 

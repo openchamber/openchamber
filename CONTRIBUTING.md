@@ -2,31 +2,14 @@
 
 ## Before you start
 
-Bug fixes and small improvements: just open the PR. That's most of what gets
-merged, and a typical merged PR is around 200 lines.
+Every pull request links an issue, and which issue depends on the change.
 
-New features, changes to how something behaves for users, or reworks of how a
-module is put together: start an
-[Ideas discussion](https://github.com/openchamber/openchamber/discussions/categories/ideas)
-first, and start it before the code. Say what you were trying to do, what got
-in your way, and what you'd want instead, in your own words. A screenshot or a
-rough mockup helps more than a specification.
+- **Bug fix.** Open a [bug report](https://github.com/openchamber/openchamber/issues/new?template=bug_report.yml), or find the existing one, and put `Fixes #N` in the PR description. You don't need to wait for anyone.
+- **New feature or a change to how something behaves.** Open a [feature request](https://github.com/openchamber/openchamber/issues/new?template=feature_request.yml) and wait. Building starts after the maintainer marks it `accepted`. Write it in a few sentences of your own: what you were trying to do, what got in your way, what you'd want instead. A long generated write-up with headings, implementation plans and file lists isn't read.
 
-A post describing something you already built is a report, not a discussion:
-the decision is made by then, and it gets closed along with the PR behind it.
-Not because it was drafted by an AI, we all use AI, but because it arrives
-after the only moment when talking would have changed anything. If you have an
-idea of how you'd implement it, or a branch already sketched out, bring it as a
-question: here's how I'd do it, does that shape work? A branch you're willing
-to change is a proposal. Once the shape is agreed, build it and link the
-discussion from the PR.
+A pull request without a linked bug report or accepted feature request is closed automatically with the `needs-accepted-issue` label. It reopens on its own once its description links one (`Fixes #N`, or `Part of #N` for one piece of a larger feature), or once the linked feature request gets `accepted`. Pull requests that only change documentation or tests don't need an issue.
 
-Wait for the answer before you build. A pull request that carries a product
-decision, with no discussion behind it and no maintainer go-ahead, is not
-getting reviewed, whatever shape the code is in. That "yes, go ahead" is the
-thing that makes it worth your evening.
-
-**What counts as a product decision?** Anything where two reasonable people
+**What counts as a feature request?** Anything where two reasonable people
 could disagree about whether it should exist or how it should behave. In
 practice: a new button, panel, setting or command; a changed default; a
 shortcut or gesture that now does something else; different wording, ordering
@@ -35,20 +18,20 @@ everyone. Also removing or working around behavior the code marks as
 deliberate: if a comment says something is skipped on purpose, then "is that
 actually a bug?" is a product question, and it comes first.
 
-Not a product decision: a crash, wrong data, something that doesn't work the
-way it plainly says it does, a performance fix that keeps behavior identical.
-Those are bugs. Just open the PR.
+A bug is a crash, wrong data, something that doesn't work the way it plainly
+says it does, or a performance fix that keeps behavior identical. A feature
+filed as a bug report gets relabeled, and its pull request closes with it.
 
-Not sure? Ask in the discussion first. It costs you one paragraph and saves
-you the whole pull request.
+Not sure which one it is? Open a feature request and ask. It costs you one
+paragraph and saves you the whole pull request.
 
-A large PR with no discussion behind it gets a `needs-discussion` label and a
-comment asking for one. It stays parked until the discussion exists. Nobody is
-shooing you away, we just can't review a product decision inside a 3,000-line
-diff.
+Repository collaborators and the people listed in
+[`.github/trusted-contributors`](.github/trusted-contributors) skip the
+automatic close. Their pull requests still carry product decisions only after
+the maintainer agreed to them.
 
-The single maintainer reviews everything by hand. Small, focused PRs get
-reviewed first; a PR that mixes unrelated fixes waits for the largest of them.
+Maintainers review everything by hand. Small, focused PRs get reviewed first;
+a PR that mixes unrelated fixes waits for the largest of them.
 
 ## Getting Started
 
@@ -204,12 +187,9 @@ without reconstructing the contributor's work.
 
 Before opening a pull request:
 
-1. For anything that is not a bug fix or a small improvement, make sure the
-   [Ideas discussion](https://github.com/openchamber/openchamber/discussions/categories/ideas)
-   happened first, that a maintainer said go ahead, and link it. Opening one
-   after the implementation, to describe what you already built, closes the
-   post and this pull request with it; opening the pull request without the
-   go-ahead means nobody reviews it.
+1. Link the issue: `Fixes #N` for a bug report or a whole accepted feature
+   request, `Part of #N` for one piece of an accepted feature request (see
+   *Before you start*).
 2. Read [`AGENTS.md`](./AGENTS.md), every project skill matching the character
    of the change, and the nearest package README and module `DOCUMENTATION.md`.
 3. Keep the change focused. Separate unrelated cleanup or refactors.
@@ -264,11 +244,25 @@ behavior before and after the change. Attach screenshots for static states and
 a short recording for motion, gestures, drag-and-drop, focus, or multi-step
 interactions.
 
-Evidence goes in the PR description: drag screenshots, recordings and logs into
-the GitHub editor and GitHub hosts them. Never commit them to the branch (an
-`evidence/` or `pr-evidence/` folder, request logs, traces): committed, they
-ship in every clone of the repository, and the intake check asks you to remove
-them.
+Evidence goes in the PR description, never in the branch: committed images,
+recordings, logs and traces ship in every clone of the repository, and the
+intake check asks you to remove them. Two ways to attach it:
+
+- By hand: drag the files into the PR description editor and GitHub hosts them.
+- From an agent or a script: `node scripts/pr-evidence.mjs --title "openchamber #123 evidence" before.png after.png`
+  uploads PNG, JPEG, GIF or WebP files to a secret gist and prints the Markdown
+  to paste into the description. Record motion as a GIF. It needs an
+  authenticated `gh`.
+
+Changes to the translation catalogs, where all UI wording lives, need no
+screenshots.
+
+Both rules are checked on every pull request. A branch that adds screenshots,
+recordings or logs gets `evidence-in-branch`; a change to UI files
+(`packages/ui/src`, `.tsx` and `.css`) whose description has no image gets
+`needs-visual-evidence`. The review starts once the label is gone, and it comes
+off on its own when the files leave the branch or the description gains a
+screenshot.
 
 Claims about performance, memory, CPU, rendering, startup, or similar empirical
 behavior require relevant before and after measurements.
@@ -287,9 +281,9 @@ Choose evidence based on the affected behavior:
 
 Evidence must represent the current pull request HEAD. After implementation
 changes that can affect the demonstrated behavior, refresh the evidence or
-state why it remains valid. If there is genuinely no user-visible change, say
-so and provide a concrete reason; deleting the evidence section is not an
-exemption.
+state why it remains valid. If a UI change genuinely shows nothing on screen,
+say why in the description; the maintainer then lifts the label by hand.
+Deleting the evidence section is not an exemption.
 
 ### Review enforcement
 
@@ -327,17 +321,12 @@ verify a trustworthy result, in which case it applies `review:automation-failed`
 Each completed review creates a new comment tied to its reviewed HEAD so the
 conversation remains chronological. Previous review comments are not rewritten.
 
-### Size label and parking
+### Size label
 
 Every PR gets a `size:XS` to `size:XXL` label from its changed lines. Tests,
 lockfiles and translation catalogs (`packages/ui/src/lib/i18n/messages`) don't
 count, so a one-line settings change that touches twelve locale files is still
 `size:XS`.
-
-A `size:XL` or larger PR with no Ideas discussion linked in its body also gets
-`needs-discussion` and a comment. Link the discussion (or shrink the PR) and
-the label comes off on the next push or edit. Repo collaborators are exempt:
-the team settles product questions before the work starts.
 
 ### Keeping PRs active
 
@@ -367,7 +356,7 @@ You can still help:
 
 - Report bugs. Even "this felt confusing" is useful. Write issues in English (machine translation is fine); reports in other languages wait until someone translates them
 - Test on different devices, browsers, or OS versions
-- Suggest features in [Ideas discussions](https://github.com/openchamber/openchamber/discussions/categories/ideas). The issue tracker is for bugs only
+- Suggest features with a [feature request](https://github.com/openchamber/openchamber/issues/new?template=feature_request.yml)
 - Answer questions in [Q&A discussions](https://github.com/openchamber/openchamber/discussions/categories/q-a)
 
 ## Questions?

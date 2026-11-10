@@ -215,7 +215,7 @@ type UrlAuthScope = `guest:${string}`;
 
 type MintedUrlAuthToken = { token: string; expiresAt: number };
 
-const mintedUrlAuthTokenSchema = z.object({ token: z.string(), expiresAt: z.number() });
+const mintedUrlAuthTokenSchema = z.object({ token: z.string(), expiresAt: z.number(), expiresIn: z.number().optional() });
 
 // One POST to `/auth/url-token` with the current runtime credentials. In relay
 // mode the mint must ride the tunnel, not the network: there is no reachable
@@ -242,7 +242,13 @@ const postUrlAuthTokenMint = async (apiBaseUrl: string | null | undefined, scope
     throw new Error(`Failed to mint runtime URL auth token (${response.status})`);
   }
   const parsed = mintedUrlAuthTokenSchema.safeParse(await response.json().catch(() => null));
-  return parsed.success ? { token: parsed.data.token.trim(), expiresAt: parsed.data.expiresAt } : { token: '', expiresAt: 0 };
+  if (!parsed.success) return { token: '', expiresAt: 0 };
+  // `expiresAt` is on the server's clock, and every expiry check here reads this
+  // device's clock. A device even a minute ahead would discard each fresh token
+  // and open realtime sockets without one, so prefer the remaining lifetime.
+  // Servers older than `expiresIn` only send `expiresAt`.
+  const { token, expiresAt, expiresIn } = parsed.data;
+  return { token: token.trim(), expiresAt: expiresIn === undefined ? expiresAt : Date.now() + expiresIn };
 };
 
 /**

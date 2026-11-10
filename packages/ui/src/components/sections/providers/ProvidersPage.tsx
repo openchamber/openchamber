@@ -4,7 +4,7 @@ import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLay
 import { SettingsSection } from '@/components/sections/shared/SettingsSection';
 import { SettingsInfoHint } from '@/components/sections/shared/SettingsInfoHint';
 import { ProviderLogo } from '@/components/ui/ProviderLogo';
-import { selectProvidersForDirectory, useConfigStore } from '@/stores/useConfigStore';
+import { selectSettingsOnlyProvidersForDirectory, selectProvidersForDirectory, useConfigStore } from '@/stores/useConfigStore';
 import { useSettingsDirectory } from '@/hooks/useSettingsDirectory';
 import { useUIStore } from '@/stores/useUIStore';
 import { Button } from '@/components/ui/button';
@@ -26,6 +26,7 @@ import { listConnectableProviders } from './connectableProviders';
 import { ProviderConnectPicker } from './ProviderConnectPicker';
 import {
   providerHasCredentials,
+  providerHoldsStoredLogin,
   shouldShowApiKeyAuth,
   shouldShowModelsSection,
   usesMachineCredentials,
@@ -47,6 +48,8 @@ import { ProviderAccounts } from './ProviderAccounts';
 import { ProviderAccountSwitchToggle } from './ProviderAccountSwitchToggle';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { CustomProviderForm } from './CustomProviderForm';
+import { ProviderLogoImageControl } from './ProviderLogoImageControl';
+import { providerLogoUploadSupported, removeProviderLogo, uploadProviderLogo } from '@/lib/customProviderLogos';
 
 import { ProviderAuthMethodCards } from './ProviderAuthMethodCards';
 import type { IntegrationKeyRequest } from './ProviderApiKeyForm';
@@ -60,6 +63,7 @@ import {
   resolveProviderConfigScope,
   storedProviderEntrySchema,
   type CustomProviderFormState,
+  type CustomProviderLogoPlan,
   type CustomProviderPersistPlan,
   type ProviderConfigScope,
   type StoredProviderEntry,
@@ -103,7 +107,8 @@ export const ProvidersPage: React.FC = () => {
   // Settings browses whichever project its own selector points at; the app
   // stays where it is.
   const settingsDirectory = useSettingsDirectory();
-  const providers = useConfigStore((state) => selectProvidersForDirectory(state, settingsDirectory));
+  const chatProviders = useConfigStore((state) => selectProvidersForDirectory(state, settingsDirectory));
+  const settingsOnlyProviders = useConfigStore((state) => selectSettingsOnlyProvidersForDirectory(state, settingsDirectory));
   // Which provider the page shows is its own state. The config store's
   // selectedProviderId belongs to the chat's model selection; sharing it made
   // Settings open on the chat's provider and marked the chat selection manual.
@@ -135,6 +140,8 @@ export const ProvidersPage: React.FC = () => {
   const hiddenModels = useUIStore((state) => state.hiddenModels);
   const customProviderIcons = useUIStore((state) => state.customProviderIcons);
   const setCustomProviderIcon = useUIStore((state) => state.setCustomProviderIcon);
+  const customProviderLogos = useUIStore((state) => state.customProviderLogos);
+  const setCustomProviderLogo = useUIStore((state) => state.setCustomProviderLogo);
   const toggleHiddenModel = useUIStore((state) => state.toggleHiddenModel);
   const hideAllModels = useUIStore((state) => state.hideAllModels);
   const showAllModels = useUIStore((state) => state.showAllModels);
@@ -151,6 +158,20 @@ export const ProvidersPage: React.FC = () => {
   const [catalog, setCatalog] = React.useState<IntegrationCatalog | null>(() => peekIntegrationCatalog());
   const [integrationsLoadFailed, setIntegrationsLoadFailed] = React.useState(false);
   const integrations = catalog?.integrations ?? null;
+  // A provider with no model at all gets a card only while it holds a stored
+  // login: without one there is nothing on its page to act on. Joined so a
+  // re-read of the integrations that changes no card keeps the same array.
+  const storedLoginIds = settingsOnlyProviders
+    .filter((provider) => providerHoldsStoredLogin(integrations, provider))
+    .map((provider) => provider.id)
+    .join('\n');
+  const providers = React.useMemo(() => {
+    const loginIds = new Set(storedLoginIds.split('\n'));
+    const manageable = settingsOnlyProviders.filter(
+      (provider) => provider.models.length > 0 || loginIds.has(provider.id),
+    );
+    return manageable.length > 0 ? [...chatProviders, ...manageable] : chatProviders;
+  }, [chatProviders, settingsOnlyProviders, storedLoginIds]);
   // Null until read, and where the runtime has no OpenChamber server (VS Code).
   const [disabledProviders, setDisabledProviders] = React.useState<string[] | null>(null);
   React.useEffect(() => {
@@ -372,6 +393,29 @@ export const ProvidersPage: React.FC = () => {
   const selectedProvider = providers.find((provider) => provider.id === selectedProviderId);
   const selectedSources = selectedProviderId ? providerSources[selectedProviderId] : undefined;
 
+  const [logoBusyId, setLogoBusyId] = React.useState<string | null>(null);
+  /** Uploads or removes the provider's logo image; a failure is a toast and leaves the stored logo as it was. */
+  const applyLogoPlan = async (providerId: string, logoPlan: CustomProviderLogoPlan) => {
+    if (logoPlan.kind === 'keep' || !providerLogoUploadSupported()) return;
+    if (logoPlan.kind === 'remove' && !useUIStore.getState().customProviderLogos[providerId]) return;
+    setLogoBusyId(providerId);
+    try {
+      if (logoPlan.kind === 'upload') {
+        setCustomProviderLogo(providerId, await uploadProviderLogo(providerId, logoPlan.file));
+      } else {
+        await removeProviderLogo(providerId);
+        setCustomProviderLogo(providerId, null);
+      }
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      toast.error(logoPlan.kind === 'upload'
+        ? t('settings.providers.page.logo.toast.uploadFailed', { reason })
+        : t('settings.providers.page.logo.toast.removeFailed', { reason }));
+    } finally {
+      setLogoBusyId(null);
+    }
+  };
+
   const handleSaveCustomProvider = async (plan: CustomProviderPersistPlan) => {
     const busyKey = `custom:${plan.providerID}`;
     setAuthBusyKey(busyKey);
@@ -418,6 +462,9 @@ export const ProvidersPage: React.FC = () => {
       else delete nextCustomProviderIcons[plan.providerID];
       await updateDesktopSettings({ customProviderIcons: nextCustomProviderIcons });
       setCustomProviderIcon(plan.providerID, plan.icon);
+      // The provider is saved by now; a failed image write is reported on its own
+      // and does not reopen the form, whose next Save would store the key again.
+      await applyLogoPlan(plan.providerID, plan.logo);
 
       toast.success(t('settings.providers.page.toast.customProviderSaved', { provider: plan.name }));
       setCandidateProviderId('');
@@ -668,6 +715,8 @@ export const ProvidersPage: React.FC = () => {
   }
 
   const providerModels = Array.isArray(selectedProvider.models) ? selectedProvider.models : [];
+  // Hiding a model only takes it out of the chat pickers, which never list image models.
+  const canHideModels = !settingsOnlyProviders.includes(selectedProvider);
   const selectedIntegration = findIntegrationForProvider(integrations ?? [], selectedProvider.id);
   const signInMethods = getSignInMethods(
     findIntegrationForProvider(integrations ?? [], getSignInIntegrationId(selectedProvider.id)),
@@ -733,6 +782,12 @@ export const ProvidersPage: React.FC = () => {
       {configSources.length > 0
         ? <> · {t('settings.providers.page.configuredIn', { sources: configSources.join(', ') })}</>
         : null}
+    </span>
+  );
+
+  const modelCountAccessory = (
+    <span className="typography-micro text-muted-foreground font-normal">
+      ({providerModels.length})
     </span>
   );
 
@@ -870,15 +925,39 @@ export const ProvidersPage: React.FC = () => {
         ) : null}
       </SettingsSection>
 
+      {/* A custom provider sets its logo in the edit form, unless enterprise mode hides the form. */}
+      {providerLogoUploadSupported() && sourcesLoaded && (!isEditableCustomProvider || enterpriseLocked) ? (
+        <SettingsSection
+          title={t('settings.providers.page.logo.title')}
+          info={t('settings.providers.page.logo.info')}
+          settingsItem="providers.logo"
+        >
+          <ProviderLogoImageControl
+            preview={customProviderLogos[selectedProvider.id]
+              ? <ProviderLogo providerId={selectedProvider.id} alt="" className="size-5" />
+              : null}
+            busy={logoBusyId === selectedProvider.id}
+            onPick={(file) => void applyLogoPlan(selectedProvider.id, { kind: 'upload', file })}
+            onRemove={() => void applyLogoPlan(selectedProvider.id, { kind: 'remove' })}
+          />
+        </SettingsSection>
+      ) : null}
+
+      {providerModels.length === 0 ? (
+        <SettingsSection
+          title={t('settings.providers.page.models.title')}
+          titleAccessory={modelCountAccessory}
+          settingsItem="providers.models"
+        >
+          <p className="typography-meta text-muted-foreground">{t('settings.providers.page.models.none')}</p>
+        </SettingsSection>
+      ) : null}
+
       {showModelsSection ? (
       <SettingsSection
         title={t('settings.providers.page.models.title')}
-        titleAccessory={
-          <span className="typography-micro text-muted-foreground font-normal">
-            ({providerModels.length})
-          </span>
-        }
-        headerAction={(
+        titleAccessory={modelCountAccessory}
+        headerAction={canHideModels ? (
           <div className="flex items-center gap-1">
             <Button
               variant="outline"
@@ -902,7 +981,7 @@ export const ProvidersPage: React.FC = () => {
               {t('settings.providers.page.actions.showAll')}
             </Button>
           </div>
-        )}
+        ) : undefined}
         settingsItem="providers.models"
       >
             <div className="relative mb-2">
@@ -923,7 +1002,7 @@ export const ProvidersPage: React.FC = () => {
                   const modelId = typeof model?.id === 'string' ? model.id : '';
                   const modelName = typeof model?.name === 'string' ? model.name : modelId;
                   const metadata = modelId ? getModelMetadata(selectedProvider.id, modelId) as ModelMetadata | undefined : undefined;
-                  const isHidden = hiddenModels.some(
+                  const isHidden = canHideModels && hiddenModels.some(
                     (item) => item.providerID === selectedProvider.id && item.modelID === modelId
                   );
 
@@ -990,6 +1069,7 @@ export const ProvidersPage: React.FC = () => {
                         )}
                           </>
                         )}
+                        {canHideModels ? (
                         <button
                           type="button"
                           onClick={() => toggleHiddenModel(selectedProvider.id, modelId)}
@@ -999,6 +1079,7 @@ export const ProvidersPage: React.FC = () => {
                         >
                           {isHidden ? <Icon name="eye-off" className="h-3.5 w-3.5" /> : <Icon name="eye" className="h-3.5 w-3.5" />}
                         </button>
+                        ) : null}
                       </div>
                       </div>
                     </div>

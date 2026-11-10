@@ -7,6 +7,7 @@ import { sessionGoalStatusColor, sessionGoalStatusLabelKey } from '@/lib/session
 import { setSessionGoalStatus } from '@/lib/sessionGoalActions';
 import { toast } from '@/components/ui';
 import { Button } from '@/components/ui/button';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/lib/i18n';
 import { Spinner } from '@/components/ui/spinner';
 
@@ -56,20 +57,19 @@ export const SessionGoalRow: React.FC<SessionGoalRowProps> = React.memo(({ sessi
     : (goal.tokensUsed > 0 ? t('chat.goal.usage.tokens', { used: formatGoalTokens(goal.tokensUsed) }) : null);
 
   const pauseResume = goal.status === 'active'
-    ? { icon: 'pause' as const, labelKey: 'chat.goal.action.pause' as const, next: 'paused' as const }
+    ? { icon: 'pause' as const, labelKey: 'chat.goal.action.pause' as const, tooltipKey: 'contextTooltips.chat.goalPause' as const, next: 'paused' as const }
     : (goal.status === 'paused' || goal.status === 'blocked' || goal.status === 'budgetLimited'
-      ? { icon: 'play' as const, labelKey: 'chat.goal.action.resume' as const, next: 'active' as const }
+      ? { icon: 'play' as const, labelKey: 'chat.goal.action.resume' as const, tooltipKey: 'contextTooltips.chat.goalResume' as const, next: 'active' as const }
       : null);
 
   return (
     <div
       role="group"
-      className="flex oc-composer-row min-w-0 items-center gap-2 border-b border-border/60 ps-3 pe-1.5"
+      className="flex oc-composer-row min-w-0 items-center gap-2 border-b border-edge ps-3 pe-1.5"
       aria-label={t('chat.goal.row.aria')}
-      title={objectiveContent ?? undefined}
     >
       <Icon name="target" className="size-3.5 flex-shrink-0" style={{ color: sessionGoalStatusColor[goal.status] }} aria-hidden="true" />
-      <span className="min-w-0 flex-1 truncate text-sm text-foreground">
+      <span dir="auto" className="min-w-0 flex-1 truncate oc-ui-start-align text-sm text-foreground" title={objectiveContent ?? undefined}>
         {objectiveContent || t('chat.goal.dialog.titleManage')}
       </span>
       {evaluating ? (
@@ -89,18 +89,25 @@ export const SessionGoalRow: React.FC<SessionGoalRowProps> = React.memo(({ sessi
         </span>
       ) : null}
       {pauseResume ? (
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          onClick={() => void handleToggleStatus(pauseResume.next)}
-          onMouseDown={(event) => event.preventDefault()}
-          disabled={busy}
-          className="shrink-0 text-muted-foreground hover:bg-transparent hover:text-foreground"
-        >
-          <Icon name={pauseResume.icon} className="size-3" aria-hidden="true" />
-          {t(pauseResume.labelKey)}
-        </Button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span className="inline-flex shrink-0">
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => void handleToggleStatus(pauseResume.next)}
+                onMouseDown={(event) => event.preventDefault()}
+                disabled={busy}
+                className="shrink-0 text-muted-foreground hover:bg-transparent hover:text-foreground"
+              >
+                <Icon name={pauseResume.icon} className="size-3" aria-hidden="true" />
+                {t(pauseResume.labelKey)}
+              </Button>
+            </span>
+          </TooltipTrigger>
+          <TooltipContent side="top" sideOffset={6}>{t(pauseResume.tooltipKey)}</TooltipContent>
+        </Tooltip>
       ) : null}
     </div>
   );

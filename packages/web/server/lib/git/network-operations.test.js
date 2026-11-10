@@ -16,6 +16,7 @@ import { createHttpsCredentialReference, createSshCredentialReference } from './
 import { createNetworkOperations, createTrustedDirectoriesConfig } from './network-operations.js';
 import { createBindingService } from '../source-control/binding-service.js';
 import { createBindingStore } from '../source-control/binding-storage.js';
+import { createSourceControlAuditStore } from '../source-control/audit-storage.js';
 import { createProviderDescriptors } from '../source-control/provider-descriptors.js';
 import { giteaDescriptor } from '../gitea/descriptor.js';
 import { resolveRepositoryIdentity } from '../source-control/repository-identity.js';
@@ -33,6 +34,8 @@ const CLONE_CREDENTIAL = {
 };
 const temporaryDirectories = [];
 const execFileAsync = promisify(execFile);
+// The read of the person's own line-ending and LFS settings before a pull rebase.
+const OWN_CONFIG_PATTERN = '^(core\\.(autocrlf|eol|safecrlf|attributesfile)|filter\\.lfs\\.clean|lfs\\.extension\\..*)$';
 
 const createLocalRepository = async () => {
   const parent = await fs.mkdtemp(path.join(os.tmpdir(), 'openchamber-local-integration-'));
@@ -165,6 +168,7 @@ const setup = ({ mode = 'managed', transport = 'https', credentialId = 'opaque-c
       return { ...response, code: 0, stdout: SHA };
     }
     return response ?? (call.args.includes('^filter\\..*\\.(process|smudge|clean|required)$')
+      || call.args.includes(OWN_CONFIG_PATTERN)
       || call.args.includes('HEAD:.gitmodules') || call.args.includes('ls-tree') || call.args.includes('ls-files') || call.args.includes('rev-list')
       ? { code: 0 } : undefined);
   });
@@ -1567,11 +1571,53 @@ process.exit(safe ? 0 : 1);
     const result = await setupValue.service.execute(plan.operationId);
 
     expect(result.state).toBe('succeeded');
-    expect(setupValue.calls).toHaveLength(2);
-    expect(setupValue.calls[0].args.slice(-4)).toEqual([
+    expect(setupValue.calls).toHaveLength(3);
+    expect(setupValue.calls[0].args.slice(-5)).toEqual(['ls-remote', '--symref', '--', ENDPOINT, 'HEAD']);
+    expect(setupValue.calls[1].args.slice(-4)).toEqual([
       'push', '--', ENDPOINT, ':refs/heads/published',
     ]);
-    expect(setupValue.calls[1].args.slice(-3)).toEqual(['update-ref', '-d', 'refs/remotes/publish/published']);
+    expect(setupValue.calls[2].args.slice(-3)).toEqual(['update-ref', '-d', 'refs/remotes/publish/published']);
+  });
+
+  it('asks for the remote default branch on a credential lease of its own', async () => {
+    const setupValue = setup();
+    const revoked = [];
+    let issued = 0;
+    setupValue.credentialBroker.issue.mockImplementation(() => {
+      const lease = ++issued;
+      return { gitConfigArgs: ['-c', `credential.helper=!broker nonce-${lease}`], revoke: vi.fn(() => { revoked.push(lease); }) };
+    });
+    const input = request();
+    delete input.sourceRef;
+    input.operation = 'delete-remote-branch';
+    const plan = await setupValue.service.plan(input);
+
+    const result = await setupValue.service.execute(plan.operationId);
+
+    expect(result.state).toBe('succeeded');
+    const probe = setupValue.calls.find((call) => call.args.includes('ls-remote'));
+    const push = setupValue.calls.find((call) => call.args.includes('push'));
+    expect(probe.args).toContain('credential.helper=!broker nonce-1');
+    expect(push.args).toContain('credential.helper=!broker nonce-2');
+    expect(revoked).toEqual([1, 2]);
+  });
+
+  it('refuses to delete the branch the remote names as its default', async () => {
+    const setupValue = setup({
+      spawnResponder: (call) => (call.args.includes('ls-remote')
+        ? { code: 0, stdout: `ref: refs/heads/published\tHEAD\n${SHA}\tHEAD\n` }
+        : undefined),
+    });
+    const input = request();
+    delete input.sourceRef;
+    input.operation = 'delete-remote-branch';
+    const plan = await setupValue.service.plan(input);
+
+    const result = await setupValue.service.execute(plan.operationId);
+
+    expect(result.state).toBe('failed');
+    expect(result.error).toEqual({ code: 'INVALID_REQUEST', message: "The remote's default branch can't be deleted" });
+    expect(setupValue.calls.some((call) => call.args.includes('push'))).toBe(false);
   });
 
   it('resets each discovered CA and client certificate setting by its exact key', async () => {
@@ -1647,6 +1693,29 @@ process.exit(safe ? 0 : 1);
     expect(setupValue.calls[0].options.env.OPENCHAMBER_GIT_SSH_KEY).toBe(keyPath);
     expect(setupValue.calls[0].options.env.GIT_SSH_COMMAND).not.toContain(keyPath);
     expect(setupValue.calls[0].options.shell).toBe(false);
+  });
+
+  it('forwards only the resolved SSH passphrase and redacts it from failed transfers', async () => {
+    const passphrase = 'ssh-passphrase-canary';
+    const setupValue = setup({ transport: 'ssh', env: { OPENCHAMBER_GIT_SSH_PASSPHRASE: 'ambient-secret',
+      OPENCHAMBER_GIT_SSH_EXECUTABLE: '/ambient/ssh',
+      SSH_ASKPASS: '/ambient/helper' }, spawnResults: [{ code: 1, stderr: `Permission denied ${passphrase}` }] });
+    const cleanup = vi.fn(async () => true);
+    const askpassEnv = { SSH_ASKPASS: '/owned/helper', SSH_ASKPASS_REQUIRE: 'force', DISPLAY: ':0',
+      OPENCHAMBER_GIT_SSH_PASSPHRASE: passphrase };
+    setupValue.credentialResolver.resolve.mockResolvedValue({ mode: 'managed', transport: 'ssh', key: {
+      privateKeyPath: '/owned/key', sourcePath: '/original/key', fingerprint: `SHA256:${'a'.repeat(43)}`,
+      askpassEnv, cleanup,
+    } });
+    const plan = await setupValue.service.plan(request('fetch', { remote: { name: 'publish',
+      endpoint: { displayUrl: 'git@example.com:owner/repository.git', fingerprint: setupValue.authority.endpointFingerprint } } }));
+    const result = await setupValue.service.execute(plan.operationId);
+    expect(setupValue.calls[0].options.env).toMatchObject(askpassEnv);
+    expect(setupValue.calls[0].options.env).not.toHaveProperty('OPENCHAMBER_GIT_SSH_EXECUTABLE');
+    expect(JSON.stringify(setupValue.calls[0].args)).not.toContain(passphrase);
+    expect(result.state).toBe('failed');
+    expect(JSON.stringify(result)).not.toContain(passphrase);
+    expect(cleanup).toHaveBeenCalled();
   });
 
   it('rejects config, remote, or source changes before spawning', async () => {
@@ -2086,6 +2155,156 @@ process.exit(safe ? 0 : 1);
     expect(setupValue.calls.find((call) => call.args.includes('clone'))?.options.cwd).toBe(alpha);
   });
 
+  it.each([
+    ['submodule', 'system', true], ['lfs', 'system', true],
+    ['submodule', 'anonymous', true], ['lfs', 'anonymous', true],
+    ['submodule', 'managed', true], ['lfs', 'managed', true],
+    ['submodule', 'system', false], ['lfs', 'system', false],
+    ['submodule', 'system', true, 'plan'], ['lfs', 'system', true, 'plan'],
+    ['submodule', 'system', true, 'start'], ['lfs', 'system', true, 'start'],
+    ['submodule', 'system', true, 'cancel-start'], ['lfs', 'system', true, 'cancel-start'],
+  ])('audits a nested %s with %s transport, granted=%s, auditFailure=%s', async (kind, mode, granted, auditFailure) => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'openchamber-submodule-fresh-nested-'));
+    temporaryDirectories.push(root);
+    const alpha = path.join(root, 'vendor', 'alpha');
+    const nested = path.join(alpha, 'nested');
+    const pointer = `version https://git-lfs.github.com/spec/v1\noid sha256:${'d'.repeat(64)}\nsize 12\n`;
+    const childEndpoint = kind === 'lfs'
+      ? 'https://example.com/owner/alpha.git/info/lfs'
+      : 'https://example.com/owner/nested.git';
+    const rootManifest = 'submodule.alpha.path\nvendor/alpha\0submodule.alpha.url\n../alpha.git\0';
+    const childManifest = 'submodule.nested.path\nnested\0submodule.nested.url\n../nested.git\0';
+    const auditPath = path.join(root, 'audit.json');
+    const auditStore = { ...createSourceControlAuditStore({ filePath: auditPath }) };
+    const planAudit = auditStore.plan;
+    const startAudit = auditStore.start;
+    const nestedAudits = [];
+    let operationId;
+    let notifyStart;
+    let releaseStart;
+    const startEntered = new Promise((resolve) => { notifyStart = resolve; });
+    const startReleased = new Promise((resolve) => { releaseStart = resolve; });
+    auditStore.plan = vi.fn(async (record) => {
+      if (!record.id.includes(':auxiliary:')) operationId = record.id.slice('git:'.length);
+      if (record.target.auxiliaries?.some((entry) => entry.endpointFingerprint === fingerprintRemoteUrl(childEndpoint))) {
+        nestedAudits.push(record);
+        if (auditFailure === 'plan') throw new Error('Private audit failure');
+      }
+      return planAudit(record);
+    });
+    auditStore.start = vi.fn(async (id) => {
+      if (auditFailure === 'start' && nestedAudits.some((record) => record.id === id)) throw new Error('Private audit failure');
+      if (auditFailure === 'cancel-start' && nestedAudits.some((record) => record.id === id)) {
+        notifyStart();
+        await startReleased;
+      }
+      return startAudit(id);
+    });
+    const validateGitAuxiliaryContext = vi.fn(async ({ rawEndpoint }) => {
+      if (!granted && rawEndpoint === childEndpoint) {
+        throw Object.assign(new Error('Missing grant'), { code: 'GIT_AUXILIARY_AUTHORIZATION_REQUIRED' });
+      }
+      return {
+        endpoint: rawEndpoint, endpointFingerprint: fingerprintRemoteUrl(rawEndpoint),
+        transportMode: rawEndpoint === childEndpoint ? mode : 'system', transportRevision: 'transport_one',
+        credentialId: rawEndpoint === childEndpoint && mode === 'managed' ? 'nested-credential' : undefined,
+      };
+    });
+    const setupValue = setup({
+      validateGitAuxiliaryContext,
+      auditStore,
+      spawnResponder: ({ args, options }) => {
+        const command = args.join(' ');
+        const inLfsChild = kind === 'lfs' && options.cwd === alpha;
+        if (kind === 'submodule' && args.includes('clone') && args.at(-1) === nested
+          || inLfsChild && args.includes('lfs') && args.includes('fetch')) {
+          const persisted = Object.values(JSON.parse(fsSync.readFileSync(auditPath, 'utf8')).records);
+          expect(persisted).toContainEqual(expect.objectContaining({
+            id: nestedAudits[0]?.id, state: 'running',
+            target: { kind: 'git-network', operation: 'checkout-hydration', remotes: [],
+              auxiliaries: [{ kind, endpointFingerprint: fingerprintRemoteUrl(childEndpoint) }] },
+            transportReference: { kind: 'auxiliary', entries: [{ kind, endpointFingerprint: fingerprintRemoteUrl(childEndpoint),
+              transport: mode === 'managed' ? { kind: 'managed', credentialId: 'nested-credential' }
+                : mode === 'anonymous' ? { kind: 'anonymous' } : { kind: 'system', marker: 'system-credentials' } }] },
+          }));
+        }
+        if (command.includes('config --blob HEAD:.gitmodules')) {
+          if (options.cwd === root) return { code: 0, stdout: rootManifest };
+          return kind === 'submodule' && options.cwd === alpha ? { code: 0, stdout: childManifest } : { code: 1 };
+        }
+        if (command.includes('ls-tree -rz')) {
+          if (options.cwd === root) return { code: 0, stdout: `160000 commit ${'b'.repeat(40)}\tvendor/alpha\0` };
+          return kind === 'submodule' && options.cwd === alpha
+            ? { code: 0, stdout: `160000 commit ${'c'.repeat(40)}\tnested\0` }
+            : { code: 0 };
+        }
+        if (command.includes('clone --no-checkout')) {
+          fsSync.mkdirSync(path.join(args.at(-1), '.git'));
+          return { code: 0 };
+        }
+        if (command.includes('rev-parse --verify HEAD')) {
+          if (options.cwd === alpha) return { code: 0, stdout: 'b'.repeat(40) };
+          return { code: 0, stdout: options.cwd === nested ? 'c'.repeat(40) : SHA };
+        }
+        if (args.includes('ls-files')) return inLfsChild ? { code: 0, stdout: 'asset.bin\0' } : { code: 0 };
+        if (inLfsChild && args.includes('check-attr')) return { code: 0, stdout: 'asset.bin\0filter\0lfs\0' };
+        if (inLfsChild && args.includes('--batch-check')) return { code: 0, stdout: `${SHA} blob ${Buffer.byteLength(pointer)}\n` };
+        if (inLfsChild && args.includes('--batch')) return { code: 0, stdout: `${SHA} blob ${Buffer.byteLength(pointer)}\n${pointer}\n` };
+        if (command.includes('HEAD:.lfsconfig') || command.includes('config --includes')) return { code: 1 };
+        if (command.includes('lfs version')) return inLfsChild ? { code: 0, stdout: 'git-lfs/3.0' } : { code: 1 };
+        return { code: 0 };
+      },
+    });
+
+    const hydration = setupValue.service.hydrateBoundCheckout({
+      directory: root, parentRemoteName: 'publish',
+      repositoryAuthority: { repositoryId: 'repo_one', bindingRevision: 2, configRevision: 'config_one' },
+    });
+    if (auditFailure === 'cancel-start') {
+      await startEntered;
+      await setupValue.service.cancel(operationId);
+      releaseStart();
+    }
+    const result = await hydration;
+
+    // Planning could not see this endpoint, so execution checks it against the binding revision planning pinned.
+    expect(validateGitAuxiliaryContext).toHaveBeenCalledWith(expect.objectContaining({
+      directory: root, repositoryId: 'repo_one', bindingRevision: 2, kind, rawEndpoint: childEndpoint,
+    }));
+    const clones = setupValue.calls.filter((call) => call.args.includes('clone')).map((call) => call.args.at(-1));
+    if (!granted || auditFailure) {
+      const entries = kind === 'submodule' ? result.submodules : result.lfs;
+      expect(entries).toContainEqual(expect.objectContaining({
+        path: kind === 'submodule' ? 'vendor/alpha/nested' : 'vendor/alpha',
+        status: auditFailure === 'cancel-start' ? 'cancelled' : granted ? 'failed' : 'authorization-required',
+      }));
+      expect(clones).toEqual([alpha]);
+      expect(setupValue.calls.some((call) => call.args.includes('lfs') && call.args.includes('fetch'))).toBe(false);
+      expect(nestedAudits).toHaveLength(granted ? 1 : 0);
+      if (auditFailure === 'cancel-start') {
+        // Let the delayed write settle even if execution returned before it.
+        await Promise.all(auditStore.start.mock.results.map(({ value }) => value));
+        expect(await auditStore.read(nestedAudits[0].id)).toMatchObject({ state: 'cancelled', result: { errorCode: 'CANCELLED' } });
+      }
+      return;
+    }
+    expect(result.status).toBe('succeeded');
+    expect(nestedAudits).toHaveLength(1);
+    expect(await auditStore.read(nestedAudits[0].id)).toMatchObject({ state: 'succeeded', repositoryId: 'repo_one', providerAccountId: null });
+    expect(JSON.stringify(nestedAudits)).not.toMatch(/https:\/\/|vendor\/|Private audit|top-secret/);
+    if (kind === 'submodule') {
+      expect(result.submodules).toMatchObject([
+        { path: 'vendor/alpha', status: 'succeeded' },
+        { path: 'vendor/alpha/nested', status: 'succeeded', endpoint: { displayUrl: childEndpoint } },
+      ]);
+      expect(clones).toEqual([alpha, nested]);
+    } else {
+      expect(result.lfs).toContainEqual(expect.objectContaining({
+        path: 'vendor/alpha', status: 'succeeded', endpoint: expect.objectContaining({ displayUrl: childEndpoint }),
+      }));
+    }
+  });
+
   it('does not report a freshly cloned submodule as hydrated when discovery inside it fails', async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'openchamber-submodule-recursive-'));
     temporaryDirectories.push(root);
@@ -2202,6 +2421,78 @@ process.exit(safe ? 0 : 1);
     });
     expect(setupValue.calls.some((call) => call.args.includes('clone') || call.args.includes('fetch'))).toBe(false);
     expect(setupValue.credentialResolver.resolve).not.toHaveBeenCalled();
+  });
+
+  describe('LFS checkout with an SSH parent and no explicit endpoint', () => {
+    const SSH_PARENT = 'git@example.com:owner/repository.git';
+    const LFS_ENDPOINT = 'https://example.com/owner/repository.git/info/lfs';
+    const LFS_PUBLIC_ENDPOINT = { displayUrl: LFS_ENDPOINT, fingerprint: fingerprintRemoteUrl(LFS_ENDPOINT) };
+    const LFS_POINTER = `version https://git-lfs.github.com/spec/v1\noid sha256:${'d'.repeat(64)}\nsize 12\n`;
+    const setupCheckout = (validateGitAuxiliaryContext) => setup({
+      mode: 'system',
+      transport: 'ssh',
+      validateGitAuxiliaryContext,
+      spawnResponder: ({ args }) => {
+        const command = args.join(' ');
+        if (args.includes('ls-files')) return { code: 0, stdout: 'asset.bin\0' };
+        if (args.includes('check-attr')) return { code: 0, stdout: 'asset.bin\0filter\0lfs\0' };
+        if (args.includes('--batch-check')) return { code: 0, stdout: `${SHA} blob ${Buffer.byteLength(LFS_POINTER)}\n` };
+        if (args.includes('--batch')) return { code: 0, stdout: `${SHA} blob ${Buffer.byteLength(LFS_POINTER)}\n${LFS_POINTER}\n` };
+        if (command.includes('lfs version')) return { code: 0, stdout: 'git-lfs/3.0' };
+        if (command.includes('HEAD:.lfsconfig') || command.includes('HEAD:.gitmodules') || command.includes('config --includes')) return { code: 1 };
+        return { code: 0 };
+      },
+    });
+    const lfsTransfers = (calls) => calls.filter((call) => call.args.includes('lfs') && !call.args.includes('version'));
+    const hydrate = ({ service }) => service.hydrateBoundCheckout({
+      directory: '/repository', parentRemoteName: 'publish',
+      repositoryAuthority: { repositoryId: 'repo_one', bindingRevision: 2, configRevision: 'config_one' },
+    });
+
+    it('inspects the derived HTTPS endpoint', async () => {
+      const setupValue = setupCheckout();
+
+      const result = await setupValue.service.inspectCheckoutHydration({
+        directory: '/repository', parentEndpoint: SSH_PARENT, parentRemoteName: 'publish',
+      });
+
+      expect(result).toEqual({
+        headSha: SHA,
+        requirements: [{ kind: 'lfs', path: '.', endpoint: LFS_PUBLIC_ENDPOINT }],
+      });
+      expect(lfsTransfers(setupValue.calls)).toEqual([]);
+    });
+
+    it('transfers an authorized checkout through exactly that endpoint', async () => {
+      const validateGitAuxiliaryContext = vi.fn(async ({ rawEndpoint }) => ({
+        endpoint: rawEndpoint, endpointFingerprint: fingerprintRemoteUrl(rawEndpoint),
+        transportMode: 'system', transportRevision: 'transport_one',
+      }));
+      const setupValue = setupCheckout(validateGitAuxiliaryContext);
+
+      const result = await hydrate(setupValue);
+
+      expect(result).toMatchObject({ status: 'succeeded', lfs: [{ path: '.', status: 'succeeded', endpoint: LFS_PUBLIC_ENDPOINT }] });
+      expect(validateGitAuxiliaryContext).toHaveBeenCalledWith(expect.objectContaining({
+        kind: 'lfs', rawEndpoint: LFS_ENDPOINT, parentRemote: 'publish',
+      }));
+      expect(lfsTransfers(setupValue.calls).map((call) => call.args.slice(call.args.indexOf(`lfs.url=${LFS_ENDPOINT}`) + 1)))
+        .toEqual([['lfs', 'fetch', 'publish', 'HEAD'], ['lfs', 'checkout']]);
+    });
+
+    it('starts no transfer without an auxiliary grant', async () => {
+      const setupValue = setupCheckout(vi.fn(async () => {
+        throw Object.assign(new Error('Missing grant'), { code: 'GIT_AUXILIARY_AUTHORIZATION_REQUIRED' });
+      }));
+
+      const result = await hydrate(setupValue);
+
+      expect(result).toMatchObject({
+        status: 'authorization-required',
+        lfs: [{ path: '.', status: 'authorization-required', endpoint: LFS_PUBLIC_ENDPOINT }],
+      });
+      expect(lfsTransfers(setupValue.calls)).toEqual([]);
+    });
   });
 
   it('rejects a symlinked submodule parent without starting auxiliary transport', async () => {
@@ -2999,6 +3290,97 @@ process.exit(safe ? 0 : 1);
     expect(operation.credentialBroker.revoke).toHaveBeenCalledWith(planned.operationId);
   });
 
+  it.each([
+    ['a tree their Git calls clean', false],
+    ['a real unstaged edit', true],
+  ])('sync pull reads line endings from the person\'s own Git configuration: %s', async (_name, edited) => {
+    const { parent, directory, env, git } = await createLocalRepository();
+    await git('checkout', '-b', 'incoming');
+    await fs.writeFile(path.join(directory, 'incoming.txt'), 'incoming content\n');
+    await git('add', '.');
+    await git('commit', '-m', 'incoming');
+    const incomingSha = await git('rev-parse', 'HEAD');
+    await git('checkout', 'published');
+    const oldHead = await git('rev-parse', 'HEAD');
+    // Their global configuration converts line endings, as Git for Windows sets up by default.
+    const globalConfig = path.join(parent, 'global.config');
+    await fs.writeFile(globalConfig, '[core]\n\tautocrlf = true\n');
+    const userEnv = { ...env, GIT_CONFIG_GLOBAL: globalConfig, GIT_OPTIONAL_LOCKS: '0' };
+    const userGit = async (...args) => (await execFileAsync('git', args, { cwd: directory, env: userEnv })).stdout;
+    const readme = path.join(directory, 'README.md');
+    await fs.rm(readme);
+    await userGit('checkout', '--', 'README.md');
+    expect(await fs.readFile(readme, 'utf8')).toBe('ordinary content\r\n');
+    // A save without changes: the index no longer vouches for the file, so Git compares content.
+    const later = new Date(Date.now() + 5_000);
+    await fs.utimes(readme, later, later);
+    if (edited) await fs.appendFile(readme, 'local edit\r\n');
+    expect(await userGit('status', '--porcelain')).toBe(edited ? ' M README.md\n' : '');
+    const operations = createNetworkOperations({
+      validateGitTransportContext: async () => ({ endpoint: ENDPOINT, endpointFingerprint: fingerprintRemoteUrl(ENDPOINT),
+        transportMode: 'system', transportRevision: 'one' }),
+      credentialResolver: { resolve: vi.fn() },
+      inheritedEnv: userEnv,
+      runtimeIdentity: { id: 'fixture', platform: 'web' },
+      spawnImpl: (binary, args, options) => {
+        // Transfers use locally seeded objects; integration runs real Git unchanged.
+        const transfer = args.findIndex((arg) => arg === 'fetch' || arg === 'push');
+        if (transfer >= 0) {
+          const replacement = args[transfer] === 'fetch'
+            ? ['update-ref', args.at(-1).split(':')[1], incomingSha] : ['rev-parse', 'HEAD'];
+          return spawn(binary, [...args.slice(0, transfer), ...replacement], options);
+        }
+        return spawn(binary, args, options);
+      },
+    });
+    const system = { transportMode: 'system' };
+    const base = syncRequest();
+    const plan = await operations.plan(syncRequest({
+      directory, fetch: { ...base.fetch, ...system }, push: { ...base.push, ...system },
+    }));
+    const result = await operations.execute(plan.operationId);
+    if (edited) {
+      // Real changes still stop the pull, untouched: there is no autostash.
+      expect(result).toMatchObject({ state: 'partial', stepResults: [
+        { step: 'fetch', status: 'succeeded' },
+        { step: 'pull', status: 'failed', error: { message: expect.stringContaining('You have unstaged changes') } },
+        { step: 'push', status: 'skipped' },
+      ] });
+      expect(await git('rev-parse', 'HEAD')).toBe(oldHead);
+      expect(await fs.readFile(readme, 'utf8')).toBe('ordinary content\r\nlocal edit\r\n');
+    } else {
+      expect(result, JSON.stringify(result)).toMatchObject({ state: 'succeeded', stepResults: [
+        { step: 'fetch', status: 'succeeded' }, { step: 'pull', status: 'succeeded' }, { step: 'push', status: 'succeeded' },
+      ] });
+      await git('merge-base', '--is-ancestor', incomingSha, 'HEAD');
+      // The rebase writes files with the line endings their own Git would.
+      expect(await fs.readFile(path.join(directory, 'incoming.txt'), 'utf8')).toBe('incoming content\r\n');
+      expect(await userGit('status', '--porcelain')).toBe('');
+    }
+  }, 20_000);
+
+  it.each([
+    ['the canonical LFS clean filter', '', 'filter.lfs.clean\ngit-lfs clean -- %f\0', true],
+    ['an LFS extension git-lfs would run', '', 'filter.lfs.clean\ngit-lfs clean -- %f\0lfs.extension.custom.clean\nprogram %f\0', false],
+    ['a process filter the repository sets', 'filter.lfs.process\0', 'filter.lfs.clean\ngit-lfs clean -- %f\0', false],
+    ['another clean command', '', 'filter.lfs.clean\nprogram %f\0', false],
+  ])('sync pull runs the LFS clean filter only for %s', async (_name, repositoryFilters, ownConfig, cleans) => {
+    const operation = setup({ spawnResponder: ({ args }) => {
+      if (args.includes('^filter\\..*\\.(process|smudge|clean|required)$')) return { code: 0, stdout: repositoryFilters };
+      if (args.includes(OWN_CONFIG_PATTERN)) return { code: 0, stdout: `core.autocrlf\ntrue\0${ownConfig}` };
+      return undefined;
+    } });
+    const planned = await operation.service.plan(syncRequest());
+    await operation.service.execute(planned.operationId);
+    const rebase = operation.calls.find((call) => call.args.includes('rebase')).args;
+    expect(rebase).toContain('core.autocrlf=true');
+    expect(rebase).toContain('filter.lfs.smudge=');
+    expect(rebase.includes('filter.lfs.clean=git-lfs clean -- %f')).toBe(cleans);
+    // An empty `process` would stop Git from running `clean` at all.
+    expect(rebase.includes('filter.lfs.process=')).toBe(!cleans);
+    expect(rebase.some((arg) => arg.startsWith('lfs.extension.'))).toBe(false);
+  });
+
   it('fails closed when local filter discovery is truncated or fails, before merge', async () => {
     for (const response of [{ code: 128 }, { stdout: 'filter.custom.process' }, { stdout: 'filter.custom.process\0'.repeat(4_000) }]) {
       const operation = setup({ spawnResponder: ({ args }) => args.includes('--name-only') ? response : { code: 0 } });
@@ -3026,7 +3408,8 @@ process.exit(safe ? 0 : 1);
         { step: 'push', status: 'skipped' },
       ],
     });
-    expect(setupValue.calls).toHaveLength(3);
+    // Fetch, the two local configuration reads, the rebase.
+    expect(setupValue.calls).toHaveLength(4);
   });
 
   it('honors cancellation between sync steps without starting the next process', async () => {

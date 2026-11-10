@@ -22,5 +22,5 @@ export const subscribeSpaceSessionProject = (runtimeKey: string): (() => void) =
   const project = resolveProjectForSessionDirectory(projects.projects, session.availableWorktreesByProject, session.currentSessionDirectory);
   if (!project) return;
   if (projects.activeProjectId !== project.id) projects.setActiveProjectIdOnly(project.id);
-  useSessionDisplayStore.getState().setSingleProjectId(project.id);
+  if (!session.currentSessionKeepsSingleProject) useSessionDisplayStore.getState().setSingleProjectId(project.id);
 });

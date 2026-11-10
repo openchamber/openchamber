@@ -1,7 +1,7 @@
 ---
 mode: primary
 hidden: true
-model: opencode-go/mimo-v2.5
+model: opencode-go/deepseek-v4.1-flash
 color: "#4f8f8f"
 permissions:
   - { action: "*", resource: "*", effect: deny }

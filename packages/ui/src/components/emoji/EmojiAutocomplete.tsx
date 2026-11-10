@@ -5,6 +5,7 @@ import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { searchEmoji, useEmojiTable, type EmojiEntry } from '@/lib/emoji/shortcodes';
 import { cn } from '@/lib/utils';
 import { useMobileAutocompleteMaxHeight } from '@/components/chat/useMobileAutocompleteMaxHeight';
+import { useHeightMorph } from '@/lib/motion/useSizeMorph';
 
 /** `hasResults` is always given: until a list is on screen every key stays the field's. */
 export type EmojiAutocompleteHandle = InlinePickerHandle;
@@ -31,7 +32,11 @@ export const EmojiAutocomplete = React.forwardRef<EmojiAutocompleteHandle, Emoji
   style,
 }, ref) => {
   const containerRef = React.useRef<HTMLDivElement | null>(null);
-  const mobileMaxHeight = useMobileAutocompleteMaxHeight(containerRef, true, 240);
+  // Narrowing as the user types, the box eases into its new height; the
+  // edge it is anchored to stays put.
+  useHeightMorph(containerRef);
+  // A caret placement brings its own max-height.
+  const mobileMaxHeight = useMobileAutocompleteMaxHeight(containerRef, style?.maxHeight === undefined, 240);
   const { table, failed } = useEmojiTable(true);
   const results = React.useMemo<EmojiEntry[]>(
     () => (table ? searchEmoji(table.entries, searchQuery, RESULT_LIMIT) : []),

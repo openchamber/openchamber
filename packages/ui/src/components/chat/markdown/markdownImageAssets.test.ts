@@ -35,7 +35,7 @@ const resolver = {
 };
 
 mock.module('@/lib/runtime-fetch', () => ({ runtimeFetch }));
-mock.module('@/lib/runtime-url', () => ({ getRuntimeUrlResolver: () => resolver }));
+mock.module('@/lib/runtime-url', () => ({ getRuntimeUrlResolver: () => resolver, configureRuntimeUrlResolver: () => {} }));
 
 class TestFileReader {
   result: string | ArrayBuffer | null = null;

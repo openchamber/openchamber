@@ -13,7 +13,7 @@ const CONSOLE_STATUS_URL = 'https://opencode.ai/console/api/go/status';
 const CONSOLE_BILLING_STATUS_URL = 'https://opencode.ai/console/api/billing/status';
 // The Console counts one cent as 1_000_000 micro-cents, so a dollar is 100_000_000.
 const MICRO_CENTS_PER_DOLLAR = 100_000_000;
-const CONSOLE_PRODUCTS = new Set(['go', 'go-plus']);
+const CONSOLE_PRODUCTS = new Set(['go', 'go-plus', 'go-teams']);
 const NO_CONSOLE_SUBSCRIPTION = 'No active OpenCode Go subscription on the selected Console account';
 // Console keys expire and nothing can renew them, while a Console sign-in is
 // renewed by OpenCode and serves OpenCode Go too. Providers offers that sign-in

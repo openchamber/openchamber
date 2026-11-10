@@ -36,12 +36,14 @@ import {
   glyphSymbolSvg,
   noTileIconSvg,
 } from './geometry.mjs';
+import { canaryImageOutputs } from './canary.mjs';
 import { composeOnSquare, encodeIco, pixelCubePng, solidSquare, svgToPng } from './raster.mjs';
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const at = (...parts) => join(repoRoot, ...parts);
 
 const ELECTRON_ICONS = at('packages/electron/resources/icons');
+const CANARY_ICONS = at('packages/electron/resources/icons-canary');
 const WEB_PUBLIC = at('packages/web/public');
 const VSCODE_ASSETS = at('packages/vscode/assets');
 const ANDROID_RES = at('packages/mobile/android/app/src/main/res');
@@ -301,8 +303,12 @@ const generate = async () => {
     execFileSync('node', [at('packages/electron/scripts/generate-macos-icon-assets.cjs')], { stdio: 'inherit' });
     writeFile(join(ELECTRON_ICONS, 'dev-icon.png'), await macDevDockIcon());
     console.log('Wrote dev-icon.png.');
+    // Canary: every icon comes from its Icon Composer document (canary.mjs).
+    execFileSync('node', [at('packages/electron/scripts/generate-macos-icon-assets.cjs'), CANARY_ICONS], { stdio: 'inherit' });
+    for (const [path, buffer] of await canaryImageOutputs({ iconsDir: CANARY_ICONS, releaseIconsDir: ELECTRON_ICONS, ictool: ICTOOL })) writeFile(path, buffer);
+    console.log('Wrote the Canary icons.');
   } else {
-    console.log('No Xcode 26 (actool and Icon Composer): Assets.car, icon.icns and dev-icon.png were left as they are.');
+    console.log('No Xcode 26 (actool and Icon Composer): Assets.car, icon.icns, dev-icon.png and the Canary icons were left as they are.');
   }
   writeControlCenterSymbol();
 };

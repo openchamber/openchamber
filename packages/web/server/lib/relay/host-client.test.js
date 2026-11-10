@@ -2,7 +2,7 @@
 // client using the JS e2ee initiator. Verifies the full handshake and a tunneled
 // HTTP GET /health, and asserts only binary frames cross the relay post-handshake.
 
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'bun:test';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'bun:test';
 import http from 'node:http';
 import crypto from 'node:crypto';
 import { EventEmitter } from 'node:events';
@@ -552,6 +552,35 @@ describe('relay host-client control reconnect', () => {
 
   it('reconnects when the relay retires an unresponsive control socket', async () => {
     expect(await redialsAfterRetire(4003)).toBe(1);
+  });
+
+  // The relay accepted the dial and never answered the upgrade: no error, no close.
+  it('redials a control socket whose opening handshake never completes', () => {
+    vi.useFakeTimers();
+    const sockets = [];
+    const host = startRelayHost({
+      relayUrl: 'wss://relay.example.test/ws',
+      identity: fakeIdentity,
+      getLocalPort: () => 1,
+      logger: { warn: () => {}, info: () => {} },
+      createSocket: (url) => {
+        const socket = new BunLikeFailingSocket(url);
+        socket.terminate = () => socket.fail('WebSocket is closed before the connection is established');
+        sockets.push(socket);
+        return socket;
+      },
+    });
+    try {
+      vi.advanceTimersByTime(14_999);
+      expect(sockets).toHaveLength(1);
+
+      vi.advanceTimersByTime(1 + 1000);
+      expect(sockets).toHaveLength(2);
+      expect(host.getStatus()).toMatchObject({ state: 'reconnecting', lastError: 'control socket open timeout' });
+    } finally {
+      host.stop();
+      vi.useRealTimers();
+    }
   });
 });
 

@@ -156,6 +156,12 @@ type RowProps = {
   ariaLabel?: string;
   tooltip?: React.ReactNode;
   className?: string;
+  /**
+   * Direction of a label that is not a translated string: `auto` for names and
+   * titles people or agents wrote, `ltr` for branches and paths. A translated
+   * label keeps the interface's direction.
+   */
+  labelDir?: 'auto' | 'ltr';
 };
 
 /**
@@ -173,6 +179,7 @@ export const WorkStatusRow: React.FC<RowProps> = ({
   ariaLabel,
   tooltip,
   className,
+  labelDir,
 }) => {
   const labelId = React.useId();
   const touch = React.useContext(WorkStatusTouchContext);
@@ -190,7 +197,7 @@ export const WorkStatusRow: React.FC<RowProps> = ({
         // the status glyphs sections centre in a 14px slot line up as well.
         <span className="flex size-5 shrink-0 items-center justify-center [&>span]:size-5 [&_svg]:size-4">{leadingNode}</span>
       ) : leadingNode}
-      <span id={labelId} className={cn('min-w-0 flex-1 truncate', touch ? 'typography-ui-label' : 'text-[0.8125rem]', muted && 'text-muted-foreground')}>
+      <span id={labelId} dir={labelDir} className={cn('min-w-0 flex-1 truncate', labelDir && 'oc-ui-start-align', touch ? 'typography-ui-label' : 'text-[0.8125rem]', muted && 'text-muted-foreground')}>
         {label}
       </span>
       {value !== undefined && value !== null ? (
@@ -279,7 +286,7 @@ export const WorkStatusRowAction: React.FC<{
 }> = ({ children, onClick, tone = 'default', disabled, ariaLabel }) => {
   const touch = React.useContext(WorkStatusTouchContext);
   const color = tone === 'default' ? undefined : TONE_COLOR[tone];
-  return (
+  const button = (
     <button
       type="button"
       aria-label={ariaLabel}
@@ -302,6 +309,13 @@ export const WorkStatusRowAction: React.FC<{
     >
       {children}
     </button>
+  );
+  if (!ariaLabel) return button;
+  return (
+    <Tooltip delayDuration={300}>
+      <TooltipTrigger asChild>{button}</TooltipTrigger>
+      <TooltipContent side="top" sideOffset={4}>{ariaLabel}</TooltipContent>
+    </Tooltip>
   );
 };
 
@@ -346,8 +360,7 @@ export const WorkStatusCallout: React.FC<{ children: React.ReactNode }> = ({ chi
 export const WorkStatusMeter: React.FC<{ percent: number; color: string }> = ({ percent, color }) => {
   const touch = React.useContext(WorkStatusTouchContext);
   return (
-    // On the phone it starts under the row's label, past the icon column.
-    <div className={cn('h-1 overflow-hidden rounded-full bg-[var(--chat-divider)]', touch ? 'mb-2 ms-[2.625rem] me-2.5' : 'mx-1 mb-1')}>
+    <div className={cn('h-1 overflow-hidden rounded-full bg-[var(--chat-divider)]', touch ? 'mx-2.5 mb-2' : 'mx-1 mb-1')}>
       <div
         className="h-full rounded-full"
         style={{ width: `${Math.max(0, Math.min(100, percent))}%`, backgroundColor: color }}

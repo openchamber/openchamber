@@ -32,8 +32,7 @@ import {
   type ScheduledTask,
   type ScheduledTaskStatus,
 } from '@/lib/scheduledTasksApi';
-import { ScheduledTaskEditorDialog } from './ScheduledTaskEditorDialog';
-import { canonicalizeTimezone } from '@/lib/timezones';
+import { ScheduledTaskEditorDialog, type ScheduledTaskScopeOption } from './ScheduledTaskEditorDialog';
 import { getModelDisplayName } from '@/lib/modelDisplay';
 import { agentLabel } from '@/lib/agentLabel';
 import { useAgentColors } from '@/hooks/useAgentColors';
@@ -43,14 +42,9 @@ import { useFilesViewTabsStore } from '@/stores/useFilesViewTabsStore';
 import { CHAT_DRAFT_PROJECT_ID } from '@/lib/chatDirectories';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { createTaskRequestGate, mayCommitTaskList, mayEndTaskLoad } from './scheduledTasksRequests';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
+import { formatSchedule } from './scheduledTaskSchedule';
 
-const scheduleTimes = (task: ScheduledTask): string[] => {
-  const raw = Array.isArray(task.schedule.times)
-    ? task.schedule.times
-    : (task.schedule.time ? [task.schedule.time] : []);
-  const valid = raw.filter((value) => typeof value === 'string' && /^([01]\d|2[0-3]):([0-5]\d)$/.test(value));
-  return Array.from(new Set(valid)).sort((a, b) => a.localeCompare(b));
-};
 
 /**
  * What a task runs with, drawn the way the composer shows it: the provider's
@@ -87,64 +81,6 @@ const TaskModelLine: React.FC<{ task: ScheduledTask }> = ({ task }) => {
   );
 };
 
-const formatSchedule = (task: ScheduledTask, t: ReturnType<typeof useI18n>['t']): string => {
-  const timesLabel = scheduleTimes(task).join(', ') || '--:--';
-  const formatWeekday = (value: number) => {
-    if (value === 0) return t('sessions.scheduledTasks.dialog.schedule.weekdayShort.sun');
-    if (value === 1) return t('sessions.scheduledTasks.dialog.schedule.weekdayShort.mon');
-    if (value === 2) return t('sessions.scheduledTasks.dialog.schedule.weekdayShort.tue');
-    if (value === 3) return t('sessions.scheduledTasks.dialog.schedule.weekdayShort.wed');
-    if (value === 4) return t('sessions.scheduledTasks.dialog.schedule.weekdayShort.thu');
-    if (value === 5) return t('sessions.scheduledTasks.dialog.schedule.weekdayShort.fri');
-    if (value === 6) return t('sessions.scheduledTasks.dialog.schedule.weekdayShort.sat');
-    return t('sessions.scheduledTasks.dialog.schedule.weekdayShort.unknown');
-  };
-  if (task.schedule.kind === 'daily') {
-    if (task.schedule.timezone) {
-      return t('sessions.scheduledTasks.dialog.schedule.dailyWithTimezone', {
-        time: timesLabel,
-        timezone: canonicalizeTimezone(task.schedule.timezone),
-      });
-    }
-    return t('sessions.scheduledTasks.dialog.schedule.daily', { time: timesLabel });
-  }
-  if (task.schedule.kind === 'weekly') {
-    const days = Array.isArray(task.schedule.weekdays)
-      ? task.schedule.weekdays.map((value) => formatWeekday(value)).join(', ')
-      : '';
-    if (task.schedule.timezone) {
-      return t('sessions.scheduledTasks.dialog.schedule.weeklyWithTimezone', {
-        days,
-        time: timesLabel,
-        timezone: canonicalizeTimezone(task.schedule.timezone),
-      });
-    }
-    return t('sessions.scheduledTasks.dialog.schedule.weekly', { days, time: timesLabel });
-  }
-  if (task.schedule.kind === 'once') {
-    const date = typeof task.schedule.date === 'string' && task.schedule.date.trim().length > 0
-      ? task.schedule.date
-      : t('sessions.scheduledTasks.dialog.schedule.unknownDate');
-    const time = typeof task.schedule.time === 'string' && task.schedule.time.trim().length > 0
-      ? task.schedule.time
-      : '--:--';
-    if (task.schedule.timezone) {
-      return t('sessions.scheduledTasks.dialog.schedule.onceWithTimezone', {
-        date,
-        time,
-        timezone: canonicalizeTimezone(task.schedule.timezone),
-      });
-    }
-    return t('sessions.scheduledTasks.dialog.schedule.once', { date, time });
-  }
-  if (task.schedule.timezone) {
-    return t('sessions.scheduledTasks.dialog.schedule.cronWithTimezone', {
-      cron: task.schedule.cron || '',
-      timezone: canonicalizeTimezone(task.schedule.timezone),
-    });
-  }
-  return t('sessions.scheduledTasks.dialog.schedule.cron', { cron: task.schedule.cron || '' });
-};
 
 const formatClockTime = (value: number | undefined, timeFormatPreference: TimeFormatPreference): string => {
   if (!value || !Number.isFinite(value)) {
@@ -417,16 +353,29 @@ export function ScheduledTasksView({ layout, onLeave }: {
     };
   }, [selectedProjectID, reloadTasks]);
 
-  const handleSaveTask = React.useCallback(async (taskDraft: Partial<ScheduledTask>) => {
-    // An existing task belongs to the scope whose list displayed it; a draft
-    // without an id is created in the selected scope. Acting on the owner
-    // keeps a scope switch made while the editor was open from misfiling a
-    // task into the other project.
-    const projectID = (taskDraft.id ? editorOwnerRef.current : '') || selectedProjectID;
+  const handleSaveTask = React.useCallback(async (taskDraft: Partial<ScheduledTask>, targetProjectID: string) => {
+    // An existing task belongs to the scope whose list displayed it, captured
+    // when the editor opened, so a scope switch in the list meanwhile cannot
+    // misfile it. The editor's own scope field names where it is saved.
+    const ownerProjectID = taskDraft.id ? editorOwnerRef.current : '';
+    const projectID = targetProjectID || ownerProjectID || selectedProjectID;
     if (!projectID) {
       throw new Error(t('sessions.scheduledTasks.dialog.error.chooseProjectFirst'));
     }
-    await upsertScheduledTask(projectID, taskDraft);
+    if (taskDraft.id && ownerProjectID && projectID !== ownerProjectID) {
+      // Tasks are stored per project, so a move is a new task there and a
+      // delete here. The new one is written first: a failed delete leaves
+      // two copies the user is told about, never none.
+      const { id: originalTaskID, state: _state, ...movedTask } = taskDraft;
+      await upsertScheduledTask(projectID, movedTask);
+      try {
+        await deleteScheduledTask(ownerProjectID, originalTaskID);
+      } catch {
+        toast.error(t('sessions.scheduledTasks.dialog.toast.moveLeftOriginal'));
+      }
+    } else {
+      await upsertScheduledTask(projectID, taskDraft);
+    }
     // Refresh what is on screen: normally the scope that was just saved; if
     // the user switched while the editor was open, the newer scope's list is
     // what the view belongs to and it must stay consistent.
@@ -575,6 +524,10 @@ export function ScheduledTasksView({ layout, onLeave }: {
     </span>
   );
   const hasScopes = chatsAvailable || projects.length > 0;
+  const editorScopes: ScheduledTaskScopeOption[] = [
+    ...(chatsAvailable ? [{ id: CHAT_DRAFT_PROJECT_ID, label: chatsLabel }] : []),
+    ...projects.map((project) => ({ id: project.id, label: renderProjectLabel(project) })),
+  ];
 
   const projectSelector = (
     <div className="flex flex-col items-start gap-1">
@@ -598,7 +551,9 @@ export function ScheduledTasksView({ layout, onLeave }: {
           ) : selectedProject ? (
             <SelectValue>{renderProjectLabel(selectedProject)}</SelectValue>
           ) : (
-            <SelectValue placeholder={t('sessions.scheduledTasks.dialog.project.placeholder')} />
+            <SelectValue>
+              {hasScopes ? t('sessions.scheduledTasks.dialog.project.placeholder') : t('sessions.scheduledTasks.dialog.project.empty')}
+            </SelectValue>
           )}
         </SelectTrigger>
         <SelectContent>
@@ -689,7 +644,7 @@ export function ScheduledTasksView({ layout, onLeave }: {
                     {task.name}
                   </div>
                   <div className="typography-micro truncate text-muted-foreground">
-                    {formatSchedule(task, t)}
+                    {formatSchedule(task.schedule, t)}
                   </div>
                   <div className="typography-micro flex min-w-0 items-center gap-1 text-muted-foreground" title={task.execution.useDefaults ? undefined : `${task.execution.providerID ?? ''}/${task.execution.modelID ?? ''}`}>
                     <TaskModelLine task={task} />
@@ -748,6 +703,14 @@ export function ScheduledTasksView({ layout, onLeave }: {
                       <span>{t('sessions.scheduledTasks.dialog.lastRun.never')}</span>
                     )}
                   </span>
+                  {task.state?.lastRunIsolated ? (
+                    <span className="inline-flex items-center gap-1.5" title={task.state?.lastRunBranch || undefined}>
+                      <Icon name="git-branch" className="h-3.5 w-3.5" />
+                      {task.state?.lastRunBranch
+                        ? t('sessions.scheduledTasks.dialog.lastRun.isolatedBranch', { branch: task.state.lastRunBranch })
+                        : t('sessions.scheduledTasks.dialog.lastRun.isolated')}
+                    </span>
+                  ) : null}
                 </div>
 
                 {task.state?.lastError ? (
@@ -839,13 +802,13 @@ export function ScheduledTasksView({ layout, onLeave }: {
     <>
       {layout === 'mobile' ? (
         <div className="flex h-full min-h-0 flex-col">
-          <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-4">
+          <ScrollableOverlay outerClassName="min-h-0 flex-1" className="space-y-4 px-4 py-4" disableHorizontal>
             <p className="typography-meta text-muted-foreground">{t('sessions.scheduledTasks.dialog.description')}</p>
             {projectSelector}
             {tasksList}
-          </div>
+          </ScrollableOverlay>
           <div
-            className="shrink-0 border-t border-border/70 px-4 pt-2"
+            className="shrink-0 border-t border-edge px-4 pt-2"
             style={{ paddingBottom: 'calc(0.5rem + var(--oc-safe-area-bottom, 0px))' }}
           >
             {newTaskButton('w-full')}
@@ -858,8 +821,8 @@ export function ScheduledTasksView({ layout, onLeave }: {
         // so the page itself only carries the close affordance.
         <div className="absolute inset-0 z-10 flex flex-col bg-background">
           <div className="flex min-h-0 flex-1">
-            <div className="flex w-60 flex-shrink-0 flex-col border-e border-border/50">
-              <div className="flex-1 space-y-0.5 overflow-y-auto p-2">
+            <div className="flex w-60 flex-shrink-0 flex-col border-e border-edge">
+              <ScrollableOverlay outerClassName="flex-1 min-h-0" className="space-y-0.5 p-2" disableHorizontal>
                 {!hasScopes ? (
                   <div className="px-2 py-2 typography-meta text-muted-foreground">
                     {t('sessions.scheduledTasks.dialog.project.empty')}
@@ -867,7 +830,7 @@ export function ScheduledTasksView({ layout, onLeave }: {
                 ) : null}
                 {chatsAvailable ? renderScopeButton(CHAT_DRAFT_PROJECT_ID, chatsLabel) : null}
                 {projects.map((project) => renderScopeButton(project.id, renderProjectLabel(project)))}
-              </div>
+              </ScrollableOverlay>
             </div>
             <div className="flex min-w-0 flex-1 flex-col">
               {/* Pages have no close button: you leave by picking a session,
@@ -875,11 +838,11 @@ export function ScheduledTasksView({ layout, onLeave }: {
               <div className="flex items-center px-6 pt-3">
                 {newTaskButton()}
               </div>
-              <div className="min-h-0 flex-1 overflow-y-auto px-6 py-4">
+              <ScrollableOverlay outerClassName="min-h-0 flex-1" className="px-6 py-4" disableHorizontal>
                 <div className="mx-auto w-full max-w-3xl">
                   {tasksList}
                 </div>
-              </div>
+              </ScrollableOverlay>
             </div>
           </div>
         </div>
@@ -891,6 +854,7 @@ export function ScheduledTasksView({ layout, onLeave }: {
         // The editor works in the task's own scope: an existing task keeps
         // the project it was captured with even if the selection has moved.
         projectId={editorOwnerRef.current || selectedProjectID}
+        scopes={editorScopes}
         onOpenChange={setEditorOpen}
         onSave={handleSaveTask}
       />

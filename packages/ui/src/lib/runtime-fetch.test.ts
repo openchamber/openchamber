@@ -1,10 +1,52 @@
 import { describe, expect, test } from 'bun:test';
 import { createRuntimeOpencodeClient } from '@/lib/opencode/client';
-import { addRuntimeProxyHeaders, buildRuntimeFetchUrl, isLatin1Safe, runtimeFetch, sanitizeHeadersForBrowser } from './runtime-fetch';
-import { clearRuntimeAuthCredentialProvider, setRuntimeBearerToken } from './runtime-auth';
+import { addRuntimeProxyHeaders, buildRuntimeFetchUrl, installRuntimeFetchBridge, isLatin1Safe, runtimeFetch, sanitizeHeadersForBrowser } from './runtime-fetch';
+import { clearRuntimeAuthCredentialProvider, setRuntimeBearerToken, setRuntimeExtraHeaders } from './runtime-auth';
 import { configureRuntimeUrlResolver, getRuntimeUrlResolver, setRuntimeUrlResolver } from './runtime-url';
+import { serveTestHttp } from './test-http-server';
 
 const originalFetch = globalThis.fetch;
+
+test('mobile runtime credentials cannot follow HTTP redirects through fetch or the bridge', async () => {
+  const previous = getRuntimeUrlResolver();
+  const originalWindow = globalThis.window;
+  let targetRequests = 0;
+  const target = await serveTestHttp((_request, response) => {
+    targetRequests += 1;
+    response.end('ok');
+  });
+  const source = await serveTestHttp((_request, response) => {
+    response.writeHead(302, { Location: target.url.toString() });
+    response.end();
+  });
+  try {
+    Object.defineProperty(globalThis, 'window', { configurable: true, value: {
+      location: { protocol: 'capacitor:', origin: 'capacitor://localhost', href: 'capacitor://localhost' },
+      fetch: originalFetch,
+    } });
+    configureRuntimeUrlResolver({ apiBaseUrl: source.url.toString() });
+    setRuntimeExtraHeaders({ 'X-Proxy-Secret': 'synthetic-only' });
+    const url = new URL('/health', source.url);
+    for (const input of [url.toString(), url, new Request(url)]) {
+      await expect(runtimeFetch(input, { redirect: 'follow' })).rejects.toThrow();
+    }
+    installRuntimeFetchBridge();
+    for (const input of [url.toString(), url, new Request(url)]) {
+      await expect(window.fetch(input, { redirect: 'follow' })).rejects.toThrow();
+    }
+    expect(targetRequests).toBe(0);
+    // Requests without mobile proxy credentials retain normal redirect behavior.
+    setRuntimeExtraHeaders({});
+    expect((await runtimeFetch(url)).ok).toBe(true);
+    expect(targetRequests).toBe(1);
+  } finally {
+    setRuntimeExtraHeaders({});
+    setRuntimeUrlResolver(previous);
+    Object.defineProperty(globalThis, 'window', { configurable: true, value: originalWindow });
+    source.close();
+    target.close();
+  }
+});
 
 describe('buildRuntimeFetchUrl', () => {
   test('preserves same-origin paths by default', () => {

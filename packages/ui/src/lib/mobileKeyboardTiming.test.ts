@@ -1,46 +1,44 @@
 import { describe, expect, test } from 'bun:test';
 
-import { KEYBOARD_EASING_CSS, createCubicBezierEasing, keyboardEase } from './mobileKeyboardTiming';
+import { KEYBOARD_SHOW_MS, keyboardEase, keyboardKeyframes } from './mobileKeyboardTiming';
 
-const expectClose = (actual: number, expected: number, tolerance: number) => {
-    expect(Math.abs(actual - expected)).toBeLessThanOrEqual(tolerance);
-};
+// The keyboard's position per 60 fps frame from the start of its rise, traced
+// from a simulator recording (share of the travel covered).
+const RECORDED_KEYBOARD = [0.05, 0.23, 0.37, 0.49, 0.61, 0.71, 0.77, 0.83, 0.87, 0.91, 0.93, 0.95, 0.96, 0.98, 0.98];
 
-describe('createCubicBezierEasing', () => {
-    test('linear control points reproduce the identity', () => {
-        const linear = createCubicBezierEasing(0, 0, 1, 1);
-        for (const t of [0, 0.1, 0.25, 0.5, 0.75, 0.9, 1]) {
-            expectClose(linear(t), t, 1e-4);
-        }
+describe('keyboardEase', () => {
+    test('follows the recorded keyboard within 4% on every frame', () => {
+        RECORDED_KEYBOARD.forEach((position, index) => {
+            const t = (index + 1) / 60;
+            expect(Math.abs(keyboardEase((t * 1000) / KEYBOARD_SHOW_MS) - position)).toBeLessThanOrEqual(0.04);
+        });
     });
 
-    test('ease-in-out matches known CSS samples', () => {
-        // cubic-bezier(0.42, 0, 0.58, 1) — CSS `ease-in-out`.
-        const easeInOut = createCubicBezierEasing(0.42, 0, 0.58, 1);
-        expectClose(easeInOut(0.5), 0.5, 1e-3);
-        expectClose(easeInOut(0.25), 0.129, 5e-3);
-        expectClose(easeInOut(0.75), 0.871, 5e-3);
-    });
-
-    test('clamps outside the unit interval', () => {
+    test('starts at rest, ends on target, clamps outside the run', () => {
         expect(keyboardEase(-1)).toBe(0);
+        expect(keyboardEase(0)).toBe(0);
+        expect(keyboardEase(1)).toBe(1);
         expect(keyboardEase(2)).toBe(1);
     });
 });
 
-describe('keyboardEase', () => {
-    test('is monotonic and decelerating', () => {
-        let previous = 0;
-        for (let i = 1; i <= 20; i += 1) {
-            const value = keyboardEase(i / 20);
-            expect(value).toBeGreaterThanOrEqual(previous);
-            previous = value;
-        }
-        // A decelerating curve is past the halfway mark at half time.
-        expect(keyboardEase(0.5)).toBeGreaterThan(0.6);
+// Core Animation runs keyframes joined by plain linear segments; a keyframe
+// carrying its own easing (a linear() one above all) sends the whole
+// animation back to the main thread on iOS WebKit.
+describe('keyboardKeyframes', () => {
+    const frames = keyboardKeyframes((position) => ({ transform: `translateY(${position * 100}px)` }));
+
+    test('traces the curve from start to target with no easing of their own', () => {
+        expect(frames[0]).toEqual({ transform: 'translateY(0px)', offset: 0 });
+        expect(frames[frames.length - 1]).toEqual({ transform: 'translateY(100px)', offset: 1 });
+        for (const frame of frames) expect(frame.easing).toBeUndefined();
     });
 
-    test('CSS string carries the same control points', () => {
-        expect(KEYBOARD_EASING_CSS).toBe('cubic-bezier(0.38, 0.7, 0.125, 1)');
+    test('offsets rise evenly and positions follow keyboardEase', () => {
+        frames.forEach((frame, index) => {
+            const offset = index / (frames.length - 1);
+            expect(frame.offset).toBe(offset);
+            expect(frame.transform).toBe(`translateY(${keyboardEase(offset) * 100}px)`);
+        });
     });
 });

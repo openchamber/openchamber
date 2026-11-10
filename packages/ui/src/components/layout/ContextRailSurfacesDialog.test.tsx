@@ -69,7 +69,7 @@ describe('rail panel arrangement dialog', () => {
     };
     ({ ContextRailSurfacesDialog } = await import('./ContextRailSurfacesDialog'));
     // The full registry, Workflows included, as in a build that has workflows.
-    useUIStore.setState({ contextRailOrder: [...defaultOrder], contextRailHiddenSurfaces: [], agentWorkflowFeatureAvailable: true });
+    useUIStore.setState({ contextRailOrder: [...defaultOrder], contextRailHiddenSurfaces: [], agentWorkflowFeatureAvailable: true, agentWorkflowToolEnabled: true });
     closeCount = 0;
     const container = document.createElement('div');
     document.body.appendChild(container);
@@ -98,8 +98,9 @@ describe('rail panel arrangement dialog', () => {
     await act(async () => document.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, clientX: 12, clientY: 90 })));
     expect(useUIStore.getState().contextRailOrder).toEqual(defaultOrder);
     await act(async () => document.dispatchEvent(new MouseEvent('mouseup', { bubbles: true })));
-    expect(order().slice(0, 3)).toEqual(['git', 'pr', 'context']);
-    expect(useUIStore.getState().contextRailOrder.slice(0, 3)).toEqual(['git', 'pr', 'context']);
+    // Dropped among the changes, Context carries its group past them.
+    expect(order().slice(0, 5)).toEqual(['git', 'pr', 'diff', 'walkthrough', 'context']);
+    expect(useUIStore.getState().contextRailOrder.slice(0, 5)).toEqual(['git', 'pr', 'diff', 'walkthrough', 'context']);
     expect(useUIStore.getState().contextRailHiddenSurfaces).toEqual([]);
     expect(closeCount).toBe(0);
   });
@@ -110,7 +111,7 @@ describe('rail panel arrangement dialog', () => {
     await key(handle(0), 'Space', ' ');
     await key(handle(0), 'ArrowDown');
     await key(handle(0), 'Space', ' ');
-    expect(order().slice(0, 2)).toEqual(['git', 'context']);
+    expect(order().slice(0, 5)).toEqual(['git', 'pr', 'diff', 'walkthrough', 'context']);
     expect(useUIStore.getState().contextRailHiddenSurfaces).toEqual(['context']);
     const showAll = [...document.querySelectorAll('button')].find((button) => button.textContent === 'Show all');
     if (!showAll) throw new Error('Expected Show all');
@@ -118,7 +119,7 @@ describe('rail panel arrangement dialog', () => {
     expect(useUIStore.getState().contextRailHiddenSurfaces).toEqual([]);
     await act(async () => root.render(null));
     await render();
-    expect(order().slice(0, 2)).toEqual(['git', 'context']);
+    expect(order().slice(0, 5)).toEqual(['git', 'pr', 'diff', 'walkthrough', 'context']);
   });
 
   test('Escape cancels a keyboard drag without closing or saving', async () => {
@@ -166,6 +167,6 @@ describe('rail panel arrangement dialog', () => {
     });
     await act(async () => dispatch('touchmove', 90));
     await act(async () => dispatch('touchend', 90));
-    expect(order().slice(0, 3)).toEqual(['git', 'pr', 'context']);
+    expect(order().slice(0, 5)).toEqual(['git', 'pr', 'diff', 'walkthrough', 'context']);
   });
 });

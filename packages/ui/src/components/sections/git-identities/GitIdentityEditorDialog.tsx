@@ -1,7 +1,7 @@
 import React from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { SettingsChipGroup, SETTINGS_FIELD_LABEL_CLASS, SETTINGS_HELPER_CLASS } from '@/components/sections/shared/SettingsSection';
+import { SettingsChipGroup, SettingsStackedField, SETTINGS_FIELD_LABEL_CLASS, SETTINGS_HELPER_CLASS } from '@/components/sections/shared/SettingsSection';
 import { Checkbox } from '@/components/ui/checkbox';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { SettingsInfoHint } from '@/components/sections/shared/SettingsInfoHint';
@@ -448,19 +448,25 @@ export const GitIdentityEditorDialog: React.FC<GitIdentityEditorDialogProps> = (
                 {/* Laid out for every method and live only for SSH, so switching
                     methods keeps the dialog's height. The picker mounts with SSH
                     because mounting reads the saved keys. */}
-                <EditorRow label={t('settings.gitIdentities.editor.field.sshKey')} info={t('settings.sourceControl.ssh.hostSetup')}>
+                <EditorRow label={t('settings.gitIdentities.editor.field.sshKey')} info={t('settings.sourceControl.ssh.hostSetupHint')}>
                   {transport === 'ssh' ? (
                     <ManagedSshCredentials selection={{ value: sshCredentialId, onChange: setSshCredentialId }} />
                   ) : (
-                    // Same shape as the picker, its status line included, so
-                    // picking SSH swaps content without adding a line.
                     <div className="flex min-w-0 flex-1 flex-col gap-2">
-                      <Select value="" disabled>
-                        <SelectTrigger className="min-w-0 max-w-full" aria-label={t('settings.gitIdentities.editor.field.sshKey')}>
-                          <SelectValue placeholder={t('settings.sourceControl.ssh.title')} />
-                        </SelectTrigger>
-                        <SelectContent />
-                      </Select>
+                      <SettingsStackedField label={t('settings.sourceControl.ssh.passphrase')}
+                        info={t('settings.sourceControl.ssh.passphraseHint')}>
+                        <Input type="password" value="" autoComplete="off" className="h-8 rounded-md px-3"
+                          aria-label={t('settings.sourceControl.ssh.passphrase')} disabled />
+                      </SettingsStackedField>
+                      <div className="flex min-w-0 items-center gap-2">
+                        <Select value="" disabled>
+                          <SelectTrigger className="min-w-0 max-w-full" aria-label={t('settings.gitIdentities.editor.field.sshKey')}>
+                            <SelectValue placeholder={t('settings.sourceControl.ssh.title')} />
+                          </SelectTrigger>
+                          <SelectContent />
+                        </Select>
+                        <Button size="sm" variant="outline" className="shrink-0" disabled>{t('settings.sourceControl.ssh.discover')}</Button>
+                      </div>
                       <p aria-hidden="true" className={`${SETTINGS_HELPER_CLASS} min-h-[1lh]`} />
                     </div>
                   )}

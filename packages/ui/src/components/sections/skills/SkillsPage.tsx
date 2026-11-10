@@ -40,7 +40,7 @@ import {
 } from '@/components/ui/dialog';
 import { Icon } from "@/components/icon/Icon";
 import { SimpleMarkdownRenderer } from '@/components/chat/MarkdownRenderer';
-import { PreviewToggleButton } from '@/components/views/PreviewToggleButton';
+import { ToolbarTooltipButton } from '@/components/ui/action-toolbar';
 import { SkillsCatalogPage } from './catalog/SkillsCatalogPage';
 import { SkillUseField } from './SkillUseField';
 import {
@@ -53,7 +53,7 @@ import { useI18n } from '@/lib/i18n';
 import { languageByExtension } from '@/lib/codemirror/languageByExtension';
 import { createFlexokiCodeMirrorTheme } from '@/lib/codemirror/flexokiTheme';
 import { codeHighlightExtension } from '@/lib/codemirror/codeHighlight';
-import { getCodeTokenTheme } from '@/lib/shiki/appThemeRegistry';
+import { getCodeTokenTheme, getThemeRenderName } from '@/lib/shiki/appThemeRegistry';
 import { getLanguageFromExtension } from '@/lib/toolHelpers';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { useUIStore } from '@/stores/useUIStore';
@@ -315,7 +315,7 @@ const SkillsInstalledPage: React.FC = () => {
     if (useShiki && shikiLanguage) {
       extensions.push(codeHighlightExtension({
         language: shikiLanguage,
-        themeName: currentTheme.metadata.id,
+        themeName: getThemeRenderName(currentTheme),
         theme: getCodeTokenTheme(currentTheme),
       }));
     }
@@ -699,9 +699,11 @@ const SkillsInstalledPage: React.FC = () => {
         <SettingsSection
           title={t('settings.skills.page.section.instructions')}
           headerAction={(
-            <PreviewToggleButton
-              currentMode={skillEditorMode === 'preview' ? 'preview' : 'edit'}
-              onToggle={() => setSkillEditorMode((mode) => mode === 'preview' ? 'edit' : 'preview')}
+            <ToolbarTooltipButton
+              label={t('documentToolbar.preview')}
+              icon="eye"
+              pressed={skillEditorMode === 'preview'}
+              onClick={() => setSkillEditorMode((mode) => mode === 'preview' ? 'edit' : 'preview')}
             />
           )}
           settingsItem="skills.instructions"

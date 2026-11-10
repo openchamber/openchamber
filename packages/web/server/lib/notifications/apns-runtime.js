@@ -26,6 +26,50 @@ const DEFAULT_RELAY_URL = 'https://api.openchamber.dev/v1/push/send';
 const MAX_TOKENS_PER_SESSION = 10;
 // APNs reasons that mean the token is permanently invalid → drop it.
 const DEAD_TOKEN_REASONS = new Set(['BadDeviceToken', 'Unregistered', 'DeviceTokenNotForTopic']);
+// The relay answers a send in 0.1-0.4 s, its FCM/APNs call included. Without a limit a stalled
+// path held the send for undici's 300 s and then lost it. The limit sits above Node's 10 s
+// connect timeout, so a path that never connects fails first with a code that is retried.
+const RELAY_TIMEOUT_MS = 15_000;
+const RELAY_RETRY_DELAY_MS = 5_000;
+// Failures before the request left this machine (Node puts the code on `cause`, Bun on the
+// error). Only these are retried: the relay does not deduplicate sends, so repeating a request
+// it may have received, after a timeout or a reset, could alert the phone twice.
+const RELAY_NOT_SENT_CODES = new Set([
+  'ECONNREFUSED',
+  'ENOTFOUND',
+  'EAI_AGAIN',
+  'ENETUNREACH',
+  'EHOSTUNREACH',
+  'UND_ERR_CONNECT_TIMEOUT',
+]);
+const relayErrorCode = (error) => error?.cause?.code ?? error?.code;
+
+const describeRelayError = (error) => {
+  if (error?.name === 'TimeoutError') {
+    return `no answer in ${RELAY_TIMEOUT_MS / 1000} s, not retried`;
+  }
+  const code = relayErrorCode(error);
+  const message = error?.message ?? String(error);
+  return code && !message.includes(code) ? `${message} (${code})` : message;
+};
+
+const postToRelay = async (url, body, label) => {
+  const attempt = () =>
+    fetch(url, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body,
+      signal: AbortSignal.timeout(RELAY_TIMEOUT_MS),
+    });
+  try {
+    return await attempt();
+  } catch (error) {
+    if (!RELAY_NOT_SENT_CODES.has(relayErrorCode(error))) throw error;
+    console.warn(`${label} unreachable (${relayErrorCode(error)}), retrying in ${RELAY_RETRY_DELAY_MS / 1000} s`);
+    await new Promise((resolve) => setTimeout(resolve, RELAY_RETRY_DELAY_MS));
+    return attempt();
+  }
+};
 
 const trimmedEnv = (name) => {
   const value = process.env[name];
@@ -45,6 +89,8 @@ export const createApnsRuntime = (deps) => {
     readSettingsFromDiskMigrated,
     // Host relay identity keys, shared with the private relay (relay/key-store.js).
     relayKeyStore,
+    // Session keys of revoked or expired clients (client-push-access.js).
+    getInvalidSessionKeys = async () => new Set(),
   } = deps;
 
   let persistLock = Promise.resolve();
@@ -89,14 +135,14 @@ export const createApnsRuntime = (deps) => {
       const ts = Date.now();
       // platform is part of the signed message so it can't be tampered en route.
       const sig = signRelayMessage(privateKey, `${ts}.${token}.${platform}`);
-      const res = await fetch(relay.registerUrl, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ token, platform, publicKeyJwk: relayPublicJwk(publicJwk), ts, sig }),
-      });
+      const res = await postToRelay(
+        relay.registerUrl,
+        JSON.stringify({ token, platform, publicKeyJwk: relayPublicJwk(publicJwk), ts, sig }),
+        '[Push relay] register-token',
+      );
       if (!res.ok) console.warn(`[Push relay] register-token failed status=${res.status}`);
     } catch (error) {
-      console.warn('[Push relay] register-token request failed:', error?.message ?? error);
+      console.warn('[Push relay] register-token request failed:', describeRelayError(error));
     }
   };
 
@@ -237,6 +283,24 @@ export const createApnsRuntime = (deps) => {
       const tokensBySession = { ...(current.tokensBySession || {}) };
       for (const [session, entries] of Object.entries(tokensBySession)) {
         const filtered = normalizeTokens(entries).filter((entry) => entry.deviceToken !== deviceToken);
+        if (filtered.length === 0) delete tokensBySession[session];
+        else tokensBySession[session] = filtered;
+      }
+      return { version: APNS_TOKENS_VERSION, tokensBySession };
+    });
+  };
+
+  // A device can sit under several keys (an older cookie session, an earlier pairing) and a
+  // send reaches it through any of them, so it leaves every key except those in `keep`.
+  const removeApnsDevicesOfSessions = async (sessionKeys, keep) => {
+    await persistTokenUpdate((current) => {
+      const tokensBySession = { ...(current.tokensBySession || {}) };
+      const deviceTokens = new Set(
+        sessionKeys.flatMap((key) => normalizeTokens(tokensBySession[key]).map((entry) => entry.deviceToken)),
+      );
+      for (const [session, entries] of Object.entries(tokensBySession)) {
+        if (keep.has(session)) continue;
+        const filtered = normalizeTokens(entries).filter((entry) => !deviceTokens.has(entry.deviceToken));
         if (filtered.length === 0) delete tokensBySession[session];
         else tokensBySession[session] = filtered;
       }
@@ -433,11 +497,7 @@ export const createApnsRuntime = (deps) => {
       sig,
     });
     try {
-      const res = await fetch(relay.url, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: requestBody,
-      });
+      const res = await postToRelay(relay.url, requestBody, '[APNs relay]');
       if (!res.ok) {
         console.warn(`[APNs relay] send failed status=${res.status}`);
         return;
@@ -450,7 +510,7 @@ export const createApnsRuntime = (deps) => {
         }
       }
     } catch (error) {
-      console.warn('[APNs relay] request failed:', error?.message ?? error);
+      console.warn('[APNs relay] request failed:', describeRelayError(error));
     }
   };
 
@@ -517,6 +577,9 @@ export const createApnsRuntime = (deps) => {
   const sendApnsToAllUiSessions = async ({ sealed, ...payload } = {}, _options = {}) => {
     const sealedContent = sealed ?? { title: payload.title, body: payload.body };
     const store = await readTokensFromDisk();
+    // Rejects when the client list cannot be read: this notification is lost with a log line
+    // in the fanout, since sending would reach a revoked device.
+    const invalidSessionKeys = await getInvalidSessionKeys();
     // Tokens are grouped by their registered APNs environment so each batch goes to the
     // endpoint that actually knows the token (Xcode builds → sandbox, TestFlight/App Store
     // → production). Mixing them gets BadDeviceToken and the token wrongly dropped as dead.
@@ -525,7 +588,8 @@ export const createApnsRuntime = (deps) => {
     // each is its own send; the rest share one batch per environment.
     const sealedDevices = [];
     const seen = new Set();
-    for (const record of Object.values(store.tokensBySession || {})) {
+    for (const [sessionKey, record] of Object.entries(store.tokensBySession || {})) {
+      if (invalidSessionKeys.has(sessionKey)) continue;
       for (const entry of normalizeTokens(record)) {
         if (seen.has(entry.deviceToken)) continue;
         seen.add(entry.deviceToken);
@@ -542,12 +606,13 @@ export const createApnsRuntime = (deps) => {
 
     const relay = resolveRelayConfig();
     if (relay) {
-      for (const [environment, deviceTokens] of tokensByEnvironment) {
-        await sendViaRelay(deviceTokens, payload, relay, relay.environment ?? environment);
-      }
-      for (const entry of sealedDevices) {
-        await sendViaRelay([entry.deviceToken], sealedPayloadFor(payload, sealedContent, entry.pushKey), relay, relay.environment ?? entry.environment);
-      }
+      // In parallel, so one send waiting out a timeout or a retry does not hold the others.
+      await Promise.all([
+        ...[...tokensByEnvironment].map(([environment, deviceTokens]) =>
+          sendViaRelay(deviceTokens, payload, relay, relay.environment ?? environment)),
+        ...sealedDevices.map((entry) =>
+          sendViaRelay([entry.deviceToken], sealedPayloadFor(payload, sealedContent, entry.pushKey), relay, relay.environment ?? entry.environment)),
+      ]);
       return;
     }
     await sendViaDirectApns(tokensByEnvironment, payload);
@@ -572,6 +637,7 @@ export const createApnsRuntime = (deps) => {
     addOrUpdateApnsToken,
     removeApnsToken,
     removeApnsTokenFromAllSessions,
+    removeApnsDevicesOfSessions,
     sendApnsToAllUiSessions,
     resolveApnsConfig,
     // exposed for tests

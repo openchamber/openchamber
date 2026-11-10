@@ -2,7 +2,9 @@ import React from 'react';
 
 import { Icon } from "@/components/icon/Icon";
 import { cn } from '@/lib/utils';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/lib/i18n';
+import { useAgentStatusLabel } from '@/hooks/useAgentStatusLabel';
 import { useAssistantStatus } from '@/hooks/useAssistantStatus';
 import { useBackgroundSessionWork } from '@/hooks/useBackgroundSessionWork';
 import { useConfigStore } from '@/stores/useConfigStore';
@@ -14,23 +16,28 @@ import { registerFloatingPanelClearanceReader } from '@/components/chat/composer
 const ScrollAction: React.FC<{ onClick: () => void; children?: React.ReactNode }> = ({ onClick, children }) => {
     const { t } = useI18n();
     return (
-        // Sits inside the pill's hairline border, so the pill as a whole is
-        // 28px like the status row it takes over from.
-        <button
-            type="button"
-            onClick={onClick}
-            aria-label={t('chat.scrollToBottom.aria')}
-            className="inline-flex h-[calc(1.75rem-2px)] min-w-0 max-w-full flex-1 items-center rounded-full [corner-shape:round] text-start"
-        >
-            {/* flex-1 so the icon stays centred when the mobile
-                touch-target floor widens the bare button past 28px;
-                with the status label present it collapses back to
-                its 28px basis. */}
-            <span className="flex h-full w-7 flex-1 shrink-0 basis-7 items-center justify-center text-muted-foreground">
-                <Icon name="arrow-down" className="h-4 w-4" />
-            </span>
-            {children}
-        </button>
+        <Tooltip>
+            <TooltipTrigger asChild>
+                {/* Sits inside the pill's hairline border, so the pill as a whole is
+                    28px like the status row it takes over from. */}
+                <button
+                    type="button"
+                    onClick={onClick}
+                    aria-label={t('chat.scrollToBottom.aria')}
+                    className="inline-flex h-[calc(1.75rem-2px)] min-w-0 max-w-full flex-1 items-center rounded-full [corner-shape:round] text-start"
+                >
+                    {/* flex-1 so the icon stays centred when the mobile
+                        touch-target floor widens the bare button past 28px;
+                        with the status label present it collapses back to
+                        its 28px basis. */}
+                    <span className="flex h-full w-7 flex-1 shrink-0 basis-7 items-center justify-center text-muted-foreground">
+                        <Icon name="arrow-down" className="h-4 w-4" />
+                    </span>
+                    {children}
+                </button>
+            </TooltipTrigger>
+            <TooltipContent side="top" sideOffset={6}>{t('chat.scrollToBottom.aria')}</TooltipContent>
+        </Tooltip>
     );
 };
 
@@ -41,7 +48,6 @@ const ScrollAction: React.FC<{ onClick: () => void; children?: React.ReactNode }
  * scroll button, never inside it.
  */
 const WorkingPillBody: React.FC<{ onClick: () => void }> = ({ onClick }) => {
-    const { t } = useI18n();
     const { activeModel, working } = useAssistantStatus();
     const providers = useConfigStore((state) => state.providers);
     const backgroundWork = useBackgroundSessionWork();
@@ -52,11 +58,8 @@ const WorkingPillBody: React.FC<{ onClick: () => void }> = ({ onClick }) => {
         return getProviderModelDisplayName(provider, activeModel.modelId) || null;
     }, [activeModel, providers]);
 
-    if (!working.isWorking || !working.statusText) return <ScrollAction onClick={onClick} />;
-    const status = working.statusText;
-    const label = modelName && modelName.trim().length > 0
-        ? t('chat.statusRow.modelStatus', { model: modelName.trim(), status })
-        : status.charAt(0).toUpperCase() + status.slice(1);
+    const label = useAgentStatusLabel(working.isWorking ? working.status : null, modelName);
+    if (!label) return <ScrollAction onClick={onClick} />;
 
     return (
         <>

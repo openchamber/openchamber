@@ -20,7 +20,7 @@ drawer.
 | `KnowledgeSplit.tsx` | the wide layout: list column and open entry side by side |
 | `KnowledgeEntryView.tsx` | the shell an opened note or memory renders in, in place of the list |
 | `KnowledgeComposer.tsx` | the add field every section except memory uses |
-| `KnowledgeActions.tsx` | the row actions: pin toggle, the ⋯ menu, hover reveal |
+| `KnowledgeActions.tsx` | the row actions: pin toggle, the ⋯ menu, the row's right-click menu, hover reveal |
 | `pendingKnowledgeDeletes.ts` | deletes that wait out an undo window |
 | `knowledgeFormat.ts` | note title from the first line, entry dates |
 | `useProjectTodoSend.ts` | sending a todo to a current/new/worktree session |
@@ -35,9 +35,13 @@ on the right until four short entries were taking a quarter of the panel's
 width from the notes they navigate, then a strip under a search field, which
 cost two rows for what one header holds.
 
-A narrow panel keeps the label on the active tab only; the others show an icon
-and their count. The row is a container query on its own width, so the same
-code fits the desktop panel and the mobile drawer.
+When the labelled tabs do not fit, the active tab keeps its label and the
+others show an icon and their count; the mobile drawer always does this. When
+even that does not fit, the active tab drops its label too, so every tab stays
+in view. The row compares its width with invisible copies of itself in the
+first two forms. A
+fixed width threshold it replaced went stale as tabs, counts and translations
+grew, and the row scrolled sideways between the threshold and the real width.
 
 Search is a toggle. The button opens a bar floating over the top of the list,
 the way the chat's search floats over the conversation; opening it moves
@@ -100,9 +104,12 @@ from a file is a button inside the same field.
 ## Row actions
 
 Every row has the same actions in the same place: at most one direct control
-(pin for notes and plans, send for todos), then a ⋯ menu with the rest (share,
-delete). On desktop they appear on hover or keyboard focus; touch layouts show
-them always. A pinned entry keeps its filled pin visible.
+(pin for notes and plans, send for todos), then a menu with the rest (share,
+delete). With a mouse the menu is the row's right click (Shift+F10 from the
+keyboard, `KnowledgeRowContextMenu`), and the direct control appears on hover
+or keyboard focus; touch screens show it always, with a ⋯ button for the menu.
+An opened entry keeps its ⋯ in the toolbar. A pinned entry keeps its filled
+pin visible.
 
 The pin attaches a note or plan to the current session's context, and a pinned
 note says so in its footer. The icon alone read as "pin to the top of the
@@ -394,6 +401,15 @@ matched the old project would silently hide everything in the new one.
   writes store them last too, and a drag stores what the user dragged.
 - **Plan creation is not optimistic.** The id and file name come from the
   server, and a row that cannot be opened is worse than a brief wait.
+
+## Why list rows share one tooltip
+
+The lists are not virtualized and every row keeps its buttons mounted, so a
+tooltip per button would mount several tooltip roots per row. A control in a
+list carries its text in `data-row-tooltip`, and `DelegatedTooltip`
+(`ui/row-tooltip.tsx`) listens on the panel and anchors one tooltip to it. That also covers the same
+controls in an open entry's toolbar. It answers a mouse or the keyboard; a touch
+gets no tooltip on these controls.
 
 ## Pinned context
 

@@ -74,7 +74,9 @@ mock.module('@/stores/useDirectoryStore', () => ({
     selector({ currentDirectory: '/test/project' }),
 }));
 const runtimeFetchCalls: string[] = [];
+const runtimeFetchModule = await import('@/lib/runtime-fetch');
 mock.module('@/lib/runtime-fetch', () => ({
+  ...runtimeFetchModule,
   runtimeFetch: async (url: string) => {
     runtimeFetchCalls.push(url);
     return new Response(JSON.stringify({ authenticatedProviders: [] }), {
@@ -99,6 +101,7 @@ mock.module('@/lib/opencode/client', () => ({
 }));
 mock.module('@/lib/i18n', () => ({
   useI18n: () => ({ t: (key: string) => key }),
+  getCurrentIntlLocale: () => 'en-US',
 }));
 mock.module('@/components/chat/mobileControlsUtils', () => ({
   isPrimaryMode: (mode: string | undefined) => mode === 'primary',

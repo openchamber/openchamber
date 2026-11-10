@@ -22,6 +22,7 @@ const baseForm = (overrides: Partial<CustomProviderFormState> = {}): CustomProvi
   providerID: 'custom-provider',
   name: 'Custom Provider',
   icon: 'server',
+  logo: null,
   protocol: 'openai-chat',
   baseURL: 'https://api.example.com/v1',
   apiKey: 'sk-test',
@@ -108,6 +109,7 @@ describe('validateCustomProvider', () => {
     expect(result.result).toEqual({
       providerID: 'custom-provider',
       icon: 'server',
+      logo: { kind: 'keep' },
       name: 'Custom Provider',
       apiKey: 'sk-secret',
       config: {
@@ -163,6 +165,21 @@ describe('validateCustomProvider', () => {
 
   test('keeps no icon for a new provider so its own logo still shows', () => {
     expect(createEmptyCustomProviderForm().icon).toBeNull();
+    expect(createEmptyCustomProviderForm().logo).toBeNull();
+  });
+
+  test('changes the stored logo image only through what the user did in the field', () => {
+    const planFor = (logo: CustomProviderFormState['logo']) => validateCustomProvider({
+      form: baseForm({ logo }),
+      t,
+      existingProviderIDs: new Set(),
+    }).result?.logo;
+    const file = new File(['png'], 'logo.png', { type: 'image/png' });
+
+    // Untouched: a logo kept from before, or uploaded by another client meanwhile, stays.
+    expect(planFor(null)).toEqual({ kind: 'keep' });
+    expect(planFor(file)).toEqual({ kind: 'upload', file });
+    expect(planFor('removed')).toEqual({ kind: 'remove' });
   });
 
   test('turns a discovered model into a row, the provider winning over models.dev field by field', () => {
@@ -696,6 +713,25 @@ describe('edit form from the stored config entry', () => {
     const config = editAndSave(providerToEditFormState(live, stored));
     expect(config?.models.vision?.limit).toEqual({ context: 200000, output: 8192 });
     expect(config?.models.vision?.capabilities).toEqual({ tools: true, input: ['text', 'image'], output: ['text'] });
+  });
+
+  test('a saved model type loads and saves as it is, image or any other', () => {
+    const stored = storedProviderEntrySchema.parse({
+      name: 'Campus LLM',
+      settings: { baseURL: 'https://llm.example.edu/v1' },
+      models: {
+        flare: { name: 'Flare', type: 'image' },
+        judge: { name: 'Judge', type: 'decision' },
+        fast: { name: 'Fast' },
+      },
+    });
+    const form = providerToEditFormState(live, stored);
+
+    expect(form.models.map((model) => [model.id, model.type])).toEqual([['flare', 'image'], ['judge', 'decision'], ['fast', undefined]]);
+    const models = editAndSave(form)?.models;
+    expect(models?.flare.type).toBe('image');
+    expect(models?.judge.type).toBe('decision');
+    expect(models?.fast?.type).toBeUndefined();
   });
 
   test('a stored model without levels saves without the generated ones', () => {

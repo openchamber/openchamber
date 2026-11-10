@@ -1,4 +1,5 @@
 import type * as React from 'react';
+import { readMobileKeyboardVar } from '@/lib/mobileKeyboardInsets';
 
 /** A caret in viewport coordinates: the top and bottom of its line, and its x. */
 export type CaretCoords = { top: number; bottom: number; left: number };
@@ -90,12 +91,12 @@ export const fixedPopupStyle = (placement: CaretPopupPlacement): React.CSSProper
  * The part of the window the user sees, above the phone's keyboard. A mobile
  * browser reports the keyboard through the visual viewport. The iOS app does
  * not: its keyboard overlays a full-height view and the app lifts its UI by
- * `--oc-keyboard-inset` (`apps/mobileNativeChrome.ts`), so that inset ends the
- * room there.
+ * `--oc-keyboard-inset` (`lib/mobileKeyboardInsets.ts`), so that inset ends
+ * the room there.
  */
 export const viewportLimits = (): PopupLimits => {
   const top = window.visualViewport?.offsetTop ?? 0;
-  const keyboard = Number.parseFloat(document.documentElement.style.getPropertyValue('--oc-keyboard-inset')) || 0;
+  const keyboard = readMobileKeyboardVar('--oc-keyboard-inset');
   return {
     top,
     bottom: Math.min(top + (window.visualViewport?.height ?? window.innerHeight), window.innerHeight - keyboard),

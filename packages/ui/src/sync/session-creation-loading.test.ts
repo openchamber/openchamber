@@ -8,6 +8,7 @@ import { ChildStoreManager } from "./child-store"
 import { createSession, setActionRefs } from "./session-actions"
 import { SessionMessageLoader, setImperativeSessionMessageLoader } from "./session-message-loader"
 import { useSessionUIStore } from "./session-ui-store"
+import { useProjectsStore } from "@/stores/useProjectsStore"
 
 const originalCreateSession = opencodeClient.createSession
 const originalDirectory = opencodeClient.getDirectory()
@@ -34,6 +35,7 @@ const session: Session = {
 }
 
 beforeEach(() => {
+  useProjectsStore.setState({ projects: [{ id: "project-created", path: session.directory }] })
   requests = 0
   childStores = new ChildStoreManager()
   loader = new SessionMessageLoader(childStores, { sdk, runtimeKey: getRuntimeKey() })

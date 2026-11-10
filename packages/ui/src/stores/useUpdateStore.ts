@@ -14,6 +14,7 @@ import {
 } from '@/lib/desktop';
 import { formatMessage, useI18nStore } from '@/lib/i18n/store';
 import { getUpdateInstallErrorMessage } from '@/lib/updateInstallError';
+import { getUpdateCheckErrorMessage } from '@/lib/updateCheckError';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { getClientPlatform, isCapacitorApp } from '@/lib/platform';
 
@@ -151,7 +152,11 @@ export function parseUpdateCheckResponse(data: {
   packageManager?: string;
   updateCommand?: string;
   installBlocked?: string;
+  requiredOpenCodeVersion?: string;
+  openCodeVersion?: string;
 }): UpdateInfo {
+  const openCodeTooOld = data.installBlocked === 'opencode-version'
+    && Boolean(data.requiredOpenCodeVersion && data.openCodeVersion);
   return {
     available: data.available ?? false,
     version: data.version,
@@ -165,11 +170,13 @@ export function parseUpdateCheckResponse(data: {
         : undefined,
     packageManager: data.packageManager,
     updateCommand: data.updateCommand,
-    installBlocked: data.installBlocked === 'service-manager'
+    installBlocked: openCodeTooOld ? 'opencode-version' : data.installBlocked === 'service-manager'
       || data.installBlocked === 'manual-install'
       || data.installBlocked === 'desktop-host'
       ? data.installBlocked
       : undefined,
+    requiredOpenCodeVersion: openCodeTooOld ? data.requiredOpenCodeVersion : undefined,
+    openCodeVersion: openCodeTooOld ? data.openCodeVersion : undefined,
   };
 }
 
@@ -274,15 +281,28 @@ export const useUpdateStore = create<UpdateStore>()((set, get) => ({
           checkForWebUpdates('desktop', appVersion),
         ]);
         const desktopInfo = desktopResult.status === 'fulfilled' ? desktopResult.value : null;
+        if (desktopResult.status === 'rejected') throw desktopResult.reason;
+        if (!desktopInfo) {
+          throw new Error(formatMessage(useI18nStore.getState().dictionary, 'updateDialog.error.restartUnavailable'));
+        }
         suggestedSec = apiResult.status === 'fulfilled'
           ? (apiResult.value?.nextSuggestedCheckInSec ?? null)
           : null;
+        const previousVersion = get().info?.version ?? null;
+        const offeredVersion = desktopInfo.version ?? null;
+        const versionChanged =
+          previousVersion !== null &&
+          offeredVersion !== null &&
+          previousVersion !== offeredVersion;
         set({
           checking: false,
-          available: desktopInfo?.available ?? false,
+          available: desktopInfo.available,
           info: desktopInfo,
           lastChecked: Date.now(),
           nextCheckInSec: suggestedSec,
+          ...(!desktopInfo.available || versionChanged
+            ? { downloaded: false, progress: null }
+            : {}),
         });
 
         return suggestedSec;
@@ -309,17 +329,17 @@ export const useUpdateStore = create<UpdateStore>()((set, get) => ({
     } catch (error) {
       set({
         checking: false,
-        error: error instanceof Error ? error.message : 'Failed to check for updates',
+        error: error instanceof Error ? getUpdateCheckErrorMessage(error) : 'Failed to check for updates',
       });
       return null;
     }
   },
 
   downloadUpdate: async () => {
-    const { available, runtimeType } = get();
+    const { available, runtimeType, downloading } = get();
 
     // For web runtime, there's no download - user uses in-app update or CLI
-    if (runtimeType !== 'desktop' || !available) {
+    if (runtimeType !== 'desktop' || !available || downloading) {
       return;
     }
 
@@ -346,12 +366,13 @@ export const useUpdateStore = create<UpdateStore>()((set, get) => ({
       }));
 
       const ok = await downloadDesktopUpdate((progress) => {
-        set({ progress });
+        if (get().info?.version === desktopInfo.version && get().available) set({ progress });
       });
       if (!ok) {
         throw new Error('Desktop update only works on Local instance');
       }
-      set({ downloading: false, downloaded: true });
+      const stillOffered = get().available && get().info?.version === desktopInfo.version;
+      set({ downloading: false, downloaded: stillOffered, ...(stillOffered ? {} : { progress: null }) });
     } catch (error) {
       set({
         downloading: false,

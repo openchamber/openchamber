@@ -9,6 +9,10 @@ import { ChildStoreManager } from '@/sync/child-store';
 import { setSyncRefs } from '@/sync/sync-refs';
 import { createRuntimeOpencodeClient } from '@/lib/opencode/client';
 import { applyGlobalSessionStatusEvent, replaceGlobalSessionStatusById } from '@/sync/global-session-status';
+import { applySessionEventToGlobalSessions } from '@/sync/session-event-router';
+import { applySessionLiveWorkEvents, resetSessionLiveWork } from '@/sync/session-live-work';
+import type { OpenCodeEvent } from '@opencode/client';
+import { translateWireEvent } from '@/lib/opencode/events';
 import { readGuestWorkspace, observeGuestWorkspace } from './workspace';
 import { guestMay } from './capabilities';
 
@@ -31,7 +35,10 @@ beforeEach(() => {
   useUIStore.setState({ eventStreamStatus: 'idle' });
   replaceGlobalSessionStatusById(new Map());
 });
-afterEach(() => manager.disposeAll());
+afterEach(() => {
+  manager.disposeAll();
+  resetSessionLiveWork();
+});
 const readB = () => {
   const snapshot = readGuestWorkspace({ kind: 'sessions', projectId: 'b' }, 'board');
   if (snapshot.kind !== 'sessions') throw new Error('Expected sessions');
@@ -56,6 +63,49 @@ describe('extension workspace projection', () => {
       expect(fetch.mock.calls.length).toBe(0);
     } finally { fetch.mockRestore(); }
   });
+  test('forwards the session agent to extensions and publishes changes', async () => {
+    useGlobalSessionsStore.getState().applySnapshot([
+      { ...session('b-session', '/b-tree'), agent: 'fixer' },
+      session('a-session', '/a'),
+    ], [], 'ready');
+    const snapshot = readB();
+    expect(snapshot.sessions.map((entry) => [entry.id, entry.agent])).toEqual([['b-session', 'fixer']]);
+    const agents: (string | undefined)[] = [];
+    const stop = observeGuestWorkspace({ kind: 'sessions', projectId: 'b' }, 'board', (next) => {
+      if (next.kind === 'sessions') agents.push(next.sessions[0].agent);
+    });
+    try {
+      useGlobalSessionsStore.getState().applySnapshot([{ ...session('b-session', '/b-tree'), agent: 'review', time: { created: 1, updated: 2 } }], [], 'ready');
+      await Promise.resolve();
+      useGlobalSessionsStore.getState().applySnapshot([{ ...session('b-session', '/b-tree'), time: { created: 1, updated: 3 } }], [], 'ready');
+      await Promise.resolve();
+      expect(agents.length).toBe(3);
+      expect(agents).toEqual(['fixer', 'review', undefined]);
+      expect(Object.hasOwn(readB().sessions[0], 'agent')).toBe(false);
+    } finally { stop(); }
+  });
+  for (const updated of [1, 2]) {
+    test(`publishes agent patches immediately with updated timestamp ${updated}`, async () => {
+      const agents: (string | undefined)[] = [];
+      const stop = observeGuestWorkspace({ kind: 'sessions', projectId: 'b' }, 'board', (next) => {
+        if (next.kind === 'sessions') agents.push(next.sessions[0].agent);
+      });
+      try {
+        for (const agent of ['fixer', 'review']) {
+          applySessionEventToGlobalSessions({
+            type: 'session.patched',
+            properties: { sessionID: 'b-session', patch: { agent, time: { updated } } },
+          });
+          await Promise.resolve();
+          expect(readB().sessions[0].agent).toBe(agent);
+        }
+        expect(agents).toEqual([undefined, 'fixer', 'review']);
+      } finally {
+        stop();
+        applySessionEventToGlobalSessions({ type: 'session.idle', properties: { sessionID: 'b-session' } });
+      }
+    });
+  }
   test('a session in the project folder of a worktree belongs to the project and to that worktree', () => {
     useGlobalSessionsStore.getState().applySnapshot([
       session('b-session', '/b-tree/ai'),
@@ -133,6 +183,44 @@ describe('extension workspace projection', () => {
       { title: 'Own card', url: 'https://board.example/B-2', kind: 'issue', linkedAt: 5 },
     ]);
   });
+  test('in work follows the session metadata and the In work setting, and publishes the toggle', async () => {
+    useUIStore.setState({ sessionWorkEnabled: true });
+    useGlobalSessionsStore.getState().applySnapshot([
+      { ...session('b-session', '/b-tree'), metadata: { openchamber: { work: { state: 'open', openedAt: 1 } } } },
+      { ...session('b-done', '/b-tree'), metadata: { openchamber: { work: { state: 'done', doneAt: 2 } } } },
+      session('b-plain', '/b-tree'),
+      { ...session('b-sub', '/b-tree'), parentID: 'b-session', metadata: { openchamber: { work: { state: 'open', openedAt: 1 } } } },
+    ], [{ ...session('b-archived', '/b-tree'), time: { created: 1, updated: 1, archived: 3 }, metadata: { openchamber: { work: { state: 'open', openedAt: 1 } } } }], 'ready');
+    const inWork = () => Object.fromEntries(readB().sessions.map((entry) => [entry.id, entry.inWork]));
+    expect(inWork()).toEqual({ 'b-session': true, 'b-done': false, 'b-plain': false, 'b-sub': false, 'b-archived': false });
+    const seen: boolean[] = [];
+    const stop = observeGuestWorkspace({ kind: 'sessions', projectId: 'b' }, 'board', (next) => {
+      if (next.kind === 'sessions') seen.push(next.sessions.some((entry) => entry.inWork));
+    });
+    try {
+      useUIStore.setState({ sessionWorkEnabled: false });
+      await Promise.resolve();
+      expect(inWork()).toEqual({ 'b-session': false, 'b-done': false, 'b-plain': false, 'b-sub': false, 'b-archived': false });
+      expect(seen).toEqual([true, false]);
+    } finally {
+      stop();
+      useUIStore.setState({ sessionWorkEnabled: true });
+    }
+  });
+  test('unread follows the idle and viewed marks, and a view publishes', async () => {
+    const turned = { ...session('b-session', '/b-tree'), time: { created: 1, updated: 2, idle: 5 } };
+    useGlobalSessionsStore.getState().applySnapshot([turned, { ...session('b-seen', '/b-tree'), time: { created: 1, updated: 2, idle: 5, viewed: 5 } }], [], 'ready');
+    expect(Object.fromEntries(readB().sessions.map((entry) => [entry.id, entry.unread]))).toEqual({ 'b-session': true, 'b-seen': false });
+    const seen: boolean[] = [];
+    const stop = observeGuestWorkspace({ kind: 'sessions', projectId: 'b' }, 'board', (next) => {
+      if (next.kind === 'sessions') seen.push(next.sessions.find((entry) => entry.id === 'b-session')?.unread ?? false);
+    });
+    try {
+      useGlobalSessionsStore.getState().upsertSession({ ...turned, time: { ...turned.time, viewed: 5 } });
+      await Promise.resolve();
+      expect(seen).toEqual([true, false]);
+    } finally { stop(); }
+  });
   test('blocking requests and retries expose state without conversation data', () => {
     const child = manager.ensureChild('/b-tree', { bootstrap: false });
     applyGlobalSessionStatusEvent('/b-tree', { type: 'session.status', properties: { sessionID: 'b-session', status: { type: 'retry', attempt: 1, message: 'Wait', next: 1 } } });
@@ -143,5 +231,59 @@ describe('extension workspace projection', () => {
     child.setState({ permission: {}, form: { 'b-session': [{ id: 'form', sessionID: 'b-session', title: 'Pick one', fields: [{ key: 'answer', type: 'boolean' }] }] } });
     expect(readB().sessions[0].activity).toBe('waiting-question');
     expect('messages' in readB().sessions[0]).toBe(false);
+  });
+  test('the running tool shows its path relative to the session, only while the session runs, and publishes', async () => {
+    const wire = { id: 'evt', created: 1, location: { directory: '/b-tree' } };
+    const durable = { aggregateID: 'b-session', seq: 1, version: 1 as const };
+    const call = (id: string, name: string, input: Record<string, string>) => {
+      const events: OpenCodeEvent[] = [
+        { ...wire, type: 'session.tool.input.started', durable, data: { sessionID: 'b-session', assistantMessageID: 'msg', id, name } },
+        { ...wire, type: 'session.tool.called', durable, data: { sessionID: 'b-session', assistantMessageID: 'msg', id, input, executed: true } },
+      ];
+      applySessionLiveWorkEvents(events.flatMap(translateWireEvent));
+    };
+    const tools: unknown[] = [];
+    const stop = observeGuestWorkspace({ kind: 'sessions', projectId: 'b' }, 'board', (next) => {
+      if (next.kind === 'sessions') tools.push(next.sessions[0].tool);
+    });
+    try {
+      applyGlobalSessionStatusEvent('/b-tree', { type: 'session.status', properties: { sessionID: 'b-session', status: { type: 'busy' } } });
+      call('1', 'edit', { path: '/b-tree/src/layout.ts' });
+      await Promise.resolve();
+      expect(readB().sessions[0].tool).toEqual({ name: 'edit', target: 'src/layout.ts' });
+      // Outside the session's folder only the name shows, however the path is written.
+      call('2', 'read', { filePath: '/etc/hosts' });
+      expect(readB().sessions[0].tool).toEqual({ name: 'read', target: 'hosts' });
+      call('3', 'read', { filePath: '../private/secrets/key.pem' });
+      expect(readB().sessions[0].tool).toEqual({ name: 'read', target: 'key.pem' });
+      call('4', 'read', { filePath: '/b-tree/../private/key.pem' });
+      expect(readB().sessions[0].tool).toEqual({ name: 'read', target: 'key.pem' });
+      call('5', 'read', { filePath: 'src/./page/../main.ts' });
+      expect(readB().sessions[0].tool).toEqual({ name: 'read', target: 'src/main.ts' });
+      // The status says idle: a call still in the index is not shown.
+      applyGlobalSessionStatusEvent('/b-tree', { type: 'session.status', properties: { sessionID: 'b-session', status: { type: 'idle' } } });
+      expect(readB().sessions[0].tool).toBeNull();
+      await Promise.resolve();
+      expect(tools.at(-1)).toBeNull();
+      expect(tools.some((entry) => JSON.stringify(entry) === JSON.stringify({ name: 'edit', target: 'src/layout.ts' }))).toBe(true);
+    } finally { stop(); }
+  });
+  test('context fill is the latest step against the session model window, unknown after a compaction', () => {
+    const wire = { id: 'evt', created: 1, location: { directory: '/b-tree' } };
+    const durable = { aggregateID: 'b-session', seq: 1, version: 1 as const };
+    // SAFETY: the projection reads only `id`, `models[].id` and `models[].limit` of a provider.
+    useConfigStore.setState({ providers: [{ id: 'acme', name: 'Acme', models: [{ id: 'big', name: 'Big', limit: { context: 400_000, output: 32_000 } }] }] as never });
+    useGlobalSessionsStore.getState().applySnapshot([{ ...session('b-session', '/b-tree'), model: { providerID: 'acme', id: 'big' } }], [], 'ready');
+    expect(readB().sessions[0].context).toBeNull();
+    applySessionLiveWorkEvents(translateWireEvent({
+      ...wire, type: 'session.step.ended', durable,
+      data: { sessionID: 'b-session', assistantMessageID: 'msg', finish: 'stop', cost: 0, tokens: { input: 100_000, output: 0, reasoning: 0, cache: { read: 0, write: 0 } } },
+    }));
+    expect(readB().sessions[0].context).toEqual({ tokens: 100_000, limit: 400_000 });
+    // A model the provider list does not know has no window to measure against.
+    useConfigStore.setState({ providers: [] });
+    expect(readB().sessions[0].context).toEqual({ tokens: 100_000, limit: null });
+    applySessionLiveWorkEvents(translateWireEvent({ ...wire, type: 'session.compaction.ended', durable, data: { sessionID: 'b-session', reason: 'auto', text: 'summary' } }));
+    expect(readB().sessions[0].context).toBeNull();
   });
 });

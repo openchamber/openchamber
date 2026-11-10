@@ -56,6 +56,9 @@ const runSchema = z.object({
   createdAt: z.number(),
   startedAt: z.number().optional(),
   endedAt: z.number().optional(),
+  // The server process running it; absent in runs saved before it was recorded.
+  ownerPid: z.number().int().positive().optional(),
+  ownerStartedAt: z.string().min(1).optional(),
   currentPhase: z.string().nullable(),
   agents: z.array(agentSchema),
   logs: z.array(z.object({ at: z.number(), message: z.string() })),
@@ -133,20 +136,25 @@ export const createWorkflowRunStore = ({ fsPromises, path, dataDir, now = Date.n
     }
   };
 
-  /** Saves the run as it is now; resolves once it is on disk. */
+  /** Saves a call-time snapshot; publishes new/replacement working objects only on success. */
   const save = async (run) => {
-    await load();
-    runs.set(run.id, run);
     const snapshot = structuredClone(run);
-    writeChain = writeChain
-      .then(() => writeRun(snapshot))
-      .then(() => prune(snapshot.id))
-      .catch((error) => {
-        console.warn(`[workflows] failed to save run ${snapshot.id}:`, error?.message ?? error);
+    await load();
+    const writing = writeChain.then(async () => {
+      await writeRun(snapshot);
+      runs.set(snapshot.id, run);
+      // Retention cannot turn a committed snapshot into a failed save.
+      await prune(snapshot.id).catch((error) => {
+        console.warn('[workflows] failed to prune runs:', error?.message ?? error);
       });
-    return writeChain;
+    });
+    writeChain = writing.catch((error) => {
+      console.warn(`[workflows] failed to save run ${snapshot.id}:`, error?.message ?? error);
+    });
+    return writing;
   };
 
+  // These are mutable working references, not evidence of a successful save.
   const get = async (id) => {
     await load();
     return runs.get(id) ?? null;
@@ -177,6 +185,8 @@ export const createWorkflowRunStore = ({ fsPromises, path, dataDir, now = Date.n
       runs.set(id, run);
       throw error;
     }
+    // An earlier queued save may have published its working object meanwhile.
+    runs.delete(id);
     return true;
   };
 

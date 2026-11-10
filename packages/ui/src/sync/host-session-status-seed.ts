@@ -3,10 +3,10 @@ import { opencodeClient } from '@/lib/opencode/client';
 import type { HostSessionStatusSnapshot } from '@/lib/opencode/session-status';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { resolveGlobalSessionDirectory, useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
-import { applyGlobalSessionStatusEvents, hasActiveSubagent, useGlobalSessionStatusStore } from './global-session-status';
-import { hasRunningShell } from './background-shells';
+import { applyGlobalSessionStatusEvents, hasBackgroundWork, useGlobalSessionStatusStore } from './global-session-status';
 import { readHostBlockingRequestsSnapshot } from './global-blocking-requests';
 import { applyHostTurnStarts, needsHostTurnStarts } from './session-activity-timing';
+import { seedSessionContextFromHost, sessionContextRevision } from './session-live-work';
 
 // Seeds the cross-directory status index from the host's own map.
 //
@@ -63,8 +63,7 @@ export const buildHostStatusSeedEvents = (
 /**
  * The host's turn starts, moved onto this device's clock. A busy entry's start
  * is its running turn's. An idle entry's is its last turn's, which counts only
- * while this device holds that turn open for a subagent or background command
- * (`isHeldHere`); otherwise the turn is over, or a newer one began that the
+ * while this device holds that turn open for background work (`isHeldHere`); otherwise the turn is over, or a newer one began that the
  * host map has not caught up with.
  */
 export const buildHostTurnStarts = (
@@ -81,9 +80,9 @@ export const buildHostTurnStarts = (
   return starts;
 };
 
-/** Idle here, with a running subagent or background command keeping its turn open. */
+/** Idle here, with background work keeping its turn open. */
 const isHeldHere = (sessionId: string, activeSessionIds: ReadonlySet<string>): boolean => (
-  !activeSessionIds.has(sessionId) && (hasActiveSubagent(sessionId, activeSessionIds) || hasRunningShell(sessionId))
+  !activeSessionIds.has(sessionId) && hasBackgroundWork(sessionId, activeSessionIds)
 );
 
 let inFlight: Promise<void> | null = null;
@@ -93,6 +92,7 @@ export const seedGlobalSessionStatusFromHost = (): Promise<void> => {
   if (inFlight) return inFlight;
   const runtimeKey = getRuntimeKey();
   const requestedAt = Date.now();
+  const contextSince = sessionContextRevision();
   inFlight = (async () => {
     const snapshot = await readHostBlockingRequestsSnapshot(async () => {
       const response = await opencodeClient.getHostSessionStatusSnapshot();
@@ -122,6 +122,7 @@ export const seedGlobalSessionStatusFromHost = (): Promise<void> => {
     const { activeSessionIds } = useGlobalSessionStatusStore.getState();
     const held = new Set(Object.keys(snapshot.sessions).filter((sessionId) => isHeldHere(sessionId, activeSessionIds)));
     applyHostTurnStarts(buildHostTurnStarts(snapshot, (sessionId) => held.has(sessionId)), held, { requestedAt, answeredAt });
+    if (snapshot.context) seedSessionContextFromHost(new Map(Object.entries(snapshot.context)), contextSince);
   })().finally(() => {
     inFlight = null;
   });

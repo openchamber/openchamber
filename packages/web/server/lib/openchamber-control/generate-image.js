@@ -185,7 +185,7 @@ export const createImageGenerationAction = ({ getClient, readSettings, fsPromise
     if (resolution) request.resolution = resolution;
     let result;
     try {
-      result = await client.generate.image(request, { signal: signal ? AbortSignal.any([signal, deadline]) : deadline });
+      result = await client.experimental.generate.image(request, { signal: signal ? AbortSignal.any([signal, deadline]) : deadline });
     } catch (error) {
       if (deadline.aborted) throw new OpenChamberControlError(`${modelName} did not finish within 5 minutes`, 504);
       if (signal?.aborted) throw error;

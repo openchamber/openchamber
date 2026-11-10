@@ -28,7 +28,7 @@ import { ModelMultiSelect, generateInstanceId, type ModelSelectionWithId } from 
 import { RunLaneCard } from './RunLaneCard';
 import { ModelEffortMenu } from './ModelEffortMenu';
 import { LaneStatusIcon } from './LaneStatusIcon';
-import { LANE_STATUS_COUNT_KEYS, LANE_STATUS_ORDER, resolveLaneStatus, type LaneStatus } from '@/lib/multirun/laneStatus';
+import { hasRunningGoal, LANE_STATUS_COUNT_KEYS, LANE_STATUS_ORDER, resolveLaneStatus, type LaneStatus } from '@/lib/multirun/laneStatus';
 import { useGlobalBlockingRequestsStore } from '@/sync/global-blocking-requests';
 import { isSessionUnread } from '@/sync/session-unread';
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
@@ -94,9 +94,9 @@ function PromptCaption({ prompt, expanded, onToggle }: { prompt: string; expande
   return (
     <div className="flex min-w-0 flex-1 items-start gap-1">
       {expanded ? (
-        <div className="max-h-64 min-w-0 flex-1 overflow-y-auto whitespace-pre-wrap break-words rounded-md bg-[var(--surface-muted)] px-2 py-1.5 typography-meta text-foreground">
+        <ScrollableOverlay outerClassName="max-h-64 min-w-0 flex-1 rounded-md bg-[var(--surface-muted)]" className="whitespace-pre-wrap break-words px-2 py-1.5 typography-meta text-foreground" disableHorizontal>
           {prompt}
-        </div>
+        </ScrollableOverlay>
       ) : (
         <span ref={lineRef} className="min-w-0 flex-1 truncate typography-meta text-muted-foreground">{prompt}</span>
       )}
@@ -186,8 +186,10 @@ function RunOverviewContent({ runKey }: { runKey: string }): React.ReactNode {
   }
 
   const laneIds = run.lanes.map((lane) => lane.sessionId);
-  const finishedLaneIds = laneIds.filter((id) => !activeSessionIds.has(id) && sessionById.get(id)?.time.idle);
-  const busyLaneCount = laneIds.filter((id) => activeSessionIds.has(id)).length;
+  const finishedLaneIds = laneIds.filter((id) => (
+    !activeSessionIds.has(id) && sessionById.get(id)?.time.idle && !hasRunningGoal(sessionById.get(id))
+  ));
+  const busyLaneCount = laneIds.filter((id) => activeSessionIds.has(id) || hasRunningGoal(sessionById.get(id))).length;
   const isolated = run.lanes.some((lane) => worktreeById.get(lane.sessionId));
   const memberById = new Map([...run.lanes, ...run.fusions].map((member) => [member.sessionId, member]));
   const nameOf = (sessionId: string): string => {

@@ -20,6 +20,7 @@ import { clearSessionGoal, setSessionGoal } from '@/lib/sessionGoalActions';
 import { useI18n } from '@/lib/i18n';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { useUIStore } from '@/stores/useUIStore';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 
 interface SessionGoalDialogProps {
   open: boolean;
@@ -135,7 +136,7 @@ function SessionGoalDialogBody({ mobile, onOpenChange, sessionId, directory }: S
               {/* Only failure states carry a reason worth reading; outcomes
                   like "verified by audit" are noise next to the status dot. */}
               {goal.statusReason && (goal.status === 'blocked' || goal.status === 'budgetLimited') ? (
-                <p className="typography-meta text-muted-foreground">{goal.statusReason}</p>
+                <p dir="auto" className="typography-meta text-muted-foreground">{goal.statusReason}</p>
               ) : null}
               {goal.evaluationProviderID || goal.evaluationModelID ? (
                 <div className="flex items-baseline gap-2 typography-meta">
@@ -149,7 +150,7 @@ function SessionGoalDialogBody({ mobile, onOpenChange, sessionId, directory }: S
           )}
 
           {isCompleted ? (
-            <p className="max-h-48 overflow-y-auto whitespace-pre-wrap break-words typography-meta text-muted-foreground">{objectiveContent ?? goal.objective}</p>
+            <ScrollableOverlay as="p" dir="auto" outerClassName="max-h-48" className="whitespace-pre-wrap break-words typography-meta text-muted-foreground" disableHorizontal>{objectiveContent ?? goal.objective}</ScrollableOverlay>
           ) : (
             <>
               <div className="space-y-1">

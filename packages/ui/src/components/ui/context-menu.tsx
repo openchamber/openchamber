@@ -10,8 +10,10 @@ import {
 } from "./dropdown-menu.styles";
 import { Icon } from "@/components/icon/Icon";
 import { GlassRedrawGuard } from "./glass-redraw-guard"
+import { PopupOverlayScrollbar } from "./AttachedOverlayScrollbar";
 import { handleDropdownNavigationKey } from "./dropdown-navigation";
 import { useMenuWindowDismiss } from "./menu-window-dismiss";
+import { openContextMenuFromKeyboard } from "./contextMenuKeyboard";
 
 // The wrapper owns `actionsRef` to close the menu on window blur.
 function ContextMenu({ open, defaultOpen, onOpenChange, ...props }: Omit<React.ComponentProps<typeof BaseContextMenu.Root>, "actionsRef">) {
@@ -34,17 +36,26 @@ function ContextMenu({ open, defaultOpen, onOpenChange, ...props }: Omit<React.C
   );
 }
 
-function ContextMenuTrigger({ ...props }: React.ComponentProps<typeof BaseContextMenu.Trigger>) {
-  return <BaseContextMenu.Trigger {...props} />;
+function ContextMenuTrigger({ onKeyDown, ...props }: React.ComponentProps<typeof BaseContextMenu.Trigger>) {
+  return (
+    <BaseContextMenu.Trigger
+      {...props}
+      onKeyDown={(event) => {
+        onKeyDown?.(event);
+        if (!event.defaultPrevented) openContextMenuFromKeyboard(event);
+      }}
+    />
+  );
 }
 
 type ContentProps = {
   className?: string;
   positionerClassName?: string;
   children?: React.ReactNode;
-} & React.ComponentProps<typeof BaseContextMenu.Popup>;
+} & Omit<React.ComponentProps<typeof BaseContextMenu.Popup>, "ref">;
 
 function ContextMenuContent({ className, positionerClassName, children, style, onKeyDown, ...props }: ContentProps) {
+  const [popup, setPopup] = React.useState<HTMLDivElement | null>(null);
   const handleKeyDown: NonNullable<React.ComponentProps<typeof BaseContextMenu.Popup>["onKeyDown"]> = (event) => {
     onKeyDown?.(event);
     handleDropdownNavigationKey(event, (navigationKey) => {
@@ -60,18 +71,22 @@ function ContextMenuContent({ className, positionerClassName, children, style, o
     <BaseContextMenu.Portal>
       <BaseContextMenu.Positioner className={cn("app-region-no-drag z-50", positionerClassName)}>
         <BaseContextMenu.Popup
+          ref={setPopup}
           data-slot="dropdown-menu-content"
           style={{
             color: "var(--surface-elevated-foreground)",
             ...style,
           }}
-          className={cn(dropdownMenuPopupClass, className)}
+          className={cn(dropdownMenuPopupClass, "overlay-scrollbar-target", className)}
           {...props}
           onKeyDown={handleKeyDown}
         >
           {children}
           <GlassRedrawGuard />
         </BaseContextMenu.Popup>
+        {/* A menu scrolls only where its caller gave it overflow; the thumb
+            shows only then. */}
+        <PopupOverlayScrollbar scroller={popup} />
       </BaseContextMenu.Positioner>
     </BaseContextMenu.Portal>
   );

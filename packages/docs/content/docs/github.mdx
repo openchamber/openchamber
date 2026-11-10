@@ -7,7 +7,7 @@ description: Connect GitHub, GitLab, Gitea, Forgejo or Gerrit and work with issu
 
 Connect an account on the host your project lives on and OpenChamber can list its issues and pull requests, start a session from one, and open, review and merge pull requests for you. Five hosts are built in: GitHub, including GitHub Enterprise; GitLab, including self-managed GitLab; Gitea; Forgejo, including Codeberg; and Gerrit. An [extension](/extensions/#an-extension-as-a-git-host) can add another.
 
-The project's remote decides which host OpenChamber talks to. A project whose `origin` is on gitlab.com uses your GitLab account for the board, the pull request badge on its branches, and the Git panel. A remote on a host alias from `~/.ssh/config`, such as `github.com-work`, isn't matched to any host.
+The project's remote decides which host OpenChamber talks to. A project whose `origin` is on gitlab.com uses your GitLab account for the board, the pull request badge on its branches, and the Git panel. A remote on a host alias from `~/.ssh/config`, such as `github.com-work`, isn't matched to any host. Gitea and Forgejo match an alias whose SSH configuration points at the instance's web address, and a remote on the instance's SSH clone address once you enter that address in **Settings → Integrations**.
 
 The words follow the host. GitLab says merge request, and Gerrit says change.
 
@@ -48,6 +48,8 @@ From the **PR** tab in the [Git panel](/git/), you can create a pull request, up
 ## Link an issue or pull request to a message
 
 In the chat composer, open the **+** menu and choose the link entry for your host, such as **Link GitHub Issue or PR**, **Link GitLab Issue or MR**, or **Link Gerrit change**. Pick one or more items. Each one goes with your next message as context, a pull request can bring its diff, and the session's work status panel keeps a link to it. Attaching only adds context; your message says what to do with it.
+
+You can also paste a link to an issue, pull request or Linear issue into the message. It turns into a chip with its number and title right where you pasted it, and goes with the message the same way. A link the app can't read stays plain text, and a notice says why.
 
 Gerrit has no issues, so only changes show there.
 

@@ -11,6 +11,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { useI18n } from '@/lib/i18n';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import {
   getOpenCodeTrustSnapshot,
   settleOpenCodeTrust,
@@ -69,9 +70,9 @@ export const OpenCodeTrustDialog = () => {
       <DialogContent layerClassName="z-[70]" backdropProps={{ className: 'z-[70]' }}>
         <DialogHeader>
           <DialogTitle>{t('projects.opencodeTrust.title')}</DialogTitle>
-          <DialogDescription>{t('projects.opencodeTrust.description', { path: request?.directory ?? '' })}</DialogDescription>
+          <DialogDescription className="[overflow-wrap:anywhere]">{t('projects.opencodeTrust.description', { path: request?.directory ?? '' })}</DialogDescription>
         </DialogHeader>
-        <div className="max-h-[40vh] space-y-3 overflow-y-auto">
+        <ScrollableOverlay outerClassName="max-h-[40vh]" className="space-y-3" disableHorizontal>
           {plugins.length > 0 ? (
             <div className="space-y-1">
               <p className="typography-meta text-muted-foreground">{t('projects.opencodeTrust.plugins')}</p>
@@ -97,7 +98,7 @@ export const OpenCodeTrustDialog = () => {
             </div>
           ) : null}
           <p className="typography-meta text-muted-foreground">{t('projects.opencodeTrust.paused')}</p>
-        </div>
+        </ScrollableOverlay>
         <DialogFooter>
           <Button variant="ghost" autoFocus disabled={saving} onClick={() => void settle('skip')}>
             {t('projects.opencodeTrust.skip')}

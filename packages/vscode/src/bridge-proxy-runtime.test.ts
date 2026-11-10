@@ -345,4 +345,55 @@ describe('VS Code API proxy folder trust', () => {
       await rm(root, { recursive: true, force: true });
     }
   });
+
+  test('checks the folder a session moves into', async () => {
+    const { mkdir, mkdtemp, realpath, rm, writeFile } = await import('node:fs/promises');
+    const os = await import('node:os');
+    const path = await import('node:path');
+    const { createOpenCodeTrust } = await import('../../web/server/lib/opencode-trust/index.js');
+    const root = await realpath(await mkdtemp(path.join(os.tmpdir(), 'vscode-opencode-trust-move-')));
+    const repo = path.join(root, 'repo');
+    const plain = path.join(root, 'plain');
+    await mkdir(path.join(repo, '.opencode', 'plugins'), { recursive: true });
+    await writeFile(path.join(repo, '.opencode', 'plugins', 'probe.js'), 'export default {}');
+    await mkdir(path.join(plain, 'sub'), { recursive: true });
+    const trustDeps = {
+      ...deps,
+      openCodeTrust: createOpenCodeTrust({ storePath: path.join(root, 'trust.json'), homeDirectory: path.join(root, 'home') }),
+    };
+    const move = async (directory: string): Promise<ProxyAnswer> => {
+      const bodyBase64 = Buffer.from(JSON.stringify({ directory })).toString('base64');
+      const payload = { method: 'POST', path: '/api/session/ses_plain/move', bodyBase64 };
+      const response = await handleProxyBridgeMessage({ id: 'move', type: 'api:proxy', payload }, ctx, trustDeps);
+      assert.ok(response);
+      // SAFETY: api:proxy always answers with an ApiProxyResponsePayload, and every answer here is JSON text.
+      return response.data as ProxyAnswer;
+    };
+    const originalFetch = globalThis.fetch;
+    const moved: string[] = [];
+    try {
+      // SAFETY: test double for the global fetch; the proxy only reads the status, headers and text.
+      globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+        const url = String(input instanceof Request ? input.url : input);
+        if (url.endsWith('/api/session/ses_plain')) {
+          return Response.json({ data: { id: 'ses_plain', location: { directory: plain } } });
+        }
+        moved.push(init?.body instanceof Uint8Array ? Buffer.from(init.body).toString('utf8') : '');
+        return new Response(null, { status: 204 });
+      }) as typeof fetch;
+
+      const refused = await move(repo);
+      assert.equal(refused.status, 403);
+      const refusal = JSON.parse(refused.bodyText);
+      assert.equal(refusal.code, 'opencode_trust_required');
+      assert.equal(refusal.directory, repo);
+      assert.deepEqual(moved, []);
+
+      assert.equal((await move(path.join(plain, 'sub'))).status, 204);
+      assert.deepEqual(moved, [JSON.stringify({ directory: path.join(plain, 'sub') })]);
+    } finally {
+      globalThis.fetch = originalFetch;
+      await rm(root, { recursive: true, force: true });
+    }
+  });
 });

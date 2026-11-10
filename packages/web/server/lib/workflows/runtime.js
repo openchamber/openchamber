@@ -6,6 +6,7 @@ import { WORKFLOW_ANSWER_TOOL } from '../openchamber-control/actions.js';
 import { OpenChamberControlError } from '../openchamber-control/error.js';
 import { WorkflowAgentStopped } from './agent-session.js';
 import { findSchemaContradiction, parseJsonAnswer, validateJsonSchema } from './json-schema.js';
+import { readWorkflowProcessStart } from './process-owner.js';
 import { runWorkflowSandbox } from './sandbox.js';
 import { WorkflowScriptError, parseWorkflowScript, plannedPhases } from './script.js';
 import { isWorkflowRunId } from './store.js';
@@ -160,6 +161,16 @@ const reportText = (run) => {
   return `<openchamber-workflow ${attributes}>\n${lines.join('\n')}\n</openchamber-workflow>`;
 };
 
+const isPidAlive = (pid) => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    // EPERM: the process exists but belongs to someone else.
+    return error?.code === 'EPERM';
+  }
+};
+
 /**
  * Workflow runs: scripts an agent writes that fan work out to many agents,
  * run here in OpenChamber's server so the agent that asked stays free. The
@@ -178,6 +189,9 @@ export const createWorkflowRuntime = ({
   sleep = (duration) => new Promise((resolve) => setTimeout(resolve, duration)),
   maxConcurrentAgents = MAX_CONCURRENT_AGENTS,
   maxAgentsPerRun = MAX_AGENTS_PER_RUN,
+  pid = process.pid,
+  isProcessAlive = isPidAlive,
+  readProcessStart = readWorkflowProcessStart,
 }) => {
   // Run id -> { controller, terminate, sessions: Set<sessionId> } while it runs.
   const active = new Map();
@@ -208,8 +222,31 @@ export const createWorkflowRuntime = ({
 
   const persist = async (run, options) => {
     if (removedRuns.has(run.id)) return;
+    try {
+      await store.save(run);
+    } catch {
+      throw new OpenChamberControlError('Could not save workflow run', 500);
+    }
+    if (removedRuns.has(run.id)) return;
     announce(run, options);
-    await store.save(run);
+  };
+
+  // Admission changes only top-level fields. Copy logs before appending so a
+  // failed checkpoint can restore their original contents and all shared refs.
+  const withRollback = async (run, transition) => {
+    const before = { ...run };
+    try {
+      await transition();
+    } catch (error) {
+      if (!removedRuns.has(run.id)) {
+        for (const key of Object.keys(run)) {
+          if (!Object.hasOwn(before, key)) delete run[key];
+        }
+        Object.assign(run, before);
+        announce(run, { immediate: true });
+      }
+      throw error;
+    }
   };
 
   const assertEnabled = async () => {
@@ -273,13 +310,17 @@ export const createWorkflowRuntime = ({
 
   // --- report ----------------------------------------------------------------
 
+  // get/list expose working state, so a newly minted report must remain
+  // ineligible even while its terminal checkpoint is still pending.
+  const uncommittedReports = new WeakSet();
+
   /**
    * Sends the run's report. A report a resume replaced (or one already sent)
    * is left alone, so a retry never sends a stale report or marks a new one.
    */
   const deliverReport = async (run) => {
     const report = run.report;
-    if (!report || report.delivered) return;
+    if (!report || report.delivered || uncommittedReports.has(report)) return;
     const message = {
       id: report.messageId,
       text: reportText(run),
@@ -302,7 +343,9 @@ export const createWorkflowRuntime = ({
       }
       if (run.report !== report) return;
       report.delivered = true;
-      await persist(run, { immediate: true });
+      await persist(run, { immediate: true }).catch((error) => {
+        console.warn(`[workflows] report ${report.messageId} of ${run.id} was delivered but its marker was not saved:`, error.message);
+      });
       return;
     }
   };
@@ -314,16 +357,21 @@ export const createWorkflowRuntime = ({
     if (error) run.error = error;
     else delete run.error;
     if (result !== undefined) run.result = result;
-    run.report = { messageId: createMessageId(now()), delivered: false, resume };
+    const report = { messageId: createMessageId(now()), delivered: false, resume };
+    uncommittedReports.add(report);
+    run.report = report;
+    // On failure, retain this undelivered report to protect the last durable
+    // snapshot from retention. Its WeakSet membership still forbids delivery.
     await persist(run, { immediate: true });
+    uncommittedReports.delete(report);
   };
 
   // --- running ---------------------------------------------------------------
 
-  const log = (run, message) => {
+  const log = (run, message, notify = true) => {
     run.logs.push({ at: now(), message: truncate(message, 2_000) });
     if (run.logs.length > MAX_LOGS) run.logs.splice(0, run.logs.length - MAX_LOGS);
-    announce(run);
+    if (notify) announce(run);
   };
 
   /** One agent() call: replayed from the last attempt when it asked the same, else run. */
@@ -365,6 +413,7 @@ export const createWorkflowRuntime = ({
 
     const { signal } = execution.controller;
     let release;
+    let counted = false;
     try {
       release = await execution.limiter.acquire(signal);
       // Counted when an agent starts, across attempts: a call still queued
@@ -376,6 +425,7 @@ export const createWorkflowRuntime = ({
         return null;
       }
       run.agentsStarted = started + 1;
+      counted = true;
       // An agent filed under a phase moves the run there, so a pipeline that
       // names phases per agent shows where it is like one that calls phase().
       if (record.phase) {
@@ -399,14 +449,14 @@ export const createWorkflowRuntime = ({
         allowTools: slot ? [WORKFLOW_ANSWER_TOOL] : [],
         text,
         signal,
-        onSession: (id) => {
+        onSession: async (id) => {
           record.sessionId = id;
           execution.sessions.add(id);
-          if (slot) answerSlots.set(id, slot);
           // At once, not throttled: the chat leaves workflow agents out of its
           // subagent rows by this id, and it must know before the agent works.
           // Saved too, so a restart knows which session to report as stopped.
-          void persist(run, { immediate: true });
+          await persist(run, { immediate: true });
+          if (slot) answerSlots.set(id, slot);
         },
       });
       let current = outcome;
@@ -455,6 +505,7 @@ export const createWorkflowRuntime = ({
       return value;
     } catch (error) {
       const stopped = error instanceof WorkflowAgentStopped || signal.aborted;
+      if (counted && !record.sessionId && !stopped) run.agentsStarted -= 1;
       Object.assign(record, {
         state: stopped ? 'stopped' : 'failed',
         endedAt: now(),
@@ -465,6 +516,7 @@ export const createWorkflowRuntime = ({
     } finally {
       release?.();
       if (record.sessionId) {
+        execution.sessions.delete(record.sessionId);
         answerSlots.delete(record.sessionId);
         // What the agent ran on and spent; the session keeps it, so a failed
         // read only leaves the panel without the numbers.
@@ -472,7 +524,9 @@ export const createWorkflowRuntime = ({
         if (read?.model) record.modelUsed = read.model;
         if (read) record.usage = read.usage;
       }
-      await persist(run);
+      await persist(run).catch((error) => {
+        console.warn(`[workflows] agent ${record.key} of ${run.id} ended but could not be saved:`, error.message);
+      });
     }
   };
 
@@ -504,36 +558,13 @@ export const createWorkflowRuntime = ({
    *
    * The run is in `active` from the first moment it is `running`, so a stop
    * that arrives before the sandbox exists is recorded and honoured as soon as
-   * it does. It leaves `active` once its end is saved, before the report goes
-   * out, so a slow delivery does not hold a finished run as running.
+   * it does. It leaves `active` when the worker ends, even if its terminal
+   * checkpoint fails; such a failure withholds the report.
    */
-  const execute = async (run) => {
-    const { body } = parse(run.script);
-    const completed = new Map(run.agents.filter((agent) => agent.state === 'completed').map((agent) => [agent.key, agent]));
-    const execution = {
-      controller: new AbortController(),
-      limiter: createLimiter(maxConcurrentAgents),
-      sessions: new Set(),
-      inflight: new Set(),
-      completed,
-      consumed: new Set(),
-      occurrences: new Map(),
-      stopReason: null,
-      sandbox: null,
-    };
-    active.set(run.id, execution);
-    Object.assign(run, { state: 'running', attempt: run.attempt + 1, startedAt: now(), agents: [], currentPhase: null });
-    delete run.endedAt;
-    delete run.error;
-    delete run.result;
-    delete run.report;
-    log(run, run.attempt === 1
-      ? 'Run started'
-      : `Attempt ${run.attempt} started; ${completed.size} answers from earlier attempts can be reused`);
-
+  const execute = async (run, execution, body) => {
+    const { completed } = execution;
     let ending;
     try {
-      await persist(run, { immediate: true });
       execution.sandbox = runWorkflowSandbox({
         body,
         args: run.args,
@@ -541,7 +572,8 @@ export const createWorkflowRuntime = ({
         onAgent: (call) => {
           const running = runAgent(run, execution, call);
           execution.inflight.add(running);
-          void running.finally(() => execution.inflight.delete(running));
+          const removeInflight = () => execution.inflight.delete(running);
+          void running.then(removeInflight, removeInflight);
           return running;
         },
         onPhase: (title) => {
@@ -567,21 +599,62 @@ export const createWorkflowRuntime = ({
       // Agents the script did not wait for, or that were running when it was
       // stopped, end with the run; the report counts them as stopped.
       execution.controller.abort();
-      await Promise.all([...execution.sessions].map((sessionId) => agentSessions.interrupt(run.directory, sessionId)));
+      await Promise.allSettled([...execution.sessions].map((sessionId) => agentSessions.interrupt(run.directory, sessionId)));
       await Promise.allSettled([...execution.inflight]);
       // Answers this attempt did not get to stay for the next one.
       for (const [key, agent] of completed) {
         if (!execution.consumed.has(key)) run.agents.push(agent);
       }
       await settleRun(run, ending.state, ending);
+    } catch (error) {
+      // The worker ended. Keep its truthful working state while disk retains
+      // the last successful snapshot; no report may describe an unsaved end.
+      console.warn(`[workflows] run ${run.id} ended; completion report withheld:`, error?.message ?? error);
+      log(run, 'Could not save workflow completion; completion report withheld.');
+      announce(run, { immediate: true });
+      return;
     } finally {
       active.delete(run.id);
     }
     await deliverReport(run);
   };
 
-  const startInBackground = (run) => {
-    void execute(run).catch((error) => {
+  const startInBackground = async (run) => {
+    const { body } = parse(run.script);
+    const completed = new Map(run.agents.filter((agent) => agent.state === 'completed').map((agent) => [agent.key, agent]));
+    const execution = {
+      controller: new AbortController(),
+      limiter: createLimiter(maxConcurrentAgents),
+      sessions: new Set(),
+      inflight: new Set(),
+      completed,
+      consumed: new Set(),
+      occurrences: new Map(),
+      stopReason: null,
+      sandbox: null,
+    };
+    active.set(run.id, execution);
+    try {
+      await withRollback(run, async () => {
+        Object.assign(run, { state: 'running', attempt: run.attempt + 1, startedAt: now(), agents: [], logs: [...run.logs], currentPhase: null, ownerPid: pid });
+        delete run.endedAt;
+        delete run.error;
+        delete run.result;
+        delete run.report;
+        delete run.ownerStartedAt;
+        log(run, run.attempt === 1
+          ? 'Run started'
+          : `Attempt ${run.attempt} started; ${completed.size} answers from earlier attempts can be reused`, false);
+        const startedAt = await readProcessStart(pid);
+        if (startedAt) run.ownerStartedAt = startedAt;
+        else console.warn(`[workflows] Cannot read process start time for owner PID ${pid}; run ${run.id} uses PID-only recovery`);
+        await persist(run, { immediate: true });
+      });
+    } catch (error) {
+      active.delete(run.id);
+      throw error;
+    }
+    void execute(run, execution, body).catch((error) => {
       console.warn(`[workflows] run ${run.id} ended with an internal error:`, error?.message ?? error);
     });
   };
@@ -646,14 +719,14 @@ export const createWorkflowRuntime = ({
     await assertEnabled();
     const run = await requireRun(runId);
     if (run.state !== 'awaiting-approval') throw new OpenChamberControlError(`The run is ${run.state}, not waiting for approval`, 409);
-    startInBackground(run);
+    await startInBackground(run);
     return { runId: run.id, state: 'running' };
   };
 
   const decline = async ({ runId }) => {
     const run = await requireRun(runId);
     if (run.state !== 'awaiting-approval') throw new OpenChamberControlError(`The run is ${run.state}, not waiting for approval`, 409);
-    await settleRun(run, 'declined', { resume: false });
+    await withRollback(run, () => settleRun(run, 'declined', { resume: false }));
     await deliverReport(run);
     return { runId: run.id, state: run.state };
   };
@@ -678,8 +751,9 @@ export const createWorkflowRuntime = ({
     if (run.state !== 'failed' && run.state !== 'stopped') {
       throw new OpenChamberControlError(`The run is ${run.state}; only a failed or stopped run resumes. Propose a new one with workflow.run`, 409);
     }
-    startInBackground(run);
-    return { runId: run.id, state: 'running', reused: run.agents.filter((agent) => agent.state === 'completed').length };
+    const reused = run.agents.filter((agent) => agent.state === 'completed').length;
+    await startInBackground(run);
+    return { runId: run.id, state: 'running', reused };
   };
 
   const status = async ({ runId }, { sessionId } = {}) => summarizeRun(await requireRun(runId, sessionId));
@@ -691,15 +765,23 @@ export const createWorkflowRuntime = ({
    */
   const remove = async ({ runId }) => {
     const run = await requireRun(runId);
-    if (active.has(run.id) || run.state === 'running' || run.state === 'awaiting-approval') {
+    // The run's state is the rule ("stop or decline first"), not the active
+    // set: an execution leaves `active` only once its end save resolves
+    // (execute's finally), so for a moment after the end is saved the run is
+    // finished yet still listed there. Deleting in that overlap is safe — the
+    // deletion drops an undelivered report and the `removedRuns` guards keep
+    // the run from coming back.
+    if (run.state === 'running' || run.state === 'awaiting-approval') {
       throw new OpenChamberControlError('Stop or decline the run before deleting it', 409);
     }
     removedRuns.add(run.id);
+    const report = run.report;
     delete run.report;
     try {
       await store.remove(run.id);
     } catch (error) {
       removedRuns.delete(run.id);
+      if (report) run.report = report;
       throw error;
     }
     // A throttled update still on its way would bring the run back on screen.
@@ -826,18 +908,35 @@ export const createWorkflowRuntime = ({
   /**
    * After a restart the scripts that were running are gone: each such run is
    * marked stopped and says so. Reports go out with deliverPending once
-   * OpenCode answers.
+   * OpenCode answers. A run whose server process is still alive is left
+   * alone: a second OpenChamber over the same data directory (a dev server
+   * started next to the desktop app) must not stop another server's run.
    */
   const start = () => {
     restored = (async () => {
       for (const run of await store.list()) {
         if (run.state !== 'running') continue;
-        for (const agent of run.agents) {
-          if (agent.state === 'running' || agent.state === 'queued') Object.assign(agent, { state: 'stopped', error: 'OpenChamber restarted' });
+        try {
+          if (run.ownerPid && run.ownerPid !== pid && isProcessAlive(run.ownerPid)) {
+            const startedAt = run.ownerStartedAt ? await readProcessStart(run.ownerPid) : null;
+            if (run.ownerStartedAt && !startedAt) {
+              console.warn(`[workflows] Cannot verify process start time for owner PID ${run.ownerPid} of run ${run.id}; preserving the live owner's run`);
+            }
+            // Legacy records and inaccessible process metadata retain PID-only
+            // protection so another server's live work is never stopped blindly.
+            if (!run.ownerStartedAt || !startedAt || startedAt === run.ownerStartedAt) {
+              console.info(`[workflows] Skipping run ${run.id}: owner PID ${run.ownerPid} is alive${!run.ownerStartedAt || !startedAt ? ' according to a PID-only check' : ' with matching process start time'}`);
+              continue;
+            }
+          }
+          for (const agent of run.agents) {
+            if (agent.state === 'running' || agent.state === 'queued') Object.assign(agent, { state: 'stopped', error: 'OpenChamber restarted' });
+          }
+          await settleRun(run, 'stopped', { error: 'OpenChamber restarted while the workflow ran.', resume: false });
+        } catch (error) {
+          console.warn(`[workflows] could not recover run ${run.id}; completion report withheld:`, error?.message ?? error);
+          announce(run, { immediate: true });
         }
-        Object.assign(run, { state: 'stopped', endedAt: now(), error: 'OpenChamber restarted while the workflow ran.' });
-        run.report = { messageId: createMessageId(now()), delivered: false, resume: false };
-        await persist(run, { immediate: true });
       }
     })();
     return restored;

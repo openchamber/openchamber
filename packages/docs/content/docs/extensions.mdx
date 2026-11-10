@@ -46,7 +46,16 @@ Showing a panel and reading which project and session are open needs no permissi
 - **Use your Small Model**: one-off text generation outside your sessions, with the model from Settings → Sessions → Small Model. Costs tokens.
 - **Connect to an external service**: with the account you connect in Settings → Integrations.
 - **Read a session's conversation**: only when you run the extension's action on that session.
-- **Run a local service**: a separate program with your full user access. Allow it only if you trust the author.
+- **Run a local service**: a separate program with your full user access. Allow it only if you trust the author. When the extension wants to be told what happens in your sessions, this line also lists the moments it hears about: a turn finishes, a turn fails, the agent asks permission, the agent asks a question. It hears about them in every project, with no window open, and gets only identifiers: the session, its project, and the items you linked to it.
+- **Read what the agent says in the background**: the final answer of each turn, the questions the agent asks and what it asks permission for, in every project, sent to the extension's local service. Allow it only if you trust where the extension sends it.
+- **Start sessions and send messages on its own**: its local service does this with no window open, which costs tokens and can run tools.
+- **Add to what agents read**: text in the instructions of your sessions, and skills offered to every agent while the extension is on.
+- **Add a plugin to OpenCode**: the package's plugin is loaded into your OpenCode while the extension is on. Plugin code runs inside OpenCode with your full access, like a local service, so allow it only if you trust the author.
+- **Recognise its links in chats**: identifiers like `DEMO-12` and links to the extension's site become clickable in your chat messages. The dialog lists which ones and says whether a click opens them in the extension or attaches them to your message. Links OpenChamber already knows, such as GitHub pull requests and Linear issues, keep their usual behavior.
+
+A local service can also keep running while OpenChamber runs, or wake on a schedule. The dialog says so under **Run a local service**, and it says when what you type after `@` goes to the service. An extension can add its own rows to the `@` menu and its own blocks to agent replies. Pausing the extension takes all of this away.
+
+An extension that delivers your notifications, to Slack, Matrix or a server of its own, says so under **Run a local service** too, with a line that starts with **Delivers your notifications**. Nothing goes out until you connect an account for it in [Settings → Integrations](/integrations/#extension-notification-channels); after that it gets what your phone would, and pausing the extension stops it.
 
 When a newer version asks for more than you allowed, the card shows **Needs approval** and a **Review permissions** button. Until you allow the new list, that extension stays off.
 
@@ -60,6 +69,14 @@ Besides its panel on the rail, an extension can add entries to menus you already
 
 Some extensions show a live picture instead of a panel of their own: what an agent is working in on the server, such as a browser or a simulator. Click into the picture or type to take control, and the status line says **You have control**; the agent's own browser actions are refused until you press **Hand back to agent**. Copy and paste work as usual. Another device connected at the same time sees who is in control and cannot take it over. Such an extension can add its own controls beside the picture, an address bar above it or a tool column next to it for example.
 
+## An extension with an OpenCode plugin
+
+An extension can ship an OpenCode plugin, so you install one thing instead of two. Its permission dialog has a row that starts with **Add a plugin to OpenCode**. Once you allow it, OpenChamber adds the plugin to the OpenCode it runs for you within a couple of seconds, with no restart; disabling or removing the extension takes it out the same way. Nothing is written into your own `opencode.json`, so the plugin never outlives the extension and never runs in the OpenCode you start in a terminal.
+
+When OpenChamber did not start the OpenCode it talks to, or your environment sets its own `OPENCODE_CONFIG`, OpenChamber's config does not reach that OpenCode. The extension's screen says so and offers **Add to global config**. That writes the plugin's folder into your global OpenCode config: it then runs in every OpenCode on this computer, including the terminal, stays on while the extension is off, and is yours to manage on **Settings → Plugins**. If you remove the extension, OpenCode lists that entry as a failed plugin and keeps running until you delete the entry there. An OpenCode on another machine cannot load a folder from this one; the screen says so.
+
+VS Code and the mobile app load no extensions. A session inside an isolated space runs its own OpenCode, which never receives the plugin. In enterprise mode the plugin counts like a local service: the extension installs only from a repository your administrator listed.
+
 ## An extension as a git host
 
 An extension can add a git host next to GitHub, GitLab, Gitea, Forgejo and Gerrit. Its permission dialog then has a line that starts with **Acts as the Git host** and names the host. The line also says what OpenChamber sends it: repository names, branches, and the issue and pull request text you write.
@@ -71,6 +88,28 @@ Your token stays in OpenChamber. The extension asks OpenChamber to call the host
 Pausing the extension takes the host away until you turn it back on, and your account stays. Removing the extension forgets the account. VS Code doesn't show git hosts from extensions.
 
 The OpenChamber SDK has a working example, `examples/source-control-provider`, to start from when building one. See [Build an extension](/sdk/).
+
+## An extension as a tracker
+
+An extension can add a work item tracker next to Linear: YouTrack, Jira, Plane, or a tracker of its own. Its permission dialog then has a line that starts with **Acts as the tracker** and names it. The line also says what OpenChamber sends it: your searches and the items you open, and that it is asked to change their state and post session comments for you.
+
+Once you allow it, the tracker gets its own card in **Settings → Integrations** under **Extension accounts**. Connect an account there: with a token, or by signing in in the browser after you enter the client id of the app you registered with the tracker, and the server's address first if the card asks for one. After that its items are wherever Linear's are: the chat's **+** menu and the picker, New Worktree, the linked items of a session, and the live states of items you follow. A pasted link to one of its items is recognised the same way. See [Linear](/integrations/#linear) for what each of these does.
+
+Your tokens stay in OpenChamber. The extension asks OpenChamber to call the tracker for it, and OpenChamber adds the credential to each call, only for the server you connected. The extension never receives it, and only its state change and comment calls may write anything there.
+
+Pausing the extension takes the tracker away until you turn it back on, and your accounts stay. Removing the extension forgets them. VS Code shows no trackers; on the phone the tracker's items show, and accounts are connected from the web or desktop app.
+
+The OpenChamber SDK has a working example, `examples/tracker-provider`, with a fake tracker to run beside it. See [Build an extension](/sdk/).
+
+## An extension as a usage provider
+
+An extension can add a usage provider next to the built-in ones: a provider OpenChamber does not read itself, or one of its own. Its permission dialog then has a line that starts with **Reports usage like a built-in provider** and lists the OpenCode providers whose credentials it reads, such as `openrouter`; an extension that lists none says so.
+
+Once you allow it, its card sits after the built-in providers on **Settings → Usage**, with the extension's name and icon, and it joins the header's rate limits, Work Status, the phone's popover and the desktop tray when you tick **Show in Work Status**, like any built-in. On every refresh OpenChamber hands the extension the credential OpenCode holds for each provider it listed, and nothing else; a version that lists another provider asks for your approval again. The extension reads the usage itself, and OpenChamber draws it the way it draws a built-in.
+
+Pausing the extension takes the card away until you turn it back on, and your Usage settings for it stay. Removing the extension takes the card away for good. VS Code shows no usage from extensions; on the phone the card shows, and the extension is set up from the web or desktop app. A session inside an isolated space reads usage from that space's own server, which has no extensions.
+
+The OpenChamber SDK has a working example, `examples/quota-provider`, with a fake usage API to run beside it. See [Build an extension](/sdk/).
 
 ## Connect its account
 

@@ -4,18 +4,18 @@ import { sessionFolderCollision } from './sessionFolderCollision';
 
 const rect = (top: number): ClientRect => ({ top, bottom: top + 28, left: 0, right: 240, width: 240, height: 28 });
 
-const container = (id: string, type: string): DroppableContainer => ({
+const container = (id: string, type: string, sortGroup?: string): DroppableContainer => ({
   id,
   key: id,
-  data: { current: { type } },
+  data: { current: { type, sortGroup } },
   disabled: false,
   node: { current: null },
   rect: { current: null },
 });
 
-const active = (type: string): Active => ({
+const active = (type: string, sortGroup?: string): Active => ({
   id: 'dragged',
-  data: { current: { type } },
+  data: { current: { type, sortGroup } },
   rect: { current: { initial: null, translated: null } },
 });
 
@@ -49,5 +49,26 @@ describe('sessionFolderCollision', () => {
 
   test('other drags keep the nearest target', () => {
     expect(collide('project', 130)[0]).toBe('project');
+  });
+
+  test('a header lands only among the headers of its sort group', () => {
+    // A project of Projects right under the dragged one, a group's project and
+    // a section caption further off: only the farther Projects one is a target.
+    const sorted = [
+      container('group-project', 'project', 'section:clients'),
+      container('caption', 'section', 'sections'),
+      container('far-project', 'project', 'projects'),
+    ];
+    const rects = new Map([['group-project', rect(120)], ['caption', rect(150)], ['far-project', rect(400)]]);
+    const hit = (type: string, sortGroup: string) => sessionFolderCollision({
+      active: active(type, sortGroup),
+      collisionRect: rect(130),
+      droppableRects: rects,
+      droppableContainers: sorted,
+      pointerCoordinates: { x: 100, y: 140 },
+    }).map((collision) => collision.id);
+    expect(hit('project', 'projects')).toEqual(['far-project']);
+    expect(hit('project', 'section:clients')).toEqual(['group-project']);
+    expect(hit('section', 'sections')).toEqual(['caption']);
   });
 });

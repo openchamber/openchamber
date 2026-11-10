@@ -54,6 +54,36 @@ export const useGlobalBlockingRequestsStore = create<GlobalBlockingRequestsState
   bySession: new Map(),
 }));
 
+/** Whether a page or a secret card in this session waits for the user's answer. */
+export const useIsPageWaiting = (sessionId: string | null | undefined): boolean => (
+  useGlobalBlockingRequestsStore((state) => Boolean(sessionId && state.bySession.get(sessionId)?.pages.length))
+);
+
+/** Whether this call's page or secret card waits for the user's answer, as the server announced it. */
+export const useIsCallWaiting = (sessionId: string | null | undefined, callId: string | null | undefined): boolean => (
+  useGlobalBlockingRequestsStore((state) => Boolean(sessionId && callId && state.bySession.get(sessionId)?.pages.some((page) => page.id === callId)))
+);
+
+/**
+ * The pages that stopped waiting between two states of the index, as
+ * `sessionID:pageID`: answered, settled by the host's snapshot after a missed
+ * end, or gone with their session.
+ */
+export const settledPageKeys = (
+  previous: ReadonlyMap<string, PendingBlockingRequests>,
+  next: ReadonlyMap<string, PendingBlockingRequests>,
+): string[] => {
+  const settled: string[] = [];
+  for (const [sessionId, entry] of previous) {
+    if (entry.pages.length === 0) continue;
+    const remaining = next.get(sessionId)?.pages;
+    if (remaining === entry.pages) continue;
+    const kept = new Set(remaining?.map((page) => page.id));
+    for (const page of entry.pages) if (!kept.has(page.id)) settled.push(`${sessionId}:${page.id}`);
+  }
+  return settled;
+};
+
 export const resetGlobalBlockingRequests = (): void => {
   pageSnapshotObservers.clear();
   useGlobalBlockingRequestsStore.setState({ bySession: new Map() });

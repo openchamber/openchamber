@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import express from 'express';
 import os from 'os';
 import path from 'path';
-import { mkdir, mkdtemp, realpath, rm, writeFile } from 'fs/promises';
+import { cp, mkdir, mkdtemp, realpath, rm, writeFile } from 'fs/promises';
 
 import { registerOpenCodeProxy } from './lib/opencode/proxy.js';
 import { createOpenCodeTrust, OPENCODE_TRUST_REQUIRED } from './lib/opencode-trust/index.js';
@@ -20,29 +20,38 @@ describe('OpenCode proxy folder trust', () => {
   let upstreamServer;
   let proxyServer;
   let base;
+  let plain;
   let upstreamHits;
+  let upstreamBodies;
 
   beforeEach(async () => {
     root = await realpath(await mkdtemp(path.join(os.tmpdir(), 'opencode-trust-proxy-')));
     repo = path.join(root, 'repo');
     await mkdir(path.join(repo, '.opencode', 'plugins'), { recursive: true });
     await writeFile(path.join(repo, '.opencode', 'plugins', 'probe.js'), 'export default {}');
+    plain = path.join(root, 'plain');
+    await mkdir(path.join(plain, 'sub'), { recursive: true });
     upstreamHits = [];
+    upstreamBodies = [];
 
     const upstream = express();
     upstream.get('/api/session/:id', (req, res) => {
       if (req.params.id === 'ses_repo') return res.json({ data: { id: 'ses_repo', location: { directory: repo } } });
+      if (req.params.id === 'ses_plain') return res.json({ data: { id: 'ses_plain', location: { directory: plain } } });
       return res.status(404).json({ error: 'not found' });
     });
+    upstream.use(express.json());
     upstream.use((req, res) => {
       upstreamHits.push(`${req.method} ${req.path}`);
+      if (req.method === 'POST') upstreamBodies.push(req.body);
       res.json({ ok: true });
     });
     upstreamServer = await listen(upstream);
     const upstreamPort = upstreamServer.address().port;
 
     const app = express();
-    app.use(express.json());
+    // As in the server: OpenCode routes reach the proxy with their body unread.
+    app.use('/api/opencode', express.json());
     registerOpenCodeProxy(app, {
       fs: {},
       os: {},
@@ -99,7 +108,77 @@ describe('OpenCode proxy folder trust', () => {
     expect((await fetch(`${base}/api/session/ses_other/prompt`, { method: 'POST' })).status).toBe(200);
   });
 
+  it('checks the folder OpenCode decodes from a normalized marked header', async () => {
+    const refused = await fetch(`${base}/api/agent`, { headers: {
+      'x-opencode-directory': encodeURIComponent(path.join(root, '%72epo')),
+      'x-opencode-directory-encoding': 'uri',
+    } });
+
+    expect(refused.status).toBe(403);
+    expect(await refused.json()).toMatchObject({ code: OPENCODE_TRUST_REQUIRED, directory: repo });
+    expect(upstreamHits).toEqual([]);
+  });
+
+  it('checks a literal-percent folder when a marked header has malformed escapes', async () => {
+    const malformedRepo = path.join(root, 'bad%ZZ');
+    await cp(repo, malformedRepo, { recursive: true });
+    const refused = await fetch(`${base}/api/agent`, { headers: {
+      'x-opencode-directory': malformedRepo,
+      'x-opencode-directory-encoding': 'uri',
+    } });
+
+    expect(refused.status).toBe(403);
+    expect(await refused.json()).toMatchObject({ code: OPENCODE_TRUST_REQUIRED, directory: malformedRepo });
+    expect(upstreamHits).toEqual([]);
+  });
+
+  it.each([
+    ['marked', { 'x-opencode-directory-encoding': 'uri' }],
+    ['unmarked', {}],
+  ])('checks the raw folder of an %s header that mixes valid and malformed escapes', async (_kind, marker) => {
+    const literalRepo = path.join(root, '1%72epo%ZZ');
+    await cp(repo, literalRepo, { recursive: true });
+    const refused = await fetch(`${base}/api/agent`, { headers: { 'x-opencode-directory': literalRepo, ...marker } });
+
+    expect(refused.status).toBe(403);
+    expect(await refused.json()).toMatchObject({ code: OPENCODE_TRUST_REQUIRED, directory: literalRepo });
+    expect(upstreamHits).toEqual([]);
+  });
+
   it('serves the session list of an untrusted folder', async () => {
     expect((await fetch(`${base}/api/session?limit=5`, { headers: scoped() })).status).toBe(200);
+  });
+
+  const move = (sessionID, directory) => fetch(`${base}/api/session/${sessionID}/move`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ directory }),
+  });
+
+  it('keeps a session out of an untrusted folder until the user trusts it', async () => {
+    const refused = await move('ses_plain', repo);
+    expect(refused.status).toBe(403);
+    expect(await refused.json()).toMatchObject({ code: OPENCODE_TRUST_REQUIRED, directory: repo });
+    expect(upstreamHits).toEqual([]);
+
+    const shown = await (await fetch(`${base}/api/opencode/trust?directory=${encodeURIComponent(repo)}`)).json();
+    await fetch(`${base}/api/opencode/trust`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ directory: repo, fingerprint: shown.fingerprint }),
+    });
+    expect((await move('ses_plain', repo)).status).toBe(200);
+    expect(upstreamHits).toEqual(['POST /api/session/ses_plain/move']);
+    expect(upstreamBodies).toEqual([{ directory: repo }]);
+  });
+
+  it('moves a session between folders that run nothing', async () => {
+    const moved = await fetch(`${base}/api/session/ses_plain/move`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ directory: path.join(plain, 'sub'), delivery: 'queue' }),
+    });
+    expect(moved.status).toBe(200);
+    expect(upstreamBodies).toEqual([{ directory: path.join(plain, 'sub'), delivery: 'queue' }]);
   });
 });

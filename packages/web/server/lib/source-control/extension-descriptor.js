@@ -21,7 +21,8 @@ import { extensionProviderId } from './provider-id.js';
  *     state: boolean, labels: boolean, reviewers: boolean, changeRequestPatch: boolean, liveSummaries: boolean,
  *     reviewModel?: 'verdict' | 'votes', revisions?: boolean,
  *   },
- *   token: {
+ *   login?: { kind: 'service', hint: string },
+ *   token?: {
  *     header: 'authorization' | 'private-token', scheme: 'bearer' | 'token' | 'basic' | 'none', username?: boolean,
  *     scopes: string[], createPath?: string,
  *   },
@@ -103,7 +104,7 @@ const freezeList = (list) => Object.freeze([...list]);
 /**
  * The full, frozen `ProviderDescriptor` of an extension's Git host. The host
  * fixes everything the wire cannot carry or the extension must not choose:
- * the id (`ext-<guestId>`), personal access tokens as the only sign-in,
+ * the id (`ext-<guestId>`), sign-in from the declared token and/or service login,
  * origins as instances (only the declared ones unless `custom`, and never a
  * host a built-in serves by default, declared or entered), the thread
  * pattern compiled from templates, and the features PR 2 does not forward
@@ -157,15 +158,16 @@ export function buildExtensionDescriptor({ guestId, contribution, guest }) {
   };
   const pattern = threadPattern(presentation.urls, fail);
 
-  const token = { scopes: freezeList(contribution.token.scopes) };
-  if (contribution.token.createPath) token.createPath = contribution.token.createPath;
+  const token = contribution.token ? { scopes: freezeList(contribution.token.scopes) } : null;
+  if (contribution.token?.createPath) token.createPath = contribution.token.createPath;
+  const login = contribution.login ? Object.freeze({ ...contribution.login }) : null;
 
   // Basic auth sends `login:token`, so the Settings card asks for the login.
   const settings = [Object.freeze({ key: 'instance', type: 'instance-url', secret: false, scope: 'instance' })];
-  if (contribution.token.scheme === 'basic') {
+  if (contribution.token?.scheme === 'basic') {
     settings.push(Object.freeze({ key: 'username', type: 'username', secret: false, scope: 'instance' }));
   }
-  settings.push(Object.freeze({ key: 'token', type: 'personal-access-token', secret: true, scope: 'instance' }));
+  if (token) settings.push(Object.freeze({ key: 'token', type: 'personal-access-token', secret: true, scope: 'instance' }));
 
   const changeBased = {};
   if (capabilities.reviewModel) changeBased.reviewModel = capabilities.reviewModel;
@@ -209,7 +211,7 @@ export function buildExtensionDescriptor({ guestId, contribution, guest }) {
       // No `createVia`: absent means `api`, so an extension creates through `/pr/create`.
       ...changeBased,
     }),
-    authMethods: Object.freeze({ device: false, pat: true, cli: false }),
+    authMethods: Object.freeze({ device: false, pat: Boolean(token), cli: login ?? false }),
     transport: Object.freeze({
       httpsUsername: contribution.transport.httpsUsername.kind === 'fixed'
         ? Object.freeze({ kind: 'fixed', value: contribution.transport.httpsUsername.value })
@@ -252,7 +254,7 @@ export function buildExtensionDescriptor({ guestId, contribution, guest }) {
         placeholder: declared.placeholder,
       }),
       cliTransport: false,
-      token: Object.freeze(token),
+      ...(token ? { token: Object.freeze(token) } : {}),
       urls: Object.freeze({
         changeRequest: freezeList(presentation.urls.changeRequest),
         issue: freezeList(presentation.urls.issue),
@@ -272,7 +274,7 @@ export function buildExtensionDescriptor({ guestId, contribution, guest }) {
       guestId,
       name: guest.name,
       version: guest.version,
-      token: Object.freeze({ header: contribution.token.header, scheme: contribution.token.scheme }),
+      ...(contribution.token ? { token: Object.freeze({ header: contribution.token.header, scheme: contribution.token.scheme }) } : {}),
     }),
   });
 }

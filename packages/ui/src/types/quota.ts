@@ -1,4 +1,5 @@
-export type QuotaProviderId =
+/** The usage providers OpenChamber reads itself (`packages/web/server/lib/quota/providers`). */
+type BuiltInQuotaProviderId =
   | 'openai'
   | 'codex'
   | 'cursor'
@@ -18,6 +19,7 @@ export type QuotaProviderId =
   | 'ollama-cloud'
   | 'wafer'
   | 'opencode-go'
+  | 'opencode'
   | 'deepinfra'
   | 'deepseek'
   | 'exe-dev'
@@ -27,10 +29,25 @@ export type QuotaProviderId =
   | 'zenmux'
   | 'xai';
 
+/** A usage provider an installed extension serves (`provides: ["quota"]`): `ext-<extension id>`, the server's name for it. */
+export type ExtensionQuotaProviderId = `ext-${string}`;
+
+export type QuotaProviderId = BuiltInQuotaProviderId | ExtensionQuotaProviderId;
+
 export interface UsageWindowGiftReset {
   recordId: number;
   expireAt: number;
+  /**
+   * Grant kind of the z.ai record, delivered per record by the list API and
+   * sent back unchanged on activation. Absent when the record carries none;
+   * the runtimes then fall back to 'GLOBAL'.
+   */
+  grantType?: string;
 }
+
+export type UsageWindowValue =
+  | { kind: 'requests'; count: number }
+  | { kind: 'spend'; spent: number; limit: number | null };
 
 export interface UsageWindow {
   usedPercent: number | null;
@@ -41,6 +58,8 @@ export interface UsageWindow {
   resetAtFormatted: string | null;
   resetAfterFormatted: string | null;
   valueLabel?: string | null;
+  value?: UsageWindowValue;
+  creditsUsed?: number;
   /** Claimable gift (bonus) limit reset, when the provider exposes an available one. */
   giftReset?: UsageWindowGiftReset | null;
 }
@@ -88,6 +107,8 @@ export interface ProviderResult {
   error?: string;
   /** Subscription tier reported by the provider, when it exposes one. */
   planLabel?: string | null;
+  /** Whose numbers these are, when they come from a sign-in other than the one OpenChamber chats as. */
+  accountLabel?: string | null;
   usage: ProviderUsage | null;
   fetchedAt: number;
 }

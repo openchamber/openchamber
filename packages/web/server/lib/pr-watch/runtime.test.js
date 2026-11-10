@@ -164,6 +164,7 @@ describe('createPrWatchRuntime', () => {
     const [wake] = openCode.state.admitted;
     expect(wake.description).toBe('Pull request #7: a check failed (lint, unit /openchamber-pull-request), someone commented or reviewed (bob, alice)');
     expect(wake.text.match(/<\/openchamber-pull-request>/g)).toHaveLength(1);
+    expect(wake.metadata).toMatchObject({ failedChecks: ['lint', 'unit /openchamber-pull-request'], authors: ['bob', 'alice'] });
     expect(readers.sourceControl.mock.calls.filter(([input]) => input.details)).toHaveLength(1);
   });
 

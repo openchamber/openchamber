@@ -3,12 +3,17 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, test } from 'bun:test';
 
+import { ghConfigDir } from './gh-config.js';
+
 const { isTrustedGitHubHost, hasStoredGhLogin, listTrustedGitHubHosts } = await import('./host-trust.js');
 
 // isTrustedGitHubHost reads GH_HOST and hosts.yml at call time (no memo), so
 // tests just set and restore the environment around each case.
 const previousGhHost = process.env.GH_HOST;
 const previousGhConfigDir = process.env.GH_CONFIG_DIR;
+const previousXdgConfigHome = process.env.XDG_CONFIG_HOME;
+const previousAppData = process.env.APPDATA;
+const previousPlatform = Object.getOwnPropertyDescriptor(process, 'platform');
 const createdDirs = [];
 
 const createHostsYaml = (content) => {
@@ -16,6 +21,7 @@ const createHostsYaml = (content) => {
   createdDirs.push(dir);
   fs.writeFileSync(path.join(dir, 'hosts.yml'), content);
   process.env.GH_CONFIG_DIR = dir;
+  return dir;
 };
 
 afterEach(() => {
@@ -23,9 +29,90 @@ afterEach(() => {
   else process.env.GH_HOST = previousGhHost;
   if (previousGhConfigDir === undefined) delete process.env.GH_CONFIG_DIR;
   else process.env.GH_CONFIG_DIR = previousGhConfigDir;
+  if (previousXdgConfigHome === undefined) delete process.env.XDG_CONFIG_HOME;
+  else process.env.XDG_CONFIG_HOME = previousXdgConfigHome;
+  if (previousAppData === undefined) delete process.env.APPDATA;
+  else process.env.APPDATA = previousAppData;
+  Object.defineProperty(process, 'platform', previousPlatform);
   for (const dir of createdDirs.splice(0)) {
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+describe('gh config directory', () => {
+  test('uses the home default outside Windows even when APPDATA is set', () => {
+    delete process.env.GH_CONFIG_DIR;
+    delete process.env.XDG_CONFIG_HOME;
+    process.env.APPDATA = path.join(os.tmpdir(), 'unused-appdata');
+    Object.defineProperty(process, 'platform', { value: 'linux' });
+    expect(ghConfigDir()).toBe(path.join(os.homedir(), '.config', 'gh'));
+  });
+
+  test('uses the home default on Windows when APPDATA is empty', () => {
+    process.env.GH_CONFIG_DIR = '';
+    process.env.XDG_CONFIG_HOME = '';
+    process.env.APPDATA = '';
+    Object.defineProperty(process, 'platform', { value: 'win32' });
+    expect(ghConfigDir()).toBe(path.join(os.homedir(), '.config', 'gh'));
+  });
+
+  test('discovers Windows default logins without falling back from an override', () => {
+    const dir = createHostsYaml('github.explicit.com:\n  user: octocat\n');
+    fs.mkdirSync(path.join(dir, 'GitHub CLI'));
+    fs.writeFileSync(path.join(dir, 'GitHub CLI', 'hosts.yml'), 'github.windows.com:\n  user: octocat\n');
+    fs.mkdirSync(path.join(dir, 'gh'));
+    fs.writeFileSync(path.join(dir, 'gh', 'hosts.yml'), 'github.xdg.com:\n  user: octocat\n');
+    Object.defineProperty(process, 'platform', { value: 'win32' });
+    process.env.APPDATA = dir;
+    process.env.GH_HOST = '';
+    delete process.env.XDG_CONFIG_HOME;
+    delete process.env.GH_CONFIG_DIR;
+
+    expect(hasStoredGhLogin('github.windows.com')).toBe(true);
+    expect(isTrustedGitHubHost('github.windows.com')).toBe(true);
+    expect(listTrustedGitHubHosts()).toEqual(['github.windows.com']);
+
+    process.env.XDG_CONFIG_HOME = dir;
+    expect(listTrustedGitHubHosts()).toEqual(['github.xdg.com']);
+    process.env.GH_CONFIG_DIR = dir;
+    expect(listTrustedGitHubHosts()).toEqual(['github.explicit.com']);
+
+    fs.unlinkSync(path.join(dir, 'hosts.yml'));
+    expect(listTrustedGitHubHosts()).toEqual([]);
+    expect(isTrustedGitHubHost('github.windows.com')).toBe(false);
+    fs.writeFileSync(path.join(dir, 'hosts.yml'), '::: not: [valid\n');
+    expect(listTrustedGitHubHosts()).toEqual([]);
+
+    delete process.env.GH_CONFIG_DIR;
+    fs.unlinkSync(path.join(dir, 'gh', 'hosts.yml'));
+    expect(listTrustedGitHubHosts()).toEqual([]);
+  });
+
+  test('discovers enterprise logins under XDG_CONFIG_HOME', () => {
+    const dir = createHostsYaml('');
+    fs.mkdirSync(path.join(dir, 'gh'));
+    fs.writeFileSync(path.join(dir, 'gh', 'hosts.yml'), 'github.acme.com:\n  user: octocat\n');
+    process.env.XDG_CONFIG_HOME = dir;
+    process.env.GH_HOST = '';
+    delete process.env.GH_CONFIG_DIR;
+
+    expect(hasStoredGhLogin('github.acme.com')).toBe(true);
+    expect(isTrustedGitHubHost('github.acme.com')).toBe(true);
+    expect(listTrustedGitHubHosts()).toEqual(['github.acme.com']);
+  });
+
+  test('GH_CONFIG_DIR takes precedence without falling back to XDG_CONFIG_HOME', () => {
+    const dir = createHostsYaml('github.explicit.com:\n  user: octocat\n');
+    fs.mkdirSync(path.join(dir, 'gh'));
+    fs.writeFileSync(path.join(dir, 'gh', 'hosts.yml'), 'github.xdg.com:\n  user: octocat\n');
+    process.env.XDG_CONFIG_HOME = dir;
+
+    expect(hasStoredGhLogin('github.explicit.com')).toBe(true);
+    expect(hasStoredGhLogin('github.xdg.com')).toBe(false);
+
+    process.env.GH_CONFIG_DIR = path.join(dir, 'missing');
+    expect(hasStoredGhLogin('github.xdg.com')).toBe(false);
+  });
 });
 
 describe('isTrustedGitHubHost', () => {

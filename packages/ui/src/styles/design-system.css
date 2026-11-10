@@ -25,6 +25,14 @@
     --oc-glass-popover-opacity: 50%;
     --oc-glass-tooltip-opacity: 62%;
     --oc-glass-saturation: 1.24;
+    /* Tone steps of flat tiles (.oc-tile and its inset and hover). Dark themes
+       take smaller steps: the same mix of text colour reads about 1.6 times
+       stronger near black (ΔL* 4 against 2.5 in light), so cards stood out
+       more in dark than in light. chat/lib/visualKit.ts mirrors these for
+       agent pages. */
+    --oc-tile-tone: 4%;
+    --oc-tile-inset-tone: 6%;
+    --oc-tile-hover-tone: 7%;
 
     /* Semantic typography defaults (must match SEMANTIC_TYPOGRAPHY) */
     --text-markdown: 0.875rem;
@@ -39,6 +47,49 @@
 
     /* Text selection colour shared by native ::selection and the comment overlay */
     --oc-text-selection: var(--interactive-selection);
+
+    /* Edges: three strengths of the theme's border colour. Muted separates
+       quiet layout (list dividers, section rules), the base edge frames
+       content, strong marks what must hold its shape (a code canvas, an
+       input that needs a visible outline). Call sites pick a level instead
+       of an opacity of their own. */
+    --oc-edge-muted: color-mix(in srgb, var(--interactive-border) 40%, transparent);
+    --oc-edge: color-mix(in srgb, var(--interactive-border) 70%, transparent);
+    --oc-edge-strong: var(--interactive-border);
+
+    /* Elevation. Every lifted surface takes one of three levels: raised sits
+       in the layout (the composer, panels beside the chat), floating opens
+       over it (menus, popovers, autocompletes), the button level is a
+       pressable control. Each is the app's glass edge at half a pixel (a
+       hairline ring and a lit top line) over soft shadows. Dark themes give
+       the edge two hairlines, dark outside and light inside, since a single
+       ring either vanishes or glows on a dark page. The ring is drawn in the
+       shadow so it never shifts layout. */
+    --oc-elevation-ring: rgb(0 0 0 / 0.14);
+    --oc-elevation-button:
+      0 1px 1.5px 0 rgb(0 0 0 / 0.08),
+      0 0 0 0.5px rgb(0 0 0 / 0.14);
+    --oc-elevation-raised:
+      inset 0 1px 0 0 rgb(255 255 255 / 0.7),
+      0 0 0 0.5px var(--oc-elevation-ring),
+      0 1px 2px -0.5px rgb(0 0 0 / 0.06),
+      0 4px 10px -2px rgb(0 0 0 / 0.07);
+    --oc-elevation-floating:
+      inset 0 1px 0 0 rgb(255 255 255 / 0.7),
+      0 0 0 0.5px var(--oc-elevation-ring),
+      0 1px 2px -0.5px rgb(0 0 0 / 0.06),
+      0 4px 8px -2px rgb(0 0 0 / 0.08),
+      0 12px 20px -4px rgb(0 0 0 / 0.06);
+
+    /* Motion: springs traced as linear() easings (lib/motion/springs.ts,
+       whose test keeps these in step). Popups open on the popup spring and
+       close on a short fade; layout moves take the calmer layout spring.
+       The dev motion panel overrides them on the root element. */
+    --oc-motion-popup-duration: 251ms;
+    --oc-motion-popup-easing: linear(0, 0.0186, 0.0657, 0.1307, 0.2056, 0.2848, 0.364, 0.4406, 0.5127, 0.5791, 0.6394, 0.6933, 0.741, 0.7828, 0.819, 0.8501, 0.8767, 0.8992, 0.9182, 0.9341, 0.9473, 0.9581, 0.9671, 0.9743, 0.9802, 0.9849, 0.9887, 0.9917, 0.994, 0.9958, 0.9972, 0.9982, 1);
+    --oc-motion-popup-exit-duration: 110ms;
+    --oc-motion-layout-duration: 294ms;
+    --oc-motion-layout-easing: linear(0, 0.0344, 0.1145, 0.2151, 0.3209, 0.423, 0.5166, 0.5995, 0.6712, 0.7322, 0.7832, 0.8255, 0.8602, 0.8885, 0.9114, 0.9298, 0.9445, 0.9563, 0.9657, 0.9731, 0.9789, 0.9835, 0.9872, 0.99, 0.9922, 0.994, 0.9953, 0.9964, 0.9972, 0.9978, 0.9983, 0.9987, 1);
 
     /* Default Light Theme */
     --background: oklch(0.97 0.02 85); /* Warm sand background */
@@ -83,6 +134,27 @@
   }
 
   .dark {
+    --oc-tile-tone: 3%;
+    --oc-tile-inset-tone: 4.5%;
+    --oc-tile-hover-tone: 5.5%;
+    --oc-elevation-ring: rgb(255 255 255 / 0.08);
+    --oc-elevation-button:
+      inset 0 1px 0 0 rgb(255 255 255 / 0.04),
+      inset 0 0 0 0.5px var(--oc-elevation-ring),
+      0 0 0 0.5px rgb(0 0 0 / 0.55),
+      0 1px 2px 0 rgb(0 0 0 / 0.4);
+    --oc-elevation-raised:
+      inset 0 1px 0 0 rgb(255 255 255 / 0.04),
+      inset 0 0 0 0.5px var(--oc-elevation-ring),
+      0 0 0 0.5px rgb(0 0 0 / 0.55),
+      0 2px 4px 0 rgb(0 0 0 / 0.25),
+      0 1px 2px 0 rgb(0 0 0 / 0.25);
+    --oc-elevation-floating:
+      inset 0 1px 0 0 rgb(255 255 255 / 0.04),
+      inset 0 0 0 0.5px var(--oc-elevation-ring),
+      0 0 0 0.5px rgb(0 0 0 / 0.55),
+      0 8px 16px 0 rgb(0 0 0 / 0.25),
+      0 4px 8px 0 rgb(0 0 0 / 0.25);
     --oc-glass-blur: 26px;
     --oc-glass-opacity: 50%;
     --oc-glass-popover-opacity: 52%;
@@ -384,49 +456,14 @@
   );
 }
 
-/* The composer is a place to type, so its top line is as quiet as a text
-   field's. In light themes the dropdown's bright top line made the box read
-   as a raised slab; the hairline and shadows stay the dropdown's. */
+/* The composer is a place to type and part of the layout, so it sits one
+   level lower than the menus that open over it. */
 .oc-glass-floating.oc-composer-sheen {
-  box-shadow:
-    inset 0 1px 0 0 rgb(255 255 255 / 0.55),
-    inset 0 0 0 1px rgb(0 0 0 / 0.04),
-    0 0 0 1px rgb(0 0 0 / 0.1),
-    0 1px 2px -0.5px rgb(0 0 0 / 0.08),
-    0 4px 8px -2px rgb(0 0 0 / 0.08),
-    0 12px 20px -4px rgb(0 0 0 / 0.08);
-}
-
-/* In dark themes the hairline and shadows stay the dropdown's, since it floats
-   over the chat. The selector outranks .dark .oc-glass-floating. */
-.dark .oc-glass-floating.oc-composer-sheen {
-  box-shadow:
-    inset 0 1px 0 0 rgb(255 255 255 / 0.025),
-    inset 0 0 0 1px rgb(255 255 255 / 0.08),
-    0 0 0 1px rgb(0 0 0 / 0.36),
-    0 1px 1px -0.5px rgb(0 0 0 / 0.22),
-    0 3px 3px -1.5px rgb(0 0 0 / 0.2),
-    0 6px 6px -3px rgb(0 0 0 / 0.16);
+  box-shadow: var(--oc-elevation-raised);
 }
 
 .oc-glass-floating {
-  box-shadow:
-    inset 0 1px 0 0 rgb(255 255 255 / 0.8),
-    inset 0 0 0 1px rgb(0 0 0 / 0.04),
-    0 0 0 1px rgb(0 0 0 / 0.1),
-    0 1px 2px -0.5px rgb(0 0 0 / 0.08),
-    0 4px 8px -2px rgb(0 0 0 / 0.08),
-    0 12px 20px -4px rgb(0 0 0 / 0.08);
-}
-
-.dark .oc-glass-floating {
-  box-shadow:
-    inset 0 1px 0 0 rgb(255 255 255 / 0.06),
-    inset 0 0 0 1px rgb(255 255 255 / 0.08),
-    0 0 0 1px rgb(0 0 0 / 0.36),
-    0 1px 1px -0.5px rgb(0 0 0 / 0.22),
-    0 3px 3px -1.5px rgb(0 0 0 / 0.2),
-    0 6px 6px -3px rgb(0 0 0 / 0.16);
+  box-shadow: var(--oc-elevation-floating);
 }
 
 /* Panels that are part of the layout (the context panel card, the work
@@ -442,10 +479,11 @@
      with anything outside the card. Not a backdrop root, so the work status
      glass still blurs what is behind it. */
   isolation: isolate;
-  /* Kept within the card's gutter (about 8px), which the aside clips. */
+  /* The raised level's shadows; its ring is the inset one below. Kept within
+     the card's gutter (about 8px), which the aside clips. */
   box-shadow:
-    0 1px 2px 0 rgb(0 0 0 / 0.06),
-    0 4px 8px -3px rgb(0 0 0 / 0.12);
+    0 2px 4px 0 rgb(0 0 0 / 0.04),
+    0 1px 2px -1px rgb(0 0 0 / 0.08);
 }
 
 .oc-panel-edge::after {
@@ -455,8 +493,7 @@
   z-index: 1000;
   border-radius: inherit;
   pointer-events: none;
-  /* The dropdown's outer and inner rings combined. */
-  box-shadow: inset 0 0 0 1px rgb(0 0 0 / 0.12);
+  box-shadow: inset 0 0 0 0.5px var(--oc-elevation-ring);
   transition: opacity 200ms ease;
 }
 
@@ -465,8 +502,8 @@
    card below, which is a dropdown. */
 .dark .oc-panel-edge {
   box-shadow:
-    0 1px 1px 0 rgb(0 0 0 / 0.35),
-    0 4px 8px -3px rgb(0 0 0 / 0.45);
+    0 2px 4px 0 rgb(0 0 0 / 0.3),
+    0 1px 2px 0 rgb(0 0 0 / 0.3);
 }
 
 /* A docked panel takes the theme's muted surface (the sidebar's fill), so the
@@ -482,6 +519,11 @@
   /* The chat's page colour, kept under its own name because the panel rules
      below redefine --surface-background and cannot mix from themselves. */
   --oc-chat-background: var(--surface-background);
+  /* The Canary icon's colours, the blue tile and the yellow bird, for the
+     Canary update channel's controls. The icon is the same in every theme,
+     so these are too. */
+  --brand-canary: oklch(0.46 0.194 264.1); /* #1c4ac2 */
+  --brand-canary-foreground: oklch(0.899 0.186 97.9); /* #ffdd00 */
 }
 
 .oc-panel-edge:not([data-edge-floating]) {
@@ -496,38 +538,19 @@
 
 .dark .oc-panel-edge::after {
   box-shadow:
-    inset 0 1px 0 0 color-mix(in srgb, var(--foreground) 3%, transparent),
-    inset 0 0 0 1px color-mix(in srgb, var(--foreground) 6%, transparent);
+    inset 0 0.5px 0 0 rgb(255 255 255 / 0.06),
+    inset 0 0 0 0.5px var(--oc-elevation-ring);
 }
 
-/* The work status card opened over the chat is a dropdown, and looks like
-   one: the full edge, lit top included, with the dropdown's tight shadows
-   (its widest one would be clipped where the context panel begins). */
-.oc-panel-edge[data-edge-floating] {
-  box-shadow:
-    0 0 0 1px rgb(0 0 0 / 0.1),
-    0 1px 2px -0.5px rgb(0 0 0 / 0.08),
-    0 4px 8px -2px rgb(0 0 0 / 0.08);
+/* The work status card opened over the chat is a dropdown, and takes the
+   floating level. */
+.oc-panel-edge[data-edge-floating],
+.dark .oc-panel-edge[data-edge-floating] {
+  box-shadow: var(--oc-elevation-floating);
 }
 
 .oc-panel-edge[data-edge-floating]::after {
-  box-shadow:
-    inset 0 1px 0 0 rgb(255 255 255 / 0.8),
-    inset 0 0 0 1px rgb(0 0 0 / 0.04);
-}
-
-.dark .oc-panel-edge[data-edge-floating] {
-  box-shadow:
-    0 0 0 1px rgb(0 0 0 / 0.36),
-    0 1px 1px -0.5px rgb(0 0 0 / 0.22),
-    0 3px 3px -1.5px rgb(0 0 0 / 0.2),
-    0 6px 6px -3px rgb(0 0 0 / 0.16);
-}
-
-.dark .oc-panel-edge[data-edge-floating]::after {
-  box-shadow:
-    inset 0 1px 0 0 rgb(255 255 255 / 0.06),
-    inset 0 0 0 1px rgb(255 255 255 / 0.08);
+  opacity: 0;
 }
 
 /* A panel animating out drops its edge along with its fill. Listed for dark
@@ -555,30 +578,32 @@
    a shadow below. */
 @layer components {
 .oc-raised {
-  --oc-raised-edge: color-mix(in srgb, var(--foreground) 10%, transparent);
+  /* The button level, with its ring inset. The ring is half a pixel at rest
+     and a full one on a focused field, so focus still reads. */
+  --oc-raised-edge: color-mix(in srgb, var(--foreground) 16%, transparent);
+  --oc-raised-edge-width: 0.5px;
   box-shadow:
-    inset 0 0 0 1px var(--oc-raised-edge),
-    0 1px 2px 0 rgb(0 0 0 / 0.06);
+    inset 0 0 0 var(--oc-raised-edge-width) var(--oc-raised-edge),
+    0 1px 1.5px 0 rgb(0 0 0 / 0.08);
 }
 
 .oc-field {
   box-shadow:
-    inset 0 0 0 1px var(--oc-raised-edge),
+    inset 0 0 0 var(--oc-raised-edge-width, 0.5px) var(--oc-raised-edge),
     inset 0 1px 2px 0 rgb(0 0 0 / 0.04);
 }
 
 .dark .oc-raised {
-  --oc-raised-edge: color-mix(in srgb, var(--foreground) 6%, transparent);
+  --oc-raised-edge: color-mix(in srgb, var(--foreground) 14%, transparent);
   background-image: linear-gradient(
     180deg,
     color-mix(in srgb, var(--foreground) 1%, transparent),
     transparent 50%
   );
   box-shadow:
-    inset 0 1px 0 0 color-mix(in srgb, var(--foreground) 1.5%, transparent),
-    inset 0 0 0 1px var(--oc-raised-edge),
-    0 1px 1px 0 rgb(0 0 0 / 0.28),
-    0 2px 3px -2px rgb(0 0 0 / 0.2);
+    inset 0 0.5px 0 0 color-mix(in srgb, var(--foreground) 8%, transparent),
+    inset 0 0 0 var(--oc-raised-edge-width) var(--oc-raised-edge),
+    0 1px 2px 0 rgb(0 0 0 / 0.4);
 }
 
 /* A text field shares the controls' light but sits a tone lower: its fill is
@@ -602,11 +627,13 @@
 .oc-field:focus,
 .oc-field:focus-within {
   --oc-raised-edge: color-mix(in srgb, var(--foreground) 26%, transparent);
+  --oc-raised-edge-width: 1px;
 }
 
 .oc-field:is([aria-invalid="true"], [data-invalid]),
 .oc-field:is([aria-invalid="true"], [data-invalid]):is(:focus, :focus-within) {
   --oc-raised-edge: var(--status-error);
+  --oc-raised-edge-width: 1px;
 }
 
 /* The track a raised pill moves in reads as pressed in. */
@@ -623,8 +650,8 @@
    shadow, the dark themes' faint sheen. Pressed, the button sinks flat. */
 .oc-raised-button {
   box-shadow:
-    inset 0 1px 0 0 rgb(255 255 255 / 0.45),
-    0 1px 2px 0 rgb(0 0 0 / 0.08);
+    inset 0 1px 0 0 rgb(255 255 255 / 0.2),
+    0 1px 1.5px 0 rgb(0 0 0 / 0.1);
 }
 
 .dark .oc-raised-button {
@@ -642,7 +669,7 @@
 .oc-raised-button:active,
 .oc-raised:is(button, [role="button"]):active {
   background-image: none;
-  box-shadow: inset 0 0 0 1px var(--oc-raised-edge, transparent);
+  box-shadow: inset 0 0 0 var(--oc-raised-edge-width, 1px) var(--oc-raised-edge, transparent);
 }
 
 /* Flat surfaces in the layout (cards, list tiles) separate from the page by
@@ -651,7 +678,7 @@
    dark themes: a tile is one step, a block inside it (an icon square, a
    neutral pill) is the next, and hover adds a step to what it sits on. */
 .oc-tile {
-  background-color: color-mix(in srgb, var(--foreground) 4%, transparent);
+  background-color: color-mix(in srgb, var(--foreground) var(--oc-tile-tone), transparent);
 }
 
 /* A row in the composer's top slot (goal, background commands, queue, hints).
@@ -662,7 +689,7 @@
 }
 
 .oc-tile-inset {
-  background-color: color-mix(in srgb, var(--foreground) 6%, transparent);
+  background-color: color-mix(in srgb, var(--foreground) var(--oc-tile-inset-tone), transparent);
 }
 
 .oc-tile-hover:hover {
@@ -670,8 +697,53 @@
 }
 
 .oc-tile.oc-tile-hover:hover {
-  background-color: color-mix(in srgb, var(--foreground) 7%, transparent);
+  background-color: color-mix(in srgb, var(--foreground) var(--oc-tile-hover-tone), transparent);
 }
+}
+
+/* Popups (menus, selects, tooltips) open on the popup spring and close on a
+   short fade. Only opacity and the transform properties move: a blanket
+   transition-all also eased the shadow, the size and the colours. Layered as
+   components, so a call site's transition-none (an instant tooltip) wins. */
+@layer components {
+.oc-popup-motion {
+  transition-property: opacity, transform, scale, translate;
+  transition-duration: var(--oc-motion-popup-duration);
+  transition-timing-function: var(--oc-motion-popup-easing);
+}
+
+/* iOS WebKit runs a transition on a linear() easing on the main thread at
+   60 Hz; a cubic-bezier it hands to the compositor. This one stays within 2%
+   of the popup spring (performance-engineering, references/ios-webkit.md).
+   The feature query matches iOS and iPadOS WebKit only. */
+@supports (-webkit-touch-callout: none) {
+  .oc-popup-motion {
+    transition-timing-function: cubic-bezier(0.26, 0.2, 0.13, 1);
+  }
+}
+
+.oc-popup-motion[data-ending-style] {
+  transition-duration: var(--oc-motion-popup-exit-duration);
+  transition-timing-function: ease-in;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .oc-popup-motion {
+    transition-property: opacity;
+  }
+}
+}
+
+/* A control easing into a new width (lib/motion/useSizeMorph.ts) clips its
+   text while it moves: an ellipsis there would flash on every change. */
+[data-width-morphing] * {
+  text-overflow: clip !important;
+}
+
+/* A popup easing into a new height clips its content while it moves: a
+   longer list would spill past the box, a scroller would flash its bar. */
+[data-height-morphing] {
+  overflow: hidden !important;
 }
 
 /* Keyboard focus draws no ring anywhere in the app. Chromium matches
@@ -691,9 +763,11 @@
 }
 
 /* A modal window (dialogs, the command palette, Settings) lifts off the
-   dimmed page: a wide soft shadow plus a tighter one under the edge. */
+   dimmed page: the half-pixel ring of every lifted surface as its edge, a
+   wide soft shadow plus a tighter one under it. */
 .oc-modal-shadow {
   box-shadow:
+    0 0 0 0.5px var(--oc-elevation-ring),
     0 2px 6px -1px rgb(0 0 0 / 0.08),
     0 12px 28px -6px rgb(0 0 0 / 0.16),
     0 32px 72px -12px rgb(0 0 0 / 0.24);
@@ -701,6 +775,7 @@
 
 .dark .oc-modal-shadow {
   box-shadow:
+    0 0 0 0.5px var(--oc-elevation-ring),
     0 2px 6px -1px rgb(0 0 0 / 0.3),
     0 12px 28px -6px rgb(0 0 0 / 0.45),
     0 32px 72px -12px rgb(0 0 0 / 0.6);
@@ -763,16 +838,17 @@ html[data-glass-redraw-guard] body::before {
   backdrop-filter: blur(1px);
 }
 
-/* The recap hint floats in the band above the composer; a panel docked
-   there (queue, suggestion, BTW) would push it up over the transcript, so it
-   hides while any panel is mounted. See ComposerFloatingPanel. */
+/* The recap hint lies under the latest answer's footer, over the band the
+   transcript keeps above the composer (MessageBody). A panel docked there
+   (queue, suggestion, BTW) takes that band, so the hint hides while any panel
+   is mounted. See ComposerFloatingPanel. */
 [data-composer-bound][data-floating-panel] .oc-recap-hint {
   opacity: 0;
 }
 
 /* The same goes for a composer taller than at rest (a top row, more lines of
-   text): the hint rides its top edge and would land on the transcript.
-   See the composer slot observer in ChatContainer. */
+   text): it grows into the band, under the hint. See the composer slot
+   observer in ChatContainer. */
 [data-composer-bound][data-composer-grown] .oc-recap-hint {
   opacity: 0;
 }
@@ -833,6 +909,13 @@ html[data-glass-redraw-guard] body::before {
   --z-modal: 50;
   --transition-fast: 150ms ease-in-out;
 
+  /* Tailwind's shadow utilities map onto the elevation levels, so a call
+     site's shadow-* lands on the same scale as the surface classes. */
+  --shadow-sm: var(--oc-elevation-button);
+  --shadow-md: var(--oc-elevation-raised);
+  --shadow-lg: var(--oc-elevation-floating);
+  --shadow-xl: var(--oc-elevation-floating);
+
   /* Override Tailwind spacing scale with custom properties that respect --padding-scale */
   --spacing-0: 0;
   --spacing-0\.5: calc(0.125rem * var(--padding-scale, 1));
@@ -886,6 +969,9 @@ html[data-glass-redraw-guard] body::before {
   --color-destructive: var(--destructive);
   --color-destructive-foreground: var(--destructive-foreground);
   --color-border: var(--border);
+  --color-edge-muted: var(--oc-edge-muted);
+  --color-edge: var(--oc-edge);
+  --color-edge-strong: var(--oc-edge-strong);
   --color-input: var(--input);
   --color-ring: var(--ring);
   --color-chart-1: var(--chart-1);

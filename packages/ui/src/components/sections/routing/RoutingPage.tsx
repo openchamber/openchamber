@@ -353,7 +353,7 @@ export const RoutingPage: React.FC = () => {
   return (
     <SettingsPageLayout
       title={t('settings.page.routing.title')}
-      description={t('settings.page.routing.description')}
+      namedBySidebar
       showSaveStatus
     >
       {loadError ? <p className={SETTINGS_DESCRIPTION_CLASS}>{t('settings.routing.loadError', { error: loadError })}</p> : null}
@@ -417,7 +417,7 @@ export const RoutingPage: React.FC = () => {
           <SettingsSection title={t('settings.routing.categories.title')}>
             <div className={SETTINGS_FIELDS_STACK_CLASS}>
               <p className={SETTINGS_HELPER_CLASS}>{t('settings.routing.categories.description')}</p>
-              <div className="divide-y divide-border/40 border-y border-border/40">
+              <div className="divide-y divide-edge-muted border-y border-edge-muted">
                 {draft.categories.map((category) => (
                   <CategoryRow
                     key={category.id}

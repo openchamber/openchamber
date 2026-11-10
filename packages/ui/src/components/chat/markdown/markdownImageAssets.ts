@@ -1,4 +1,5 @@
 import { runtimeFetch } from '@/lib/runtime-fetch';
+import { readAssetBlob } from '@/lib/runtime-asset';
 import { getRuntimeUrlResolver, type RuntimeUrlResolver } from '@/lib/runtime-url';
 import { isFilePathWithinDirectory, toAbsoluteFilePath } from '@/lib/path-utils';
 
@@ -226,7 +227,7 @@ const loadRawImageBlob = async (
     throw new Error('Image is too large');
   }
 
-  const blob = await response.blob();
+  const blob = await readAssetBlob(response, MAX_MARKDOWN_IMAGE_BYTES, signal);
   await validateImageBlob(blob, mimeType);
   throwIfAborted(signal);
   return blob;

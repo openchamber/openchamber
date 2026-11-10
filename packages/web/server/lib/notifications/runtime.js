@@ -1,7 +1,9 @@
+import { createHash } from 'node:crypto';
 import { unwrapOpenCodeResponse } from '../opencode/response-envelope.js';
 import { createSessionActivityProbe } from '../opencode/session-activity.js';
 import { isEnterpriseMode } from '../enterprise-mode.js';
-import { truncateNotificationText } from './message.js';
+import { genericNotificationTitle, truncateNotificationText } from './message.js';
+import { pullRequestNotificationTitle } from './pull-request-locales.js';
 import {
   defaultNotificationTemplates,
   notificationTexts,
@@ -37,6 +39,9 @@ export const createNotificationTriggerRuntime = (deps) => {
     // `(sessionId, turnEndedAt)`: whether that turn was a step of an
     // auto-review loop; the loop's end notifies once (`notifyAutoReviewEnded`).
     isInAutoReview = () => false,
+    // `({ notification, requireHidden })`: extension notification channels
+    // (`extension-channels.js`), called where push is, with the text push gets.
+    deliverToExtensionChannels = null,
   } = deps;
   let getIsSessionAutoAccepting = deps.getIsSessionAutoAccepting;
   // Where a session is read: the host's OpenCode for its own sessions, the OpenCode inside the
@@ -49,16 +54,24 @@ export const createNotificationTriggerRuntime = (deps) => {
         buildOpenCodeUrl: (fetchPath) => `http://space${fetchPath}`,
         getOpenCodeAuthHeaders: () => ({}),
         fetchImpl: spaceFetchFor(spaceId) ?? unreachableSpaceFetch,
+        isSpace: true,
       }
     : hostSource);
   const hostActivityProbe = createSessionActivityProbe({ ...hostSource, timeoutMs: 2000 });
 
   // A parent goes idle while a background subagent still works; OpenCode then
   // hands the result back and the parent runs again. That first idle is a
-  // pause, so it announces nothing. When the check cannot be made, the idle is
-  // announced as before: a missed "ready" is worse than an early one.
+  // pause, so it announces nothing. OpenCode 2.2.6+ also lists background
+  // subagents deeper in the tree and background images; shell commands do not
+  // hold the announcement, since a dev server never ends. Running direct
+  // children are asked for in any case: OpenChamber's own child sessions
+  // (workflow agents) are no OpenCode jobs, and a space reaches only session
+  // routes. When the check cannot be made, the idle is announced as before: a
+  // missed "ready" is worse than an early one.
   const isPausedForSubagents = async (sessionId, spaceId) => {
     const activityProbe = spaceId ? createSessionActivityProbe({ ...sourceFor(spaceId), timeoutMs: 2000 }) : hostActivityProbe;
+    const backgroundJobs = await activityProbe.fetchRunningBackgroundJobs(sessionId);
+    if (backgroundJobs?.some((job) => job.kind !== 'shell')) return true;
     const statuses = await activityProbe.fetchActiveSessionStatuses();
     if (!statuses) return false;
     return (await activityProbe.hasWorkingChildren(sessionId, statuses)) === true;
@@ -96,23 +109,12 @@ export const createNotificationTriggerRuntime = (deps) => {
   // Generic notification for native push (per the mobile design): a fixed, scenario-based
   // title + the session name as the body. No model/project/message content crosses the relay
   // in the clear; a phone with a push key gets what happened sealed (`sealed` below).
-  const APNS_TITLE_BY_TYPE = {
-    ready: 'Agent response is ready',
-    error: 'Agent hit an error',
-    question: 'Agent needs your input',
-    permission: 'Agent needs permission',
-    goal_complete: 'Goal complete',
-    goal_blocked: 'Goal blocked',
-    goal_budget: 'Goal reached its token budget',
-    review: 'Review finished',
-  };
-
-  const genericTitleOf = (payload) => APNS_TITLE_BY_TYPE[payload?.data?.type] || 'Agent update';
+  const genericTitleOf = (payload) => genericNotificationTitle(payload?.data?.type);
 
   const toApnsGenericPayload = (payload) => {
     const data = payload?.data && typeof payload.data === 'object' ? payload.data : {};
     const knownSessionName = typeof data.sessionName === 'string' ? data.sessionName.trim() : '';
-    const sessionName = knownSessionName || 'Session';
+    const sessionName = knownSessionName || (data.type === 'pull-request' ? '' : 'Session');
     const phoneBody = payload?.phoneBody ?? '';
     return {
       title: genericTitleOf(payload),
@@ -174,6 +176,32 @@ export const createNotificationTriggerRuntime = (deps) => {
             console.warn('[APNs] fanout failed:', error?.message ?? error);
           }),
     ]);
+  };
+
+  /**
+   * What an extension channel receives: the same text as web push, after the
+   * user's templates, and in enterprise mode the same generic title with no
+   * body, session name or directory, since the channel's server is outside
+   * the boundary. Sent beside `fanoutPush`, after the same toggles and
+   * suppressions; the channel module applies the visibility gate itself.
+   */
+  const sendToChannels = ({ kind, title, body, tag, sessionId, directory, sessionName }, settings) => {
+    if (typeof deliverToExtensionChannels !== 'function') return;
+    const enterprise = isEnterpriseMode();
+    const notification = {
+      kind,
+      title: enterprise ? genericNotificationTitle(kind) : title,
+      body: enterprise ? '' : body,
+      tag,
+      at: Date.now(),
+      sessionId: sessionId || null,
+      sessionName: enterprise ? null : (typeof sessionName === 'string' && sessionName.trim() ? sessionName.trim() : null),
+      directory: enterprise ? null : (typeof directory === 'string' && directory ? directory : null),
+      url: sessionId ? buildSessionDeepLinkUrl(sessionId) : null,
+    };
+    Promise.resolve(deliverToExtensionChannels({ notification, requireHidden: settings?.notificationMode !== 'always' })).catch((error) => {
+      console.warn('[Notification] extension channel delivery failed:', error?.message ?? error);
+    });
   };
 
   let getIsWindowFocused = typeof deps.getIsWindowFocused === 'function'
@@ -615,9 +643,16 @@ export const createNotificationTriggerRuntime = (deps) => {
           },
           { requireNoSse: true },
         );
+        sendToChannels({ kind: 'ready', title, body, tag: `ready-${sessionId}`, sessionId, directory: notificationDirectory, sessionName }, settings);
       }
 
       if (info?.role === 'assistant' && info?.finish === 'error' && sessionId) {
+        // Interrupted steps carry `aborted`; terminal execution failures still
+        // notify through session.error, including exhausted auto-resume attempts.
+        if (info?.error?.type === 'aborted') {
+          return;
+        }
+
         const settings = await readSettingsFromDisk();
         if (settings.notifyOnError === false) return;
 
@@ -692,6 +727,7 @@ export const createNotificationTriggerRuntime = (deps) => {
           },
           { requireNoSse: true },
         );
+        sendToChannels({ kind: 'error', title, body, tag: `error-${sessionId}`, sessionId, directory: notificationDirectory, sessionName }, settings);
       }
 
       return;
@@ -784,6 +820,7 @@ export const createNotificationTriggerRuntime = (deps) => {
           },
           { requireNoSse: true },
         );
+        sendToChannels({ kind: 'question', title, body, tag: `question-${sessionId}`, sessionId: formSessionId, directory: notificationDirectory, sessionName }, settings);
       }, PUSH_QUESTION_DEBOUNCE_MS);
 
       pushQuestionDebounceTimers.set(sessionId, timer);
@@ -928,6 +965,7 @@ export const createNotificationTriggerRuntime = (deps) => {
           },
           { requireNoSse: true },
         );
+        sendToChannels({ kind: 'permission', title, body, tag: `permission-${sessionId}`, sessionId, directory: notificationDirectory, sessionName }, settings);
       }, PUSH_PERMISSION_DEBOUNCE_MS);
 
       pushPermissionDebounceTimers.set(sessionId, { timer, requestKey });
@@ -969,6 +1007,9 @@ export const createNotificationTriggerRuntime = (deps) => {
       },
       { requireNoSse: true },
     );
+    if (typeof deliverToExtensionChannels === 'function') {
+      sendToChannels({ kind: type, title, body, tag, sessionId, directory, sessionName }, await readSettingsFromDisk());
+    }
   };
 
   const sendGoalSettlePush = ({ sessionId, directory, status, title, body }) => sendSettlePush({
@@ -1007,6 +1048,25 @@ export const createNotificationTriggerRuntime = (deps) => {
     await sendSettlePush({ sessionId, directory, type: 'review', tag, title, body });
   };
 
+  const notifyPullRequest = async ({ item, event }) => {
+    const settings = await readSettingsFromDisk();
+    if (settings.notifyOnPullRequests === false) return;
+    if (settings.notificationMode !== 'always' && getIsWindowFocused?.()) return;
+    const title = pullRequestNotificationTitle(settings.locale, event);
+    if (!title) return;
+    const body = `${item.owner}/${item.repo}#${item.number}`;
+    // The tag reaches every channel even when enterprise mode strips the body,
+    // so it names the pull request only through a digest.
+    const tag = `pull-request-${createHash('sha256').update(`${item.instance}\n${body}`).digest('hex').slice(0, 16)}-${event}`;
+    const payload = { title, body, tag, kind: 'pull-request', requireHidden: settings.notificationMode !== 'always' };
+    if (settings.nativeNotificationsEnabled) {
+      const desktopNotificationDelivered = emitDesktopNotification(payload);
+      broadcastUiNotification(payload, { desktopNotificationDelivered });
+    }
+    await fanoutPush({ title, body, phoneBody: `${title}: ${body}`, tag, data: { url: '/', type: 'pull-request' } }, { requireNoSse: true });
+    sendToChannels({ kind: 'pull-request', title, body, tag }, settings);
+  };
+
   return {
     maybeSendPushForTrigger,
     setAutoAcceptSession,
@@ -1015,5 +1075,6 @@ export const createNotificationTriggerRuntime = (deps) => {
     clearPendingPushBadge,
     sendGoalSettlePush,
     notifyAutoReviewEnded,
+    notifyPullRequest,
   };
 };

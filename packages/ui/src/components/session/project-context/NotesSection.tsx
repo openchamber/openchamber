@@ -47,7 +47,8 @@ const NoteMeta: React.FC<{ note: ProjectNote; pinned: boolean }> = ({ note, pinn
             void openSessionLink(origin.sessionId, origin.messageId ?? null);
           }}
           className="text-muted-foreground underline decoration-dotted underline-offset-2 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          title={t('rightSidebar.contextNotesTodo.notes.source.open')}
+          aria-label={t('rightSidebar.contextNotesTodo.notes.source.open')}
+          data-row-tooltip={t('rightSidebar.contextNotesTodo.notes.source.open')}
         >
           {sourceLabel}
         </button>
@@ -78,6 +79,12 @@ const NoteCard: React.FC<{
   const { t } = useI18n();
   const { title, rest } = React.useMemo(() => splitNoteTitle(note.body), [note.body]);
   const fadePreview = rest.length > PREVIEW_FADE_MIN_CHARS || rest.split('\n').length > PREVIEW_FADE_MIN_LINES;
+  const menuItems = [{
+    id: 'delete',
+    label: t('rightSidebar.contextNotesTodo.notes.actions.delete'),
+    destructive: true,
+    onSelect: onDelete,
+  }];
 
   return (
     <KnowledgeCard
@@ -93,16 +100,10 @@ const NoteCard: React.FC<{
       actions={(
         <>
           <KnowledgePinToggle pinned={pinned} onToggle={onTogglePinned} />
-          <KnowledgeMenu
-            items={[{
-              id: 'delete',
-              label: t('rightSidebar.contextNotesTodo.notes.actions.delete'),
-              destructive: true,
-              onSelect: onDelete,
-            }]}
-          />
+          <KnowledgeMenu items={menuItems} />
         </>
       )}
+      menuItems={menuItems}
       footer={<NoteMeta note={note} pinned={pinned} />}
     >
       {rest ? (

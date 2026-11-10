@@ -1,6 +1,5 @@
-import { Icon } from '@/components/icon/Icon';
+import { ToolbarTooltipButton } from '@/components/ui/action-toolbar';
 import { useI18n } from '@/lib/i18n';
-import { cn } from '@/lib/utils';
 
 /**
  * The header's trigger, always visible like the header's other actions. It
@@ -16,25 +15,17 @@ export function WholeFileCommentButton({
   className?: string;
 }) {
   const { t } = useI18n();
-  const label = t('inlineComment.actions.commentOnFile');
   return (
-    <button
-      type="button"
-      className={cn(
-        'inline-flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:text-foreground focus-visible:outline-none',
-        className,
-        active && 'text-foreground opacity-100',
-      )}
-      aria-label={label}
-      aria-pressed={active}
-      title={label}
+    <ToolbarTooltipButton
+      label={t('inlineComment.actions.commentOnFile')}
+      icon="chat-1"
+      pressed={active}
+      className={className}
       onClick={(event) => {
         event.stopPropagation();
         onClick();
       }}
       onKeyDown={(event) => event.stopPropagation()}
-    >
-      <Icon name="chat-1" className="size-3.5" />
-    </button>
+    />
   );
 }

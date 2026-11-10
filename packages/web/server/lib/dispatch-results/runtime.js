@@ -412,32 +412,49 @@ export function createDispatchResultsRuntime({
       if (watched.kind === 'subagents') return arm(sessionId, subagentRecheckMs);
 
       let waiting = false;
+      const ready = [];
       for (const entry of pendingFor(sessionId)) {
         const outcome = watched.kind === 'deleted'
           ? DELETED_OUTCOME
           : readDispatchOutcome(watched.records, entry.dispatchedAt, entry.afterIdleId);
-        if (!outcome) {
-          waiting = true;
-          continue;
+        if (outcome) ready.push({ entry, outcome });
+        else waiting = true;
+      }
+
+      // Every ready entry reports the session's newest run, so prompts a
+      // parent steered into one run share one message id and one result. An
+      // entry that already holds an id keeps it: that id may have landed with
+      // an earlier run, and sharing it would swallow this one.
+      const unsent = ready.filter(({ entry }) => !entry.messageId);
+      if (unsent.length > 0) {
+        const minted = new Map(); // parentSessionId → message id
+        for (const { entry } of unsent) {
+          if (!minted.has(entry.parentSessionId)) minted.set(entry.parentSessionId, createMessageId(now()));
+          entry.messageId = minted.get(entry.parentSessionId);
         }
-        if (!entry.messageId) {
-          // Persisted before the first attempt, so a retry reuses it.
-          entry.messageId = createMessageId(now());
-          try {
-            await persist();
-          } catch (error) {
-            // Unsaved, it could be minted again after a crash and deliver twice.
-            delete entry.messageId;
-            throw error;
-          }
+        // Persisted before the first attempt, so a retry reuses it.
+        try {
+          await persist();
+        } catch (error) {
+          // Unsaved, it could be minted again after a crash and deliver twice.
+          for (const { entry } of unsent) delete entry.messageId;
+          throw error;
         }
+      }
+
+      const deliveries = new Map(); // message id → ready entries
+      for (const item of ready) deliveries.set(item.entry.messageId, [...(deliveries.get(item.entry.messageId) ?? []), item]);
+      for (const group of deliveries.values()) {
+        // An entry without a baseline compares clocks and can miss a reply
+        // that began before its send; another entry of the run may have it.
+        const { entry, outcome } = group.find((item) => item.outcome.text) ?? group[0];
         const message = buildDispatchResultMessage({
           sessionId,
           title: watched.kind === 'ended' ? watched.title : '',
           outcome,
         });
         await deliver(entry, message);
-        entries.delete(entry.id);
+        for (const item of group) entries.delete(item.entry.id);
         await persist();
         console.log(`[dispatch-results] delivered the ${outcome.state} result of ${sessionId} to ${entry.parentSessionId}`);
       }

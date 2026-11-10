@@ -3,11 +3,14 @@ import React from 'react';
 
 import { useEmojiPicker } from '@/components/emoji/useEmojiPicker';
 import { toast } from '@/components/ui';
+import { AttachedOverlayScrollbar } from '@/components/ui/AttachedOverlayScrollbar';
 import { Button } from '@/components/ui/button';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { KnowledgeCard } from './KnowledgeCard';
 import { KnowledgeEntryView } from './KnowledgeEntryView';
 import { KnowledgeSplit } from './KnowledgeSplit';
 import { KnowledgeMenu } from './KnowledgeActions';
+import { ButtonTooltip } from '@/components/ui/action-toolbar';
 import { memoryDeleteKey, scheduleKnowledgeDelete, usePendingKnowledgeDeletes } from './pendingKnowledgeDeletes';
 import { Icon } from '@/components/icon/Icon';
 import { useI18n } from '@/lib/i18n';
@@ -59,17 +62,19 @@ const MemoryTidyButton: React.FC<{ projectPath: string | null }> = ({ projectPat
   };
 
   return (
-    <Button
-      type="button"
-      variant="outline"
-      size="xs"
-      disabled={!ready || starting}
-      onClick={() => void handleClick()}
-      className="ms-auto shrink-0 gap-1 border-[var(--status-info-border)] bg-[var(--status-info-background)] text-[var(--status-info)] hover:bg-[var(--status-info-background)] hover:text-[var(--status-info)]"
-    >
-      <Icon name={starting ? 'loader-4' : 'brush'} className={cn('size-3.5', starting && 'animate-spin')} />
-      {t('rightSidebar.contextNotesTodo.memory.tidy.action')}
-    </Button>
+    <ButtonTooltip label={t('contextTooltips.workspace.memory.tidy')} className="ms-auto shrink-0">
+      <Button
+        type="button"
+        variant="outline"
+        size="xs"
+        disabled={!ready || starting}
+        onClick={() => void handleClick()}
+        className="gap-1 border-[var(--status-info-border)] bg-[var(--status-info-background)] text-[var(--status-info)] hover:bg-[var(--status-info-background)] hover:text-[var(--status-info)]"
+      >
+        <Icon name={starting ? 'loader-4' : 'brush'} className={cn('size-3.5', starting && 'animate-spin')} />
+        {t('rightSidebar.contextNotesTodo.memory.tidy.action')}
+      </Button>
+    </ButtonTooltip>
   );
 };
 
@@ -132,6 +137,12 @@ const MemoryCard: React.FC<{
   selected: boolean;
 }> = ({ entry, badge, onOpen, onDelete , selected}) => {
   const { t } = useI18n();
+  const menuItems = [{
+    id: 'delete',
+    label: t('rightSidebar.contextNotesTodo.memory.actions.delete'),
+    destructive: true,
+    onSelect: onDelete,
+  }];
   return (
     <KnowledgeCard
       selected={selected}
@@ -146,16 +157,8 @@ const MemoryCard: React.FC<{
           </span>
         </>
       )}
-      actions={(
-        <KnowledgeMenu
-          items={[{
-            id: 'delete',
-            label: t('rightSidebar.contextNotesTodo.memory.actions.delete'),
-            destructive: true,
-            onSelect: onDelete,
-          }]}
-        />
-      )}
+      actions={<KnowledgeMenu items={menuItems} />}
+      menuItems={menuItems}
       footer={<MemoryMeta entry={entry} />}
     >
       <p className="line-clamp-2 whitespace-pre-wrap break-words typography-meta text-muted-foreground" dir="auto">
@@ -199,6 +202,7 @@ const MemoryView: React.FC<{
   }, [bodyDraft, entry.body, entry.title, titleDraft]);
 
   const bodyRef = React.useRef<HTMLTextAreaElement>(null);
+  const [bodyScroller, setBodyScroller] = React.useState<HTMLTextAreaElement | null>(null);
   const emojiPicker = useEmojiPicker(bodyRef);
   const commitRef = React.useRef<() => void>(() => {});
   commitRef.current = () => {
@@ -251,15 +255,21 @@ const MemoryView: React.FC<{
           dir="auto"
           className="w-full flex-shrink-0 bg-transparent typography-ui-header font-semibold text-foreground outline-none focus-visible:outline-none"
         />
-        <textarea
-          ref={bodyRef}
-          value={bodyDraft}
-          onChange={(event) => setBodyDraft(event.target.value.slice(0, AGENT_MEMORY_BODY_MAX_LENGTH))}
-          onBlur={() => commitRef.current()}
-          aria-label={t('rightSidebar.contextNotesTodo.memory.actions.editBody')}
-          dir="auto"
-          className="min-h-0 w-full flex-1 resize-none overflow-y-auto bg-transparent typography-ui-label leading-relaxed text-foreground outline-none focus-visible:outline-none"
-        />
+        <div className="relative flex min-h-0 flex-1 flex-col">
+          <textarea
+            ref={(node) => {
+              bodyRef.current = node;
+              setBodyScroller(node);
+            }}
+            value={bodyDraft}
+            onChange={(event) => setBodyDraft(event.target.value.slice(0, AGENT_MEMORY_BODY_MAX_LENGTH))}
+            onBlur={() => commitRef.current()}
+            aria-label={t('rightSidebar.contextNotesTodo.memory.actions.editBody')}
+            dir="auto"
+            className="min-h-0 w-full flex-1 resize-none overflow-y-auto bg-transparent typography-ui-label leading-relaxed text-foreground outline-none focus-visible:outline-none"
+          />
+          <AttachedOverlayScrollbar scroller={bodyScroller} disableHorizontal />
+        </div>
         {emojiPicker}
       </div>
     </KnowledgeEntryView>
@@ -385,9 +395,19 @@ export const MemorySection: React.FC<{
     }
   }, [saveEntry, scope, t]);
 
-  const scopeOptions: Array<{ id: AgentMemoryScope; label: string; count: number }> = [
-    { id: 'project', label: t('rightSidebar.contextNotesTodo.memory.scope.project'), count: projectEntries.length },
-    { id: 'global', label: t('rightSidebar.contextNotesTodo.memory.scope.global'), count: globalEntries.length },
+  const scopeOptions: Array<{ id: AgentMemoryScope; label: string; tooltip: string; count: number }> = [
+    {
+      id: 'project',
+      label: t('rightSidebar.contextNotesTodo.memory.scope.project'),
+      tooltip: t('contextTooltips.workspace.memory.scope.project'),
+      count: projectEntries.length,
+    },
+    {
+      id: 'global',
+      label: t('rightSidebar.contextNotesTodo.memory.scope.global'),
+      tooltip: t('contextTooltips.workspace.memory.scope.global'),
+      count: globalEntries.length,
+    },
   ];
 
   const openView = openEntry ? (
@@ -412,20 +432,24 @@ export const MemorySection: React.FC<{
       <div className="flex items-center gap-1">
         <div role="group" aria-label={t('rightSidebar.contextNotesTodo.memory.scope.label')} className="flex items-center gap-1">
           {scopeOptions.map((option) => (
-            <Button
-              key={option.id}
-              type="button"
-              variant="chip"
-              size="xs"
-              aria-pressed={scope === option.id}
-              className="!font-normal"
-              onClick={() => {
-                scopePickedRef.current = true;
-                setScope(option.id);
-              }}
-            >
-              {`${option.label} ${option.count}`}
-            </Button>
+            <Tooltip key={option.id}>
+              <TooltipTrigger asChild>
+                <Button
+                  type="button"
+                  variant="chip"
+                  size="xs"
+                  aria-pressed={scope === option.id}
+                  className="!font-normal"
+                  onClick={() => {
+                    scopePickedRef.current = true;
+                    setScope(option.id);
+                  }}
+                >
+                  {`${option.label} ${option.count}`}
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent sideOffset={6}>{option.tooltip}</TooltipContent>
+            </Tooltip>
           ))}
         </div>
         <MemoryTidyButton projectPath={projectPath} />

@@ -2,11 +2,17 @@ import { afterAll, beforeAll, beforeEach, describe, expect, test } from 'bun:tes
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import { findRuntimeMatches, pluginFileRuntimeTarget, resolveLoadState } from '../../../../ui/src/components/sections/plugins/pluginLoadState.ts';
+import { createPluginSwitchStore } from './plugin-switches.js';
 
 let rootDir;
 let projectDir;
+let globalDir;
 let userConfigPath;
+let switchStorePath;
+let switchStore;
 let plugins;
+const originalConfigDir = process.env.OPENCODE_CONFIG_DIR;
 
 function thrownBy(fn) {
   try {
@@ -30,6 +36,10 @@ describe('opencode plugins data layer', () => {
   beforeAll(async () => {
     rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-plugins-'));
     userConfigPath = path.join(rootDir, 'user-opencode.json');
+    switchStorePath = path.join(rootDir, 'plugin-switches.json');
+    // The global config folder is read at import; keep it off the real one.
+    globalDir = path.join(rootDir, 'global');
+    process.env.OPENCODE_CONFIG_DIR = globalDir;
     process.env.OPENCODE_CONFIG = userConfigPath;
     plugins = await import('./plugins.js');
   });
@@ -38,11 +48,16 @@ describe('opencode plugins data layer', () => {
     process.env.OPENCODE_CONFIG = userConfigPath;
     projectDir = fs.mkdtempSync(path.join(rootDir, 'project-'));
     fs.rmSync(userConfigPath, { force: true });
+    fs.rmSync(switchStorePath, { force: true });
+    fs.rmSync(globalDir, { recursive: true, force: true });
+    switchStore = createPluginSwitchStore({ filePath: switchStorePath });
   });
 
   afterAll(() => {
     fs.rmSync(rootDir, { recursive: true, force: true });
     delete process.env.OPENCODE_CONFIG;
+    if (originalConfigDir === undefined) delete process.env.OPENCODE_CONFIG_DIR;
+    else process.env.OPENCODE_CONFIG_DIR = originalConfigDir;
   });
 
   test('parses v1 tuples and v2 objects into the same entry', () => {
@@ -75,6 +90,42 @@ describe('opencode plugins data layer', () => {
     expect(() => plugins.writePluginDirFile({ fileName: 'a/b.js', content: '', scope: 'project' }, projectDir)).toThrow('Plugin file name');
     expect(() => plugins.writePluginDirFile({ fileName: 'A.js', content: '', scope: 'project' }, projectDir)).toThrow('Plugin file name');
     expect(() => plugins.writePluginDirFile({ fileName: 'foo.txt', content: '', scope: 'project' }, projectDir)).toThrow('Plugin file name');
+  });
+
+  test('the global entry helpers write the global file, never OPENCODE_CONFIG, and add a folder once', () => {
+    const pluginDir = fs.mkdtempSync(path.join(rootDir, 'plugin-'));
+    const globalPath = path.join(globalDir, 'opencode.json');
+    expect(plugins.readGlobalPluginEntries()).toEqual({ path: globalPath, targets: [] });
+
+    expect(plugins.addGlobalPluginEntry(pluginDir)).toEqual({ path: globalPath, added: true });
+    expect(readJson(globalPath).plugins).toEqual([pluginDir]);
+    expect(fs.existsSync(userConfigPath)).toBe(false);
+    expect(plugins.readGlobalPluginEntries().targets).toEqual([fs.realpathSync(pluginDir)]);
+
+    // Idempotent, also through another spelling of the same folder.
+    expect(plugins.addGlobalPluginEntry(`${pluginDir}/`)).toEqual({ path: globalPath, added: false });
+    expect(readJson(globalPath).plugins).toEqual([pluginDir]);
+
+    // The folder the plugins page lists for the user scope is the same entry.
+    expect(plugins.listPluginEntries(projectDir).map((entry) => [entry.spec, entry.scope, entry.sourcePath])).toEqual([[pluginDir, 'user', globalPath]]);
+  });
+
+  test('the global entry goes beside an existing opencode.jsonc and refuses a global file that does not parse', () => {
+    const pluginDir = fs.mkdtempSync(path.join(rootDir, 'plugin-'));
+    const jsoncPath = path.join(globalDir, 'opencode.jsonc');
+    fs.mkdirSync(globalDir, { recursive: true });
+    fs.writeFileSync(jsoncPath, '{\n  // mine\n  "model": "test/model"\n}\n', 'utf8');
+    expect(plugins.addGlobalPluginEntry(pluginDir)).toEqual({ path: jsoncPath, added: true });
+    const written = fs.readFileSync(jsoncPath, 'utf8');
+    expect(written).toContain('// mine');
+    expect(written).toContain(pluginDir);
+    expect(plugins.readGlobalPluginEntries()).toEqual({ path: jsoncPath, targets: [fs.realpathSync(pluginDir)] });
+
+    fs.writeFileSync(jsoncPath, '{ "plugins": [', 'utf8');
+    const error = thrownBy(() => plugins.addGlobalPluginEntry(pluginDir));
+    expect(error.code).toBe('CONFIG_INVALID');
+    expect(error.message).toContain(jsoncPath);
+    expect(fs.readFileSync(jsoncPath, 'utf8')).toBe('{ "plugins": [');
   });
 
   test('creates string and object entries with duplicate rejection', () => {
@@ -148,8 +199,136 @@ describe('opencode plugins data layer', () => {
 
     expect(readJson(firstConfigPath).plugins).toEqual(['first-plugin']);
     expect(readJson(secondConfigPath).plugins).toEqual(['second-plugin']);
-    expect(fs.existsSync(path.join(path.dirname(firstConfigPath), 'plugins', 'first.js'))).toBe(true);
-    expect(fs.existsSync(path.join(path.dirname(secondConfigPath), 'plugins', 'second.js'))).toBe(true);
+    // OpenCode scans only the global `plugins/` folder for user plugin files.
+    expect(fs.readdirSync(path.join(globalDir, 'plugins')).sort()).toEqual(['first.js', 'second.js']);
+    expect(fs.existsSync(path.join(rootDir, 'first', 'plugins'))).toBe(false);
+  });
+
+  test('lists the global config and plugins folder when OPENCODE_CONFIG names a missing file', () => {
+    const globalConfigPath = path.join(globalDir, 'opencode.json');
+    writeJson(globalConfigPath, { plugins: ['global-plugin'] });
+    fs.mkdirSync(path.join(globalDir, 'plugins'), { recursive: true });
+    fs.writeFileSync(path.join(globalDir, 'plugins', 'global-file.js'), '', 'utf8');
+    process.env.OPENCODE_CONFIG = path.join(rootDir, 'missing', 'opencode.json');
+
+    expect(plugins.listPluginEntries(projectDir)).toEqual([
+      expect.objectContaining({ spec: 'global-plugin', scope: 'user', sourcePath: globalConfigPath }),
+    ]);
+    expect(plugins.listPluginDirFiles(projectDir)).toEqual([
+      expect.objectContaining({ fileName: 'global-file.js', scope: 'user', kind: 'file', absolutePath: path.join(globalDir, 'plugins', 'global-file.js') }),
+    ]);
+  });
+
+  test('preserves runtime paths through a symlinked config directory', () => {
+    const physicalDir = fs.mkdtempSync(path.join(rootDir, 'physical-'));
+    fs.symlinkSync(physicalDir, globalDir, 'dir');
+    for (const name of ['plugins/local', 'plugin/legacy']) {
+      fs.mkdirSync(path.join(globalDir, name), { recursive: true });
+    }
+    fs.writeFileSync(path.join(globalDir, 'plugins', 'editable.ts'), '');
+    fs.writeFileSync(path.join(globalDir, 'plugin', 'legacy.ts'), '');
+
+    const files = plugins.listPluginDirFiles(projectDir);
+    for (const file of files) {
+      const folder = file.fileName.startsWith('legacy') ? 'plugin' : 'plugins';
+      const originalPath = path.join(globalDir, folder, file.fileName);
+      expect(file.absolutePath).toBe(originalPath);
+      expect(file.resolvedPath).toBe(fs.realpathSync(originalPath));
+      const target = pluginFileRuntimeTarget(file.absolutePath);
+      const active = { source: { kind: 'local', path: file.kind === 'file' || file.fileName.endsWith('.ts') ? originalPath : path.join(originalPath, 'index.js') }, state: { kind: 'active' } };
+      expect(resolveLoadState(findRuntimeMatches(target, [active]))).toEqual({ kind: 'active', version: null });
+      const failed = { source: { kind: 'local', path: originalPath }, state: { kind: 'failed', error: 'load failed', ref: 'err_local' } };
+      expect(resolveLoadState(findRuntimeMatches(target, [failed]))).toEqual({ kind: 'failed', error: 'load failed', ref: 'err_local' });
+    }
+    expect(files).toHaveLength(4);
+  });
+
+  test('lists global and OPENCODE_CONFIG entries together and edits each in its own file', () => {
+    const globalConfigPath = path.join(globalDir, 'opencode.json');
+    writeJson(globalConfigPath, { plugins: ['global-plugin', 'shared-plugin'] });
+    writeJson(userConfigPath, { plugins: ['custom-plugin', 'shared-plugin'] });
+
+    expect(plugins.listPluginEntries(projectDir).map((entry) => [entry.spec, entry.sourcePath])).toEqual([
+      ['global-plugin', globalConfigPath],
+      ['shared-plugin', userConfigPath],
+      ['custom-plugin', userConfigPath],
+    ]);
+    expect(thrownBy(() => plugins.createPluginEntry({ spec: 'global-plugin', scope: 'user' }, projectDir)))
+      .toHaveProperty('code', 'ENTRY_EXISTS');
+
+    plugins.updatePluginEntry(plugins.encodePluginId('config', 'user:global-plugin'), { options: { a: 1 } }, projectDir);
+    plugins.deletePluginEntry(plugins.encodePluginId('config', 'user:shared-plugin'), projectDir);
+    expect(readJson(globalConfigPath).plugins).toEqual([{ package: 'global-plugin', options: { a: 1 } }, 'shared-plugin']);
+    expect(readJson(userConfigPath).plugins).toEqual(['custom-plugin']);
+  });
+
+  test('keeps custom relative targets when the global config is a symlink alias', () => {
+    const spec = './plugins/memory';
+    writeJson(userConfigPath, { plugins: [{ package: spec, options: { owner: 'custom' } }] });
+    const customPluginPath = path.join(rootDir, 'plugins', 'memory');
+    fs.mkdirSync(customPluginPath, { recursive: true });
+    fs.mkdirSync(path.join(globalDir, 'plugins', 'memory'), { recursive: true });
+    fs.symlinkSync(userConfigPath, path.join(globalDir, 'opencode.json'));
+
+    expect(plugins.listPluginEntries(globalDir)).toEqual([
+      expect.objectContaining({
+        id: plugins.encodePluginId('config', `user:${spec}`),
+        spec, scope: 'user', sourcePath: userConfigPath,
+        resolvedPath: fs.realpathSync(customPluginPath), options: { owner: 'custom' },
+      }),
+    ]);
+  });
+
+  test('lists and edits entries in an opencode.jsonc beside opencode.json', () => {
+    delete process.env.OPENCODE_CONFIG;
+    const jsonPath = path.join(globalDir, 'opencode.json');
+    const jsoncPath = path.join(globalDir, 'opencode.jsonc');
+    writeJson(jsonPath, { $schema: 'https://opencode.ai/config.json' });
+    fs.writeFileSync(jsoncPath, '{\n  // mine\n  "plugins": ["alpha@latest", "-opencode.tool.patch",],\n}\n', 'utf8');
+
+    expect(plugins.listPluginEntries(projectDir).map((entry) => [entry.spec, entry.sourcePath])).toEqual([
+      ['alpha@latest', jsoncPath],
+      ['-opencode.tool.patch', jsoncPath],
+    ]);
+
+    plugins.updatePluginEntry(plugins.encodePluginId('config', 'user:alpha@latest'), { options: { a: 1 } }, projectDir);
+    expect(fs.readFileSync(jsoncPath, 'utf8')).toContain('// mine');
+    expect(plugins.listPluginEntries(projectDir)[0]).toMatchObject({ spec: 'alpha@latest', options: { a: 1 }, sourcePath: jsoncPath });
+    expect(readJson(jsonPath)).toEqual({ $schema: 'https://opencode.ai/config.json' });
+  });
+
+  test('lists entries from every folder config OpenCode finds above the project', () => {
+    delete process.env.OPENCODE_CONFIG;
+    const childDir = path.join(projectDir, 'child');
+    writeJson(path.join(projectDir, 'opencode.json'), { plugins: ['parent-plugin'] });
+    writeJson(path.join(childDir, 'opencode.json'), { plugins: ['root-plugin'] });
+    writeJson(path.join(childDir, '.opencode', 'opencode.json'), { plugins: ['dot-plugin'] });
+
+    expect(plugins.listPluginEntries(childDir).map((entry) => [entry.spec, entry.scope])).toEqual([
+      ['parent-plugin', 'user'],
+      ['root-plugin', 'project'],
+      ['dot-plugin', 'project'],
+    ]);
+
+    plugins.deletePluginEntry(plugins.encodePluginId('config', 'user:parent-plugin'), childDir);
+    expect(readJson(path.join(projectDir, 'opencode.json')).plugins).toBeUndefined();
+  });
+
+  test('edits the listed project entry when OPENCODE_CONFIG is another project file', () => {
+    const customPath = path.join(projectDir, '.opencode', 'opencode.json');
+    const rootPath = path.join(projectDir, 'opencode.json');
+    process.env.OPENCODE_CONFIG = customPath;
+    writeJson(customPath, { plugins: [{ package: 'shared', options: { from: 'custom' } }] });
+    writeJson(rootPath, { plugins: [{ package: 'shared', options: { from: 'root' } }] });
+
+    expect(plugins.listPluginEntries(projectDir).map((entry) => [entry.scope, entry.sourcePath])).toEqual([
+      ['user', customPath],
+      ['project', rootPath],
+    ]);
+
+    plugins.updatePluginEntry(plugins.encodePluginId('config', 'project:shared'), { options: { from: 'edited' } }, projectDir);
+    expect(readJson(rootPath).plugins).toEqual([{ package: 'shared', options: { from: 'edited' } }]);
+    expect(readJson(customPath).plugins).toEqual([{ package: 'shared', options: { from: 'custom' } }]);
   });
 
   test('rewrites a v1 plugin array into v2 plugins when one entry is updated', () => {
@@ -220,6 +399,24 @@ describe('opencode plugins data layer', () => {
     expect(plugins.decodePluginId(id)).toEqual({ prefix: 'config', value: 'user:oh-my-openagent@4.3.0' });
   });
 
+  test('lists a physical config once while retaining declarations from independent configs', () => {
+    const configPath = path.join(globalDir, 'opencode.jsonc');
+    process.env.OPENCODE_CONFIG = configPath;
+    writeJson(configPath, { plugins: [{ package: './plugins/memory', options: { owner: 'user' } }] });
+    const pluginPath = path.join(globalDir, 'plugins', 'memory');
+    fs.mkdirSync(pluginPath, { recursive: true });
+    const entries = plugins.listPluginEntries(globalDir);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({ scope: 'user', sourcePath: configPath, resolvedPath: fs.realpathSync(pluginPath), options: { owner: 'user' } });
+    expect(plugins.listPluginDirFiles(globalDir).find((file) => file.fileName === 'memory')).toMatchObject({ absolutePath: pluginPath, resolvedPath: entries[0].resolvedPath });
+
+    writeJson(path.join(projectDir, '.opencode', 'opencode.json'), { plugins: [{ package: pluginPath, options: { owner: 'project' } }] });
+    expect(plugins.listPluginEntries(projectDir).map((entry) => ({ scope: entry.scope, path: entry.resolvedPath, options: entry.options }))).toEqual([
+      { scope: 'user', path: fs.realpathSync(pluginPath), options: { owner: 'user' } },
+      { scope: 'project', path: fs.realpathSync(pluginPath), options: { owner: 'project' } },
+    ]);
+  });
+
   test('round-trips plugin dir files', () => {
     plugins.writePluginDirFile({ fileName: 'my-plugin.ts', content: 'export default {}', scope: 'project' }, projectDir);
     const file = plugins.listPluginDirFiles(projectDir).find((candidate) => candidate.fileName === 'my-plugin.ts');
@@ -250,4 +447,174 @@ describe('opencode plugins data layer', () => {
       expect.objectContaining({ fileName: 'valid.mjs', scope: 'project' }),
     ]);
   });
+
+  test('records a switch in OpenChamber and leaves the OpenCode config alone', () => {
+    const userRule = { action: 'integration.use', resource: 'skill:other', effect: 'deny' };
+    writeJson(userConfigPath, { plugins: ['leakshield'], policies: [userRule] });
+    const id = plugins.encodePluginId('config', 'user:leakshield');
+
+    expect(plugins.listPluginEntries(projectDir, switchStore)).toEqual([
+      expect.objectContaining({ spec: 'leakshield', policyResource: 'plugin:leakshield', switchState: 'on' }),
+    ]);
+
+    expect(plugins.setPluginEntryEnabled(id, false, projectDir, switchStore)).toEqual({
+      enabled: false,
+      resource: 'plugin:leakshield',
+      changed: true,
+    });
+    expect(switchStore.read()).toEqual({ ok: true, resources: ['plugin:leakshield'] });
+    // The user's own config keeps only their rule.
+    expect(readJson(userConfigPath).policies).toEqual([userRule]);
+    expect(plugins.listPluginEntries(projectDir, switchStore)[0].switchState).toBe('off');
+
+    // Disabling twice writes nothing new.
+    expect(plugins.setPluginEntryEnabled(id, false, projectDir, switchStore).changed).toBe(false);
+
+    expect(plugins.setPluginEntryEnabled(id, true, projectDir, switchStore)).toEqual({
+      enabled: true,
+      resource: 'plugin:leakshield',
+      changed: true,
+    });
+    expect(readJson(userConfigPath).policies).toEqual([userRule]);
+    expect(plugins.listPluginEntries(projectDir, switchStore)[0].switchState).toBe('on');
+  });
+
+  test('reports every switch as unreadable when its state cannot be read', () => {
+    writeJson(userConfigPath, { plugins: ['leakshield'] });
+    fs.writeFileSync(switchStorePath, '{not json', 'utf8');
+    const id = plugins.encodePluginId('config', 'user:leakshield');
+
+    expect(plugins.listPluginEntries(projectDir, switchStore)[0].switchState).toBe('unreadable');
+    expect(() => plugins.setPluginEntryEnabled(id, false, projectDir, switchStore)).toThrow();
+    expect(readJson(userConfigPath).policies).toBeUndefined();
+  });
+
+  test('leaves a user-authored deny alone when an entry is switched on', () => {
+    const userRule = { action: 'integration.use', resource: 'plugin:leakshield', effect: 'deny' };
+    writeJson(userConfigPath, { plugins: ['leakshield'], policies: [userRule] });
+    const id = plugins.encodePluginId('config', 'user:leakshield');
+
+    expect(plugins.setPluginEntryEnabled(id, true, projectDir, switchStore)).toEqual({
+      enabled: true,
+      resource: 'plugin:leakshield',
+      changed: false,
+    });
+    expect(readJson(userConfigPath).policies).toEqual([userRule]);
+    // OpenChamber's own state is on; the user's rule still denies the plugin.
+    expect(plugins.listPluginEntries(projectDir, switchStore)[0].switchState).toBe('on');
+  });
+
+  test('uses the unversioned package name or the resolved path as the policy target', () => {
+    plugins.createPluginEntry({ spec: '@acme/plugin@1.2.0', scope: 'user' }, projectDir);
+    plugins.createPluginEntry({ spec: './local', scope: 'project' }, projectDir);
+
+    const [userEntry, projectEntry] = plugins.listPluginEntries(projectDir, switchStore);
+    expect(userEntry.policyResource).toBe('plugin:@acme/plugin');
+    expect(projectEntry.policyResource).toBe(`plugin:${path.join(projectDir, '.opencode', 'local')}`);
+  });
+
+  test('switches a local plugin file off by its absolute path', () => {
+    plugins.writePluginDirFile({ fileName: 'local.js', content: '//x', scope: 'user' }, projectDir);
+    const file = plugins.listPluginDirFiles(projectDir, switchStore).find((candidate) => candidate.fileName === 'local.js');
+    expect(file.switchState).toBe('on');
+    expect(file.policyResource).toBe(`plugin:${file.absolutePath}`);
+
+    expect(plugins.setPluginFileEnabled(file.id, false, projectDir, switchStore)).toEqual({
+      enabled: false,
+      resource: `plugin:${file.absolutePath}`,
+      changed: true,
+    });
+    expect(switchStore.read()).toEqual({ ok: true, resources: [`plugin:${file.absolutePath}`] });
+    expect(fs.existsSync(userConfigPath)).toBe(false);
+    expect(plugins.listPluginDirFiles(projectDir, switchStore).find((candidate) => candidate.fileName === 'local.js').switchState).toBe('off');
+
+    expect(plugins.setPluginFileEnabled(file.id, true, projectDir, switchStore).changed).toBe(true);
+    expect(switchStore.read()).toEqual({ ok: true, resources: [] });
+  });
+
+  test('resolves a legacy file id to the v1 directory when both directories hold the name', () => {
+    plugins.writePluginDirFile({ fileName: 'same.js', content: '//v2', scope: 'user' }, projectDir);
+    const v2Dir = path.dirname(
+      plugins.listPluginDirFiles(projectDir).find((candidate) => candidate.fileName === 'same.js').absolutePath,
+    );
+    const v1Dir = path.join(path.dirname(v2Dir), 'plugin');
+    fs.mkdirSync(v1Dir, { recursive: true });
+    fs.writeFileSync(path.join(v1Dir, 'same.js'), '//v1', 'utf8');
+
+    plugins.setPluginFileEnabled(plugins.encodePluginId('legacy', 'user:same.js'), false, projectDir, switchStore);
+
+    expect(switchStore.read()).toEqual({ ok: true, resources: [`plugin:${path.join(v1Dir, 'same.js')}`] });
+    expect(fs.existsSync(userConfigPath)).toBe(false);
+  });
+
+  test('derives the policy target of a file URL spec as its path', () => {
+    const pluginPath = path.join(projectDir, 'from-url.js');
+    writeJson(userConfigPath, { plugins: [`file://${pluginPath}`] });
+
+    expect(plugins.listPluginEntries(projectDir)[0].policyResource).toBe(`plugin:${pluginPath}`);
+  });
+
+  test('leaves a file URL OpenCode cannot match without a policy target', () => {
+    writeJson(userConfigPath, {
+      plugins: ['file:relative.js', 'file://remote/plugin.js', 'file:///tmp/bad%2Fplugin.js'],
+    });
+
+    for (const entry of plugins.listPluginEntries(projectDir)) {
+      expect(entry.policyResource).toBeUndefined();
+    }
+  });
+
+  test('listing plugin files does not create a project config', () => {
+    const opencodeDir = path.join(projectDir, '.opencode');
+    expect(fs.existsSync(opencodeDir)).toBe(false);
+
+    plugins.listPluginDirFiles(projectDir);
+
+    expect(fs.existsSync(opencodeDir)).toBe(false);
+  });
+
+  test('reports a plugin a global allow keeps loading and refuses to switch it off', () => {
+    const userRule = { action: 'plugin.use', resource: '*', effect: 'allow' };
+    writeJson(userConfigPath, { plugins: ['leakshield'], policies: [userRule] });
+    const id = plugins.encodePluginId('config', 'user:leakshield');
+
+    expect(plugins.listPluginEntries(projectDir, switchStore)[0].switchState).toBe('overridden');
+    expect(() => plugins.setPluginEntryEnabled(id, false, projectDir, switchStore)).toThrow(expect.objectContaining({ code: 'SWITCH_OVERRIDDEN' }));
+    expect(switchStore.read()).toEqual({ ok: true, resources: [] });
+    expect(readJson(userConfigPath).policies).toEqual([userRule]);
+  });
+
+  test('reports a stored switch as overridden once an allow appears, and lets it go back on', () => {
+    writeJson(userConfigPath, { plugins: ['leakshield'] });
+    const id = plugins.encodePluginId('config', 'user:leakshield');
+    plugins.setPluginEntryEnabled(id, false, projectDir, switchStore);
+
+    writeJson(userConfigPath, { plugins: ['leakshield'], policies: [{ action: 'integration.use', resource: 'plugin:leak*', effect: 'allow' }] });
+
+    expect(plugins.listPluginEntries(projectDir, switchStore)[0].switchState).toBe('overridden');
+    expect(plugins.setPluginEntryEnabled(id, true, projectDir, switchStore).changed).toBe(true);
+  });
+
+  test('a project allow loses to the managed file but beats a denial merged into OPENCODE_CONFIG_CONTENT', () => {
+    const globalConfig = path.join(globalDir, 'opencode.json');
+    writeJson(globalConfig, { plugins: ['leakshield'] });
+    writeJson(path.join(projectDir, 'opencode.json'), { policies: [{ action: 'plugin.use', resource: 'leakshield', effect: 'allow' }] });
+
+    delete process.env.OPENCODE_CONFIG;
+    expect(plugins.listPluginEntries(projectDir, switchStore)[0].switchState).toBe('on');
+
+    process.env.OPENCODE_CONFIG = userConfigPath;
+    expect(plugins.listPluginEntries(projectDir, switchStore)[0].switchState).toBe('overridden');
+  });
+
+  test('switching a local file off is refused while an allow beats the denial', () => {
+    plugins.writePluginDirFile({ fileName: 'local.js', content: '//x', scope: 'user' }, projectDir);
+    writeJson(userConfigPath, { policies: [{ action: 'plugin.use', resource: '*', effect: 'allow' }] });
+    const file = plugins.listPluginDirFiles(projectDir, switchStore).find((candidate) => candidate.fileName === 'local.js');
+
+    expect(file.switchState).toBe('overridden');
+    expect(() => plugins.setPluginFileEnabled(file.id, false, projectDir, switchStore)).toThrow(expect.objectContaining({ code: 'SWITCH_OVERRIDDEN' }));
+    expect(switchStore.read()).toEqual({ ok: true, resources: [] });
+  });
+
 });

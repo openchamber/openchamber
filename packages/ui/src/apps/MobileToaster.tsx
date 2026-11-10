@@ -5,6 +5,13 @@ import { Toaster } from '@/components/ui/sonner';
 // Below sonner's 600px breakpoint `mobileOffset` replaces `offset`, so both
 // carry the same top: under the notch, inside the visible part of the screen.
 const TOP_OFFSET = 'calc(var(--oc-safe-area-top, 0px) + var(--oc-visual-viewport-offset-top, 0px) + 16px)';
+// The sides clear the screen's insets: a landscape notch, the status bar
+// column of iPhone Duo. mobile.css lets the two sides differ.
+const MOBILE_OFFSET = {
+  top: TOP_OFFSET,
+  left: 'calc(var(--oc-safe-area-left, 0px) + 16px)',
+  right: 'calc(var(--oc-safe-area-right, 0px) + 16px)',
+};
 
 /**
  * Sonner fixes its toaster to the layout viewport. iOS Safari does not shrink
@@ -43,7 +50,7 @@ export function MobileToaster() {
   useVisualViewportOffsetTop(wrapperRef);
   return (
     <div ref={wrapperRef} className="contents">
-      <Toaster position="top-center" layout="banner" offset={TOP_OFFSET} mobileOffset={{ top: TOP_OFFSET }} />
+      <Toaster position="top-center" layout="banner" offset={TOP_OFFSET} mobileOffset={MOBILE_OFFSET} />
     </div>
   );
 }

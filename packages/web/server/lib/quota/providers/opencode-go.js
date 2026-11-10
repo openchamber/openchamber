@@ -36,7 +36,7 @@ const CONSOLE_INTEGRATION_ID = 'opencode';
 // Console workspaces carry a `wrk_` id on current sign-ins; older stored
 // credentials still carry `org_`, so both prefixes count and nothing else.
 const ORGANIZATION_ID_PATTERN = /^(?:org|wrk)_[A-Za-z0-9]+$/;
-const CONSOLE_PRODUCTS = new Set(['go', 'go-plus']);
+const CONSOLE_PRODUCTS = new Set(['go', 'go-plus', 'go-teams']);
 const NO_CONSOLE_SUBSCRIPTION = 'No active OpenCode Go subscription on the selected Console account';
 // Console keys expire and nothing can renew them, while a Console sign-in is
 // renewed by OpenCode and serves OpenCode Go too. Providers offers that sign-in

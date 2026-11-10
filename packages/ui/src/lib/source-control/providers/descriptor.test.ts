@@ -31,16 +31,17 @@ describe('source-control provider descriptors', () => {
     const [parsed] = sourceControlProviderListSchema.parse([{
       ...descriptor,
       terminology: { ...descriptor.terminology, changeRequest: 'changeset' },
-      auth: { ...descriptor.auth, methods: ['pat', 'web-oauth'] },
+      auth: { ...descriptor.auth, methods: ['pat', 'cli', 'web-oauth'], login: { kind: 'service', hint: '  Run forge auth login  ', future: true } },
       settings: { fields: [{ id: 'app', kind: 'app-installation', secret: false }] },
       features: { referenceSearch: true },
     }]);
     expect(parsed?.terminology.changeRequest).toBe('pullRequest');
-    expect(parsed?.auth.methods).toEqual(['pat']);
+    expect(parsed?.auth.methods).toEqual(['pat', 'cli']);
+    expect(parsed?.auth.login).toEqual({ kind: 'service', hint: '  Run forge auth login  ' });
     expect(parsed?.settings.fields[0]?.kind).toBe('unknown');
     expect(parsed?.features).toEqual({
       referenceSearch: true, referenceDetail: false, listStatuses: false, referencesAcross: false,
-      startThread: false, authorCanReview: false, projectUploads: false, issueCloseReason: false,
+      startThread: false, reviewDrafts: false, reviewDraftFileComments: false, authorCanReview: false, projectUploads: false, issueCloseReason: false,
       // Every server older than the field served change-request diffs.
       changeRequestTemplates: [], changeRequestPatch: true, reviewModel: 'verdict', revisions: false,
       submitRequirements: false, createByPush: false, branchHeads: true, discussions: false,

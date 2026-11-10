@@ -1,10 +1,16 @@
 import type { QuotaProviderId } from '@/types';
 
-interface QuotaProviderMeta {
+export interface QuotaProviderMeta {
   id: QuotaProviderId;
   name: string;
 }
 
+/**
+ * The built-in usage providers, in the order the Usage page lists them. The
+ * providers installed extensions serve come after them, from the server
+ * (`lib/quota/extensionProviders.ts`); `useQuotaProviders` in the quota store
+ * merges the two.
+ */
 export const QUOTA_PROVIDERS: QuotaProviderMeta[] = [
   { id: 'claude', name: 'Claude' },
   { id: 'cline-pass', name: 'ClinePass' },
@@ -23,6 +29,7 @@ export const QUOTA_PROVIDERS: QuotaProviderMeta[] = [
   { id: 'ollama-cloud', name: 'Ollama Cloud' },
   { id: 'wafer', name: 'Wafer.ai' },
   { id: 'opencode-go', name: 'OpenCode Go' },
+  { id: 'opencode', name: 'OpenCode Zen' },
   { id: 'deepinfra', name: 'DeepInfra' },
   { id: 'deepseek', name: 'DeepSeek' },
   { id: 'exe-dev', name: 'exe.dev' },

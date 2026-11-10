@@ -44,7 +44,7 @@ export type DesktopHost = {
   label: string;
   /** Legacy/UI URL. During migration this may equal apiUrl. For relay hosts this is a display-only `relay://<serverId>` pseudo-URL. */
   url: string;
-  /** API endpoint used by packaged Electron UI for this instance. Absent for relay-only hosts. */
+  /** API endpoint used by packaged Electron UI for this instance. For relay-only hosts, present once a direct address has been learned. */
   apiUrl?: string;
   /** Remote client bearer token for packaged-client API access. */
   clientToken?: string;
@@ -509,12 +509,15 @@ export const probeRelayDesktopHost = async (
     serverId: relay.serverId,
     hostEncPubJwk: relay.hostEncPubJwk,
   });
-  const startedAt = Date.now();
-  const deadline = startedAt + RELAY_PROBE_DEADLINE_MS;
+  const deadline = Date.now() + RELAY_PROBE_DEADLINE_MS;
   let keep = false;
   try {
     const response = await fetchRelayProbeUntilDeadline(tunnel, '/health', deadline);
     if (!response.ok) return { status: 'unreachable', latencyMs: 0 };
+    // The menu shows latencyMs as the host's ping. Opening the tunnel (relay
+    // socket plus E2EE handshake) cost several times one round trip over it,
+    // so only the second request, on the open tunnel, is timed.
+    const startedAt = Date.now();
     const headers = new Headers({ Accept: 'application/json' });
     for (const [name, value] of Object.entries(options?.requestHeaders || {})) {
       if (name.toLowerCase() !== 'authorization') headers.set(name, value);

@@ -29,6 +29,24 @@ export const isGroupWork = (group: SessionGroup): boolean => (
   !group.isMain && group.isArchivedBucket !== true && (Boolean(group.space) || group.worktree !== null)
 );
 
+/** The root folder holding a session or a worktree, and the project of that folder. */
+export type SidebarFolderMembership = { folderId: string; projectId: string };
+
+/**
+ * The folder of the work's own project that holds it. A work that changed
+ * project (a nested folder added as one) keeps its stored membership in the
+ * old project, whose folders no longer list it.
+ */
+export const findWorkFolderId = (ref: SidebarWorkRef, folderByMember: ReadonlyMap<string, SidebarFolderMembership>): string | null => {
+  const memberId = ref.kind === 'group' ? worktreeFolderMemberId(ref.group.directory) : ref.rootSessionId;
+  const membership = memberId ? folderByMember.get(memberId) : undefined;
+  return membership?.projectId === ref.projectId ? membership?.folderId ?? null : null;
+};
+
+export const isFiledInFolder = (ref: SidebarWorkRef, folderByMember: ReadonlyMap<string, SidebarFolderMembership>): boolean => (
+  findWorkFolderId(ref, folderByMember) !== null
+);
+
 /**
  * The sessions in work of a root session's work: the root and what nests
  * under it, past subagents, whose own state never counts. The work is in work
@@ -97,9 +115,7 @@ export const buildSidebarWorkIndex = (sections: readonly ProjectSection[]): Side
  * so a work moves up when any of its sessions does). With `archiveAnchors`
  * (`buildWorktreeArchiveAnchors`) a worktree work also stands where its
  * archived sessions hold it, and is listed for them alone. With `rootOf` a
- * session no project section holds (its directory belongs to no added project)
- * belongs to the work of the top-level session it nests under, with no
- * project, instead of being left out (`orderInWorkWorks`).
+ * nested session can resolve through its root's registered project work.
  */
 export const orderSidebarWorks = (
   orderedSessions: readonly Session[],
@@ -112,9 +128,7 @@ export const orderSidebarWorks = (
   orderedSessions.forEach((session, position) => {
     if (!include(session)) return;
     const rootSessionId = rootOf?.get(session.id);
-    const ref = index.bySessionId.get(session.id) ?? (rootSessionId
-      ? { kind: 'session', key: sessionWorkKey(rootSessionId), projectId: null, rootSessionId } satisfies SidebarWorkRef
-      : undefined);
+    const ref = index.bySessionId.get(session.id) ?? (rootSessionId ? index.bySessionId.get(rootSessionId) : undefined);
     if (ref && !rankByKey.has(ref.key)) rankByKey.set(ref.key, { ref, rank: position });
   });
   if (archiveAnchors.size === 0) return [...rankByKey.values()].map((entry) => entry.ref);
@@ -152,9 +166,8 @@ export const buildSessionRootIndex = (
 /**
  * The works In work lists, before Pinned takes its own: a work is in work when
  * its root or a session nested under it, past subagents, is. In work spans
- * projects, so a session no added project holds is listed under the work of
- * its top-level session (`rootOf`) rather than dropped: the sidebar shows it
- * nowhere else, and the tray counts it (`lib/sidebarSessionRows.ts`).
+ * projects. A session without a registered project work stays hidden until
+ * session admission has checked its configuration and registered its folder.
  */
 export const orderInWorkWorks = (
   orderedSessions: readonly Session[],

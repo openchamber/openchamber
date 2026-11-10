@@ -1,8 +1,7 @@
 import React from 'react';
-import type { IntegrationInfo } from '@opencode/client';
-import { opencodeClient } from '@/lib/opencode/client';
 import { ProviderOAuthMethods } from '@/components/sections/providers/ProviderOAuthMethods';
-import { findMcpIntegration, getMcpOAuthMethods } from './mcpOAuthIntegration';
+import { getMcpOAuthMethods } from './mcpOAuthIntegration';
+import { useMcpOAuthIntegration } from './useMcpOAuthIntegration';
 
 interface McpOAuthSignInProps {
   serverName: string;
@@ -12,6 +11,17 @@ interface McpOAuthSignInProps {
   onConnected: () => void | Promise<void>;
   /** Start the sign-in as soon as the integration shows up. */
   autoStart?: boolean;
+  /** The start button's text; "Connect" when absent. */
+  connectLabel?: string;
+  /** Off when the caller starts the sign-in from its own button (with `autoStart`). */
+  showStartButton?: boolean;
+  /**
+   * Told while a sign-in runs. Starting one from another machine writes the
+   * server's redirect, and OpenCode reports the server `pending` while it
+   * reconnects, so a caller that mounts this only for `needs_auth` must keep
+   * it mounted until the sign-in ends: unmounting cancels the attempt.
+   */
+  onActiveChange?: (active: boolean) => void;
 }
 
 /**
@@ -21,57 +31,29 @@ interface McpOAuthSignInProps {
  * (by server name, in the server's Location) is MCP-specific. Renders nothing
  * while the integration is unknown.
  */
-export const McpOAuthSignIn: React.FC<McpOAuthSignInProps> = ({ serverName, directory, onConnected, autoStart }) => {
-  const [integration, setIntegration] = React.useState<IntegrationInfo | null>(null);
-
-  React.useEffect(() => {
-    let cancelled = false;
-    setIntegration(null);
-    const sdk = directory ? opencodeClient.getScopedSdkClient(directory) : opencodeClient.getSdkClient();
-    /**
-     * The mcp_* integration is registered by OpenCode on the server's first
-     * attempt, so the list read right after an install can race it and miss.
-     * Retry on a short interval until it shows up (or the panel unmounts) —
-     * a single load here left the sign-in panel empty until it was remounted
-     * from another surface.
-     */
-    const load = async (attempt = 0): Promise<void> => {
-      try {
-        const { data } = await sdk.integration.list();
-        if (cancelled) return;
-        const found = findMcpIntegration(data, serverName) ?? null;
-        if (found) {
-          setIntegration(found);
-          return;
-        }
-        if (attempt < 8) {
-          setTimeout(() => { void load(attempt + 1); }, 750);
-        }
-      } catch (error) {
-        if (cancelled) return;
-        console.error('Failed to load MCP integrations:', error);
-        if (attempt < 8) {
-          setTimeout(() => { void load(attempt + 1); }, 750);
-        }
-      }
-    };
-    void load();
-    return () => {
-      cancelled = true;
-    };
-  }, [directory, serverName]);
-
-  const methods = getMcpOAuthMethods(integration ?? undefined);
-  if (!integration || methods.length === 0) return null;
+export const McpOAuthSignIn: React.FC<McpOAuthSignInProps> = ({
+  serverName,
+  directory,
+  onConnected,
+  autoStart,
+  connectLabel,
+  showStartButton,
+  onActiveChange,
+}) => {
+  const integration = useMcpOAuthIntegration(serverName, directory);
+  if (!integration) return null;
 
   return (
     <ProviderOAuthMethods
       key={integration.id}
       integrationId={integration.id}
-      methods={methods}
+      methods={getMcpOAuthMethods(integration)}
       directory={directory}
       onConnected={onConnected}
       autoStart={autoStart}
+      connectLabel={connectLabel}
+      showStartButton={showStartButton}
+      onActiveChange={onActiveChange}
     />
   );
 };

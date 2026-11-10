@@ -2,12 +2,15 @@ import { describe, expect, test } from 'bun:test';
 import type { Session } from '@/lib/opencode/model';
 import type { SessionGroup, SessionNode } from './types';
 import type { ProjectSection } from './projects/sessionProjectRender';
+import { getWorkFolderOwnerKey } from './sessions/sessionFolderIdentity';
 import { buildSessionSidebarRowModel, countSessionSearchMatches, resolveSessionSidebarStickyHeader, runExpansionKey, type SessionSidebarActivityItem, type SessionSidebarRowModelArgs, type SessionSidebarWorkEntry } from './sessionSidebarRowModel';
 import { countSessionTreeQueryMatches } from './recent/activitySections';
 import { buildMultiRunIndex } from '@/lib/multirun/runs';
 import { withMultiRunMembership } from '@/lib/multirun/identity';
 import { getPinnedSessionKey } from '@/lib/sessionPins';
 import { getRuntimeKey } from '@/lib/runtime-switch';
+import { ensureChatsRootDirectory } from '@/lib/chatDirectories';
+import { opencodeClient } from '@/lib/opencode/client';
 
 const timelineItem = (id: string, overrides: Partial<SessionSidebarActivityItem> = {}): SessionSidebarActivityItem => ({
   node: { session: session(id), children: [], worktree: null },
@@ -73,6 +76,7 @@ const args = (sections: ProjectSection[]): SessionSidebarRowModelArgs => ({
   sessionOrderIndex: new Map(),
   groupStatusByKey: new Map(),
   folderAuthorityByOwner: new Map([['project-a', { scopeKeys: ['/repo'], complete: true }]]),
+  sessionOwnerById: new Map(),
   activeProjectId: 'project-a',
   singleProjectMode: false,
   singleProjectId: null,
@@ -81,6 +85,101 @@ const args = (sections: ProjectSection[]): SessionSidebarRowModelArgs => ({
 });
 
 describe('buildSessionSidebarRowModel', () => {
+  test('a Chats-only sidebar exposes an archived bucket with restore semantics and distinct row keys', () => {
+    const active = node('active-chat');
+    const archived = node('archived-chat');
+    archived.session.time.archived = 3;
+    const input = args([]);
+    input.chatGroup = group([active], { id: 'managed-chats', draftTarget: 'chat' });
+    input.archivedChatGroup = group([archived], { id: 'managed-chats-archived', label: 'Archived', isMain: false, isArchivedBucket: true, folderScopes: [] });
+    const model = buildSessionSidebarRowModel(input);
+    expect(model.rows.filter((row) => row.kind === 'group-header').map((row) => row.group.isArchivedBucket)).toEqual([true]);
+    const sessions = model.rows.filter((row) => row.kind === 'session');
+    expect(sessions.map((row) => [row.node.session.id, row.archived])).toEqual([['active-chat', false], ['archived-chat', true]]);
+    expect(new Set(model.rows.map((row) => row.key)).size).toBe(model.rows.length);
+    expect(model.sessionById.get('archived-chat')).toBe(archived.session);
+    input.archivedChatGroup = null;
+    expect(buildSessionSidebarRowModel(input).rows.filter((row) => row.kind === 'session').map((row) => row.node.session.id)).toEqual(['active-chat']);
+  });
+
+  test('keeps a cross-project child display-nested while folder actions use its own project', () => {
+    const child = node('child');
+    child.session.directory = '/project-b/worktree';
+    const input = args([project([group([node('parent', [child])])])]);
+    input.expandedParents = new Set(['project:active:parent']);
+    input.sessionOwnerById = new Map([['child', {
+      projectId: 'project-b',
+      projectRoot: '/project-b',
+      scopeDirectory: '/project-b/worktree',
+      kind: 'worktree',
+    }]]);
+
+    const childRow = buildSessionSidebarRowModel(input).rows
+      .find((row) => row.kind === 'session' && row.node.session.id === 'child');
+
+    expect(childRow).toMatchObject({
+      projectId: 'project-a',
+      ownerProjectId: 'project-b',
+      ownerKey: getWorkFolderOwnerKey('/project-b/worktree'),
+      selectionScopeKey: 'project-b',
+    });
+  });
+
+  test('gives an unresolved child no folder mutation owner from its display parent', () => {
+    const child = node('unresolved-child');
+    child.session.directory = '/outside-known-projects';
+    const input = args([project([group([node('parent', [child])])])]);
+    input.expandedParents = new Set(['project:active:parent']);
+    input.sessionOwnerById = new Map([['parent', {
+      projectId: 'project-a',
+      projectRoot: '/repo',
+      scopeDirectory: '/repo',
+      kind: 'project',
+    }]]);
+
+    const model = buildSessionSidebarRowModel(input);
+    const childRow = model.rows.find((row) => row.kind === 'session' && row.node.session.id === 'unresolved-child');
+
+    expect(childRow).toMatchObject({ ownerProjectId: null, ownerKey: null, selectionScopeKey: null });
+    expect(model.folderOwnerKeyBySessionId.has('unresolved-child')).toBe(false);
+  });
+
+  test('derives managed Chat folder ownership without a project owner record', () => {
+    const chat = node('chat');
+    chat.session.directory = '/home/.config/openchamber/chats/2026-10-26/session-chat';
+    const input = args([]);
+    input.chatGroup = group([chat], {
+      id: 'managed-chats',
+      directory: '/home/.config/openchamber/chats',
+      folderScopeKey: '/home/.config/openchamber/chats',
+    });
+
+    const model = buildSessionSidebarRowModel(input);
+
+    expect(model.folderOwnerKeyBySessionId.get('chat')).toBe('/home/.config/openchamber/chats');
+  });
+
+  test('does not give an outside child the managed Chat parent owner', () => {
+    const child = node('outside-child');
+    child.session.directory = '/outside-known-projects';
+    const parent = node('chat-parent', [child]);
+    parent.session.directory = '/home/.config/openchamber/chats/2026-10-26/session-parent';
+    const input = args([]);
+    input.chatGroup = group([parent], {
+      id: 'managed-chats',
+      directory: '/home/.config/openchamber/chats',
+      folderScopeKey: '/home/.config/openchamber/chats',
+    });
+    input.expandedParents = new Set(['tree-chat:active:chat-parent']);
+
+    const model = buildSessionSidebarRowModel(input);
+    const childRow = model.rows.find((row) => row.kind === 'session' && row.node.session.id === 'outside-child');
+
+    expect(model.folderOwnerKeyBySessionId.get('chat-parent')).toBe('/home/.config/openchamber/chats');
+    expect(model.folderOwnerKeyBySessionId.has('outside-child')).toBe(false);
+    expect(childRow).toMatchObject({ ownerProjectId: null, ownerKey: null, selectionScopeKey: null });
+  });
+
   test('a session in work is in the top block and stays in its project group', () => {
     const working = node('working');
     const other = node('other');
@@ -109,6 +208,19 @@ describe('buildSessionSidebarRowModel', () => {
     expect(zoneRow?.kind === 'session' && zoneRow.renderContext).toBe('timeline-mixed');
   });
 
+  // A detailed estimate on a row drawn in one line left a gap under every
+  // chat once Detailed rows turned on.
+  test('detailed zone rows leave Chats one line', () => {
+    const input = args([]);
+    input.chatGroup = group([node('chat')], { id: 'managed-chats' });
+    input.detailedZoneRows = true;
+
+    const chat = buildSessionSidebarRowModel(input).rows.find((row) => row.kind === 'session');
+
+    expect(chat?.kind === 'session' && { context: chat.renderContext, detailed: chat.detailed, estimate: chat.estimateSize })
+      .toEqual({ context: 'tree-chat', detailed: false, estimate: 32 });
+  });
+
   test('Pinned opens above In work and its sessions stay in their project', () => {
     const input = args([project([group([node('pinned'), node('working')])])]);
     input.pinnedItems = [timelineItem('pinned')];
@@ -123,6 +235,68 @@ describe('buildSessionSidebarRowModel', () => {
     ));
 
     expect(order).toEqual(['pinned', 'mixed-compact:pinned', 'work', 'mixed-compact:working', 'project:pinned', 'project:working']);
+  });
+
+  test('the blocks set the order: a section of the user\'s own lists its works under its name', () => {
+    const input = args([project([group([node('waiting'), node('other')])])]);
+    input.workEntries = sessionWorks([timelineItem('other')]);
+    input.movedSessionIds = new Set(['waiting']);
+    input.projectsCaption = true;
+    input.blocks = [
+      { kind: 'custom', id: 's1', name: 'Waiting on me', entries: sessionWorks([timelineItem('waiting')]), hideWhenEmpty: true, preview: false },
+      { kind: 'work' },
+      { kind: 'projects' },
+    ];
+
+    const rows = buildSessionSidebarRowModel(input).rows;
+    const order = rows.flatMap((row) => (
+      row.kind === 'activity-header' ? [`${row.activityKey}${row.label ? `=${row.label}` : ''}`]
+        : row.kind === 'session' ? [`${row.renderContext}:${row.node.session.id}`]
+          : row.kind === 'caption' ? [`caption:${row.caption}`]
+            : []
+    ));
+
+    expect(order).toEqual(['section:s1=Waiting on me', 'mixed-compact:waiting', 'work', 'mixed-compact:other', 'caption:projects', 'project:other']);
+  });
+
+  test('an empty section of the user\'s own hides unless kept, and a kept one says it is empty', () => {
+    const input = args([project([group([node('a')])])]);
+    input.blocks = [{ kind: 'custom', id: 's1', name: 'Today', entries: [], hideWhenEmpty: true, preview: false }, { kind: 'projects' }];
+    expect(buildSessionSidebarRowModel(input).rows.some((row) => row.kind === 'activity-header')).toBe(false);
+
+    input.blocks = [{ kind: 'custom', id: 's1', name: 'Today', entries: [], hideWhenEmpty: false, preview: false }, { kind: 'projects' }];
+    const rows = buildSessionSidebarRowModel(input).rows;
+    expect(rows[0]).toMatchObject({ kind: 'activity-header', activityKey: 'section:s1' });
+    expect(rows[1]).toMatchObject({ kind: 'empty', emptyKind: 'section' });
+  });
+
+  test('an empty group of projects shows its caption only when kept', () => {
+    const input = args([project([group([node('a')])])]);
+    input.blocks = [{ kind: 'project-group', id: 'g1', name: 'Clients', projectIds: [], hideWhenEmpty: true, preview: false }];
+    expect(buildSessionSidebarRowModel(input).rows.some((row) => row.kind === 'caption')).toBe(false);
+
+    input.blocks = [{ kind: 'project-group', id: 'g1', name: 'Clients', projectIds: [], hideWhenEmpty: false, preview: false }];
+    const rows = buildSessionSidebarRowModel(input).rows;
+    expect(rows[0]).toMatchObject({ kind: 'caption', caption: 'section:g1', label: 'Clients' });
+    expect(rows[1]).toMatchObject({ kind: 'empty', emptyKind: 'section' });
+  });
+
+  test('a group of projects lists its projects under its caption, and Projects lists the rest', () => {
+    const projectB: ProjectSection = { project: { id: 'project-b', normalizedPath: '/other' }, groups: [group([node('b')], { directory: '/other', folderScopeKey: '/other' })] };
+    const input = args([project([group([node('a')])]), projectB]);
+    input.projectsCaption = true;
+    input.blocks = [
+      { kind: 'project-group', id: 'g1', name: 'Clients', projectIds: ['project-b'], hideWhenEmpty: false, preview: false },
+      { kind: 'projects', excludedProjectIds: new Set(['project-b']) },
+    ];
+
+    const order = buildSessionSidebarRowModel(input).rows.flatMap((row) => (
+      row.kind === 'caption' ? [`caption:${row.label ?? row.caption}`]
+        : row.kind === 'project-header' ? [`project:${row.section.project.id}`]
+          : []
+    ));
+
+    expect(order).toEqual(['caption:Clients', 'project:project-b', 'caption:projects', 'project:project-a']);
   });
 
   test('search lists a pinned session once, in Pinned', () => {
@@ -196,6 +370,28 @@ describe('buildSessionSidebarRowModel', () => {
     ));
 
     expect(guidesOf()).toEqual(['root:', 'parent:1│', 'child:1│ 2└', 'last:1└']);
+  });
+
+  test('an expanded session lists its subagents but not its workflow agents or what they started', () => {
+    const agent: SessionNode = {
+      session: { ...session('agent'), metadata: { openchamber: { kind: 'workflow-agent' } } },
+      children: [node('agent-subagent')],
+      worktree: null,
+    };
+    const parent = node('parent', [node('subagent'), agent]);
+    const input = args([project([group([parent])])]);
+    input.expandedParents = new Set(['project:active:parent', 'project:active:agent']);
+    const rows = buildSessionSidebarRowModel(input).rows.flatMap((row) => (
+      row.kind === 'session' ? [`${row.node.session.id}:${String(row.expanded)}`] : []
+    ));
+    expect(rows).toEqual(['parent:true', 'subagent:undefined']);
+
+    const onlyAgents = args([project([group([node('lone', [agent])])])]);
+    onlyAgents.expandedParents = new Set(['project:active:lone']);
+    // No chevron for a row whose only children are workflow agents.
+    expect(buildSessionSidebarRowModel(onlyAgents).rows.flatMap((row) => (
+      row.kind === 'session' ? [`${row.node.session.id}:${String(row.expanded)}`] : []
+    ))).toEqual(['lone:undefined']);
   });
 
   test('search counts a subsession of a session in work once, and the moved tree leaves its group', () => {
@@ -314,6 +510,11 @@ describe('buildSessionSidebarRowModel', () => {
 
     expect(model.rows.filter((row) => row.kind === 'session')).toHaveLength(7);
     expect(model.rows.some((row) => row.kind === 'show-control' && row.more)).toBe(true);
+    const control = model.rows.find((row) => row.kind === 'show-control');
+    if (control?.kind !== 'show-control') throw new Error('Missing reveal control');
+    expect(control.hiddenNodes).toHaveLength(24_993);
+    const visibleIds = new Set(model.rows.filter((row) => row.kind === 'session').map((row) => row.node.session.id));
+    expect(control.hiddenNodes.some((hidden) => visibleIds.has(hidden.session.id))).toBe(false);
   });
 
   test('single-project flat mode reveals twenty at a time and resets without changing Chats', () => {
@@ -341,10 +542,39 @@ describe('buildSessionSidebarRowModel', () => {
   test('Chats keep the tree slot', () => {
     const input = args([]);
     input.chatGroup = group(Array.from({ length: 5 }, (_, index) => node(`chat-${index}`)), { id: 'managed-chats' });
+    input.detailedZoneRows = true;
     const rows = buildSessionSidebarRowModel(input).rows;
 
     expect([...new Set(rows.flatMap((row) => (row.kind === 'session' ? [row.renderContext] : [])))]).toEqual(['tree-chat']);
-    expect(rows.find((row) => row.kind === 'show-control')).toMatchObject({ flat: false });
+    expect(rows.find((row) => row.kind === 'show-control')).toMatchObject({ flat: false, detailed: false });
+  });
+
+  test('the reveal control takes the column of the rows it closes', () => {
+    const nodes = Array.from({ length: 20 }, (_, index) => node(`session-${index}`));
+    const input = args([project([group(nodes)])]);
+    input.sessionBatchSize = 7;
+    const control = () => {
+      const row = buildSessionSidebarRowModel(input).rows.find((candidate) => candidate.kind === 'show-control');
+      return row?.kind === 'show-control' ? row : null;
+    };
+
+    expect(control()).toMatchObject({ detailed: false });
+
+    input.detailedZoneRows = true;
+    expect(control()).toMatchObject({ detailed: true });
+  });
+
+  test('a detailed project failure takes the title column with or without retained sessions', () => {
+    for (const retained of [false, true]) {
+      const input = args([project([group(retained ? [node('retained')] : [])])]);
+      input.detailedZoneRows = true;
+      input.groupStatusByKey = new Map([['project-a:main', { state: 'load-failed', directory: '/repo', canGrantAccess: false }]]);
+      const status = () => buildSessionSidebarRowModel(input).rows.find((row) => row.kind === 'status');
+
+      expect(status()).toMatchObject({ groupKey: 'project-a:main', depth: 0, detailed: true, status: { state: 'load-failed' } });
+      input.detailedZoneRows = false;
+      expect(status()).toMatchObject({ detailed: false });
+    }
   });
 
   test('Chats failure stays visible beside retained sessions', () => {
@@ -559,6 +789,17 @@ describe('buildSessionSidebarRowModel', () => {
       // Failed or gone, it closes the list as an empty worktree does.
       input.liveSpaceIds = new Set();
       expect(listedOf(buildSessionSidebarRowModel(input).rows)).not.toContain('work:space:0123456789ab@0');
+    });
+
+    test('Show more activity covers hidden worktree subtrees and leaves shown works out', () => {
+      const roots = Array.from({ length: 7 }, (_, index) => node(`r${index}`));
+      const hiddenWork = worktree([node('wt-old', [node('wt-child')])]);
+      const input = args([project([group(roots), hiddenWork])]);
+      input.sessionOrderIndex = new Map([...roots.map((root, index) => [root.session.id, index] as const), ['wt-old', 10], ['wt-child', 11]]);
+      const control = buildSessionSidebarRowModel(input).rows.find((row) => row.kind === 'show-control');
+      if (control?.kind !== 'show-control') throw new Error('Missing reveal control');
+      expect(control.hiddenNodes.map((hidden) => hidden.session.id)).toEqual(['wt-old']);
+      expect(control.hiddenNodes[0].children[0].session.id).toBe('wt-child');
     });
 
     test('Detailed rows give the works under a project two lines, and keep what nests inside them on one', () => {
@@ -841,3 +1082,12 @@ describe('buildSessionSidebarRowModel', () => {
     expect(buildSessionSidebarRowModel(input).sessionById.get('hidden')?.id).toBe('hidden');
   });
 });
+
+const originalHomeInfo = opencodeClient.getFilesystemHomeInfo;
+opencodeClient.getFilesystemHomeInfo = async () => ({
+  home: '/home',
+  canonicalChatsRoot: '/home/.config/openchamber/chats',
+  canonicalLegacyChatsRoot: '/home/.config/openchamber/chats',
+});
+await ensureChatsRootDirectory();
+opencodeClient.getFilesystemHomeInfo = originalHomeInfo;

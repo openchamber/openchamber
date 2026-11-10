@@ -59,7 +59,7 @@ mock.module('@/lib/configSync', () => ({
   subscribeToConfigChanges: mock(() => () => undefined),
 }));
 
-const { useCommandsStore, invalidateCommandsLoadCache, selectCommandsForDirectory } = await import('./useCommandsStore');
+const { useCommandsStore, invalidateCommandsLoadCache, resolveCommandDirectory, selectCommandsForComposer, selectCommandsForDirectory, isCommandOfferedInComposer } = await import('./useCommandsStore');
 
 describe('useCommandsStore', () => {
   beforeEach(() => {
@@ -296,4 +296,57 @@ describe('useCommandsStore', () => {
     expect(useCommandsStore.getState().commands.map(c => c.name)).toEqual(['selected']);
   });
 
+  test('a worktree draft reads the commands of the folder its session starts in, once that folder is known', () => {
+    const worktreeRoot = '/repo/worktrees/feature';
+    const folder = `${worktreeRoot}/ai`;
+    const resolved = { open: true, worktreeStartDirectory: { worktreeRoot, directory: folder } };
+
+    expect(resolveCommandDirectory(worktreeRoot, resolved)).toEqual({ status: 'resolved', directory: folder });
+    expect(resolveCommandDirectory(`${worktreeRoot}/`, resolved)).toEqual({ status: 'resolved', directory: folder });
+    // Another worktree, a closed draft, a composer that shows no draft, or no directory: unchanged.
+    expect(resolveCommandDirectory('/repo/worktrees/other', resolved)).toEqual({ status: 'resolved', directory: '/repo/worktrees/other' });
+    expect(resolveCommandDirectory(worktreeRoot, { ...resolved, open: false })).toEqual({ status: 'resolved', directory: worktreeRoot });
+    expect(resolveCommandDirectory(worktreeRoot, null)).toEqual({ status: 'resolved', directory: worktreeRoot });
+    expect(resolveCommandDirectory(null, resolved)).toEqual({ status: 'resolved', directory: null });
+  });
+
+  test('a worktree draft whose start folder is still resolving lists nothing and requests nothing', () => {
+    const worktreeRoot = '/repo/worktrees/feature';
+    const pending = { open: true, worktreeStartDirectory: { worktreeRoot, directory: null } };
+    const rootOnly = [{ name: 'root-only', description: '', template: '', scope: 'project' as const }];
+    useCommandsStore.setState({ commandsByDirectory: { [worktreeRoot]: rootOnly } });
+
+    expect(resolveCommandDirectory(worktreeRoot, pending)).toEqual({ status: 'pending' });
+    // The root's cached commands are not offered for a draft that has not resolved its folder.
+    expect(selectCommandsForComposer(useCommandsStore.getState(), { status: 'pending' })).toEqual([]);
+    expect(selectCommandsForComposer(useCommandsStore.getState(), { status: 'resolved', directory: worktreeRoot })).toBe(rootOnly);
+  });
+
+  test('a worktree draft whose start folder fell back to the root lists the root', () => {
+    const worktreeRoot = '/repo/worktrees/feature';
+    const fallback = { open: true, worktreeStartDirectory: { worktreeRoot, directory: worktreeRoot } };
+
+    expect(resolveCommandDirectory(worktreeRoot, fallback)).toEqual({ status: 'resolved', directory: worktreeRoot });
+  });
+
+  test('a pinned root session keeps its own directory beside a subfolder draft', () => {
+    const worktreeRoot = '/repo/worktrees/feature';
+    const folder = `${worktreeRoot}/ai`;
+    const draft = { open: true, worktreeStartDirectory: { worktreeRoot, directory: folder } };
+
+    // The main composer maps the draft; the pinned column passes no draft and stays on the root.
+    expect(resolveCommandDirectory(worktreeRoot, draft)).toEqual({ status: 'resolved', directory: folder });
+    expect(resolveCommandDirectory(worktreeRoot, null)).toEqual({ status: 'resolved', directory: worktreeRoot });
+  });
+
+});
+
+describe('isCommandOfferedInComposer', () => {
+  test('hides OpenCode\'s own /goal but keeps a user command of that name', () => {
+    expect(isCommandOfferedInComposer({ name: 'goal', fromOpenCode: true })).toBe(false);
+    expect(isCommandOfferedInComposer({ name: 'goal', scope: 'project' })).toBe(true);
+    // A failed metadata read leaves the command unclassified: keep it.
+    expect(isCommandOfferedInComposer({ name: 'goal' })).toBe(true);
+    expect(isCommandOfferedInComposer({ name: 'review' })).toBe(true);
+  });
 });

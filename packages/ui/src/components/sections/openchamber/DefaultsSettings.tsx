@@ -10,6 +10,7 @@ import {
   SETTINGS_HELPER_CLASS,
   SETTINGS_SELECT_ROW_TRIGGER_CLASS,
 } from '@/components/sections/shared/SettingsSection';
+import { CompactionSettings } from './CompactionSettings';
 import { SessionWarmingCheckbox } from './SessionWarmingCheckbox';
 import { SettingsInlineLink } from '@/components/sections/classification/JevAccessNote';
 import { SessionWarmingModeField } from './SessionWarmingModeField';
@@ -525,6 +526,8 @@ export const DefaultsSettings: React.FC = () => {
         {/* VS Code has no OpenChamber server to warm chosen sessions: OpenCode's switch for all of them only. */}
         {isVSCode ? <SessionWarmingCheckbox /> : <SessionWarmingModeField />}
       </SettingsSection>
+
+      <CompactionSettings />
     </>
   );
 };

@@ -16,6 +16,7 @@ import { useRoutingSync } from '@/hooks/useRoutingSync';
 import { useRootScrollLock } from '@/hooks/useRootScrollLock';
 import { useGlobalSessionsPolling } from '@/hooks/useGlobalSessionsPolling';
 import { opencodeClient } from '@/lib/opencode/client';
+import { openSession } from '@/lib/router/openSessionFromRoute';
 import type { RuntimeAPIs } from '@/lib/api/types';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useConfigStore } from '@/stores/useConfigStore';
@@ -177,16 +178,17 @@ const MiniChatBootstrap: React.FC<{ config: MiniChatConfig }> = ({ config }) => 
       if (!parsed.success) return;
       const { sessionId, messageId, runtimeKey } = parsed.data;
       if (openSessionInOwningHostWindow(sessionId, runtimeKey || null, messageId || null)) return;
-      if (useSessionUIStore.getState().currentSessionId === sessionId) return;
       const sessionDirectory = (sessions.find((entry) => entry.id === sessionId) as { directory?: string | null } | undefined)?.directory?.trim();
       const directory = sessionDirectory || parsed.data.directory || null;
       void sync.ensureSessionRenderable(sessionId);
-      setCurrentSession(sessionId, directory);
+      // Same resolver as the main window: a `/btw` fork opens as its parent,
+      // with that parent's panel showing.
+      void openSession(sessionId, { directory, messageId: messageId || null });
       sessionBootstrappedRef.current = true;
     };
     window.addEventListener('openchamber:open-session', onOpenSession);
     return () => window.removeEventListener('openchamber:open-session', onOpenSession);
-  }, [sessions, setCurrentSession, sync]);
+  }, [sessions, sync]);
 
   React.useEffect(() => {
     if (config.mode !== 'draft' || draftOpen || currentSessionId) return;

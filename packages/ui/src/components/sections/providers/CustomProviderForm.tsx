@@ -18,6 +18,9 @@ import { Icon } from '@/components/icon/Icon';
 import { useI18n } from '@/lib/i18n';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { CUSTOM_PROVIDER_ICONS } from '@/lib/customProviderIcons';
+import { providerLogoUploadSupported } from '@/lib/customProviderLogos';
+import { useUIStore } from '@/stores/useUIStore';
+import { ProviderLogoImageControl } from './ProviderLogoImageControl';
 import { cn } from '@/lib/utils';
 import {
   CUSTOM_PROVIDER_PROTOCOLS,
@@ -83,6 +86,19 @@ export const CustomProviderForm: React.FC<CustomProviderFormProps> = ({
   const seededEditProviderIdRef = React.useRef<string | null>(null);
   const logoProviderId = form.providerID.trim() || 'custom';
   const { hasLogo: providerHasLogo } = useProviderLogo(logoProviderId);
+  // A logo stored under the typed ID: kept when the provider was removed and is added again.
+  const storedLogo = useUIStore((state) => state.customProviderLogos[logoProviderId]);
+  const pickedLogoFile = form.logo instanceof File ? form.logo : null;
+  const [pickedLogoUrl, setPickedLogoUrl] = React.useState<string | null>(null);
+  React.useEffect(() => {
+    if (!pickedLogoFile) {
+      setPickedLogoUrl(null);
+      return;
+    }
+    const url = URL.createObjectURL(pickedLogoFile);
+    setPickedLogoUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [pickedLogoFile]);
 
   React.useEffect(() => {
     if (!initialValues) {
@@ -280,7 +296,13 @@ export const CustomProviderForm: React.FC<CustomProviderFormProps> = ({
             disabled={busy}
           >
             <SelectTrigger aria-label={t('settings.providers.page.custom.field.protocol.label')} className="w-full">
-              <SelectValue />
+              <SelectValue>
+                {form.protocol === 'openai-responses'
+                  ? t('settings.providers.page.custom.field.protocol.openaiResponses')
+                  : form.protocol === 'anthropic-messages'
+                    ? t('settings.providers.page.custom.field.protocol.anthropicMessages')
+                    : t('settings.providers.page.custom.field.protocol.openaiChat')}
+              </SelectValue>
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="openai-chat">{t('settings.providers.page.custom.field.protocol.openaiChat')}</SelectItem>
@@ -342,6 +364,23 @@ export const CustomProviderForm: React.FC<CustomProviderFormProps> = ({
             ))}
           </div>
         </SettingsStackedField>
+
+        {providerLogoUploadSupported() ? (
+          <SettingsStackedField
+            label={t('settings.providers.page.logo.title')}
+            info={t('settings.providers.page.logo.info')}
+            settingsItem="providers.logo"
+          >
+            <ProviderLogoImageControl
+              preview={pickedLogoUrl
+                ? <img src={pickedLogoUrl} alt="" className="size-5 object-contain" />
+                : form.logo === null && storedLogo ? <ProviderLogo providerId={logoProviderId} alt="" className="size-5" /> : null}
+              busy={busy}
+              onPick={(file) => setForm((previous) => ({ ...previous, logo: file }))}
+              onRemove={() => setForm((previous) => ({ ...previous, logo: 'removed' }))}
+            />
+          </SettingsStackedField>
+        ) : null}
 
         <SettingsStackedField
           label={t('settings.providers.page.custom.field.baseURL.label')}
@@ -428,6 +467,12 @@ export const CustomProviderForm: React.FC<CustomProviderFormProps> = ({
               onToolsChange={(tools) => setForm((previous) => ({
                 ...previous,
                 models: previous.models.map((entry, rowIndex) => rowIndex === index ? { ...entry, tools, capabilitiesKnown: true, metadataSource: 'manual' } : entry),
+              }))}
+              // Unchecked writes `chat` explicitly: the save merges over the
+              // stored entry, so leaving `type` out would keep `image`.
+              onImageGenerationChange={(imageGeneration) => setForm((previous) => ({
+                ...previous,
+                models: previous.models.map((entry, rowIndex) => rowIndex === index ? { ...entry, type: imageGeneration ? 'image' : 'chat' } : entry),
               }))}
               onRemove={form.models.length > 1 ? () => {
                 setForm((prev) => ({

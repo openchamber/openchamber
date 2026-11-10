@@ -18,7 +18,8 @@ import {
 
 type OverviewIssueState = OverviewSessionFacts['issues'][number];
 import { useWorktreeChangeRequests } from './useWorktreeChangeRequests';
-import { readOverviewWorktreeGit, sessionsInWorktree, type OverviewWorktreeGit, type OverviewWorktreeTarget } from './overviewActions';
+import { sessionsInWorktree } from '@/lib/worktrees/worktreeUse';
+import { readOverviewWorktreeGit, type OverviewWorktreeGit, type OverviewWorktreeTarget } from './overviewActions';
 import { normalizePath } from '@/lib/pathNormalization';
 import { resolveProjectForSessionDirectory } from '@/lib/projectResolution';
 import { spaceProjectDirectoryIn, useSpacesStore } from '@/lib/spaces/spaces-store';
@@ -44,6 +45,8 @@ import { useUIStore } from '@/stores/useUIStore';
 import type { IssueLiveSummary, ProjectEntry, RepositoryReferenceFilter, TrackerLiveSummary } from '@/lib/api/types';
 import { useRepositoryAcrossReferenceList } from '@/components/references/referenceSources';
 import { useBackgroundShellsStore } from '@/sync/background-shells';
+import { useBackgroundImagesStore } from '@/sync/background-images';
+import { usePrWatchStore } from '@/sync/pr-watch';
 import { useGlobalBlockingRequestsStore } from '@/sync/global-blocking-requests';
 import { useGlobalSessionStatusStore } from '@/sync/global-session-status';
 import { useSessionUIStore } from '@/sync/session-ui-store';
@@ -239,6 +242,8 @@ export function useOverviewData(): OverviewData {
   const hasLoaded = useGlobalSessionsStore((state) => state.hasLoaded);
   const activeSessionIds = useGlobalSessionStatusStore((state) => state.activeSessionIds);
   const shellSessionIds = useBackgroundShellsStore((state) => state.sessionIds);
+  const imageSessionIds = useBackgroundImagesStore((state) => state.sessionIds);
+  const prWatches = usePrWatchStore((state) => state.bySession);
   const blockingBySession = useGlobalBlockingRequestsStore((state) => state.bySession);
   const worktreesByProject = useSessionUIStore((state) => state.availableWorktreesByProject);
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
@@ -308,8 +313,16 @@ export function useOverviewData(): OverviewData {
       const root = rootOf(id, entityById);
       if (!map.has(root)) map.set(root, 'shell');
     }
+    for (const id of imageSessionIds) {
+      const root = rootOf(id, entityById);
+      if (!map.has(root)) map.set(root, 'image');
+    }
+    for (const id of prWatches.keys()) {
+      const root = rootOf(id, entityById);
+      if (!map.has(root)) map.set(root, 'pullRequest');
+    }
     return map;
-  }, [activeSessionIds, entityById, shellSessionIds]);
+  }, [activeSessionIds, entityById, imageSessionIds, prWatches, shellSessionIds]);
 
   const blockingByRoot = React.useMemo(() => {
     const map = new Map<string, OverviewBlocking>();

@@ -308,6 +308,32 @@ describe('createWebFilesAPI', () => {
       type: 'file',
     });
   });
+
+  it('requests toggle supplements in the requested workspace and parses paths', async () => {
+    const { createWebFilesAPI } = await import('./files');
+    const api = createWebFilesAPI({ getDirectory: () => '/other', searchFiles: searchFilesMock });
+    runtimeFetchMock.mockResolvedValueOnce(Response.json({ files: [
+      { path: 'C:\\repo\\build\\ignored.ts', relativePath: 'build/ignored.ts' },
+    ] }));
+
+    expect(await api.search({ directory: 'C:/repo', query: 'ignored', maxResults: 25, includeHidden: true, respectGitignore: false }))
+      .toEqual([{ path: 'C:/repo/build/ignored.ts', preview: ['build/ignored.ts'] }]);
+    expect(runtimeFetchMock).toHaveBeenLastCalledWith('/api/fs/search', {
+      query: new URLSearchParams({ query: 'ignored', directory: 'C:/repo', limit: '25', includeHidden: 'true', respectGitignore: 'false' }),
+      headers: { 'x-opencode-directory': 'C:/repo' },
+    });
+    expect(searchFilesMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects failed and malformed supplemental search responses', async () => {
+    const { createWebFilesAPI } = await import('./files');
+    const api = createWebFilesAPI({});
+    const payload = { directory: '/repo', query: 'x', includeHidden: true };
+    runtimeFetchMock.mockResolvedValueOnce(Response.json({ error: 'search failed' }, { status: 500 }));
+    await expect(api.search(payload)).rejects.toThrow('search failed');
+    runtimeFetchMock.mockResolvedValueOnce(Response.json({}));
+    await expect(api.search(payload)).rejects.toMatchObject({ reason: 'invalid-response' });
+  });
 });
 
 describe('createWebFilesAPI.searchContents', () => {

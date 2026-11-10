@@ -3,7 +3,7 @@ import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { runBackgroundNetworkTask } from '@/lib/background-network';
 import type { SourceControlReadContext } from '@/lib/source-control/types';
 import type { OverviewWorktreeFacts } from '@/lib/overview/overviewModel';
-import { getRuntimeKey } from '@/lib/runtime-switch';
+import { captureRuntimeInstance } from '@/lib/runtime-switch';
 import { repositoryBindingOwner } from '@/lib/source-control/repository-binding';
 import { getSourceControlStatusKey, selectEntryVisualSummary, useGitHubPrStatusStore, type PrVisualSummary } from '@/stores/useGitHubPrStatusStore';
 import { getSourceControlAuthKey, getSourceControlReadContextAuthState, useSourceControlAuthStore } from '@/stores/useSourceControlAuthStore';
@@ -42,11 +42,12 @@ export function useWorktreeChangeRequests(
   React.useEffect(() => {
     if (!signature) return;
     let cancelled = false;
-    const runtimeKey = getRuntimeKey();
+    const isCurrent = captureRuntimeInstance();
     void (async () => {
       const resolved = await Promise.all(targetsRef.current.map(async (target) => {
         try {
           const load = await runBackgroundNetworkTask(() => repositoryBindingOwner.read(repositoryBindingOwner.scope(target.path), sourceControl));
+          if (!load) return null;
           const context = load.contexts[0];
           if (!context) return null;
           const auth = useSourceControlAuthStore.getState().entries[getSourceControlAuthKey(context)];
@@ -56,7 +57,7 @@ export function useWorktreeChangeRequests(
           return null;
         }
       }));
-      if (cancelled || runtimeKey !== getRuntimeKey()) return;
+      if (cancelled || !isCurrent()) return;
       const store = useGitHubPrStatusStore.getState();
       const toRead: Array<{ context: SourceControlReadContext; branch: string }> = [];
       const next = new Map<string, string>();

@@ -22,14 +22,15 @@ export const WorkStatusSectionList: React.FC<{
   directory: string | null;
   repositoryEnabled: boolean;
   layout: WorkStatusSectionLayout;
-}> = ({ sessionId, directory, repositoryEnabled, layout }) => {
+  visible?: boolean;
+}> = ({ sessionId, directory, repositoryEnabled, layout, visible = true }) => {
   const { extensionSections, sectionOrder, hiddenSections } = layout;
   const sectionVisible = (id: Parameters<typeof isWorkStatusSectionVisible>[1]) => isWorkStatusSectionVisible(hiddenSections, id);
 
   // Keep these elements owned here so primary readout updates do not rerender
   // unrelated sections through the composition callback.
   const secondarySections = {
-    usage: <WorkStatusUsageSection />,
+    usage: <WorkStatusUsageSection visible={visible} />,
     telemetry: <WorkStatusTelemetrySection sessionId={sessionId} directory={directory} />,
     subagents: <WorkStatusSubagentsSection sessionId={sessionId} directory={directory} />,
     workflows: <WorkStatusWorkflowsSection sessionId={sessionId} directory={directory} />,

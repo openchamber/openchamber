@@ -13,7 +13,7 @@ Pick how replies are spoken:
 
 - **browser** — your browser's built-in voices, no setup
 - **OpenAI** — OpenAI's voices; paste your API key and pick a voice
-- **OpenAI-compatible** — any service that speaks the OpenAI format; enter its URL and, if it needs one, an API key
+- **OpenAI-compatible** — any service that speaks the OpenAI format; enter its URL and, if it needs one, an API key. If the service names its speech endpoint differently, put that path in **Endpoint path**; leaving it empty keeps `/audio/speech`
 - **macOS say** — the built-in `say` command, on Macs that have it
 
 Once on, you get a play button on messages to hear them read aloud.
@@ -23,7 +23,7 @@ Once on, you get a play button on messages to hear them read aloud.
 Pick how your speech is transcribed:
 
 - **Local** runs a speech model on the computer where OpenChamber runs. The model downloads the first time you dictate, and your audio stays on that computer.
-- **Server** sends your audio to an OpenAI-compatible transcription service. Enter its URL and, if it needs one, an API key.
+- **Server** sends your audio to an OpenAI-compatible transcription service. Enter its URL and, if it needs one, an API key. If its transcription endpoint is not `/audio/transcriptions`, set **Endpoint path**. Leaving it empty keeps the OpenAI default.
 
 Local models:
 

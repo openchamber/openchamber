@@ -53,6 +53,7 @@ const journeyOf = (overrides = {}) => {
     calls,
     listSpaces: record('listSpaces', [{ id: ID, name: 'One', state: 'running' }]),
     createSpace: record('createSpace', { id: ID, state: 'preparing' }),
+    setTaskTitle: record('setTaskTitle', { applied: true, taskTitle: { title: 'User title', by: 'user' } }),
     startSpace: record('startSpace', { id: ID, state: 'running' }),
     stopSpace: record('stopSpace', { id: ID, state: 'exited' }),
     restartSpace: record('restartSpace', { id: ID, state: 'running', networkRestored: true }),
@@ -78,6 +79,16 @@ const journeyOf = (overrides = {}) => {
 };
 
 describe('space routes', () => {
+  it('renames a space task through the user operation and validates title and space identity', async () => {
+    const journey = journeyOf();
+    const { call, state } = await serve({ journey });
+    expect(await call('PUT', `${SPACES_ROUTE}/${ID}/task-title`, { title: 'User title', by: 'agent' })).toMatchObject({ status: 200, body: { taskTitle: { title: 'User title', by: 'user' } } });
+    expect(journey.calls).toEqual([['setTaskTitle', ID, 'User title']]);
+    expect(await call('PUT', `${SPACES_ROUTE}/${ID}/task-title`, { title: 123 })).toMatchObject({ status: 400, body: { code: 'invalid_request_body' } });
+    expect(await call('PUT', `${SPACES_ROUTE}/wrong/task-title`, { title: 'User title' })).toMatchObject({ status: 404, body: { code: 'space_not_found' } });
+    state.journey = null;
+    expect(await call('PUT', `${SPACES_ROUTE}/${ID}/task-title`, { title: 'User title' })).toMatchObject({ status: 404, body: { code: 'isolated_spaces_off' } });
+  });
   it('answers every journey route with 404 and isolated_spaces_off while the feature is off, and the switch still works', async () => {
     const { call, calls } = await serve({ journey: null, switchState: { enabled: false } });
     for (const [method, path] of [['GET', ''], ['POST', ''], ['GET', '/places'], ['POST', `/${ID}/start`], ['POST', `/${ID}/stop`], ['POST', `/${ID}/restart`], ['POST', `/${ID}/restart-opencode`], ['POST', `/${ID}/grants`], ['GET', '/logins'], ['GET', '/custom-providers'], ['DELETE', `/${ID}`], ['GET', `/${ID}/journal`], ['GET', `/${ID}/apply`], ['POST', `/${ID}/apply`], ['GET', '/idle-stop'], ['PUT', '/idle-stop'], ['POST', `/${ID}/setup`], ['GET', `/${ID}/setup`], ['GET', '/places/docker/disk'], ['POST', '/places/docker/clean-up'], ['POST', '/places/docker/image'], ['GET', '/places/local/setup'], ['POST', '/places/local/setup']]) {

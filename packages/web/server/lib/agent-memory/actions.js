@@ -18,7 +18,7 @@
  */
 
 import { asNonEmptyString } from '../shared/guards.js';
-import { MEMORY_BODY_MAX_LENGTH } from './runtime.js';
+import { MEMORY_BODY_MAX_LENGTH, MEMORY_TITLE_MAX_LENGTH } from './runtime.js';
 
 const MEMORY_TYPES = new Set(['fact', 'preference', 'reference']);
 
@@ -171,6 +171,10 @@ export const createAgentMemoryActions = (dependencies) => {
     if (!body) fail('body is required for memory.save', 400);
     // Shared limit with the runtime, which enforces it again on create; the
     // pre-check here is what makes the agent see a 400 usage error.
+    // The store would clamp a long title silently, cutting it mid-word.
+    if (title.length > MEMORY_TITLE_MAX_LENGTH) {
+      fail(`title holds at most ${MEMORY_TITLE_MAX_LENGTH} characters, and this one is ${title.length}`, 400);
+    }
     if (body.trim().length > MEMORY_BODY_MAX_LENGTH) {
       fail(`body holds at most ${MEMORY_BODY_MAX_LENGTH} characters, and this one is ${body.trim().length}`, 400);
     }

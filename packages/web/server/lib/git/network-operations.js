@@ -13,7 +13,7 @@ import { createNetworkOperationPlanner, isChangeReviewRemote } from './network-o
 import { createNetworkOperationRegistry } from './network-operation-registry.js';
 import { createGitRedactor, redactGitText } from './redaction.js';
 import { parseSubmoduleManifest, SUBMODULE_DISCOVERY_LIMITS } from './submodule-discovery.js';
-import { discoverLfs, parseTreeObjects, scanLfsFiles, scanLfsPushObjects, resolveLfsPushConfig, LFS_DISCOVERY_LIMITS } from './lfs-discovery.js';
+import { discoverLfs, parseTreeObjects, scanLfsFiles, scanLfsPushObjects, resolveLfsPushConfig, LFS_DISCOVERY_LIMITS, SAFE_FILTERS } from './lfs-discovery.js';
 import { resolveGitRelativeEndpoint } from './discovery-endpoint.js';
 import { fingerprintRemoteUrl, redactRemoteUrl } from '../source-control/url-redaction.js';
 
@@ -34,7 +34,8 @@ const MANAGED_ENV_NAMES = new Set([
   'GIT_ASKPASS', 'SSH_ASKPASS', 'SSH_ASKPASS_REQUIRE', 'GIT_CONFIG_COUNT',
   'GIT_CONFIG', 'GIT_CONFIG_PARAMETERS', 'GIT_CONFIG_GLOBAL', 'GIT_CONFIG_NOSYSTEM',
   'GIT_SSH', 'GIT_SSH_COMMAND', 'GIT_SSH_VARIANT',
-  'GIT_PROXY_COMMAND', 'SSH_AUTH_SOCK', 'OPENCHAMBER_GIT_SSH_KEY',
+  'GIT_PROXY_COMMAND', 'SSH_AUTH_SOCK', 'OPENCHAMBER_GIT_SSH_KEY', 'OPENCHAMBER_GIT_SSH_PASSPHRASE',
+  'OPENCHAMBER_GIT_SSH_EXECUTABLE',
   'GIT_SSL_CERT', 'GIT_SSL_KEY', 'GIT_SSL_CAINFO', 'GIT_SSL_CAPATH',
   'GIT_SSL_CIPHER_LIST', 'GIT_SSL_VERSION', 'GIT_SSL_NO_VERIFY',
   'GIT_SSL_CERT_PASSWORD_PROTECTED', 'CURL_CA_BUNDLE', 'SSL_CERT_FILE',
@@ -42,6 +43,8 @@ const MANAGED_ENV_NAMES = new Set([
   'NO_PROXY', 'http_proxy', 'https_proxy', 'all_proxy', 'no_proxy', 'NETRC',
 ]);
 const SHA_PATTERN = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/i;
+// What decides how Git converts line endings between the working tree and the index.
+const LINE_ENDING_CONFIG_PATTERN = 'core\\.(autocrlf|eol|safecrlf|attributesfile)';
 
 // The details are often a Git process result, whose `code` is the exit
 // status; the operation's own code and status are applied over them.
@@ -820,6 +823,7 @@ export function createNetworkOperations({
       throw operationError('AUTHENTICATION_REQUIRED', 'Managed Git credential is unavailable', 409);
     }
     env.OPENCHAMBER_GIT_SSH_KEY = credential.key.privateKeyPath;
+    Object.assign(env, credential.key.askpassEnv);
     env.GIT_SSH_COMMAND = helperShellCommand(SSH_WRAPPER_PATH);
     env.GIT_SSH_VARIANT = 'ssh';
     controls.updateTransportMetadata({ fingerprint: credential.key.fingerprint }, plan.transportRole);
@@ -829,7 +833,8 @@ export function createNetworkOperations({
       revoke: async () => {
         try { return credential.key.cleanup ? await credential.key.cleanup() : true; } catch { return false; }
       },
-      secrets: [credential.key.sourcePath, credential.key.privateKeyPath],
+      secrets: [credential.key.sourcePath, credential.key.privateKeyPath,
+        ...(credential.key.askpassEnv ? [credential.key.askpassEnv.OPENCHAMBER_GIT_SSH_PASSPHRASE] : [])],
     };
   };
 
@@ -895,6 +900,35 @@ export function createNetworkOperations({
     throw operationError(transportFailureCode(detail), detail, 500, result);
   };
 
+  // The remote's default branch is never deleted, whatever asked for it: some
+  // hosts refuse that deletion and some carry it out. The remote itself says
+  // which branch its HEAD names; local `refs/remotes/<remote>/HEAD` can be
+  // missing or stale. The question gets its own transport, released before the
+  // push gets one: a managed HTTPS lease answers a single credential request,
+  // as between sync's fetch and push.
+  const refuseRemoteDefaultBranch = async (plan, controls, deadline) => {
+    const probe = await transport(plan, controls, deadline);
+    let output;
+    try {
+      output = await commandResult(plan, controls, ['ls-remote', '--symref', '--', plan.rawEndpoint, 'HEAD'], probe, deadline);
+    } finally {
+      if (await safeRevoke(probe, plan.operationId)) throw operationError('UNKNOWN', 'Git credential cleanup failed', 500);
+    }
+    const defaultRef = /^ref: (\S+)\tHEAD$/m.exec(String(output.stdout))?.[1];
+    if (defaultRef === plan.target.destinationRef) {
+      throw operationError('INVALID_REQUEST', "The remote's default branch can't be deleted", 409);
+    }
+  };
+
+  /**
+   * The context pull and sync integrate in, after the credential is revoked:
+   * no network, hooks, autostash or executable content filters. Git's
+   * clean-tree check before the rebase must still read the working tree the
+   * way the person's own Git and the panel do, or a tree they see as clean is
+   * refused as "unstaged changes" (#5887). So the line-ending settings come
+   * from the person's configuration, and so does the canonical LFS clean
+   * filter, which only hashes a file locally; smudge stays off.
+   */
   const localIntegrationContext = async (directory, controls, deadline) => {
     const env = {
       ...await managedGitEnvironment(),
@@ -903,25 +937,56 @@ export function createNetworkOperations({
     const configArgs = [
       '-c', `core.hooksPath=${platform === 'win32' ? 'NUL' : '/dev/null'}`,
       '-c', 'core.fsmonitor=false', '-c', 'submodule.recurse=false', '-c', 'merge.autoStash=false',
-      '-c', 'filter.lfs.process=', '-c', 'filter.lfs.smudge=', '-c', 'filter.lfs.clean=', '-c', 'filter.lfs.required=false',
+      '-c', 'filter.lfs.smudge=', '-c', 'filter.lfs.required=false',
     ];
+    // `git config --null --get-regexp` entries: `key\nvalue`, or a bare key
+    // for names only and for a boolean written without a value.
+    const readConfig = async (configEnv, args, unavailable) => {
+      const result = await run({
+        cwd: directory, env: configEnv, controls, deadline, requireCompleteOutput: true,
+        args: ['config', '--includes', '--null', ...args],
+      });
+      if (result.cancelled || result.timedOut) {
+        throw operationError(result.timedOut ? 'TIMEOUT' : 'CANCELLED', 'Local integration was interrupted', 409, result);
+      }
+      if (![0, 1].includes(result.code) || (result.stdout && !result.stdout.endsWith('\0'))) {
+        throw operationError('STALE_CONFIG', unavailable, 409);
+      }
+      return result.stdout.split('\0').filter(Boolean).map((entry) => {
+        const separator = entry.indexOf('\n');
+        return separator < 0 ? [entry] : [entry.slice(0, separator), entry.slice(separator + 1)];
+      });
+    };
     const blocked = phaseError(controls, deadline);
     if (blocked) throw blocked;
-    const filters = await run({
-      cwd: directory, env, controls, deadline, requireCompleteOutput: true,
-      args: ['config', '--includes', '--null', '--name-only', '--get-regexp', '^filter\\..*\\.(process|smudge|clean|required)$'],
-    });
-    if (filters.cancelled || filters.timedOut) {
-      throw operationError(filters.timedOut ? 'TIMEOUT' : 'CANCELLED', 'Local integration was interrupted', 409, filters);
-    }
-    if (![0, 1].includes(filters.code) || (filters.stdout && !filters.stdout.endsWith('\0'))) {
-      throw operationError('STALE_CONFIG', 'Local Git filter configuration is unavailable', 409);
-    }
-    for (const key of filters.stdout.split('\0').filter(Boolean)) {
+    // The filters this context still sees, from the repository's own configuration.
+    const filterKeys = (await readConfig(env, [
+      '--name-only', '--get-regexp', '^filter\\..*\\.(process|smudge|clean|required)$',
+    ], 'Local Git filter configuration is unavailable')).map(([key]) => key);
+    for (const key of filterKeys) {
       if (!/^filter\.[^\0\r\n=]+\.(process|smudge|clean|required)$/i.test(key)) {
         throw operationError('STALE_CONFIG', 'Local Git filter configuration is invalid', 409);
       }
       configArgs.push('-c', `${key}=${key.toLowerCase().endsWith('.required') ? 'false' : ''}`);
+    }
+    // The person's own settings, as their Git reads them in this repository.
+    let lfsClean;
+    let lfsExtension = false;
+    for (const [key, value] of await readConfig({ ...inheritedEnv, GIT_CONFIG: undefined }, [
+      '--get-regexp', `^(${LINE_ENDING_CONFIG_PATTERN}|filter\\.lfs\\.clean|lfs\\.extension\\..*)$`,
+    ], 'Git configuration is unavailable')) {
+      if (key === 'filter.lfs.clean') lfsClean = value;
+      else if (key.startsWith('lfs.extension.')) lfsExtension = true;
+      else configArgs.push('-c', value === undefined ? key : `${key}=${value}`);
+    }
+    // Any `process` setting, an empty one included, keeps Git from running
+    // `clean`, so the clean filter returns only where none is set here. An
+    // LFS extension is a program `git-lfs clean` would run, so it keeps the
+    // filter off.
+    if (lfsClean === SAFE_FILTERS['filter.lfs.clean'] && !lfsExtension && !filterKeys.includes('filter.lfs.process')) {
+      configArgs.push('-c', `filter.lfs.clean=${lfsClean}`);
+    } else {
+      configArgs.push('-c', 'filter.lfs.process=', '-c', 'filter.lfs.clean=');
     }
     return { env, configArgs, secrets: [] };
   };
@@ -1010,10 +1075,13 @@ export function createNetworkOperations({
     && left.transportMode === right.transportMode
     && (left.credentialId ?? null) === (right.credentialId ?? null)
     && (left.transportRevision ?? null) === (right.transportRevision ?? null);
-  const auxiliaryTransport = async (hydrationPlan, kind, rawEndpoint, controls, deadline) => {
+  const auxiliaryTransport = async (hydrationPlan, kind, rawEndpoint, controls, deadline, foundAfterPlanning = false) => {
     const pinned = hydrationPlan.plannedAuxiliaryAuthorities?.find((candidate) => candidate.kind === kind
       && candidate.rawEndpoint === rawEndpoint);
-    if (hydrationPlan.plannedAuxiliaryAuthorities && !pinned) {
+    // Planning inspects only checkouts that already exist, so an endpoint read
+    // inside a child this run cloned could never be pinned. It is checked
+    // against the repository authority planning pinned instead.
+    if (hydrationPlan.plannedAuxiliaryAuthorities && !pinned && !foundAfterPlanning) {
       throw operationError('GIT_AUXILIARY_AUTHORIZATION_REQUIRED', 'Git auxiliary endpoint authorization is required', 409);
     }
     const authority = pinned ?? await currentAuxiliaryAuthority(hydrationPlan, kind, rawEndpoint, controls, deadline);
@@ -1038,7 +1106,43 @@ export function createNetworkOperations({
       await safeRevoke(context, hydrationPlan.operationId);
       throw operationError('REMOTE_CHANGED', 'Git auxiliary endpoint grant changed', 409);
     }
-    return { authority, auxiliaryPlan, context };
+    return { authority, auxiliaryPlan, context, foundAfterPlanning };
+  };
+
+  const auxiliaryTransfer = async (transfer, hydrationPlan, controls, args, context, deadline) => {
+    const execute = () => commandResult(transfer.auxiliaryPlan, controls, args, context, deadline, { transfer: true });
+    if (!auditStore || !transfer.foundAfterPlanning) return execute();
+    const { authority, auxiliaryPlan } = transfer;
+    const endpointFingerprint = fingerprintRemoteUrl(auxiliaryPlan.rawEndpoint);
+    const kind = auxiliaryPlan.auxiliaryKind;
+    const recordId = `git:${hydrationPlan.operationId}:auxiliary:${crypto.randomUUID()}`;
+    const claimed = await awaitPhase(() => auditStore.plan({
+      id: recordId, initiator: 'user', executorKind: 'openchamber-server-git', runtime: runtimeIdentity,
+      repositoryId: hydrationPlan.repositoryAuthority?.repositoryId ?? null, providerAccountId: null,
+      target: { kind: 'git-network', operation: 'checkout-hydration', remotes: [], auxiliaries: [{ kind, endpointFingerprint }] },
+      transportReference: { kind: 'auxiliary', entries: [{ kind, endpointFingerprint, transport: auditTransportPart(authority) }] },
+    }), controls, deadline);
+    if (claimed?.status === 'existing') throw operationError('UNKNOWN', 'Git auxiliary audit identity is already in use', 409);
+    let failure;
+    try {
+      await awaitMutation(() => auditStore.start(recordId), controls, deadline);
+      const current = await currentAuxiliaryAuthority(hydrationPlan, kind, auxiliaryPlan.rawEndpoint, controls, deadline);
+      if (!sameAuxiliaryAuthority(authority, current)) throw operationError('REMOTE_CHANGED', 'Git auxiliary endpoint grant changed', 409);
+      return await execute();
+    } catch (error) {
+      failure = error;
+      throw error;
+    } finally {
+      try {
+        await awaitPhase(() => auditStore.finish(recordId, {
+          state: failure ? failure.cancelled || failure.timedOut ? 'cancelled' : 'failed' : 'succeeded',
+          errorCode: failure ? hydrationError(failure).error.code : null,
+          steps: failure ? ['validated'] : ['validated', 'transferred'],
+        }), undefined, Date.now() + CLEANUP_TIMEOUT_MS);
+      } catch {
+        if (!failure) throw operationError('UNKNOWN', 'Git auxiliary audit completion failed', 500);
+      }
+    }
   };
 
   const prepareHydrationPlans = async (plans, deadline) => {
@@ -1183,22 +1287,16 @@ export function createNetworkOperations({
         lfsBinaryAvailable: Boolean(binaryResult.trim()),
       });
       if (discovery.needed) {
-        if (discovery.endpoint.status !== 'resolved') {
-          if (discovery.client.status !== 'missing') {
-            throw operationError('INVALID_REQUEST', 'Git LFS endpoint could not be resolved safely', 400);
-          }
-        } else {
-          requirements.push({
-            kind: 'lfs',
-            path: '.',
-            rawEndpoint: discovery.endpoint.candidate.endpoint,
-            transferReady: discovery.client.status !== 'missing',
-            endpoint: {
-              displayUrl: redactRemoteUrl(discovery.endpoint.candidate.endpoint),
-              fingerprint: fingerprintRemoteUrl(discovery.endpoint.candidate.endpoint),
-            },
-          });
-        }
+        requirements.push({
+          kind: 'lfs',
+          path: '.',
+          rawEndpoint: discovery.endpoint.candidate.endpoint,
+          transferReady: discovery.client.status !== 'missing',
+          endpoint: {
+            displayUrl: redactRemoteUrl(discovery.endpoint.candidate.endpoint),
+            fingerprint: fingerprintRemoteUrl(discovery.endpoint.candidate.endpoint),
+          },
+        });
       }
     }
     const currentHead = (await localGit(directory, ['rev-parse', '--verify', 'HEAD'], controls, deadline)).trim().toLowerCase();
@@ -1280,7 +1378,7 @@ export function createNetworkOperations({
     const lfs = [];
     let moduleCount = 0;
     const childPlan = (directory) => ({ ...hydrationPlan, directory, authorityDirectory: hydrationPlan.directory });
-    const visit = async (directory, parentEndpoint, parentRemoteName, prefix, depth) => {
+    const visit = async (directory, parentEndpoint, parentRemoteName, prefix, depth, foundAfterPlanning = false) => {
       if (depth > SUBMODULE_DISCOVERY_LIMITS.maxRecursionDepth) {
         throw Object.assign(new Error('Submodule recursion exceeds its depth limit'), { code: 'SUBMODULE_DISCOVERY_LIMIT_EXCEEDED' });
       }
@@ -1320,8 +1418,11 @@ export function createNetworkOperations({
           if (childHead && childHead !== module.gitlink) {
             throw Object.assign(new Error('Existing submodule checkout does not match its gitlink'), { code: 'INVALID_SUBMODULE_GITLINK' });
           }
-          if (!childHead) {
-            const transfer = await auxiliaryTransport(childPlan(directory), 'submodule', endpoint.endpoint, controls, deadline);
+          const clonesChild = !childHead;
+          if (clonesChild) {
+            const transfer = await auxiliaryTransport(
+              childPlan(directory), 'submodule', endpoint.endpoint, controls, deadline, foundAfterPlanning,
+            );
             if (transfer.authority.transportMode === 'managed') await controls.markStepCompleted('authenticated');
             let keepChild = childExists;
             let childIdentity;
@@ -1338,9 +1439,9 @@ export function createNetworkOperations({
                   childIdentity = directoryIdentity(await fsImpl.lstat(childDirectory), childBirthtimeHolds);
                 });
               }
-              await commandResult(transfer.auxiliaryPlan, controls, [
+              await auxiliaryTransfer(transfer, hydrationPlan, controls, [
                 'clone', '--no-checkout', '--no-tags', '--', endpoint.endpoint, childDirectory,
-              ], { ...transfer.context, env: { ...transfer.context.env, GIT_LFS_SKIP_SMUDGE: '1' } }, deadline, { transfer: true });
+              ], { ...transfer.context, env: { ...transfer.context.env, GIT_LFS_SKIP_SMUDGE: '1' } }, deadline);
               await controls.markStepCompleted('transferred');
               await localGit(childDirectory, ['checkout', '--force', '--detach', module.gitlink], controls, deadline, { disableLfsFilters: true });
               childHead = (await localGit(childDirectory, ['rev-parse', '--verify', 'HEAD'], controls, deadline)).trim().toLowerCase();
@@ -1361,7 +1462,7 @@ export function createNetworkOperations({
             }
           }
           submodules.push({ path: resultPath, status: 'succeeded', endpoint: publicEndpoint });
-          await visit(childDirectory, endpoint.endpoint, 'origin', resultPath, depth + 1);
+          await visit(childDirectory, endpoint.endpoint, 'origin', resultPath, depth + 1, foundAfterPlanning || clonesChild);
         } catch (error) {
           const failure = hydrationError(error);
           const existing = submodules.findIndex((entry) => entry.path === resultPath);
@@ -1417,21 +1518,17 @@ export function createNetworkOperations({
         path: lfsPath, status: 'client-missing',
         error: publicError('GIT_LFS_CLIENT_MISSING', 'Git LFS is required for this checkout; install git-lfs and retry'),
       });
-      else if (discovery.endpoint.status !== 'resolved') lfs.push({
-        path: lfsPath, status: 'authorization-required',
-        error: publicError('AUTHENTICATION_REQUIRED', 'The Git LFS endpoint requires an explicit HTTPS grant'),
-      });
       else {
         const rawEndpoint = discovery.endpoint.candidate.endpoint;
         const endpoint = { displayUrl: redactRemoteUrl(rawEndpoint), fingerprint: fingerprintRemoteUrl(rawEndpoint) };
         try {
-          const transfer = await auxiliaryTransport(childPlan(directory), 'lfs', rawEndpoint, controls, deadline);
+          const transfer = await auxiliaryTransport(childPlan(directory), 'lfs', rawEndpoint, controls, deadline, foundAfterPlanning);
           if (transfer.authority.transportMode === 'managed') await controls.markStepCompleted('authenticated');
           try {
             const context = { ...transfer.context, env: { ...transfer.context.env, GIT_LFS_SKIP_SMUDGE: '1' } };
-            await commandResult(transfer.auxiliaryPlan, controls, [
+            await auxiliaryTransfer(transfer, hydrationPlan, controls, [
               '-c', `lfs.url=${rawEndpoint}`, 'lfs', 'fetch', parentRemoteName, 'HEAD',
-            ], context, deadline, { transfer: true });
+            ], context, deadline);
             await controls.markStepCompleted('transferred');
             await commandResult(transfer.auxiliaryPlan, controls, [
               '-c', `lfs.url=${rawEndpoint}`, 'lfs', 'checkout',
@@ -1639,6 +1736,7 @@ export function createNetworkOperations({
       if (controls.isCancellationRequested()) result = cancellationResult(plan, controls, {});
       else {
         lfsUploaded = await prepareLfsPublication(plan, controls, deadline);
+        if (plan.target.operation === 'delete-remote-branch') await refuseRemoteDefaultBranch(plan, controls, deadline);
         context = await transport(plan, controls, deadline);
         if (plan.transportMode === 'managed') await controls.markStepCompleted('authenticated');
         await revalidate(plan, controls, deadline);

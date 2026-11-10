@@ -7,6 +7,7 @@ import { isIMECompositionEvent } from '@/lib/ime';
 import { cn } from '@/lib/utils';
 import { useUIStore } from '@/stores/useUIStore';
 import { KNOWLEDGE_ICON_BUTTON_CLASS } from './knowledgeRowStyle';
+import { ButtonTooltip } from '@/components/ui/action-toolbar';
 
 /** The counter appears only once the text gets close to the limit. */
 const COUNTER_THRESHOLD = 0.8;
@@ -67,8 +68,9 @@ export const KnowledgeComposer: React.FC<{
   return (
     <div
       className={cn(
-        'oc-surface-elevated flex items-end gap-1 rounded-lg bg-[var(--surface-elevated)] py-1 pe-1 ps-3',
-        'oc-raised oc-field',
+        'flex items-end gap-1 py-1 pe-1',
+        // On a phone it reads as the surface's other fields: flat, over a hairline.
+        isMobile ? 'border-b border-edge-muted ps-1' : 'oc-surface-elevated oc-raised oc-field rounded-lg bg-[var(--surface-elevated)] ps-3',
         disabled && 'opacity-50',
       )}
     >
@@ -92,7 +94,8 @@ export const KnowledgeComposer: React.FC<{
         spellCheck={multiline}
         autoComplete="off"
         className={cn(
-          'block min-h-6 w-full min-w-0 resize-none field-sizing-content bg-transparent py-0.5 typography-markdown md:typography-ui-label text-foreground outline-none placeholder:text-muted-foreground',
+          isMobile ? 'typography-meta' : 'typography-markdown md:typography-ui-label',
+          'block min-h-6 w-full min-w-0 resize-none field-sizing-content bg-transparent py-0.5 text-foreground outline-none placeholder:text-muted-foreground',
           multiline ? 'max-h-[calc(12lh+0.25rem)]' : 'max-h-[calc(6lh+0.25rem)]',
           'focus-visible:outline-none disabled:cursor-not-allowed',
         )}
@@ -113,16 +116,17 @@ export const KnowledgeComposer: React.FC<{
         />
       ) : null}
       {extraActions}
-      <button
-        type="button"
-        onClick={() => void submit()}
-        disabled={blocked || text.trim().length === 0}
-        className={KNOWLEDGE_ICON_BUTTON_CLASS}
-        aria-label={addLabel}
-        title={addLabel}
-      >
-        <Icon name="add" className="h-4 w-4" />
-      </button>
+      <ButtonTooltip label={addLabel} className="shrink-0">
+        <button
+          type="button"
+          onClick={() => void submit()}
+          disabled={blocked || text.trim().length === 0}
+          className={KNOWLEDGE_ICON_BUTTON_CLASS}
+          aria-label={addLabel}
+        >
+          <Icon name="add" className="h-4 w-4" />
+        </button>
+      </ButtonTooltip>
     </div>
   );
 };

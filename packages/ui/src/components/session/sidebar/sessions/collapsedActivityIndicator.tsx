@@ -27,7 +27,7 @@ export function CollapsedActivityIndicator({
     return (
       <RowMarkTooltip label={label}>
         <span
-          className={cn('inline-flex shrink-0 items-center', state === 'permission' ? 'text-destructive' : 'text-status-info', className)}
+          className={cn('inline-flex shrink-0 items-center text-status-warning', className)}
           aria-label={label}
         >
           <Icon name={state === 'permission' ? 'shield' : 'question'} className="h-3 w-3" />

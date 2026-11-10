@@ -50,7 +50,16 @@ Ein Panel anzeigen und lesen, welches Projekt und welche Sitzung offen sind, bra
 - **Dein Small Model verwenden**: einmalige Textgenerierung außerhalb deiner Sitzungen, mit dem Modell aus Einstellungen → Sessions → Small Model. Kostet Tokens.
 - **Mit einem externen Dienst verbinden**: mit dem Konto, das du unter Einstellungen → Integrationen verbindest.
 - **Den Gesprächsverlauf einer Sitzung lesen**: nur wenn du die Aktion der Erweiterung auf dieser Sitzung ausführst.
-- **Lokalen Dienst ausführen**: ein separates Programm mit deinen vollen Benutzerrechten. Erlaube das nur, wenn du dem Autor vertraust.
+- **Lokalen Dienst ausführen**: ein separates Programm mit deinen vollen Benutzerrechten. Erlaube das nur, wenn du dem Autor vertraust. Will die Erweiterung erfahren, was in deinen Sitzungen passiert, listet diese Zeile auch die Momente auf, von denen sie hört: ein Zug ist beendet, ein Zug schlägt fehl, der Agent bittet um Erlaubnis, der Agent stellt eine Frage. Sie hört davon in jedem Projekt, ohne geöffnetes Fenster, und bekommt nur Kennungen: die Sitzung, ihr Projekt und die Einträge, die du mit ihr verknüpft hast.
+- **Lesen, was der Agent im Hintergrund sagt**: die endgültige Antwort jedes Zugs, die Fragen, die der Agent stellt, und wofür er um Erlaubnis bittet, in jedem Projekt, gesendet an den lokalen Dienst der Erweiterung. Erlaube das nur, wenn du vertraust, wohin die Erweiterung es schickt.
+- **Selbstständig Sitzungen starten und Nachrichten senden**: ihr lokaler Dienst tut das ohne geöffnetes Fenster, was Tokens kostet und Tools ausführen kann.
+- **Ergänzen, was Agenten lesen**: Text in den Anweisungen deiner Sitzungen und Skills, die jedem Agenten angeboten werden, solange die Erweiterung aktiv ist.
+- **Ein Plugin zu OpenCode hinzufügen**: Das Plugin des Pakets wird in dein OpenCode geladen, solange die Erweiterung aktiv ist. Plugin-Code läuft innerhalb von OpenCode mit deinem vollen Zugriff, wie ein lokaler Dienst; erlaube es nur, wenn du dem Autor vertraust.
+- **Seine Links in Chats erkennen**: Kennungen wie `DEMO-12` und Links auf die Website der Erweiterung werden in deinen Chat-Nachrichten anklickbar. Der Dialog listet auf, welche das sind, und sagt, ob ein Klick sie in der Erweiterung öffnet oder an deine Nachricht anhängt. Links, die OpenChamber schon kennt, etwa Pull Requests auf GitHub und Issues in Linear, verhalten sich wie gewohnt.
+
+Ein lokaler Dienst kann auch weiterlaufen, solange OpenChamber läuft, oder nach Zeitplan aufwachen. Der Dialog sagt das unter **Lokalen Dienst ausführen**, und er sagt auch, wann das, was du nach `@` tippst, an den Dienst geht. Eine Erweiterung kann dem `@`-Menü eigene Zeilen und Agentenantworten eigene Blöcke hinzufügen. Das Pausieren der Erweiterung nimmt all das wieder weg.
+
+Eine Erweiterung, die deine Benachrichtigungen zustellt, an Slack, Matrix oder einen eigenen Server, sagt das ebenfalls unter **Lokalen Dienst ausführen**, mit einer Zeile, die mit **Stellt deine Benachrichtigungen** beginnt. Nichts geht hinaus, bis du dafür unter [Einstellungen → Integrationen](/integrations/#benachrichtigungskanäle-aus-erweiterungen) ein Konto verbindest; danach bekommt sie, was dein Telefon bekommen würde, und das Pausieren der Erweiterung beendet es.
 
 Wenn eine neuere Version mehr verlangt, als du erlaubt hast, zeigt die Karte **Freigabe nötig** und eine Schaltfläche **Berechtigungen prüfen**. Bis du die neue Liste erlaubst, bleibt die Erweiterung aus.
 
@@ -59,6 +68,14 @@ Wenn eine neuere Version mehr verlangt, als du erlaubt hast, zeigt die Karte **F
 Neben ihrem Panel in der Leiste kann eine Erweiterung Einträge in Menüs ergänzen, die du ohnehin benutzt: die Aktionen an einer Chat-Nachricht, das Menü einer Sitzung, das +-Menü neben dem Chatfeld und Slash-Befehle wie `/task ABC-12`, die etwas anhängen, ohne etwas zu öffnen. Sie kann ihren eigenen Tools auch ein richtiges Symbol, einen Titel und ein Ausgabelayout im Chat geben, so wie es die eingebauten Tools von OpenChamber haben. Die Erweiterung entscheidet, welche davon sie anbietet; alle bleiben aus, bis du die Erweiterung erlaubst.
 
 Manche Erweiterungen zeigen statt eines eigenen Panels ein Live-Bild: das, worin ein Agent auf dem Server gerade arbeitet, etwa einen Browser oder einen Simulator. Klicke in das Bild oder tippe, um die Steuerung zu übernehmen; die Statuszeile zeigt dann **Du steuerst**, und die Browser-Aktionen des Agenten werden abgelehnt, bis du **An Agent zurückgeben** drückst. Kopieren und Einfügen funktionieren wie gewohnt. Ein gleichzeitig verbundenes anderes Gerät sieht, wer steuert, und kann die Steuerung nicht übernehmen. Eine solche Erweiterung kann neben dem Bild eigene Bedienelemente zeigen, zum Beispiel eine Adressleiste darüber oder eine Werkzeugspalte daneben.
+
+## Eine Erweiterung mit einem OpenCode-Plugin
+
+Eine Erweiterung kann ein OpenCode-Plugin mitliefern, sodass du eine Sache installierst statt zwei. Ihr Berechtigungsdialog hat eine Zeile, die mit **Ein Plugin zu OpenCode hinzufügen** beginnt. Sobald du es erlaubst, fügt OpenChamber das Plugin innerhalb weniger Sekunden dem OpenCode hinzu, das es für dich ausführt, ohne Neustart; Deaktivieren oder Entfernen der Erweiterung nimmt es auf demselben Weg wieder heraus. In deine eigene `opencode.json` wird nichts geschrieben, sodass das Plugin die Erweiterung nie überlebt und nie in dem OpenCode läuft, das du im Terminal startest.
+
+Wenn OpenChamber das OpenCode, mit dem es spricht, nicht gestartet hat, oder deine Umgebung ein eigenes `OPENCODE_CONFIG` setzt, erreicht die Konfiguration von OpenChamber dieses OpenCode nicht. Die Seite der Erweiterung sagt das und bietet **Zur globalen Konfiguration hinzufügen** an. Das schreibt den Ordner des Plugins in deine globale OpenCode-Konfiguration: Es läuft dann in jedem OpenCode auf diesem Rechner, auch im Terminal, bleibt aktiv, während die Erweiterung aus ist, und gehört dir zur Verwaltung unter **Einstellungen → Plugins**. Wenn du die Erweiterung entfernst, führt OpenCode diesen Eintrag als fehlgeschlagenes Plugin und läuft weiter, bis du den Eintrag dort löschst. Ein OpenCode auf einem anderen Rechner kann keinen Ordner von diesem laden; die Seite sagt das.
+
+VS Code und die Mobile-App laden keine Erweiterungen. Eine Sitzung in einem isolierten Space läuft mit einem eigenen OpenCode, das das Plugin nie erhält. Im Enterprise-Modus zählt das Plugin wie ein lokaler Dienst: Die Erweiterung installiert sich nur aus einem Repository, das dein Administrator freigegeben hat.
 
 ## Eine Erweiterung als Git-Host
 
@@ -71,6 +88,28 @@ Dein Token bleibt in OpenChamber. Die Erweiterung bittet OpenChamber, den Host f
 Pausierst du die Erweiterung, verschwindet der Host, bis du sie wieder einschaltest, und dein Konto bleibt. Entfernst du die Erweiterung, wird das Konto vergessen. VS Code zeigt keine Git-Hosts aus Erweiterungen.
 
 Das OpenChamber SDK hat ein funktionierendes Beispiel, `examples/source-control-provider`, als Ausgangspunkt für einen eigenen Host. Siehe [Eine Erweiterung bauen](/sdk/).
+
+## Eine Erweiterung als Tracker
+
+Eine Erweiterung kann neben Linear einen Tracker für Arbeitselemente hinzufügen: YouTrack, Jira, Plane oder einen eigenen. Ihr Berechtigungsdialog hat dann eine Zeile, die mit **Dient als Tracker** beginnt und ihn nennt. Die Zeile sagt auch, was OpenChamber an ihn sendet: deine Suchanfragen und die Elemente, die du öffnest, und dass er in deinem Namen deren Status ändern und Sitzungskommentare posten soll.
+
+Sobald du sie erlaubst, bekommt der Tracker eine eigene Karte unter **Einstellungen → Integrationen** im Abschnitt **Erweiterungskonten**. Verbinde dort ein Konto: mit einem Token oder per Anmeldung im Browser, nachdem du die Client-ID der App eingegeben hast, die du beim Tracker registriert hast, und davor die Adresse des Servers, falls die Karte danach fragt. Danach stehen seine Elemente überall dort, wo die von Linear stehen: im Menü **+** des Chats und in der Auswahl, in New Worktree, bei den verknüpften Elementen einer Sitzung und in den Live-Status der Elemente, denen du folgst. Ein eingefügter Link zu einem seiner Elemente wird genauso erkannt. Was jede dieser Funktionen tut, steht unter [Linear](/integrations/#linear).
+
+Deine Tokens bleiben in OpenChamber. Die Erweiterung bittet OpenChamber, den Tracker für sie aufzurufen, und OpenChamber fügt die Zugangsdaten jedem Aufruf hinzu, nur für den Server, den du verbunden hast. Die Erweiterung bekommt sie nie, und nur ihre Aufrufe für Statusänderungen und Kommentare dürfen dort etwas schreiben.
+
+Pausierst du die Erweiterung, verschwindet der Tracker, bis du sie wieder einschaltest, und deine Konten bleiben. Entfernst du die Erweiterung, werden sie vergessen. VS Code zeigt keine Tracker; auf dem Telefon werden die Elemente des Trackers angezeigt, Konten verbindest du in der Web- oder Desktop-App.
+
+Das OpenChamber SDK hat ein funktionierendes Beispiel, `examples/tracker-provider`, mit einem Fake-Tracker, den du daneben laufen lassen kannst. Siehe [Eine Erweiterung bauen](/sdk/).
+
+## Eine Erweiterung als Nutzungsanbieter
+
+Eine Erweiterung kann neben den eingebauten Anbietern einen Nutzungsanbieter hinzufügen: einen Anbieter, den OpenChamber nicht selbst ausliest, oder einen eigenen. Ihr Berechtigungsdialog hat dann eine Zeile, die mit **Meldet die Nutzung wie ein eingebauter Anbieter** beginnt und die OpenCode-Anbieter aufzählt, deren Zugangsdaten sie liest, etwa `openrouter`; eine Erweiterung, die keine aufzählt, sagt das.
+
+Sobald du sie erlaubst, steht ihre Karte unter **Einstellungen → Nutzung** hinter den eingebauten Anbietern, mit Name und Symbol der Erweiterung, und sie erscheint wie jeder eingebaute Anbieter in den Rate-Limits der Kopfzeile, im Arbeitsstatus, im Popover des Telefons und im Desktop-Tray, wenn du **Im Arbeitsstatus anzeigen** ankreuzt. Bei jeder Aktualisierung übergibt OpenChamber der Erweiterung die Zugangsdaten, die OpenCode für jeden aufgezählten Anbieter hält, und sonst nichts; eine Version, die einen weiteren Anbieter aufzählt, fragt erneut nach deiner Zustimmung. Die Erweiterung liest die Nutzung selbst, und OpenChamber zeichnet sie so wie bei einem eingebauten Anbieter.
+
+Pausierst du die Erweiterung, verschwindet die Karte, bis du sie wieder einschaltest, und deine Nutzungseinstellungen dafür bleiben. Entfernst du die Erweiterung, verschwindet die Karte endgültig. VS Code zeigt keine Nutzung aus Erweiterungen; auf dem Telefon wird die Karte angezeigt, eingerichtet wird die Erweiterung in der Web- oder Desktop-App. Eine Sitzung in einem isolierten Space liest die Nutzung vom eigenen Server dieses Space, der keine Erweiterungen hat.
+
+Das OpenChamber SDK hat ein funktionierendes Beispiel, `examples/quota-provider`, mit einer Fake-Nutzungs-API, die du daneben laufen lassen kannst. Siehe [Eine Erweiterung bauen](/sdk/).
 
 ## Ihr Konto verbinden
 

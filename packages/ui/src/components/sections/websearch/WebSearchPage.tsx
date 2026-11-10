@@ -378,7 +378,7 @@ export const WebSearchPage: React.FC = () => {
   return (
     <SettingsPageLayout
       title={t('settings.page.webSearch.title')}
-      description={t('settings.page.webSearch.description')}
+      namedBySidebar
       showSaveStatus
     >
       {snapshot ? (

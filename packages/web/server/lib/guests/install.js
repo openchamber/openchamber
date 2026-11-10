@@ -1,6 +1,6 @@
 import fs from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
-import { removeGuestStorage } from './storage.js';
+import { removeGuestData, removeGuestStorage } from './storage.js';
 import https from 'node:https';
 import path from 'node:path';
 import { z } from 'zod';
@@ -11,7 +11,7 @@ import {
   resolveGuestPackageRoot,
   toPublicGuest,
 } from './catalog.js';
-import { stopGuestService } from './service.js';
+import { forgetServiceFailure, stopGuestService } from './service.js';
 import { cloneGitRepository, isHttpsZipUrl, isPublicHostname, parseGitInstallUrl, publicAddressesOf } from './clone.js';
 import { isReservedBuiltInId } from './builtins.js';
 import { enterpriseBlockedCapabilities } from './enterprise.js';
@@ -417,7 +417,10 @@ export const uninstallGuest = async (id, persistPath, { preserveStorageId = fals
     return { paths: kept, sources, gitOrigins, capabilityGrants, capabilityScopes, disabledGuests, serviceSocketOverrides, storageIds };
   });
   await stopGuestService(id);
+  forgetServiceFailure(id);
   await removeGuestStorage(persistPath, id);
+  // A replace is a new version of the same extension: its service keeps its files.
+  if (!preserveStorageId) await removeGuestData(persistPath, id);
   if (removedRoot && isCopiedGuestRoot(removedRoot, persistPath)) {
     await fs.rm(removedRoot, { recursive: true, force: true });
   }

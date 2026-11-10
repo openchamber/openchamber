@@ -40,7 +40,7 @@ Klap de kaart **GitHub** open en kies **GitHub verbinden** om u met een korte ap
 GitLab, Gitea, Forgejo en Gerrit hebben elk een eigen kaart naast GitHub. Na het verbinden staan hun issues en pull requests (merge requests op GitLab, wijzigingen op Gerrit) op het bord [Issues en PR's](/nl/issues-and-prs/) en in het menu **+** van de chat, net als die van GitHub.
 
 - **GitLab**: meld u op gitlab.com aan met een korte apparaatcode, een persoonlijk toegangstoken of de `glab`-aanmelding op de server. Voeg voor een zelfbeheerde GitLab het adres toe en plak een persoonlijk toegangstoken met de scope `api`. Aanmelden met een apparaatcode werkt daar alleen als de server `OPENCHAMBER_GITLAB_CLIENT_ID` instelt op een applicatie die op die instantie is geregistreerd.
-- **Gitea**: voeg het adres van uw instantie toe, zoals `https://gitea.example.com`, en plak een persoonlijk toegangstoken met de scopes `write:repository`, `write:issue` en `read:user`. De kaart linkt naar de pagina op uw instantie waar u er een aanmaakt. Gitea heeft geen aanmelding met een apparaatcode of CLI. Het vereist Gitea 1.21 of nieuwer, bereikbaar op de root van het adres.
+- **Gitea**: voeg het adres van uw instantie toe, zoals `https://gitea.example.com`, en plak een persoonlijk toegangstoken met de scopes `write:repository`, `write:issue` en `read:user`. De kaart linkt naar de pagina op uw instantie waar u er een aanmaakt. Bent u op de server aangemeld met de `gt`-CLI van Gitea (`gt auth login`), dan verschijnt de instantie vanzelf op de kaart: kies **gt CLI gebruiken** om met die aanmelding te werken. De `gt`-aanmelding dekt issues en pull requests; voor push en pull verbindt u een token of stelt u Git zelf in, bijvoorbeeld met `gt auth setup-git`. Het vereist Gitea 1.21 of nieuwer, bereikbaar op de root van het adres.
 - **Forgejo**: Codeberg staat al op de kaart, dus om te verbinden hebt u alleen een persoonlijk toegangstoken met de scopes `write:repository`, `write:issue` en `read:user` nodig; de kaart linkt naar de pagina op Codeberg waar u er een aanmaakt. Voor een andere Forgejo-server voegt u het adres toe, zoals `https://forgejo.example.com`, en plakt u een token met dezelfde scopes. Het vereist Forgejo 7.0 of nieuwer, bereikbaar op de root van het adres. Een Forgejo-server verbindt u op deze kaart en een Gitea-server op de Gitea-kaart.
 - **Gerrit**: voeg het adres van uw instantie toe, zoals `https://gerrit.example.com`, en daarna uw Gerrit-gebruikersnaam en een HTTP-wachtwoord. Maak het wachtwoord aan in Gerrit onder **Settings → HTTP Credentials**; de kaart linkt daarheen. Uw gewone aanmeldwachtwoord werkt niet, en een account zonder gebruikersnaam kan geen verbinding maken. Het vereist Gerrit 3.8 of nieuwer, bereikbaar op de root van het adres. Sites waar het reviewadres afwijkt van het Git-adres, zoals googlesource.com met `.gitcookies`, worden niet ondersteund.
 
@@ -90,6 +90,18 @@ Schakel **Sessiereacties** in op de Linear-kaart. Een sessie die vanuit een issu
 4. Kies **Instellen** en meld u aan. De modellen verschijnen daarna in de modelkiezer van de chat.
 
 Integraties worden voor uw gebruiker geïnstalleerd en werken dus in elk project. U kunt ze op elk moment via dezelfde kaart bijwerken of verwijderen.
+
+## Meldingskanalen van extensies
+
+Een [extensie](/nl/extensions/) kan uw meldingen bezorgen aan Slack, Matrix of een eigen server. Zodra u haar toestaat bij **Instellingen → Extensies**, krijgt ze op deze pagina een kaart onder **Extensieaccounts**. Voer daar het token van het account in, en het adres van de server als de kaart daarom vraagt, en verbind. Vanaf dan krijgt de extensie dezelfde meldingen als uw telefoon, volgens uw [meldingsinstellingen](/nl/notifications/). Het token blijft in OpenChamber; de service van de extensie verstuurt via OpenChamber en ziet het nooit.
+
+Weigert de server het token later, dan meldt de kaart dat het account aandacht nodig heeft; verbind opnieuw met een nieuw token. Verbreek de verbinding om de bezorging te stoppen zonder de extensie te verwijderen, of pauzeer de extensie. De extensie verwijderen vergeet het account.
+
+## Trackers van extensies
+
+Een [extensie](/nl/extensions/) kan een tracker voor werkitems toevoegen naast Linear. Zodra u haar toestaat bij **Instellingen → Extensies**, krijgt ze op deze pagina een kaart onder **Extensieaccounts**. Voer het adres van de server in als de kaart daarom vraagt, en verbind dan een account: plak een token, of sla de client-ID op van de app die u bij de tracker hebt geregistreerd en log in in de browser. Waar de tracker meerdere accounts bijhoudt, verbindt **Account toevoegen** een volgend account en wisselt **Overschakelen naar** het account dat in gebruik is. Projecttoewijzing en sessiereacties verschijnen op de kaart wanneer de tracker ze aanbiedt, net als bij Linear.
+
+Zijn items verschijnen dan in de kiezer, het menu **+** van de chat, New Worktree, de gekoppelde items van een sessie en de livestatus van items die u volgt. Tokens blijven in OpenChamber; de service van de extensie bereikt de tracker via OpenChamber en ziet ze nooit. Weigert de tracker later inloggegevens, dan meldt de kaart dat het account aandacht nodig heeft; verbind het opnieuw. De extensie pauzeren haalt de tracker overal weg en bewaart de accounts; haar verwijderen vergeet ze.
 
 ## Claude Code
 

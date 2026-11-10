@@ -31,6 +31,13 @@ export interface ProviderCapabilities {
   labels: boolean;
   reviewers: boolean;
   reviewThreads: { start: boolean; reply: boolean; resolve: boolean };
+  /**
+   * The viewer's unpublished review, kept by the host: `/pr/review/state`
+   * reads it with the threads on the diff, `/pr/review/comment*` and
+   * `/pr/review/discard` change it, `/pr/review` sends it. `fileComments`: a
+   * comment can sit on a whole file.
+   */
+  reviewDrafts?: { fileComments: boolean };
   uploads: boolean;
   stacks: boolean;
   changeRequestPatch: boolean;
@@ -80,7 +87,7 @@ export interface ProviderDescriptor {
    */
   projectPathOfRemote?(remote: { protocol: 'https' | 'http' | 'ssh'; path: string }): string;
   capabilities: ProviderCapabilities;
-  authMethods: { device: boolean; pat: boolean; cli: false | { tool: string } };
+  authMethods: { device: boolean; pat: boolean; cli: false | { tool: string } | { kind: 'service'; hint: string } };
   transport: {
     httpsUsername: { kind: 'fixed'; value: string } | { kind: 'login' };
     /** `default-only`: managed Git transport reaches the default instances only. */
@@ -111,6 +118,7 @@ export interface ProviderDescriptor {
     features: {
       referenceSearch: boolean; referenceDetail: boolean; listStatuses: boolean; referencesAcross: boolean;
       startThread: boolean; authorCanReview: boolean; projectUploads: boolean; issueCloseReason: boolean;
+      reviewDrafts?: boolean; reviewDraftFileComments?: boolean;
       changeRequestTemplates: string[];
       /** False when a change request's head is a revision ref, not a branch (no stack-on-top, no branch row). Absent means true. */
       branchHeads?: boolean;
@@ -134,7 +142,7 @@ export interface ProviderDescriptor {
     guestId: string;
     name: string;
     version: string;
-    token: { header: 'authorization' | 'private-token'; scheme: 'bearer' | 'token' | 'none' };
+    token?: { header: 'authorization' | 'private-token'; scheme: 'bearer' | 'token' | 'basic' | 'none' };
   };
 }
 
@@ -168,6 +176,7 @@ export interface PublicProviderDescriptor {
   auth: {
     methods: Array<'device' | 'pat' | 'cli'>;
     cliName?: string;
+    login?: { kind: 'service'; hint: string };
     cliTransport: boolean;
     token?: { scopes: string[]; createPath?: string };
   };
@@ -279,9 +288,22 @@ export interface ProviderImplementation {
     invalidateAccount?(input: { instance: string; accountId: string; persisted?: boolean; renew?: boolean }): Promise<boolean>;
     readCurrentAccountId(input: { instance: string }): Promise<string | null>;
     listInstances(): Promise<string[]>;
+    /** The instance's separate SSH address, where the provider keeps one. */
+    readSshUrl?(input: { instance: string }): Promise<string | null>;
+    listSshHosts?(): Promise<Array<{ instance: string; sshUrl: string }>>;
+    setSshUrl?(input: { instance: string; sshUrl: string | null }): Promise<{ sshUrl: string | null }>;
     listConnectedAccounts(): Promise<ConnectedAccount[]>;
-    /** `port` is the remote's web port when the remote is an HTTP(S) URL; absent for an SSH remote. */
-    ownsHost(input: { host: string; port?: number; knownInstances: string[] }): string | null;
+    /**
+     * `port` is the remote's web port when it is an HTTP(S) URL; `sshPort` is
+     * its SSH port, defaulting to 22. An SSH remote names no web port.
+     */
+    ownsHost(input: {
+      host: string;
+      port?: number;
+      sshPort?: number;
+      knownInstances: string[];
+      knownSshHosts?: Array<{ instance: string; sshUrl: string }>;
+    }): string | null;
   };
   transport: {
     readCredential(input: { instance: string; credentialId: string; credentialRevision?: number }): Promise<TransportCredential | null>;
@@ -308,6 +330,8 @@ export interface ProviderImplementation {
     readChangeRequestPatch?(input: ReadInput & { number: number; sourceRepo?: { owner: string; repo: string }; revision?: string }): Promise<Json>;
     readChangeRequestFile?(input: ReadInput & {
       number: number; sourceRepo?: { owner: string; repo: string }; path: string; previousPath?: string; status?: string; revision?: string;
+      /** Both sides as `data:` URLs of the file's bytes, for documents the viewer compares itself. A provider may ignore it. */
+      binary?: boolean;
     }): Promise<Json>;
     /** `discussionRefs` only reach a provider with `capabilities.discussions`; it answers them as `discussionSummaries`. */
     liveSummaries?(input: { session: ProviderSession; refs: Json[]; issueRefs: Json[]; discussionRefs: Json[] }): Promise<Json>;
@@ -324,6 +348,8 @@ export interface ProviderImplementation {
     referencesAcross?(input: { body: Json; validateReadContext(context: Json): Promise<Json> }): Promise<Json>;
     /** `kind: 'discussion'` reads a discussion's detail; otherwise the issue or change request the number names. */
     referenceDetail?(input: ReadInput & { project: ProjectSelector; number: number; host: string; kind: 'item' | 'discussion' }): Promise<Json>;
+    /** Capability `reviewDrafts`: the viewer's draft and the open threads with their lines. */
+    reviewState?(input: ReadInput & { project: ProjectSelector; number: number }): Promise<Json>;
     /** Statuses of listed change requests (`owner/repo#n[@host]`, comma separated); read with each host's account, so no session. */
     referenceStatuses?(input: Omit<ReadInput, 'session'> & { pulls: string }): Promise<Json>;
   };

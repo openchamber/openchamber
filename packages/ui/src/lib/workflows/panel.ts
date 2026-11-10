@@ -2,6 +2,7 @@ import { create } from 'zustand';
 
 import type { ContextPanelMode } from '@/lib/surfaces/modes';
 import { useUIStore } from '@/stores/useUIStore';
+import { selectWorkflowsShown } from '@/lib/workflows/availability';
 import { getWorkflowProjectScope, useWorkflowProjectScope } from './project';
 import { isRunInScope } from './project-scope';
 import { useSavedWorkflows, useSavedWorkflowsStore } from './saved';
@@ -25,12 +26,12 @@ export const useWorkflowPanelStore = create<WorkflowPanelState>((set) => ({
 type PanelTabs = readonly { mode: ContextPanelMode }[];
 
 /**
- * Whether the rail offers the Workflows panel: in a build with workflows,
+ * Whether the rail offers the Workflows panel: while workflows are shown,
  * while the project has a run or a saved workflow, or a Workflows tab is open,
  * so an open panel never loses its icon.
  */
 export const useWorkflowsSurfaceShown = (tabs: PanelTabs, directory: string | null): boolean => {
-  const available = useUIStore((state) => state.agentWorkflowFeatureAvailable);
+  const available = useUIStore(selectWorkflowsShown);
   const scope = useWorkflowProjectScope(directory);
   const runs = useProjectWorkflowRuns(scope);
   const saved = useSavedWorkflows(scope?.savedDirectory ?? null);
@@ -39,7 +40,7 @@ export const useWorkflowsSurfaceShown = (tabs: PanelTabs, directory: string | nu
 
 /** The same answer outside React, for the surface-switch shortcut. */
 export const isWorkflowsSurfaceShown = (tabs: PanelTabs, directory: string | null): boolean => {
-  if (!useUIStore.getState().agentWorkflowFeatureAvailable) return false;
+  if (!selectWorkflowsShown(useUIStore.getState())) return false;
   if (tabs.some((tab) => tab.mode === 'workflows')) return true;
   const scope = getWorkflowProjectScope(directory);
   if (!scope) return false;

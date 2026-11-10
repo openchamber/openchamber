@@ -1,0 +1,314 @@
+---
+name: openchamber-extensions
+description: Build, change or publish an OpenChamber extension.
+disable-model-invocation: true
+---
+
+# Writing an OpenChamber extension
+
+An extension is a folder with a `package.json` that has an `openchamber` block. The app draws most of it from that block, and your code runs in two places: pages in sandboxed frames, and an optional Node service. After the user adds the folder once, every rebuild reloads live.
+
+The person asking rarely knows where an extension can reach. Your job is to find the place where the work already happens, and put the feature there. A panel on its own is usually the weakest answer: nobody opens it. A good extension shows up where the user is already looking.
+
+## Steps
+
+1. **Design.** Read *Choose where it lives* and pick the points that fit. Tell the user the plan in a few plain lines: what they will see, where, and when it needs them. With no request yet, ask what they want it to do, in one question, and stop. Otherwise ask only what the request leaves open, at most: private or public, and a value you cannot guess (an account, a URL). Done when the plan is stated. If the user said to proceed without questions, state it and go on.
+2. **Create.** Use the folder the user named, else `~/openchamber-extensions/<id>`, never the project they are working in. Run `bun init -y`, then `bun add @openchamber/sdk@{{sdkVersion}}`. Write `package.json` from *Manifest*, then the code from the recipes. Everything you need is in this file and the two reference files under *Where to read more*: start writing, and open those only for a detail you miss. Build what the plan says and stop there, because each extra feature is one more thing the user has to approve and maintain.
+3. **Build.** Bundle every page script and the service:
+   ```sh
+   bunx openchamber-guest-bundle panel/main.ts panel/main.js
+   bunx openchamber-guest-bundle --node service/main.ts service/main.js
+   ```
+   A sandboxed page loads one classic script, and no runtime compiles TypeScript, so pages load the `.js`.
+4. **Check.** Run `bunx openchamber-guest-check` in the folder. Fix what it names and run it again. Done when it says the package is ready.
+5. **Try the service.** Start it and call it, when there is one:
+   ```sh
+   OPENCHAMBER_SERVICE_PORT=4599 OPENCHAMBER_SERVICE_TOKEN=t node service/main.js &
+   curl -H 'Authorization: Bearer t' localhost:4599/health
+   ```
+   Done when each route you wrote answers, then stop the process.
+6. **Hand over.** End your reply with an install link, which the chat draws as a button: one click, then the user approves what it asks for. Encode the absolute path, and list each place to look, one line per point from your plan.
+   ```markdown
+   [Install Deploys](openchamber://extensions/install?path=/Users/me/openchamber-extensions/deploys)
+   ```
+   Done when the link and those lines are in your reply. Without a chat, name the folder to add in Settings → Extensions.
+7. **Publish**, only when asked: see *Publishing*.
+
+## Choose where it lives
+
+Start from what the user wants, and combine rows. Most good extensions use two or three points.
+
+| The user wants | Use | Why there |
+|---|---|---|
+| To glance at a state while working | `statusSection.source` | A section in Work Status, drawn by the app, with no frame to load |
+| The agent to know something | `instructions` for short facts, `skills` for how-to | It reaches every session without being asked |
+| To hand the agent one item | `mentions` | It sits in the `@` menu beside files, and the agent gets the text |
+| To pick from a longer list or a form | `attach` or `commands` | A dialog on the `+` menu, or `/name`, gives a chip on the message |
+| To act on what is on screen | `actions` | Menu entries on a message, a session, selected text, a Files row or diff lines |
+| To decide with the agent | `blocks` with `answers` | The agent asks inside its reply, and a click answers it |
+| To see rich data inside a reply | `blocks` | The agent draws your component in the chat |
+| To work with no window open | `service` with `sessionControl` | The service starts sessions and reads replies |
+| To run on a clock | `service.schedule` | Wakes the service, which then goes back to sleep |
+| To react when the agent finishes or stops | `sessionEvents` | The service hears it with no window open |
+| To talk to the agent from a chat app | `sessionEvents` with `sessionControl.answers` | The service relays replies, permission requests and forms, and sends back the user's answers |
+| To get told outside the app | `service.provides: ["notifications"]` | Becomes a channel on the Notifications page |
+| To open a file type its own way | `fileEditors` | Your page opens those files in Files |
+| A place for long work, settings, history | `panel` or `page` | A rail tab or a full page, worth it only behind one of the points above |
+| To connect an account or an API | `integration` | A card in Settings → Integrations holds the token and fields |
+
+Example, "I want my Docker containers at hand and the agent to know them": `statusSection.source` for the containers at a glance with Restart on each line, `instructions` so agents know what runs here, `mentions` so `@api` attaches a container's logs, and a service that runs `docker`. No panel at all.
+
+## Manifest
+
+```json
+{
+  "name": "deploys",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "openchamber": {
+    "apiVersion": 1,
+    "engines": { "openchamber": ">={{engineFloor}}" },
+    "id": "deploys",
+    "name": "Deploys",
+    "icon": "rocket",
+    "contributes": {
+      "service": { "entry": "service/main.js", "runtime": "host", "permissions": { "exec": ["docker"] } },
+      "statusSection": { "source": { "path": "/status", "interval": 5000 }, "title": "Deploys" }
+    }
+  },
+  "dependencies": { "@openchamber/sdk": "{{sdkVersion}}" }
+}
+```
+
+The SDK version and `engines.openchamber` come from the app the user is running, so everything in the SDK works there. Keep both exactly as written here.
+
+`id` is the extension's identity, in kebab-case. Add `"panel": { "entry": "panel/index.html" }` under `contributes` only when it needs a page on the rail. `icon` is a Remixicon name without `Ri` and `Line` (`git-merge`), or a `.svg` in the package for a brand mark. The app carries a subset of Remixicon, and a name it lacks shows a generic icon, so for anything specific ship the `.svg`.
+
+Limits the package fails on:
+
+| Field | Limit |
+|---|---|
+| `actions` | 8, label up to 40 characters |
+| `commands` | 8, description up to 80 |
+| `blocks` | 4, description up to 120, args up to 8, name in PascalCase |
+| `mentions.label` | 40 |
+| `service.schedule` | 8 entries |
+| `setInstructions` text | 4,096 characters |
+| `@` rows | 20, title and subtitle up to 120 |
+| `providerLogos` | 256, each file up to 1 MB |
+
+Everything a page touches goes through `capabilities` (`prompt`, `sessions`, `files`, `model`, `shells`) or `origins` (https origins it may fetch). `sessionControl`, `instructions`, `skills`, `opencodePlugin`, `sessionEvents` and `service` need nothing there: declaring them is the request. The user approves all of it once, and an update that asks for more asks again.
+
+## Recipes
+
+### A page
+
+```html
+<!doctype html><html><body><div id="root"></div><script src="./main.js"></script></body></html>
+```
+
+```ts
+import { connectHost } from '@openchamber/sdk';
+import { applyHostReady, mountButton, mountEmpty, mountList } from '@openchamber/sdk/ui';
+
+const host = connectHost();
+const root = document.querySelector<HTMLElement>('#root')!;
+let mounted = false;
+host.onReady((context) => {
+  applyHostReady(context, document.documentElement);
+  if (mounted) return;
+  mounted = true;
+  mountButton(root, {
+    label: 'Run',
+    onClick: () => { void host.serviceRequest({ method: 'POST', path: '/run', body: '{}' }); },
+  });
+});
+```
+
+`onReady` fires again on every theme and session change, so it stays cheap. Use the kit for every control, so the page follows each theme: `mountButton`, `mountTextField`, `mountSearchField`, `mountSelect`, `mountCheckbox`, `mountSwitch`, `mountTabs`, `mountBadge`, `mountList`, `mountEmpty`, `mountSpinner`, `mountBanner`, `mountSeparator`, `mountProgress`, `mountMenu`, `mountText`. Each takes `(root, props)`; the props are in `node_modules/@openchamber/sdk/API.md`.
+
+A page has no network and no access to the app. Data comes through `host.serviceRequest` (your service), `host.request` (the integration's API), or `origins`. Show `mountEmpty` when there is nothing, and say what to do about it.
+
+### A service
+
+```ts
+import http from 'node:http';
+import { createServiceHost } from '@openchamber/sdk';
+
+const host = createServiceHost({ env: process.env });
+const token = process.env.OPENCHAMBER_SERVICE_TOKEN;
+
+const route = async (path: string, body: string) => {
+  if (path === '/run') return { done: true };
+  return null;
+};
+
+http.createServer((req, res) => {
+  if (req.headers.authorization !== `Bearer ${token}`) { res.writeHead(401).end(); return; }
+  const path = new URL(req.url ?? '/', 'http://x').pathname;
+  if (path === '/health') { res.writeHead(200).end('{}'); return; }
+  let body = '';
+  req.on('data', (chunk) => { body += chunk; });
+  req.on('end', () => {
+    route(path, body).then((answer) => {
+      res.writeHead(answer ? 200 : 404, { 'Content-Type': 'application/json' }).end(JSON.stringify(answer ?? {}));
+    }, () => { res.writeHead(500).end('{}'); });
+  });
+}).listen(Number(process.env.OPENCHAMBER_SERVICE_PORT), '127.0.0.1');
+```
+
+- Every request carries the bearer, `/health` too, and the host polls `/health` for 15 seconds at start. Listen only on `127.0.0.1`.
+- A service stops after ten quiet minutes, and the next request starts it again. So keep what must survive in a file under `os.homedir()`, outside the package, because a write inside the package reloads the extension. Set `service.keepRunning: true` only for a held connection.
+- List programs it runs in `service.permissions.exec`, so the approval dialog names them.
+- It gets no keys from the user's environment. Secrets come from `readSettings()`.
+
+`host` gives: `sessions.start({ prompt, title, directory })`, `sessions.send`, `sessions.retry`, `sessions.status`, `sessions.lastReply`, `sessions.stop` (with `sessionControl`), `sessions.answerPermission`, `sessions.answerForm` (with `sessionControl.answers`), `setInstructions(directory, text)`, `emit(topic, data)`, `readSettings()`, `needsConfiguration(message)`.
+
+Bundle with `--node`: the host runs the file directly and `node_modules` does not ship.
+
+### A status section
+
+Declare `statusSection.source` and answer `GET /status` with rows. The app draws them, and polls only while the section is on screen.
+
+```json
+{ "rows": [
+  { "kind": "line", "id": "api", "label": "api", "dot": "success", "value": "healthy",
+    "actions": [{ "kind": "button", "id": "restart", "label": "Restart", "variant": "outline" }] },
+  { "kind": "note", "id": "hint", "text": "Docker is not running", "tone": "warning" }
+] }
+```
+
+A click posts `{ id, value? }` to the same path. A line's `content` can be `{ kind: "bar", value }`, `{ kind: "chart", values }`, `{ kind: "chips", chips }` or `{ kind: "text", text }`. Tones: `default`, `muted`, `accent`, `success`, `warning`, `error`, `info`. Up to 16 rows.
+
+### Instructions and skills
+
+`"instructions": true` with a service, then `await host.setInstructions(null, text)` when it starts and when the facts change. `null` means every project, a directory means that one. Keep it to facts an agent acts on: each word costs tokens in every session.
+
+`"skills": "skills"` points to a folder of `skills/<name>/SKILL.md`, offered to every agent while the extension is on. The `description` decides when an agent picks it, so name the work.
+
+### OpenCode plugin
+
+For agent tools the extension should carry with it. `"opencodePlugin": "plugin"` points to a folder with `index.js` or `server.js` at its root, or a `package.json` whose `name` and `exports` lead to the entry; `main` is ignored. The entry default-exports `{ id, setup }` and imports nothing. It runs inside OpenCode with the user's full access, while the extension is on.
+
+### A provider's logo
+
+For a model provider the extension's OpenCode plugin registers. `"providerLogos": { "acme-cloud": "assets/acme-cloud.svg" }` under `contributes` maps the provider ID OpenCode reports to a `.svg` or `.png` in the package, and two IDs can share a file. It needs no page and no capability. The image keeps its colours, and `currentColor` in an SVG follows the theme. It replaces a logo the app ships for that ID, and what the user set for that provider comes first.
+
+### `@` rows
+
+`"mentions": { "label": "Containers" }` with a service. Answer two paths from `@openchamber/sdk`:
+
+```ts
+if (path === MENTIONS_SEARCH_PATH) {
+  const { query }: MentionsSearchRequest = JSON.parse(body);
+  return { items: rows.filter((row) => row.title.includes(query)).slice(0, 20).map(({ id, title }) => ({ id, title })) };
+}
+if (path === MENTIONS_RESOLVE_PATH) {
+  const { id }: MentionsResolveRequest = JSON.parse(body);
+  return { text: contentOf(id) };
+}
+```
+
+A search has 2 seconds, so answer from memory, not from a slow call. Trim `title` and `subtitle` to 120: a longer row is dropped.
+
+### Actions
+
+```json
+"background": { "entry": "panel/background.html" },
+"actions": [
+  { "id": "save", "label": "Save snippet", "where": "selection", "mode": "background", "icon": "pushpin", "display": "icon" },
+  { "id": "pin", "label": "Pin file", "where": "file", "mode": "background" }
+]
+```
+
+`where` is `message`, `session`, `selection`, `file` or `diff`. `mode: "background"` runs in a hidden page with no window, so finish with `host.toast`, or the user sees nothing happen. `display` works on `selection`: `label` (default), `icon` or `both`.
+
+```ts
+const host = connectHost();
+host.onAction(async (item) => {
+  await host.serviceRequest({ method: 'POST', path: '/save', body: JSON.stringify(item) });
+  await host.toast({ kind: 'success', message: 'Saved' });
+});
+```
+
+`item.kind` says what it got: `selection` has `text`, `file` has `path`, `diff` has `path`, `startLine` and `endLine`.
+
+### A chat block
+
+```json
+"blocks": [{ "name": "DeployCard", "description": "Asks which environment to deploy to. title: question, options: choices separated by |", "args": ["title", "options"], "entry": "blocks/card.html", "height": 120, "answers": true }]
+```
+
+The agent writes `DeployCard("Where?", "staging|production")` in an `openui-lang` block, and your page draws it once the block is finished and on screen.
+
+```ts
+const root = document.querySelector<HTMLElement>('#root')!;
+root.style.padding = '12px';
+host.onReady((context) => applyHostReady(context, document.documentElement));
+host.onBlock(({ args, answered }) => { /* draw args; show answered when it is set */ });
+new ResizeObserver(() => { void host.setHeight(Math.ceil(root.getBoundingClientRect().height)); }).observe(root);
+// In a click handler:
+void host.answerBlock(option);
+```
+
+- The frame fills its box with no padding, so add your own, and size it from the `ResizeObserver`, because styles settle after the first draw.
+- Set `answers: true` only when a click answers the agent. Agents then ask with this component, and the app adds a note field under it. A note alone answers too, and `answered` then holds the note.
+- The `description` decides which questions it takes: a broad one takes every question.
+- Arguments come from a model, and text from a web page can steer them. Draw them, and do nothing with side effects until the user clicks.
+
+### Sessions and clocks
+
+```json
+"service": { "entry": "service/main.js", "runtime": "host", "schedule": [{ "id": "nightly", "cron": "0 3 * * *" }] },
+"sessionControl": { "content": true },
+"sessionEvents": { "events": ["turn-finished", "turn-failed"], "content": true }
+```
+
+A clock posts to `SERVICE_SCHEDULE_PATH`; read it with `readServiceScheduleRequest`. Session events post to `SESSION_EVENTS_PATH`; read them with `readSessionEventRequest`, answer `{ "ok": true }` first, then do the work. Events cover every project, so filter on `event.project.directory`. With `"sessionControl": { "answers": true }` the service answers for the user: `sessions.answerPermission(sessionId, event.permission.requestId, { decision: 'allow' })` (or `'deny'` with a `message`), and `sessions.answerForm(sessionId, event.question.id, values)` with values keyed by each field's `key` from the event content, or `null` to dismiss. A page cannot be answered; `sessions.send` closes it and any open form, as typing in the chat does. Each scheduled session spends the user's tokens, so ship it switched off and let the user turn it on.
+
+### Settings and secrets
+
+`integration.settings` adds fields to a card in Settings → Integrations, and a field with `"secret": true` is masked and never reaches a page. The integration needs one of `token` or `oauth`. The service reads the fields with `readSettings()`, and calls `needsConfiguration('Add a token in Settings → Integrations.')` when one is missing, then `needsConfiguration(null)`.
+
+## What makes it good
+
+- It is quiet. No polling from a page, no toast without a click behind it, no agent text that is not worth its tokens.
+- It says what happened. An action ends with a toast, a failure says what to do, an empty state says why it is empty.
+- It works when things go wrong: the program is missing, the service restarts, the network is down. Answer with a row or a note, not a 500.
+- Its words are the user's: "Containers", never "service" or "payload".
+
+## Where to read more
+
+The SDK ships its full reference. Read these before guessing a method or a manifest key:
+
+- `node_modules/@openchamber/sdk/API.md`: every manifest key and host method.
+- `node_modules/@openchamber/sdk/GUEST_SERVICES.md`: services, schedules, session events, the roles under `service.provides`.
+- https://github.com/openchamber/openchamber/tree/main/packages/sdk/examples: whole extensions. `agent-desk` uses nearly every point, `session-events-log` hears events, `notification-webhook` is a notification channel, `tracker-provider` a tracker, `github-token` an integration, `checklist-editor` a file editor, `opencode-plugin` an OpenCode plugin.
+
+Service roles (`browser`, `source-control`, `notifications`, `tracker`, `quota`) each have their own manifest block and wire: read that role in `GUEST_SERVICES.md` first.
+
+## Publishing
+
+A local copy needs nothing more. An extension in a Git repository installs from its URL in Settings → Extensions, private ones over SSH or with the user's Git account too.
+
+1. Commit the built `.js` files with the sources, because installing never builds. Keep `node_modules` out.
+2. Push to a public repository, with `package.json` at its root and a semver `version`. Run `bunx openchamber-guest-check` in the repository's CI, so a broken package never reaches users.
+3. Offer an install button on any page with `openchamber://extensions/install?url=<encoded repository URL>`. It opens the desktop app, which asks before it fetches anything.
+4. Ship an update by raising `version`: the app tells users, and they update in Settings → Extensions. `#tag` or `#branch` on the install URL pins a channel.
+5. To reach the directory at https://openchamber.dev/extensions, write to feedback@openchamber.dev. Offer the user this letter with the fields filled in, and send it only after they read it:
+
+```text
+Subject: OpenChamber extension for the directory
+
+Extension name:
+Repository URL:
+Category (Workflow / Usage / Monitoring / Preview & files / DevOps / Agent setup / Memory / Providers / Themes):
+What it does:
+```
+
+## Limits worth knowing
+
+- VS Code and the phone load no extensions.
+- In enterprise mode, an extension with a service, a network or skills installs only from an allowed repository.
+- Secrets go to `integration.token` or a `secret` field, never into a page.

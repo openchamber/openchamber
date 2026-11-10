@@ -20,7 +20,7 @@ const encodeHrefPart = (value: string): string =>
  * clipping there cuts descenders off the label.
  */
 export const INLINE_REFERENCE_CHIP_CLASS =
-    'mx-px -my-[0.2em] inline-flex h-[1.3em] max-w-full items-center gap-1 whitespace-nowrap rounded-md border border-border/70 bg-background/50 px-1.5 align-middle text-[0.875em] leading-none text-foreground';
+    'mx-px -my-[0.2em] inline-flex h-[1.3em] max-w-full items-center gap-1 whitespace-nowrap rounded-md border border-edge bg-background/50 px-1.5 align-middle text-[0.875em] leading-none text-foreground';
 
 /**
  * The label inside a reference chip: one line, cut with an ellipsis where the

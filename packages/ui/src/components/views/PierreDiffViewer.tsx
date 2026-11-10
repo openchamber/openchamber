@@ -20,12 +20,15 @@ import {
 import type { WorkerPoolManager } from '@pierre/diffs/worker';
 import {
   buildPierreLineAnnotations,
+  buildPierreSelectionAnnotation,
   type PierreAnnotationData,
   PierreDiffCommentOverlays,
+  type ReviewLineItem,
   isWholeFileComment,
   toPierreAnnotationId,
   useInlineCommentController,
 } from '@/components/comments';
+import { useChangeRequestReviewContext } from '@/components/review/useChangeRequestReview';
 
 import { useOptionalThemeSystem } from '@/contexts/useThemeSystem';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
@@ -1077,6 +1080,59 @@ const PierreDiffViewerBody: React.FC<
   // Whole-file comments have no lines to sit under; the file header shows them.
   const fileDrafts = useMemo(() => diffDrafts.filter((draft) => !isWholeFileComment(draft)), [diffDrafts]);
 
+  // A change request's review: its cards on this file's lines, and the field's way into it.
+  const review = useChangeRequestReviewContext();
+  const reviewItems = useMemo<ReviewLineItem[]>(() => {
+    if (!review?.state || !fileName) return [];
+    const onLine = <T extends { path: string; line: number | null }>(entry: T): entry is T & { line: number } => (
+      entry.path === fileName && entry.line !== null
+    );
+    return [
+      ...review.state.threads.filter(onLine).map((thread): ReviewLineItem => ({
+        id: `thread-${thread.id}`, kind: 'thread', thread, lineNumber: thread.line, side: thread.side === 'old' ? 'deletions' : 'additions',
+      })),
+      ...(review.state.draft?.comments ?? []).filter(onLine).map((comment): ReviewLineItem => ({
+        id: `draft-${comment.id}`, kind: 'draft', comment, lineNumber: comment.line, side: comment.side === 'old' ? 'deletions' : 'additions',
+      })),
+    ];
+  }, [fileName, review?.state]);
+  const excerptOf = useCallback((item: ReviewLineItem) => {
+    if (item.side === 'deletions') return null;
+    const entry = item.kind === 'draft' ? item.comment : item.thread;
+    const start = entry.startLine ?? item.lineNumber;
+    return {
+      startLine: start,
+      lines: extractSelectedCode(original, modified, incomingFileDiff, { start, end: item.lineNumber, side: 'additions' }).split('\n'),
+    };
+  }, [incomingFileDiff, modified, original]);
+  const selectionSide = selection?.side;
+  // A selection across both sides has two sets of line numbers; a review comment takes one.
+  const selectionCrossesSides = Boolean(selection?.endSide && selection.endSide !== selection.side);
+  const reviewField = useMemo(() => {
+    if (!review || !fileName || selectionCrossesSides) return undefined;
+    return {
+      add: async (text: string, range?: SelectedLineRange) => {
+        const target = range ?? selectionRef.current;
+        if (!target) return false;
+        const start = Math.min(target.start, target.end);
+        const end = Math.max(target.start, target.end);
+        const added = await review.addComment({
+          path: fileName,
+          side: target.side === 'deletions' ? 'old' : 'new',
+          line: end,
+          startLine: start < end ? start : undefined,
+        }, text);
+        if (added) cancel();
+        return added;
+      },
+      // A suggestion replaces lines of the new side.
+      suggestionCode: selectionSide === 'deletions' ? undefined : () => {
+        const target = selectionRef.current;
+        return target ? extractSelectedCode(original, modified, incomingFileDiff, target) : '';
+      },
+    };
+  }, [cancel, fileName, incomingFileDiff, modified, original, review, selectionCrossesSides, selectionSide]);
+
   const selectionRef = useRef<SelectedLineRange | null>(null);
   const editingDraftIdRef = useRef<string | null>(null);
   const commentTextRef = useRef('');
@@ -1129,6 +1185,9 @@ const PierreDiffViewerBody: React.FC<
     } else {
       setSelection(range);
     }
+    // Pierre holds this selection too: closing the field has to clear it there,
+    // or the next click on the line would read as taking it back.
+    lastAppliedSelectionRef.current = range;
 
     // Clear editing state when selection changes user-driven
     if (range) {
@@ -1142,6 +1201,8 @@ const PierreDiffViewerBody: React.FC<
     cancel();
   }, [cancel]);
 
+  const commentHostsRef = useRef(new Map<string, HTMLDivElement>());
+  const typingFieldRef = useRef<HTMLTextAreaElement | null>(null);
   const renderAnnotation = useCallback((annotation: DiffLineAnnotation<DiffAnnotation>) => {
     const div = document.createElement('div');
     div.style.position = 'relative';
@@ -1166,11 +1227,16 @@ const PierreDiffViewerBody: React.FC<
       return div;
     }
 
+    // Pierre rebuilds an annotation whenever its index shifts. Handing back the
+    // same node keeps the card portalled into it mounted and its height in the
+    // layout, so the rebuild neither unmounts a comment nor moves the diff.
     const id = toPierreAnnotationId(annotation.metadata);
-
+    const existing = commentHostsRef.current.get(id);
+    if (existing) return existing;
     div.dataset.annotationId = id;
     div.dataset.annotationSide = annotation.side;
     div.dataset.annotationLine = String(annotation.lineNumber);
+    commentHostsRef.current.set(id, div);
     return div;
   }, [showLinesBelowLabel]);
 
@@ -1224,7 +1290,7 @@ const PierreDiffViewerBody: React.FC<
   }, [hunkAnchors]);
 
   const handleSaveComment = useCallback((textToSave: string, rangeOverride?: SelectedLineRange) => {
-    saveComment(textToSave, rangeOverride ?? selection ?? undefined);
+    return saveComment(textToSave, rangeOverride ?? selection ?? undefined);
   }, [saveComment, selection]);
 
 
@@ -1438,44 +1504,10 @@ const PierreDiffViewerBody: React.FC<
     }
   }, [applySelection, enableComments, setCommentText, setSelection]);
 
-  const resolveClickedSide = useCallback((numberCell: HTMLElement): AnnotationSide => {
-    const lineType =
-      numberCell.closest('[data-line-type]')?.getAttribute('data-line-type')
-      ?? numberCell.getAttribute('data-line-type');
-    if (lineType === 'change-deletion') {
-      return 'deletions';
-    }
-    if (lineType === 'change-addition') {
-      return 'additions';
-    }
+  const lightThemeName = ensurePierreThemeRegistered(lightTheme);
+  const darkThemeName = ensurePierreThemeRegistered(darkTheme);
 
-    const explicitColumnSide =
-      numberCell.getAttribute('data-column-side')
-      ?? numberCell.getAttribute('data-side')
-      ?? numberCell.closest('[data-column-side]')?.getAttribute('data-column-side');
-    if (explicitColumnSide === 'deletions' || explicitColumnSide === 'left' || explicitColumnSide === 'original') {
-      return 'deletions';
-    }
-    if (explicitColumnSide === 'additions' || explicitColumnSide === 'right' || explicitColumnSide === 'modified') {
-      return 'additions';
-    }
-
-    const row = numberCell.closest('[data-line-type]');
-    if (row instanceof HTMLElement) {
-      const rowRect = row.getBoundingClientRect();
-      const cellRect = numberCell.getBoundingClientRect();
-      const rowCenter = rowRect.left + rowRect.width / 2;
-      const cellCenter = cellRect.left + cellRect.width / 2;
-      return cellCenter < rowCenter ? 'deletions' : 'additions';
-    }
-
-    return 'additions';
-  }, []);
-
-  ensurePierreThemeRegistered(lightTheme);
-  ensurePierreThemeRegistered(darkTheme);
-
-  const diffThemeKey = `${lightTheme.metadata.id}:${darkTheme.metadata.id}:${isDark ? 'dark' : 'light'}`;
+  const diffThemeKey = `${lightThemeName}:${darkThemeName}:${isDark ? 'dark' : 'light'}`;
 
   const isLargeContent = useMemo(() => {
     if (incomingFileDiff) {
@@ -1677,12 +1709,15 @@ const PierreDiffViewerBody: React.FC<
   const handlePostRender = useCallback<NonNullable<FileDiffOptions<DiffAnnotation, undefined>['onPostRender']>>((node, instance, phase) => {
     if (hasHunkAnchors) captureHunkTargets(node, instance, phase);
     if (phase !== 'unmount' && findMatchesRef.current.length > 0) applyFindHighlights();
+    const typing = typingFieldRef.current;
+    typingFieldRef.current = null;
+    if (typing?.isConnected && document.activeElement !== typing) typing.focus({ preventScroll: true });
   }, [applyFindHighlights, captureHunkTargets, hasHunkAnchors]);
 
   const options = useMemo<FileDiffOptions<DiffAnnotation, undefined>>(() => ({
     theme: {
-      dark: darkTheme.metadata.id,
-      light: lightTheme.metadata.id,
+      dark: darkThemeName,
+      light: lightThemeName,
     },
     themeType: isDark ? 'dark' : 'light',
     preferredHighlighter: DIFFS_HIGHLIGHTER,
@@ -1711,27 +1746,35 @@ const PierreDiffViewerBody: React.FC<
     ].join('\n'),
     renderAnnotation: enableComments || hunkAnchors.length > 0 || expandOnDemand ? renderAnnotation : undefined,
     onPostRender: handlePostRender,
-  }), [handlePostRender, hunkAnchors.length, darkTheme.metadata.id, enableComments, expandOnDemand, isDark, isLargeContent, layout, lightTheme.metadata.id, renderSideBySide, wrapLines, handleSelectionChange, handleGutterUtilityClick, handleLineClick, onFindWordRequest, renderAnnotation]);
+  }), [handlePostRender, hunkAnchors.length, darkThemeName, enableComments, expandOnDemand, isDark, isLargeContent, layout, lightThemeName, renderSideBySide, wrapLines, handleSelectionChange, handleGutterUtilityClick, handleLineClick, onFindWordRequest, renderAnnotation]);
 
 
   const lineAnnotations = useMemo<DiffLineAnnotation<DiffAnnotation>[]>(() => {
     const annotations: DiffLineAnnotation<DiffAnnotation>[] = enableComments ? buildPierreLineAnnotations({
       drafts: fileDrafts,
       editingDraftId,
-      selection,
+      reviewItems,
     }) : [];
     for (const anchor of hunkAnchors) {
       annotations.push({ side: anchor.side, lineNumber: anchor.lineNumber, metadata: { type: 'hunk-action', index: anchor.index } });
     }
     const trailingExpand = expandOnDemand && fileDiff ? getTrailingExpandAnnotation(fileDiff) : null;
     if (trailingExpand) annotations.push(trailingExpand);
+    const selectionAnnotation = enableComments ? buildPierreSelectionAnnotation(selection, editingDraftId) : null;
+    if (selectionAnnotation) annotations.push(selectionAnnotation);
     return annotations;
-  }, [editingDraftId, enableComments, expandOnDemand, fileDiff, fileDrafts, hunkAnchors, selection]);
+  }, [editingDraftId, enableComments, expandOnDemand, fileDiff, fileDrafts, hunkAnchors, reviewItems, selection]);
 
   const lineAnnotationsRef = useRef(lineAnnotations);
 
   useEffect(() => {
     lineAnnotationsRef.current = lineAnnotations;
+    const current = new Set(lineAnnotations.flatMap(({ metadata }) => (
+      metadata.type === 'hunk-action' || metadata.type === 'trailing-expand' ? [] : [toPierreAnnotationId(metadata)]
+    )));
+    for (const id of commentHostsRef.current.keys()) {
+      if (!current.has(id)) commentHostsRef.current.delete(id);
+    }
   }, [lineAnnotations]);
 
   useEffect(() => {
@@ -1882,6 +1925,11 @@ const PierreDiffViewerBody: React.FC<
 
     requestAnimationFrame(() => {
       if (diffInstanceRef.current !== instance) return;
+      // A rebuilt annotation moves its node, and moving a focused field drops
+      // its focus. The virtualized diff renders later, so the post-render
+      // callback gives it back, and only to a field that had it.
+      const focused = document.activeElement;
+      typingFieldRef.current = focused instanceof HTMLTextAreaElement && diffContainerRef.current?.contains(focused) ? focused : null;
       try {
         instance.rerender();
       } catch (err) {
@@ -1920,59 +1968,40 @@ const PierreDiffViewerBody: React.FC<
 
   useEffect(() => {
     if (!enableComments) return;
-
     const container = diffContainerRef.current;
     if (!container) return;
 
-    let rafId: number | null = null;
-    let cleanup = () => {};
+    const handleNumberPointerDown = (event: PointerEvent) => {
+      if (event.shiftKey || (event.pointerType === 'mouse' && event.button !== 0)) return;
+      const current = selectionRef.current;
+      if (!current || current.start !== current.end || !current.side
+          || (current.endSide && current.endSide !== current.side)
+          || commentTextRef.current.trim()) return;
 
-    const setup = () => {
-      const host = container.querySelector('diffs-container');
-      const shadowRoot = host?.shadowRoot;
-      if (!shadowRoot) {
-        rafId = requestAnimationFrame(setup);
-        return;
+      // The capture listener sees the original number cell across the shadow
+      // boundary, before Pierre handles pointerdown on its pre element.
+      const numberCell = event.composedPath().find((node): node is HTMLElement =>
+        node instanceof HTMLElement && node.hasAttribute('data-column-number'));
+      if (!numberCell || Number(numberCell.dataset.columnNumber) !== current.start) return;
+      const side: AnnotationSide = numberCell.dataset.lineType === 'change-deletion'
+        || numberCell.closest('[data-code][data-deletions]') != null
+        ? 'deletions'
+        : 'additions';
+      if (side === current.side) return;
+
+      // Pierre toggles a single line by number alone. Clear that selection so
+      // this gesture can select the same number on the other side normally.
+      try {
+        isApplyingSelectionRef.current = true;
+        diffInstanceRef.current?.setSelectedLines(null);
+      } finally {
+        isApplyingSelectionRef.current = false;
       }
-
-      const onClickCapture = (event: Event) => {
-        if (!(event instanceof MouseEvent) || event.button !== 0) return;
-        if (!(event.target instanceof Element)) return;
-
-        const numberCell = event.target.closest('[data-column-number]');
-        if (!(numberCell instanceof HTMLElement)) return;
-
-        const lineRaw = numberCell.getAttribute('data-column-number');
-        const lineNumber = lineRaw ? parseInt(lineRaw, 10) : NaN;
-        if (Number.isNaN(lineNumber)) return;
-
-        const side = resolveClickedSide(numberCell);
-
-        handleSelectionChange({
-          start: lineNumber,
-          end: lineNumber,
-          side,
-        });
-
-        event.preventDefault();
-        event.stopPropagation();
-      };
-
-      shadowRoot.addEventListener('click', onClickCapture, true);
-      cleanup = () => {
-        shadowRoot.removeEventListener('click', onClickCapture, true);
-      };
     };
 
-    setup();
-
-    return () => {
-      if (rafId !== null) {
-        cancelAnimationFrame(rafId);
-      }
-      cleanup();
-    };
-  }, [diffThemeKey, enableComments, fileName, handleSelectionChange, resolveClickedSide]);
+    container.addEventListener('pointerdown', handleNumberPointerDown, true);
+    return () => container.removeEventListener('pointerdown', handleNumberPointerDown, true);
+  }, [enableComments]);
 
   // MutationObserver to trigger re-renders when annotation DOM nodes are added/removed
   useEffect(() => {
@@ -2098,9 +2127,13 @@ const PierreDiffViewerBody: React.FC<
       editingDraftId={editingDraftId}
       commentText={commentText}
       onTextChange={setCommentText}
-      fileLabel={(fileName?.split('/').pop()) ?? ''}
+      fileLabel={fileName ?? ''}
       onSave={handleSaveComment}
       onCancel={handleCancelComment}
+      review={review}
+      reviewItems={reviewItems}
+      reviewField={reviewField}
+      excerptOf={excerptOf}
       onEdit={(draft) => {
         applySelection({
           start: draft.startLine,

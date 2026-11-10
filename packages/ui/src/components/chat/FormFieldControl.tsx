@@ -6,6 +6,7 @@ import { Radio } from '@/components/ui/radio';
 import { Icon } from '@/components/icon/Icon';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
+import { dominantTextDirection } from '@/lib/i18n/textDirection';
 import { FORM_CUSTOM_TEXTAREA_MIN_HEIGHT, getFormCustomTextareaHeight } from './formTextareaSizing';
 import { FormMarkdown } from './FormMarkdown';
 import { isRecommendedOption, stripRecommendedMarker } from './formSerializers';
@@ -29,9 +30,8 @@ interface AutoGrowTextareaProps {
 }
 
 /**
- * Free-text answer box. It keeps its own value while the user types so a
- * keystroke does not re-render the whole form, and grows with the content up
- * to the cap in `formTextareaSizing`.
+ * Free-text answer box, sized to its content up to the cap in
+ * `formTextareaSizing`.
  */
 const AutoGrowTextarea = React.memo(function AutoGrowTextarea({
     value,
@@ -44,8 +44,6 @@ const AutoGrowTextarea = React.memo(function AutoGrowTextarea({
     const textareaRef = React.useRef<HTMLTextAreaElement | null>(null);
     const emojiPicker = useEmojiPicker(textareaRef);
     const [localValue, setLocalValue] = React.useState(value);
-    const [height, setHeight] = React.useState(FORM_CUSTOM_TEXTAREA_MIN_HEIGHT);
-    const [isScrollable, setIsScrollable] = React.useState(false);
 
     React.useEffect(() => {
         setLocalValue(value);
@@ -53,15 +51,26 @@ const AutoGrowTextarea = React.memo(function AutoGrowTextarea({
 
     React.useLayoutEffect(() => {
         const textarea = textareaRef.current;
-        if (!textarea) return;
-        const nextHeight = getFormCustomTextareaHeight({
-            scrollHeight: textarea.scrollHeight,
-            currentHeight: height,
-        });
-        const nextScrollable = textarea.scrollHeight > (nextHeight ?? height);
-        if (isScrollable !== nextScrollable) setIsScrollable(nextScrollable);
-        if (nextHeight !== null && nextHeight !== height) setHeight(nextHeight);
-    }, [height, isScrollable, localValue]);
+        const wrapper = textarea?.parentElement;
+        if (!textarea || !wrapper) return;
+        // Measure intrinsic content after deletion too. scrollHeight excludes
+        // borders; feeding it back through height state shrinks a border-box
+        // textarea by its border height on every layout effect until React throws.
+        // Hold the wrapper's space so a scrolling form body cannot clamp its
+        // scrollTop while the textarea is temporarily collapsed for measurement.
+        const minHeight = wrapper.style.minHeight;
+        wrapper.style.minHeight = `${wrapper.offsetHeight}px`;
+        try {
+            textarea.style.height = '0px';
+            textarea.style.overflowY = 'hidden';
+            const contentHeight = textarea.scrollHeight + textarea.offsetHeight - textarea.clientHeight;
+            const nextHeight = getFormCustomTextareaHeight(contentHeight);
+            textarea.style.height = `${nextHeight}px`;
+            textarea.style.overflowY = contentHeight > nextHeight ? 'auto' : 'hidden';
+        } finally {
+            wrapper.style.minHeight = minHeight;
+        }
+    }, [localValue]);
 
     return (
         <>
@@ -71,17 +80,16 @@ const AutoGrowTextarea = React.memo(function AutoGrowTextarea({
                 placeholder={placeholder}
                 disabled={disabled}
                 autoFocus={autoFocus}
-                style={{ height }}
+                style={{ height: FORM_CUSTOM_TEXTAREA_MIN_HEIGHT }}
                 onChange={(event) => {
                     setLocalValue(event.target.value);
                     onValueChange(event.target.value);
                 }}
                 onKeyDown={onKeyDown}
                 className={cn(
-                    'w-full resize-none rounded border border-border/30 bg-background/50 px-2 py-1',
+                    'w-full resize-none rounded border border-edge-muted bg-background/50 px-2 py-1',
                     'typography-meta text-foreground placeholder:text-muted-foreground',
-                    'focus:outline-none focus:border-border/60',
-                    isScrollable ? 'overflow-y-auto' : 'overflow-y-hidden',
+                    'focus:outline-none focus:border-edge',
                     disabled ? 'opacity-60' : null,
                 )}
             />
@@ -107,9 +115,17 @@ const { t } = useI18n();
 const value = valueOf(values, field.key);
 const isMissing = showErrors && missing.includes(field.key);
 const label = field.title?.trim() || field.key;
+// The field runs the way most of its own words do, so a Persian question sets
+// its label, options and radios from the right even when an option opens
+// with a Latin term. Translated controls inside it follow along.
+const dir = dominantTextDirection(
+    label,
+    field.description,
+    ...('options' in field ? field.options ?? [] : []).flatMap((option) => [option.label, option.description]),
+);
 
 return (
-        <div key={field.key} className="px-1.5 py-1">
+        <div key={field.key} dir={dir} className="px-1.5 py-1">
             <div className="flex items-baseline gap-1.5">
                 <span className={cn('typography-meta font-medium', isMissing ? 'text-[var(--status-error)]' : 'text-foreground')}>
                     {label}
@@ -164,8 +180,8 @@ return (
                         updateValue(field.key, { number: parsed !== null && Number.isFinite(parsed) ? parsed : null });
                     }}
                     className={cn(
-                        'w-full rounded border border-border/30 bg-background/50 px-2 py-1',
-                        'typography-meta text-foreground focus:outline-none focus:border-border/60',
+                        'w-full rounded border border-edge-muted bg-background/50 px-2 py-1',
+                        'typography-meta text-foreground focus:outline-none focus:border-edge',
                     )}
                 />
             ) : null}

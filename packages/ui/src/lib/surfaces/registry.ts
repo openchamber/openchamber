@@ -99,19 +99,19 @@ export const CONTEXT_SURFACES: readonly ContextSurfaceDescriptor[] = [
     availability: 'always',
   },
   {
-    id: 'notes',
-    descriptionKey: 'contextRail.surface.notes.description',
-    mode: 'notes',
-    icon: 'book-marked',
-    labelKey: 'contextRail.surface.notes',
-    availability: 'always',
-  },
-  {
     id: 'browser',
     descriptionKey: 'contextRail.surface.browser.description',
     mode: 'browser',
     icon: 'global',
     labelKey: 'contextPanel.mode.browser',
+    availability: 'always',
+  },
+  {
+    id: 'notes',
+    descriptionKey: 'contextRail.surface.notes.description',
+    mode: 'notes',
+    icon: 'book-marked',
+    labelKey: 'contextRail.surface.notes',
     availability: 'always',
   },
   {
@@ -136,6 +136,35 @@ export const CONTEXT_SURFACES: readonly ContextSurfaceDescriptor[] = [
 // code side by side, which is the whole point of the surface.
 export const WALKTHROUGH_MIN_WIDTH = 768;
 
+/**
+ * The rail's groups, drawn apart by a divider: the session's context, its
+ * changes, the tools that work on the project, the session's workspace, and
+ * installed extensions.
+ */
+type ContextSurfaceGroup = 'context' | 'changes' | 'tools' | 'workspace' | 'extensions';
+
+const BUILT_IN_SURFACE_GROUPS = {
+  context: 'context',
+  git: 'changes',
+  pr: 'changes',
+  diff: 'changes',
+  walkthrough: 'changes',
+  editor: 'tools',
+  terminal: 'tools',
+  browser: 'tools',
+  notes: 'workspace',
+  workflows: 'workspace',
+  chat: 'workspace',
+} satisfies Record<BuiltInContextSurfaceId, ContextSurfaceGroup>;
+
+const isBuiltInSurfaceId = (id: ContextSurfaceId): id is BuiltInContextSurfaceId => Object.hasOwn(BUILT_IN_SURFACE_GROUPS, id);
+
+export const contextSurfaceGroup = (surface: Pick<ContextSurfaceDescriptor, 'id' | 'mode'>): ContextSurfaceGroup => (
+  !isPluginContextPanelMode(surface.mode) && isBuiltInSurfaceId(surface.id)
+    ? BUILT_IN_SURFACE_GROUPS[surface.id]
+    : 'extensions'
+);
+
 const isKnownSurfaceId = (value: string, byId: ReadonlyMap<string, ContextSurfaceDescriptor>): boolean => {
   return byId.has(value);
 };
@@ -143,6 +172,10 @@ const isKnownSurfaceId = (value: string, byId: ReadonlyMap<string, ContextSurfac
 /**
  * Applies a persisted user reorder on top of the default registry order:
  * unknown ids are dropped, missing surfaces are appended in default order.
+ * Surfaces then gather into their groups: a group stands where its first
+ * surface stands, and its surfaces keep their order inside it. So moving a
+ * group's surface ahead of another group moves the whole group, and a saved
+ * order from before groups existed still reads as groups.
  */
 export const sortContextSurfaces = (
   railOrder: readonly string[],
@@ -170,7 +203,12 @@ export const sortContextSurfaces = (
     }
   }
 
-  return ordered;
+  const groupOrder: ContextSurfaceGroup[] = [];
+  for (const surface of ordered) {
+    const group = contextSurfaceGroup(surface);
+    if (!groupOrder.includes(group)) groupOrder.push(group);
+  }
+  return groupOrder.flatMap((group) => ordered.filter((surface) => contextSurfaceGroup(surface) === group));
 };
 
 type VisibleRailSurfacesOptions = {

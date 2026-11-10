@@ -6,6 +6,17 @@ const headersOf = (input, init) => {
   return Object.fromEntries(headers);
 };
 
+/** The JSON body of a request, read without using up the one that goes out. */
+const jsonBodyOf = async (input, init) => {
+  if (init?.body !== undefined && init?.body !== null) {
+    // A stream read here would be gone when the request is sent.
+    if (init.body instanceof ReadableStream) throw new Error('Cannot read a streamed body');
+    return JSON.parse(await new Response(init.body).text());
+  }
+  if (input instanceof Request) return JSON.parse(await input.clone().text());
+  return undefined;
+};
+
 /**
  * `fetch` for the server process with the folder trust check in front of
  * every request to the running OpenCode. Server features call OpenCode with
@@ -40,6 +51,7 @@ export const guardOpenCodeFetch = ({ fetchImpl, openCodeTrust, buildOpenCodeUrl,
       path: `${url.pathname}${url.search}`,
       headers: headersOf(input, init),
       resolveSessionDirectory,
+      readBody: () => jsonBodyOf(input, init),
     });
     if (!refusal) return fetchImpl(input, init);
     return new Response(JSON.stringify(refusal.body), {

@@ -1,3 +1,24 @@
+// An uploaded image opened as a page would run an SVG's scripts on the app's
+// origin; this policy keeps it inert and changes nothing where it is drawn as
+// an <img>.
+export const INERT_IMAGE_CSP = "default-src 'none'; style-src 'unsafe-inline'; sandbox";
+
+/** Sets the CSS `color` of an SVG document, so its `currentColor` follows the theme. */
+export const injectSvgRootColor = (svgMarkup, color) => {
+  const svgTagIndex = svgMarkup.search(/<svg\b/i);
+  if (svgTagIndex === -1) {
+    return svgMarkup;
+  }
+
+  const svgOpenTagEndIndex = svgMarkup.indexOf('>', svgTagIndex);
+  if (svgOpenTagEndIndex === -1) {
+    return svgMarkup;
+  }
+
+  const overrideStyle = `<style data-openchamber-theme-icon="1">:root{color:${color}!important;}</style>`;
+  return `${svgMarkup.slice(0, svgOpenTagEndIndex + 1)}${overrideStyle}${svgMarkup.slice(svgOpenTagEndIndex + 1)}`;
+};
+
 export const registerProjectIconRoutes = (app, dependencies) => {
   const {
     fsPromises,
@@ -7,6 +28,7 @@ export const registerProjectIconRoutes = (app, dependencies) => {
     sanitizeProjects,
     readSettingsFromDiskMigrated,
     persistSettings,
+    persistResolvedSettings,
     createFsSearchRuntime,
     spawn,
     resolveGitBinaryForSpawn,
@@ -146,18 +168,7 @@ export const registerProjectIconRoutes = (app, dependencies) => {
       return svgMarkup;
     }
 
-    const svgTagIndex = svgMarkup.search(/<svg\b/i);
-    if (svgTagIndex === -1) {
-      return svgMarkup;
-    }
-
-    const svgOpenTagEndIndex = svgMarkup.indexOf('>', svgTagIndex);
-    if (svgOpenTagEndIndex === -1) {
-      return svgMarkup;
-    }
-
-    const overrideStyle = `<style data-openchamber-theme-icon="1">:root{color:${color}!important;}</style>`;
-    return `${svgMarkup.slice(0, svgOpenTagEndIndex + 1)}${overrideStyle}${svgMarkup.slice(svgOpenTagEndIndex + 1)}`;
+    return injectSvgRootColor(svgMarkup, color);
   };
 
   const findProjectById = (settings, projectId) => {
@@ -252,10 +263,8 @@ export const registerProjectIconRoutes = (app, dependencies) => {
             ? metadataMime
             : projectIconExtensionToMime[ext] || 'application/octet-stream';
           const contentType = resolvedMime === 'image/svg+xml' ? 'image/svg+xml; charset=utf-8' : resolvedMime;
-          // Icons come from repositories. Opened as a page, an SVG would run
-          // its scripts on the app's origin; the sandbox keeps it inert and
-          // changes nothing where it is drawn as an <img>.
-          res.setHeader('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'; sandbox");
+          // Icons come from repositories.
+          res.setHeader('Content-Security-Policy', INERT_IMAGE_CSP);
           res.setHeader('X-Content-Type-Options', 'nosniff');
 
           if (resolvedMime === 'image/svg+xml' && requestedThemeVariant) {
@@ -373,7 +382,7 @@ export const registerProjectIconRoutes = (app, dependencies) => {
 
     try {
       const settings = await readSettingsFromDiskMigrated();
-      const { projects, project } = findProjectById(settings, projectId);
+      const { project } = findProjectById(settings, projectId);
       if (!project) {
         return res.status(404).json({ error: 'Project not found' });
       }
@@ -425,17 +434,37 @@ export const registerProjectIconRoutes = (app, dependencies) => {
         return res.status(415).json({ error: 'Unsupported favicon format' });
       }
 
+      // The search above can outlast other saves, and every added project runs
+      // it. The project may be gone or have a chosen icon by now, and the new
+      // icon goes onto the list as it is at write time.
+      const { project: latest } = findProjectById(await readSettingsFromDiskMigrated(), projectId);
+      if (!latest) {
+        return res.status(404).json({ error: 'Project not found' });
+      }
+      if (latest.iconImage?.source === 'custom' && !force) {
+        return res.json({
+          project: latest,
+          skipped: true,
+          reason: 'custom-icon-present',
+        });
+      }
+
       await fsPromises.mkdir(projectIconsDirPath, { recursive: true });
       await fsPromises.writeFile(iconPath, bytes);
       await removeProjectIconFiles(projectId, iconPath);
 
       const updatedAt = Date.now();
-      const nextProjects = projects.map((entry) => (
-        entry.id === projectId
-          ? { ...entry, iconImage: { mime, updatedAt, source: 'auto' } }
-          : entry
-      ));
-      const updatedSettings = await persistSettings({ projects: nextProjects });
+      const updatedSettings = await persistResolvedSettings((current) => {
+        const { projects, project: currentProject } = findProjectById(current, projectId);
+        if (!currentProject) return {};
+        return {
+          projects: projects.map((entry) => (
+            entry.id === projectId
+              ? { ...entry, iconImage: { mime, updatedAt, source: 'auto' } }
+              : entry
+          )),
+        };
+      });
       const updatedProject = (updatedSettings.projects || []).find((entry) => entry.id === projectId) || null;
 
       return res.json({

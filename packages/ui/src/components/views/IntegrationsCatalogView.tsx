@@ -3,6 +3,7 @@ import React from 'react';
 import { toast } from '@/components/ui';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import {
   Dialog,
   DialogContent,
@@ -232,6 +233,8 @@ export function IntegrationsCatalogView(): React.ReactNode {
   const [selectedId, setSelectedId] = React.useState<string | null>(null);
   /** The entry whose OAuth sign-in starts as soon as its detail page can show it, right after install. */
   const [pendingSignInId, setPendingSignInId] = React.useState<string | null>(null);
+  /** A sign-in in progress keeps its panel while the server reconnects. */
+  const [mcpSignInActive, setMcpSignInActive] = React.useState(false);
   const showEntry = React.useCallback((id: string | null) => {
     setSelectedId(id);
     setPendingSignInId(null);
@@ -794,8 +797,8 @@ export function IntegrationsCatalogView(): React.ReactNode {
 
   /** The rail: back to browsing, then every installed integration with its state. */
   const renderRail = (): React.ReactNode => (
-    <aside className="flex w-56 shrink-0 flex-col border-e border-border/50">
-      <div className="flex-1 overflow-y-auto p-2">
+    <aside className="flex w-56 shrink-0 flex-col border-e border-edge">
+      <ScrollableOverlay outerClassName="flex-1 min-h-0" className="p-2" disableHorizontal>
         <button
           type="button"
           onClick={() => showEntry(null)}
@@ -837,7 +840,7 @@ export function IntegrationsCatalogView(): React.ReactNode {
             </button>
           );
         })}
-      </div>
+      </ScrollableOverlay>
     </aside>
   );
 
@@ -896,10 +899,20 @@ export function IntegrationsCatalogView(): React.ReactNode {
     );
   };
 
-  /** Where the installed MCP server stands, with the sign-in when it asks for one. */
-  const renderConnection = (entry: CatalogEntry): React.ReactNode => {
+  /**
+   * Where the installed MCP server stands, with the sign-in when it asks for
+   * one. A failed OAuth server offers it too: the service may have rejected
+   * the stored token, and only a fresh sign-in replaces it. A connected one
+   * offers it as well — a live transport does not prove the user authorized
+   * the tools (#5934).
+   */
+  const renderConnection = (entry: CatalogEntry, mcp: CatalogMcpComponent): React.ReactNode => {
     const runtime = readMcpStatusName(mcpStatuses[entry.id]);
     const disabled = mcpServers.find((candidate) => candidate.name === entry.id)?.disabled === true;
+    const offersSignIn = !disabled
+      && (mcpSignInActive
+        || runtime === 'needs_auth'
+        || (mcp.auth === 'oauth' && (runtime === 'failed' || runtime === 'connected')));
     const state: { label: string; tone: IntegrationCatalogStatusTone } = disabled
       ? { label: t('integrationsCatalog.status.disabled'), tone: 'neutral' }
       : runtime === 'connected'
@@ -921,14 +934,20 @@ export function IntegrationsCatalogView(): React.ReactNode {
               {state.label}
             </span>
           </div>
-          {runtime === 'needs_auth' && !disabled ? (
+          {offersSignIn ? (
             <div className="mt-4 border-t border-[var(--interactive-border)] pt-4">
-              <p className="mb-3 text-sm text-muted-foreground">{t('integrationsCatalog.oauth.waiting')}</p>
+              {runtime === 'needs_auth' ? <p className="mb-3 text-sm text-muted-foreground">{t('integrationsCatalog.oauth.waiting')}</p> : null}
               <McpOAuthSignIn
                 serverName={entry.id}
                 directory={currentDirectory}
-                autoStart={pendingSignInId === entry.id}
+                autoStart={runtime === 'needs_auth' && pendingSignInId === entry.id}
+                connectLabel={runtime === 'failed'
+                  ? t('settings.mcp.page.actions.signInAgain')
+                  : runtime === 'connected'
+                    ? t('settings.mcp.page.actions.authorize')
+                    : undefined}
                 onConnected={() => { void useMcpStore.getState().connect(entry.id, currentDirectory); }}
+                onActiveChange={setMcpSignInActive}
               />
             </div>
           ) : null}
@@ -1099,7 +1118,7 @@ export function IntegrationsCatalogView(): React.ReactNode {
 
         <div className="mt-10 flex flex-col gap-10">
           {mcp && !mcpInstalled ? renderSetup(entry, mcp) : null}
-          {mcpInstalled ? renderConnection(entry) : null}
+          {mcp && mcpInstalled ? renderConnection(entry, mcp) : null}
 
           <section className="flex flex-col gap-3">
             <SectionHeading title={t('integrationsCatalog.detail.about')} />
@@ -1159,15 +1178,17 @@ export function IntegrationsCatalogView(): React.ReactNode {
     <div className="absolute inset-0 z-10 flex bg-background">
       {renderRail()}
 
-      <main
+      <ScrollableOverlay
+        as="main"
         ref={scrollerRef}
-        className="min-w-0 flex-1 overflow-y-auto"
+        outerClassName="min-w-0 flex-1"
         onScroll={(event) => {
           if (!selectedId) browseScrollTopRef.current = event.currentTarget.scrollTop;
         }}
+        disableHorizontal
       >
         {selectedEntry ? renderDetail(selectedEntry) : renderBrowse()}
-      </main>
+      </ScrollableOverlay>
 
       {confirm ? (
         <Dialog open onOpenChange={(next) => { if (!next) setConfirm(null); }}>

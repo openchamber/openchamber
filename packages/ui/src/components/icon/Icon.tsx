@@ -64,7 +64,6 @@ const DIRECTIONAL_ICONS: ReadonlySet<IconName> = new Set<IconName>([
   "arrow-go-back",
   "layout-left",
   "layout-right",
-  "menu-fold-2",
   "send-plane",
   "send-plane-2",
 ])

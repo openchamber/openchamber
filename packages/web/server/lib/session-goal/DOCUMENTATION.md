@@ -86,8 +86,10 @@ before touching the filesystem). Rationale: metadata rides every
 
 1. `createSessionGoalRuntime` subscribes to the global SSE hub (same pattern
    as session-assist — it needs the envelope's `directory`).
-2. `session.status: idle` arms a 15s per-session timer; `busy`/`retry` clears
-   it. A `session.updated` carrying a fresh active goal (`turnsUsed === 0` or
+2. `session.status: idle` arms a 3s per-session timer; `busy`/`retry` clears
+   it. The window only lets a burst of status events settle: every check
+   after it reads live state. Rechecks while work goes on without the parent,
+   and retries after a failed read, wait 15s instead. A `session.updated` carrying a fresh active goal (`turnsUsed === 0` or
    `statusReason === 'resumed'`) arms a kickoff timer — 3s for fresh goals,
    ~250ms for an explicit Resume so the nudge feels immediate — since setting
    a goal on an idle session emits no status transition.
@@ -104,9 +106,13 @@ before touching the filesystem). Rationale: metadata rides every
      goal's only pending work; an abort during an in-flight read lets the tick
      reach its own abort check and pause the goal;
    - authoritative live-activity check after the quiet window: re-read
-     `/api/session/active`, bail if the parent resumed; then list the
-      parent's subagent sessions through `GET /api/session?parentID=` (cursor
-      paged) and bail while any of them is active. The loop rechecks after
+     `/api/session/active`, bail if the parent resumed; then read OpenCode's
+      job list (2.2.6+) for the whole subagent tree and bail while a
+      background subagent or image runs; then list the parent's child
+      sessions through `GET /api/session?parentID=` (cursor paged) and bail
+      while any of them is active, since child sessions OpenChamber starts
+      itself (workflow agents) are no OpenCode jobs and an older OpenCode has
+      no job list. The loop rechecks after
       another quiet window so a missed parent idle event cannot strand the
       goal when the child finishes. A status or children fetch failure is
       unknown, not empty, so it skips the audit and retries after another quiet
@@ -123,6 +129,23 @@ before touching the filesystem). Rationale: metadata rides every
      plumbing roles are dropped from the view;
    - quiescence check via the message tail (trailing user message or
      unfinished assistant reply → bail; the next idle transition re-arms);
+   - background commands: the shells in the job list, read again after the
+     messages so a command of the turn just read is listed; it includes the
+     commands the session's subagents started. An OpenCode without the job
+     list is asked `shell.list` for the session's directory (the header-scoped
+     read in `../opencode/session-activity.js`; that location is already
+     running), which sees only the session's own commands. A command started
+     in this round, at or
+     after its newest non-synthetic user message (the goal's start when none
+     is in the window), holds the audit: OpenCode wakes the session with the
+     result, and auditing earlier reads "waiting for the tests" as unfinished
+     and nudges the agent over a running command. Commands from earlier rounds,
+     such as a dev server, are not waited for. The goal instructions tell the
+     agent to stop every command that does not finish on its own before ending
+     a turn, since the wait cannot tell a server from tests. After 30 minutes
+     the turn is audited as it stands: a command running that long is most
+     likely a server left running. Resume, and a turn that ended in an error or
+     abort, do not wait. An unreadable list is unknown and rechecks;
    - token accounting as a SNAPSHOT of the latest completed assistant turn:
      `input + cache.read + output`. Earlier turns' inputs and outputs fold
      into the next turn's cache, so the latest snapshot already carries the
@@ -191,7 +214,9 @@ before touching the filesystem). Rationale: metadata rides every
      cap. Measured on 144 hand-written goal-report turns plus 8 real ones (lab:
      `~/projects/openchamber-extensions/jev-goal-lab`): Jev 142/144 with both
      misses on the safe side, gpt-6-luna 141/144. Change the questions or the
-     threshold only with a new run of that lab;
+     threshold only with a new run of that lab. A small, narrow wording change
+     to a criterion in `audit.js` needs only a few targeted cases on Jev and
+     the small model;
    - continue: persist accounting + `turnsUsed` first (a crash after the
      write just waits for the next idle tick; the reverse could double-send),
      re-check the tail, then `POST /api/session/:id/prompt` with the
@@ -212,10 +237,35 @@ before touching the filesystem). Rationale: metadata rides every
 ## Continuation prompt
 
 Built inline in `runtime.js`: the objective as untrusted user data in an
-XML-escaped `<objective>` block, budget numbers, keep-the-full-objective and
-work-from-evidence rules, a completion-audit instruction, and the requirement
-to end every turn with a factual done/verified/remaining report — the audit
-sees only that final turn, so the report is its evidence.
+XML-escaped `<objective>` block, budget numbers,
+`GOAL_MISSION_INSTRUCTIONS` (`audit.js`), keep-the-full-objective and
+work-from-evidence rules, a completion-audit instruction, and
+`GOAL_REPORT_INSTRUCTIONS` (`audit.js`): the final message ends the run, stop
+background commands that never finish before it, and close it with four
+lines, Done, Verified, Remaining and Needs from the user, each with "nothing"
+said out loud. The audit sees only that final turn, so the report is its
+evidence; Remaining and Needs from the user answer the `remaining` and
+`needs_user` questions directly, and user-side steps (testing in the app,
+review, commits) are named as neither. The first-turn reminder (`create.js`
+and the UI's `sessionGoalActions.ts`) carries the same mission and report text.
+
+### Why the prompts never mention the loop continuing the agent
+
+The agent is sent on the whole objective in one run. A promise that the system
+will prompt it to continue, per-turn reporting and a count of auto-continuations
+all read as permission to stop after one step and hand back a list of what is
+left. The continuation stays as the safety net, unannounced. The four report
+lines keep their shape because the progress check reads them.
+
+## Recovery after connecting
+
+The loop is event-driven, so an idle event lost while the server or the event
+stream was down leaves an active goal without a timer. On every connect of
+the global event hub, `recoverActiveGoals` lists the 50 most recently updated
+root sessions (`GET /api/session`, global, starts no location) and arms a
+kickoff for each one whose goal is active and has no timer or tick. The tick
+re-reads the goal from the store and checks the session is idle, so a busy
+session or a settled goal costs one read.
 
 ## UI consumers (packages/ui)
 
@@ -225,6 +275,8 @@ sees only that final turn, so the report is its evidence.
   colors/labels shared across surfaces.
 - `stores/useSessionGoalArmStore.ts` — the "next prompt starts a goal" flag,
   consumed by `sendMessage` in `sync/session-ui-store.ts` (works for drafts).
+  A parallel launch reads it too and gives every lane its own goal
+  (`lib/multirun/DOCUMENTATION.md`).
   Armed slash commands resolve their authoritative command template and apply
   OpenCode argument expansion (`$ARGUMENTS`, positional placeholders, or the
   implicit argument suffix) for the audit objective before goal metadata is

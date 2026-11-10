@@ -51,7 +51,7 @@ describe('turn telemetry', () => {
       tokens: { input: 1500, output: 100, reasoning: 0, cache: { read: 0, write: 0 } },
     }), parts: [text(21500)] });
     const stats = getLatestCompletedTurnStats(records);
-    expect(stats).toEqual({ stepsCount: 2, lastAssistantMessageId: 'a2', elapsedDurationMs: 24000, totalToolDurationMs: 3000,
+    expect(stats).toEqual({ stepsCount: 2, lastAssistantMessageId: 'a2', previousTurn: false, elapsedDurationMs: 24000, totalToolDurationMs: 3000,
       totalLlmDurationMs: 10000, outputTokens: 300, reasoningTokens: 300, totalGeneratedTokens: 600,
       inputTokens: 2500, cost: 0.015, tokensPerSecond: 60, responseTokensPerSecond: null, avgTtftMs: 1000, cacheHitPercent: 44 });
   });
@@ -82,11 +82,22 @@ describe('turn telemetry', () => {
     expect(getLatestCompletedTurnStats(records)?.lastAssistantMessageId).toBe('a1');
   });
 
+  test('a prompt with no reply yet yields the turn before it, flagged as previous', () => {
+    const previous = getLatestCompletedTurnStats([...turn(), { info: { ...user, id: 'u2' }, parts: [] }]);
+    expect(previous?.lastAssistantMessageId).toBe('a1');
+    expect(previous?.previousTurn).toBe(true);
+    expect(getLatestCompletedTurnStats(turn())?.previousTurn).toBe(false);
+    expect(getLatestCompletedTurnStats([{ info: user, parts: [] }])).toBeNull();
+    expect(getLatestCompletedTurnStats([{ info: user, parts: [] }, { info: { ...user, id: 'u2' }, parts: [] }])).toBeNull();
+    expect(getLatestCompletedTurnStats([
+      ...turn(assistant({ time: { created: 1000 } })), { info: { ...user, id: 'u2' }, parts: [] },
+    ])).toBeNull();
+  });
+
   test('does not publish unfinished or truncated turns, or substitute older results', () => {
     expect(getLatestCompletedTurnStats(null)).toBeNull();
     expect(getLatestCompletedTurnStats([])).toBeNull();
     expect(getLatestCompletedTurnStats([{ info: assistant(), parts: [] }])).toBeNull();
-    expect(getLatestCompletedTurnStats([...turn(), { info: user, parts: [] }])).toBeNull();
     expect(getLatestCompletedTurnStats([...turn(), ...turn(assistant({ time: { created: 1000 } }))])).toBeNull();
     expect(getLatestCompletedTurnStats([
       ...turn(assistant({ time: { created: 1000 } })), { info: assistant({ id: 'a2' }), parts: [] },

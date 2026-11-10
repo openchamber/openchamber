@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { EventEmitter } from 'node:events';
 import net from 'node:net';
+import http from 'node:http';
 import express from 'express';
 import path from 'path';
 
@@ -1201,14 +1202,80 @@ describe('OpenCode proxy SSE forwarding', () => {
     await expect(response.json()).resolves.toMatchObject({ error: 'OpenCode upstream timed out' });
   });
 
-  it('does not log proxy error when the client aborts the request', async () => {
+  it.each([0, 12345])('configures proxy deadline and socket timers for %i ms', async (timeoutMs) => {
+    let socketTimeoutCalls;
+    let proxyRequestSocket;
+    const upstream = express();
+    upstream.get('/api/slow', (_req, res) => {
+      socketTimeoutCalls = socketTimeoutSpy.mock.calls.filter((_, index) =>
+        socketTimeoutSpy.mock.contexts[index] === proxyRequestSocket);
+      res.status(200).json({ ok: true });
+    });
+    upstreamServer = await listen(upstream);
+    const upstreamPort = upstreamServer.address().port;
+    const externalBaseUrl = `http://127.0.0.1:${upstreamPort}`;
+
+    const app = express();
+    registerOpenCodeProxy(app, {
+      fs: {},
+      os: {},
+      path,
+      OPEN_CODE_READY_GRACE_MS: 0,
+      LONG_REQUEST_TIMEOUT_MS: timeoutMs,
+      getRuntime: () => ({
+        openCodePort: upstreamPort,
+        openCodeBaseUrl: externalBaseUrl,
+        isOpenCodeReady: true,
+        openCodeNotReadySince: 0,
+        isRestartingOpenCode: false,
+      }),
+      getOpenCodeAuthHeaders: () => ({}),
+      buildOpenCodeUrl: (requestPath) => `${externalBaseUrl}${requestPath}`,
+      ensureOpenCodeApiPrefix: () => {},
+    });
+    proxyServer = await listen(app);
+    const proxyPort = proxyServer.address().port;
+
+    proxyServer.prependListener('request', (req) => { proxyRequestSocket = req.socket; });
+    const deadlineSpy = vi.spyOn(globalThis, 'setTimeout');
+    const socketTimeoutSpy = vi.spyOn(net.Socket.prototype, 'setTimeout');
+    const outgoingTimeoutSpy = vi.spyOn(http.ClientRequest.prototype, 'setTimeout');
+    const response = await new Promise((resolve, reject) => {
+      http.get(`http://127.0.0.1:${proxyPort}/api/slow`, (res) => {
+        const chunks = [];
+        res.on('data', (chunk) => chunks.push(chunk));
+        res.on('end', () => resolve({ status: res.statusCode, body: JSON.parse(Buffer.concat(chunks).toString()) }));
+        res.on('error', reject);
+      }).on('error', reject);
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({ ok: true });
+    const deadlineDelays = deadlineSpy.mock.calls.map(([, delay]) => delay);
+    expect(deadlineDelays).not.toContain(240000);
+    if (timeoutMs === 0) {
+      expect(deadlineDelays).not.toContain(0);
+      expect(socketTimeoutCalls.filter(([delay]) => delay > 0)).toEqual([]);
+      expect(outgoingTimeoutSpy).not.toHaveBeenCalled();
+    } else {
+      expect(deadlineDelays).toContain(timeoutMs);
+      expect(socketTimeoutCalls).toContainEqual([timeoutMs]);
+      expect(outgoingTimeoutSpy).toHaveBeenCalledWith(timeoutMs, expect.any(Function));
+    }
+  }, 30_000);
+
+  it.each([0, 5000])('closes upstream before headers when the client disconnects with a %i ms timeout', async (timeoutMs) => {
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     const upstream = express();
     let markUpstreamReceived;
     const upstreamReceived = new Promise((resolve) => {
       markUpstreamReceived = resolve;
     });
-    upstream.get('/api/hang', () => {
+    let upstreamClosed = false;
+    upstream.post('/api/hang', express.json(), (req, res) => {
+      expect(req.complete).toBe(true);
+      expect(req.body).toEqual({ prompt: 'hello' });
+      res.once('close', () => { upstreamClosed = true; });
       markUpstreamReceived();
     });
     upstreamServer = await listen(upstream);
@@ -1221,7 +1288,7 @@ describe('OpenCode proxy SSE forwarding', () => {
       os: {},
       path,
       OPEN_CODE_READY_GRACE_MS: 0,
-      LONG_REQUEST_TIMEOUT_MS: 5000,
+      LONG_REQUEST_TIMEOUT_MS: timeoutMs,
       getRuntime: () => ({
         openCodePort: upstreamPort,
         openCodeBaseUrl: externalBaseUrl,
@@ -1238,13 +1305,20 @@ describe('OpenCode proxy SSE forwarding', () => {
 
     const controller = new AbortController();
     const fetchPromise = fetch(`http://127.0.0.1:${proxyPort}/api/hang`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ prompt: 'hello' }),
       signal: controller.signal,
     }).catch(() => {});
 
     await upstreamReceived;
     controller.abort();
     await fetchPromise;
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    try {
+      await vi.waitFor(() => expect(upstreamClosed).toBe(true));
+    } finally {
+      upstreamServer.closeAllConnections();
+    }
 
     const proxyErrorLogs = errorSpy.mock.calls
       .map((call) => call.join(' '))

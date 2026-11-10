@@ -5,9 +5,14 @@ import path from 'node:path';
 import { constants as fsConstants } from 'node:fs';
 import { withSourceControlFileLock } from '../source-control/file-lock.js';
 import { isProviderId } from '../source-control/provider-id.js';
+import { mapLimited } from '../shared/map-limited.js';
 
 const VERSION = 1;
 const DEFAULT_MAX_RECORDS = 512;
+// Each identity read starts several Git processes.
+const LISTING_IDENTITY_CONCURRENCY = 4;
+// Git refuses a `.git` file above this size.
+const MAX_GITFILE_BYTES = 1024 * 1024;
 const isIdentifier = (value) => isString(value) && value.length > 0 && value.length <= 512
   && value.trim() === value && !/[\0\r\n]/.test(value);
 const exactKeys = (value, keys) => {
@@ -68,6 +73,48 @@ const parseState = (value, maxRecords) => {
   return Object.freeze({ version: VERSION, records: Object.freeze(records) });
 };
 
+const emptyState = () => Object.freeze({ version: VERSION, records: Object.freeze([]) });
+
+const readProvenanceState = async (filePath, fsImpl, maxRecords) => {
+  let handle;
+  try {
+    handle = await fsImpl.open(filePath, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
+  } catch (error) {
+    if (error?.code === 'ENOENT') return emptyState();
+    throw error?.code === 'ELOOP' ? invalidStore() : error;
+  }
+  try {
+    const stats = await handle.stat();
+    if (!stats.isFile() || (process.platform !== 'win32' && (stats.mode & 0o077) !== 0)) throw invalidStore();
+    return parseState(JSON.parse(await handle.readFile('utf8')), maxRecords);
+  } catch (error) {
+    if (error?.code === 'CONTRIBUTOR_PROVENANCE_STORE_INVALID') throw error;
+    throw invalidStore();
+  } finally {
+    await handle.close();
+  }
+};
+
+/**
+ * Whether the store holds a contributor fork for this git directory, for the
+ * VS Code host, which reads the server's file without its repository identity
+ * resolver: each record's own `repositoryId` rebuilds the id it was stored
+ * under. Writes replace the file by rename, so this read takes no lock. An
+ * unreadable store rejects: the caller cannot tell and must not run its code.
+ */
+export const isContributorForkGitDirectory = async ({
+  filePath,
+  gitDirectory,
+  fsImpl = fs,
+  maxRecords = DEFAULT_MAX_RECORDS,
+}) => {
+  const state = await readProvenanceState(filePath, fsImpl, maxRecords);
+  const canonicalGitDirectory = await fsImpl.realpath(gitDirectory);
+  const stats = await fsImpl.stat(canonicalGitDirectory);
+  return state.records.some((record) => record.provenance !== null
+    && record.worktreeId === worktreeIdFor(record.repositoryId, canonicalGitDirectory, stats));
+};
+
 export function createContributorProvenanceStore({
   filePath,
   resolveRepositoryIdentity,
@@ -89,26 +136,7 @@ export function createContributorProvenanceStore({
     writes = next.then(() => undefined, () => undefined);
     return next;
   };
-  const emptyState = () => Object.freeze({ version: VERSION, records: Object.freeze([]) });
-  const readState = async () => {
-    let handle;
-    try {
-      handle = await fsImpl.open(filePath, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
-    } catch (error) {
-      if (error?.code === 'ENOENT') return emptyState();
-      throw error?.code === 'ELOOP' ? invalidStore() : error;
-    }
-    try {
-      const stats = await handle.stat();
-      if (!stats.isFile() || (process.platform !== 'win32' && (stats.mode & 0o077) !== 0)) throw invalidStore();
-      return parseState(JSON.parse(await handle.readFile('utf8')), maxRecords);
-    } catch (error) {
-      if (error?.code === 'CONTRIBUTOR_PROVENANCE_STORE_INVALID') throw error;
-      throw invalidStore();
-    } finally {
-      await handle.close();
-    }
-  };
+  const readState = () => readProvenanceState(filePath, fsImpl, maxRecords);
   const writeState = async (state) => {
     await fsImpl.mkdir(path.dirname(filePath), { recursive: true });
     const temporary = `${filePath}.${crypto.randomUUID()}.tmp`;
@@ -124,13 +152,20 @@ export function createContributorProvenanceStore({
     }
   };
   const resolveIdentity = async (directory) => {
-    const [repository, gitPaths] = await Promise.all([
-      resolveRepositoryIdentity(directory), resolveGitPaths(directory),
-    ]);
-    if (!repository?.supported || !isIdentifier(repository.repositoryId) || !gitPaths?.supported || gitPaths.bare) {
+    // A resolver that answers the Git directory too saves the second
+    // `rev-parse` this store would otherwise run for the same directory
+    // (#6084). Length and absoluteness are checked below like any other path.
+    const repository = await resolveRepositoryIdentity(directory);
+    if (!repository?.supported || !isIdentifier(repository.repositoryId) || repository.bare === true) {
       throw invalidStore();
     }
-    const gitDirectory = await fsImpl.realpath(gitPaths.gitDirectory);
+    const gitDirectoryPath = isString(repository.gitDirectory)
+      ? repository.gitDirectory
+      : await resolveGitPaths(directory)
+        .then((gitPaths) => (gitPaths?.supported && !gitPaths.bare ? gitPaths.gitDirectory : null))
+        .catch(() => null);
+    if (!isString(gitDirectoryPath) || !path.isAbsolute(gitDirectoryPath)) throw invalidStore();
+    const gitDirectory = await fsImpl.realpath(gitDirectoryPath);
     const stats = await fsImpl.stat(gitDirectory);
     if (!stats.isDirectory()) throw invalidStore();
     return { worktreeId: worktreeIdFor(repository.repositoryId, gitDirectory, stats), repositoryId: repository.repositoryId, gitDirectory };
@@ -146,6 +181,39 @@ export function createContributorProvenanceStore({
       return error?.code === 'ENOENT' || error?.code === 'ENOTDIR';
     }
   };
+  // Asks for one byte past the size stat saw: a file that grew since reads as
+  // null, and the read never takes more than that size.
+  const readGitfile = async (entry, size) => {
+    const handle = await fsImpl.open(entry, fsConstants.O_RDONLY);
+    try {
+      const bytes = Buffer.alloc(size + 1);
+      const { bytesRead } = await handle.read(bytes, 0, bytes.length, 0);
+      return bytesRead > size ? null : bytes.toString('utf8', 0, bytesRead);
+    } finally {
+      await handle.close();
+    }
+  };
+  // The Git directory a worktree's own `.git` entry names: the entry itself,
+  // or the target of a regular `.git` file, read the way Git reads it: after
+  // the exact `gitdir: ` prefix, up to trailing line breaks. A relative target
+  // is joined without collapsing `..`, so realpath walks it through symlinks
+  // as Git does. Null when the entry is missing, neither of those, or larger
+  // than Git accepts. Reading it starts no Git process.
+  const dotGitDirectory = async (directory) => {
+    const entry = path.join(directory, '.git');
+    try {
+      const stats = await fsImpl.stat(entry);
+      if (stats.isDirectory()) return await fsImpl.realpath(entry);
+      if (!stats.isFile() || stats.size > MAX_GITFILE_BYTES) return null;
+      const contents = await readGitfile(entry, stats.size);
+      if (!contents?.startsWith('gitdir: ')) return null;
+      const target = contents.slice('gitdir: '.length).replace(/[\r\n]+$/, '');
+      if (!target) return null;
+      return await fsImpl.realpath(path.isAbsolute(target) ? target : `${directory}${path.sep}${target}`);
+    } catch {
+      return null;
+    }
+  };
   const recordForIdentity = (record, identity) => {
     if (!record) return { ...identity, revision: 0, provenance: null };
     if (record.repositoryId !== identity.repositoryId) throw invalidStore();
@@ -159,15 +227,34 @@ export function createContributorProvenanceStore({
   const readMany = (directories) => {
     if (!Array.isArray(directories) || directories.length > maxRecords
       || directories.some((directory) => !isString(directory) || !directory)) return Promise.reject(invalidStore());
-    return enqueue(async () => {
-      const [state, identities] = await Promise.all([
-        readState(),
-        // A listing entry whose git directory no longer resolves (a worktree
-        // deleted outside git, a bare repository root, a broken .git link)
-        // has no identity to look up. It reads as no provenance rather than
-        // failing the whole listing; action-time reads stay strict.
-        Promise.all(directories.map((directory) => resolveIdentity(directory).catch(() => null))),
-      ]);
+    // The lock covers only the snapshot: a long listing must not hold off a
+    // compareAndSwap in another process while it resolves identities.
+    return enqueue(readState).then(async (state) => {
+      // Only a contributor-fork record can mark a listed worktree, so a store
+      // without one answers every entry as no provenance without asking Git.
+      const marking = state.records.filter((record) => record.provenance !== null);
+      if (marking.length === 0) {
+        return directories.map(() => ({ revision: 0, provenance: null }));
+      }
+      // A marking record names its worktree's Git directory, so a listed
+      // worktree whose `.git` entry names another one cannot match; the
+      // identity read still decides for the rest, including a worktree whose
+      // `.git` entry cannot be read this way. A record written before
+      // `gitDirectory` existed names none, and then every listed identity is read.
+      const markedGitDirectories = marking.every((record) => record.gitDirectory)
+        ? new Set(marking.map((record) => record.gitDirectory))
+        : null;
+      // A listing entry whose git directory no longer resolves (a worktree
+      // deleted outside git, a bare repository root, a broken .git link)
+      // has no identity to look up. It reads as no provenance rather than
+      // failing the whole listing; action-time reads stay strict.
+      const identities = await mapLimited(directories, LISTING_IDENTITY_CONCURRENCY, async (directory) => {
+        if (markedGitDirectories) {
+          const gitDirectory = await dotGitDirectory(directory);
+          if (gitDirectory && !markedGitDirectories.has(gitDirectory)) return null;
+        }
+        return resolveIdentity(directory).catch(() => null);
+      });
       const recordsByWorktree = new Map(state.records.map((record) => [record.worktreeId, record]));
       return identities.map((identity) => (identity
         ? recordForIdentity(recordsByWorktree.get(identity.worktreeId), identity)

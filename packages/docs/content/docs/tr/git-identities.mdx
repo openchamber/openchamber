@@ -28,6 +28,10 @@ Gerrit'te hesap kimliği Git'e Gerrit kullanıcı adınız ve bağladığınız 
 
 Bir kimliği uygulamak, onu o repo'nun **local** git config'ine yazar. Yalnızca o repo'yu etkiler, global ayarınız olduğu gibi kalır. Terminaldeki Git ve agent'ın shell'i de onu kullanır. **Sistem kimliği**, OpenChamber'ın yazdıklarını kaldırır, böylece yeniden sizin kendi Git yapılandırmanız geçerli olur.
 
+## SSH anahtar parolaları
+
+Şifrelenmiş bir SSH anahtarı için `~/.ssh` içinde arama yapmadan önce isteğe bağlı parolayı girin. Ardından parmak izini doğrulayıp anahtarı ekleyin. OpenChamber anahtarı şifreli tutar ve parolayı OpenCode kimlik bilgisi deposuna kaydeder. Kayıtlı parolalar yalnızca uygulamadaki Git işlemlerinde çalışır. Terminalde veya ajanlar tarafından çalıştırılan Git komutları bunları almaz. Bu nedenle şifrelenmiş bir yönetilen anahtar bu yoldan kimlik doğrulayamaz.
+
 ## İlgili
 
 - [Git İş Akışları](/git/) — ayarladığınız kimlikle commit edin

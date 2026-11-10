@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { Icon } from '@/components/icon/Icon';
 import { OpenChamberLogo } from '@/components/ui/OpenChamberLogo';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/lib/i18n';
 import {
   fetchDevServers,
@@ -21,6 +22,7 @@ import { isSpaceDirectory } from '@/lib/spaces/space-route';
 import { useSpaceMarkLabel } from '@/lib/spaces/space-mark';
 import { useSpaceDirectoryStopped } from '@/lib/spaces/spaces-store';
 import { hideDevServerPort, showHiddenDevServerPorts, useHiddenDevServerPorts } from '@/lib/browser/hiddenDevServers';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 
 /**
  * What the panel shows before anything is loaded.
@@ -154,7 +156,7 @@ export const BrowserEmptyState: React.FC<{
               {t('contextPanel.browser.devServers.remoteOnly')}
             </span>
           ) : null}
-          <div className="flex min-h-0 flex-col gap-1 overflow-y-auto pe-0.5">
+          <ScrollableOverlay outerClassName="min-h-0" className="flex flex-col gap-1 pe-0.5" disableHorizontal>
             {visibleCandidates.map((candidate) => (
               <div key={candidate.port} className="group/server flex shrink-0 items-center gap-1">
                 <Button
@@ -209,21 +211,25 @@ export const BrowserEmptyState: React.FC<{
                   ) : null}
                 </Button>
                 {candidate.announced ? null : (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    className="size-7 shrink-0 text-muted-foreground opacity-0 group-hover/server:opacity-100 focus-visible:opacity-100"
-                    onClick={() => hideDevServerPort(candidate.port)}
-                    aria-label={t('contextPanel.browser.devServers.hide', { port: candidate.port })}
-                    title={t('contextPanel.browser.devServers.hide', { port: candidate.port })}
-                  >
-                    <Icon name="eye-off" className="size-3.5" aria-hidden="true" />
-                  </Button>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="size-7 shrink-0 text-muted-foreground opacity-0 group-hover/server:opacity-100 focus-visible:opacity-100"
+                        onClick={() => hideDevServerPort(candidate.port)}
+                        aria-label={t('contextPanel.browser.devServers.hide', { port: candidate.port })}
+                      >
+                        <Icon name="eye-off" className="size-3.5" aria-hidden="true" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent sideOffset={6}>{t('contextPanel.browser.devServers.hide', { port: candidate.port })}</TooltipContent>
+                  </Tooltip>
                 )}
               </div>
             ))}
-          </div>
+          </ScrollableOverlay>
           {hiddenCount > 0 ? (
             <Button
               type="button"

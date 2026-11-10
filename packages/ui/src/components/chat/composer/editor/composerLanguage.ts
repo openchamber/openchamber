@@ -21,6 +21,7 @@ import { getFileTypeIconHref } from '@/lib/fileTypeIcons';
 import { findAttachmentCitationRanges } from '../../attachmentCitations';
 import { resolveHighlightSegments, DEFAULT_HIGHLIGHT_CLASS, type HighlightRange } from '../../composerHighlight';
 import { findSessionLinks, sessionLinkKey } from '@/lib/sessionLinks';
+import { findWebLinks } from '../referenceLinks';
 import { filterKnownTokens, scanPrefixTokens } from '../language/prefixTokens';
 import { tokenizeComposer, tokenizeMentions, type ComposerLanguageContext } from '../language/tokenize';
 
@@ -87,6 +88,8 @@ function technicalIsolates(ranges: HighlightRange[]): DecorationSet {
     return builder.finish();
 }
 
+const DISMISS_NAME_KEY = 'mentionName';
+
 /**
  * A reference drawn as the same chip the sent message shows: an attachment
  * citation (`[name.png]`) or a skill (`$name`). The document keeps the source
@@ -94,18 +97,29 @@ function technicalIsolates(ranges: HighlightRange[]): DecorationSet {
  * the caret steps over the chip and one Backspace removes it whole.
  */
 class ReferenceChipWidget extends WidgetType {
-    constructor(readonly label: string, readonly title: string, readonly iconHref: string) {
+    constructor(
+        readonly label: string,
+        readonly title: string,
+        readonly iconHref: string,
+        readonly isSessionLink = false,
+        /** The mention name a double click dismisses; absent on other chips. */
+        readonly dismissName?: string,
+    ) {
         super();
     }
 
     eq(other: ReferenceChipWidget): boolean {
-        return other.label === this.label && other.title === this.title && other.iconHref === this.iconHref;
+        return other.label === this.label && other.title === this.title && other.iconHref === this.iconHref
+            && other.isSessionLink === this.isSessionLink && other.dismissName === this.dismissName;
     }
 
     toDOM(view: EditorView): HTMLElement {
         const doc = view.dom.ownerDocument;
         const chip = doc.createElement('span');
         chip.className = INLINE_REFERENCE_CHIP_CLASS;
+        // The shared chip has 1px inline margins outside its max-width.
+        if (this.isSessionLink) chip.style.maxWidth = 'calc(100% - 2px)';
+        if (this.dismissName !== undefined) chip.dataset[DISMISS_NAME_KEY] = this.dismissName;
         chip.title = this.title;
         const svg = doc.createElementNS('http://www.w3.org/2000/svg', 'svg');
         svg.setAttribute('class', 'block size-[1.1em] shrink-0');
@@ -172,14 +186,17 @@ function referenceChips(text: string, context: ComposerLanguageContext, typingEn
     }
 
     if (text.includes('@')) {
+        const hint = context.mentionDismissal?.hint;
+        const titleOf = (name: string) => (hint ? `@${name}\n${hint}` : `@${name}`);
+        const dismissable = (name: string) => (context.mentionDismissal ? name : undefined);
         for (const mention of tokenizeMentions(text, context)) {
             const name = text.slice(mention.start + 1, mention.end);
             if (mention.kind === 'agent') {
-                addToken(mention.start, mention.end, new ReferenceChipWidget(name, `@${name}`, AGENT_CHIP_ICON_HREF));
+                addToken(mention.start, mention.end, new ReferenceChipWidget(name, titleOf(name), AGENT_CHIP_ICON_HREF, false, dismissable(name.toLowerCase())));
                 continue;
             }
             const iconHref = /[\\/]$/.test(name) ? FOLDER_CHIP_ICON_HREF : getFileTypeIconHref(name, { themeVariant });
-            addToken(mention.start, mention.end, new ReferenceChipWidget(basename(name), `@${name}`, iconHref));
+            addToken(mention.start, mention.end, new ReferenceChipWidget(basename(name), titleOf(name), iconHref, false, dismissable(name)));
         }
     }
 
@@ -197,7 +214,15 @@ function referenceChips(text: string, context: ComposerLanguageContext, typingEn
     if (context.sessionLinkChips?.size) {
         for (const range of findSessionLinks(text, context.sessionLinkOrigins ?? [])) {
             const chip = context.sessionLinkChips.get(sessionLinkKey(range.target));
-            if (chip) chips.push({ start: range.start, end: range.end, widget: new ReferenceChipWidget(chip.label, chip.title, chip.iconHref) });
+            if (chip) chips.push({ start: range.start, end: range.end, widget: new ReferenceChipWidget(chip.label, chip.title, chip.iconHref, true) });
+        }
+    }
+
+    // So is a linked issue, change request or tracker item once read.
+    if (context.referenceLinkChips?.size) {
+        for (const range of findWebLinks(text)) {
+            const chip = context.referenceLinkChips.get(range.link);
+            if (chip) chips.push({ start: range.start, end: range.end, widget: new ReferenceChipWidget(chip.label, chip.title, chip.iconHref, true) });
         }
     }
 
@@ -283,6 +308,29 @@ const decorationField = StateField.define<DecorationState>({
     ],
 });
 
+/** A double click on a mention chip gives its text back, caret at the end. */
+const mentionChipDismissal = EditorView.domEventHandlers({
+    dblclick(event, view) {
+        const context = view.state.field(languageContextField);
+        const chip = event.target instanceof Element ? event.target.closest<HTMLElement>('[data-mention-name]') : null;
+        const name = chip?.dataset[DISMISS_NAME_KEY];
+        if (!context.mentionDismissal || !chip || name === undefined) return false;
+
+        const start = view.posAtDOM(chip);
+        let end: number | null = null;
+        view.state.field(decorationField).chips.between(start, start, (from, to) => {
+            if (from === start) end = to;
+        });
+        if (end === null) return false;
+
+        context.mentionDismissal.dismiss(name);
+        view.dispatch({ selection: { anchor: end }, effects: setLanguageContext.of(context) });
+        view.focus();
+        event.preventDefault();
+        return true;
+    },
+});
+
 /**
  * The composer language extension. Install once; feed it registry updates with
  * `setLanguageContext`.
@@ -291,5 +339,6 @@ export function composerLanguage(initial: ComposerLanguageContext = EMPTY_CONTEX
     return [
         languageContextField.init(() => initial),
         decorationField,
+        mentionChipDismissal,
     ];
 }

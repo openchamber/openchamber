@@ -166,7 +166,7 @@ stay apart. Number-only sources keep `pr:<number>` and read the repository behin
 the bound primary remote. A named repository is honoured only inside the bound
 repository's network, the repository and the upstream it was forked from, which
 is what the bound pull request list reads with the same account. A name outside
-that network fails with `409 PULL_REQUEST_REPOSITORY_MISMATCH` before any GitHub
+that network, in a source without `linked: true`, fails with `409 PULL_REQUEST_REPOSITORY_MISMATCH` before any GitHub
 request. The PR panel forwards the project of the pull request it shows.
 
 `GET /api/walkthrough/pr-diff` accepts `directory`, a JSON `source` restricted

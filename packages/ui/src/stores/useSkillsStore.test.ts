@@ -61,7 +61,7 @@ mock.module('./utils/safeStorage', () => ({
   }),
 }));
 
-const { invalidateSkillsLoadCache, selectAvailableSkillsForDirectory, useSkillsStore } = await import('./useSkillsStore');
+const { invalidateSkillsLoadCache, selectAvailableSkillsForDirectory, selectSkillsLoadedForDirectory, useSkillsStore } = await import('./useSkillsStore');
 
 describe('useSkillsStore directory resolution', () => {
   beforeEach(() => {
@@ -90,6 +90,20 @@ describe('useSkillsStore directory resolution', () => {
       isLoading: false,
       skillDraft: null,
     });
+  });
+
+  test('a project counts as loaded once its skills are read, even when it has none or the read fails', async () => {
+    const loaded = (directory: string) => selectSkillsLoadedForDirectory(useSkillsStore.getState(), directory);
+    expect(loaded(activeProjectPath)).toBe(false);
+
+    runtimeFetchImpl = async () => new Response(JSON.stringify({ skills: [] }), { headers: { 'Content-Type': 'application/json' } });
+    await useSkillsStore.getState().loadSkills(activeProjectPath);
+    expect(selectAvailableSkillsForDirectory(useSkillsStore.getState(), activeProjectPath)).toEqual([]);
+    expect(loaded(activeProjectPath)).toBe(true);
+
+    runtimeFetchImpl = async () => new Response('{}', { status: 500 });
+    expect(await useSkillsStore.getState().loadSkills('/workspace/other-project')).toBe(false);
+    expect(loaded('/workspace/other-project')).toBe(true);
   });
 
   test('loading another project leaves the active project\'s skills alone', async () => {

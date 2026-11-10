@@ -24,8 +24,9 @@ export const useGuestIconSource = (src: string): string | undefined => {
   }, [src]);
   const guestId = assetPath?.split('/')[3];
   const version = useGuestsStore((state) => state.guests.find((guest) => guest.id === guestId)?.version);
+  const revision = useGuestsStore((state) => state.guests.find((guest) => guest.id === guestId)?.revision);
   const relay = getActiveRelayTunnel();
-  const key = JSON.stringify([runtimeKey, assetPath, version]);
+  const key = JSON.stringify([runtimeKey, assetPath, version, revision]);
   React.useEffect(() => subscribeRuntimeEndpointChanged((detail) => setRuntimeKey(detail.runtimeKey)), []);
 
   React.useEffect(() => {

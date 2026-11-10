@@ -31,6 +31,7 @@ export const BUILTIN_STARTERS: readonly BuiltInStarter[] = [
     { name: 'schedule-task', icon: 'calendar-schedule', labelKey: 'chat.draftPresets.scheduleTask.label', command: '/schedule-task' },
     { name: 'debug', icon: 'bug', labelKey: 'chat.draftPresets.debug.label', command: '/debug' },
     { name: 'review', icon: 'search-eye', labelKey: 'chat.draftPresets.review.label', command: '/workspace-review' },
+    { name: 'new-extension', icon: 'puzzle', labelKey: 'chat.draftPresets.newExtension.label', command: '/new-extension' },
 ];
 
 const BUILTIN_BY_NAME = new Map<string, BuiltInStarter>(BUILTIN_STARTERS.map((s) => [s.name, s]));

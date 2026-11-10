@@ -1,5 +1,11 @@
 # Retained context views
 
+Archive session rows apply the shared session-admission directory rule before
+search, counts and grouping. Unregistered host destinations stay hidden without
+removing their records from the global archive cache. Managed chats, live spaces
+and catalogued read-only space archives retain their existing ownership. Opening
+an archive row still passes through the shared session-selection gate.
+
 `ContextPanel` keeps file, diff and walkthrough views mounted to preserve
 navigation, expanded sections and editor state. Its `visible` prop combines
 the panel's open state with the selected tab. Hiding via CSS alone does not
@@ -43,6 +49,23 @@ wherever the pointer is, and while it is held at the editor's top or bottom
 edge, or past it, the editor scrolls and the range follows. The click that
 ends a drag lands on whatever the pointer ended over, so each view's
 click-outside handler skips it (`isDragReleaseClick`) and the range stays.
+
+### Why a comment's annotation keeps one DOM node
+
+Pierre keys its annotation wrappers by index in the list, so an annotation that comes or goes rebuilds every one after it. A card is portalled into its annotation's node, so a new node would unmount the card and drop its height for a frame, which moves the diff and the scroll. `renderAnnotation` hands back the same node per annotation id, and the open comment field goes last in the list, so opening or closing it shifts nothing.
+
+### Why Pierre owns diff line-number selection
+
+`PierreDiffViewer` receives number-column selections through Pierre's
+`onLineSelected`, including clearing a single line, Shift+click ranges and
+touch taps. A separate click listener would run after Pierre's pointerup,
+reopen a cleared comment editor and replace a range with the clicked line.
+Pierre toggles a single selection by number without checking its side. A
+capture-phase pointerdown clears that selection before a same-number press
+on the other side, so Pierre starts a normal selection there. Shift+press
+and unfinished comments keep their existing paths.
+The gutter "+" keeps its own `onGutterUtilityClick` path. An unfinished
+comment still prevents an accidental deselection from closing its editor.
 
 ### Why the window follows the drag and not the gutter
 
@@ -122,8 +145,17 @@ is one `dir/` row in the parent's status; its diff read answers
 and lists its changed files, each diff read from that repository when the row
 opens, read-only: no stage, discard or hunk actions. "Open as project" adds the
 folder as a project and opens a new session draft in it, where the Git panel
-commits. The listing reads again when the entry's `contentRevision` moves.
-Mobile Changes still shows only the note for such a row.
+commits. A repository row inside that listing keeps the separate-repository
+note without recursively reading its changes. The listing reads again when
+the entry's `contentRevision` moves. Mobile Changes still shows
+only the note for such a row.
+
+Git, Changes, Walkthrough, pull requests and mobile Changes use the shared
+repository picker. Selection, discovery refresh and persistence belong to
+[`useGitStore`](../../stores/DOCUMENTATION.md#usegitstorets) and
+`useNestedGitDirectory`; diff rows do not change that selection. A changed-file
+chip falling back to Changed does (*Last turn scope*), since the chip names a
+file and only its own repository can show it.
 
 ## Find in changes
 
@@ -210,6 +242,34 @@ one attribute per moved
 control; the menu reads them when it opens and shows a check beside each view
 option that is on.
 
+### Why the changes list shares one tooltip and not a Tooltip per button
+
+The changes list is not virtualized below 1000 rows and keeps its stage,
+unstage and folder buttons mounted, so a Tooltip per button would mount
+thousands of them. `DelegatedTooltip` (`ui/row-tooltip.tsx`) listens on the
+list and shows the `data-row-tooltip` label of the button under the pointer.
+Its state stays in its own component because a re-render of `ChangesPanel`
+re-renders every row.
+
+## Files toolbar
+
+The Files editor's row (`renderFileToolbar`, an `ActionToolbar`) has the actions
+the open file's type allows, the same in every mode. The row itself keeps save
+state, the mode toggle (and HTML annotation), find, comment on the file and
+full screen; go to line, symbols, line wrap, read aloud, the file's own actions
+(open in app, copy contents, copy path, download) and auto-save live in "More
+actions". With every action on the row it ran to a dozen icons, most of them
+rarely used (maintainer, 2026-10-28). A tool the current mode cannot run opens
+the source editor first: go to line from a preview switches to the editor and
+opens the field there. Find in a Markdown preview searches the preview. A
+read-only code file has no editor, so it gets no source tools. Go to line and
+symbols close when a preview replaces the editor.
+
+Save state keeps one slot as wide as its widest text, also in previews, so
+saving moves nothing beside it; a canvas or draw.io preview puts its own save
+button there. HTML annotation
+from the source switches to the preview and starts once the page has loaded.
+
 ## Large text files
 
 The 200,000-character threshold selects an initial code preview, not read-only
@@ -253,6 +313,51 @@ unmirrored arrow up inside the LTR block.
 ### Why a bounded flex body and not percentage max-height alone
 
 A percentage max-height inside auto-height wrappers let the inner viewport grow to the entire virtual list. The Files pane then scrolled outside the virtualizer, which mounted every row and froze the renderer on large JSON. The flex layout keeps the virtualizer's viewport bounded without changing file limits, preview preferences or saved tabs.
+
+## Last turn scope
+
+`useLastTurnDiff` reads the last turn's per-file diff from OpenCode
+(`GET /api/session/:id/diff`), which compares the turn's first and last step
+snapshots. The answer moves when a step is added, when the newest step finishes
+(its end snapshot is recorded then) and when the session goes idle, so those
+three key the refetch. The desktop Diff view reads it in every scope while
+shown, so the scope picker's Last turn count is current before the user picks
+it; mobile Changes has no counts and reads it only in that scope. Outside the
+scope a running turn is not read, and its count shows as unknown until the
+turn ends. A failed read keeps its own error and retry, and another session's
+turn never shows while this one's loads.
+
+A changed-file chip under a reply opens Last turn, but the chip comes from the
+turn's tool calls and the scope from its snapshots, so they can disagree:
+snapshots are off, the project folder is no git repository (a repository nested
+in it still gets the edits), or a step took no snapshot. Each click therefore
+asks once (`pendingTurnDiffFile`, dropped when another session is on screen)
+whether the file is in the turn's diff. Until the list answers the session's
+current state the view shows loading; a failed read keeps its error and retry.
+A file that is there is expanded and scrolled to, on every click, since the
+chip's absolute path only matches the relative list through this request.
+A file that is not there opens Changed instead, in the repository holding the
+file, read afresh, expanded. A repository the picker drops again ends the
+attempt on the repository left on screen. Picking Last turn by hand asks
+nothing and stays there, empty or not. The phone's Changes surface
+(`apps/MobileChangesSurface.tsx`) answers the same way and opens the file's own
+diff screen, since it has no expanded list to scroll. VS Code has no Diff view
+panel: the chip reads the turn's diff once and opens the file's patch in the
+editor's own diff (`editor.openDiff` with `patch`; a file the turn deleted shows
+its old content against an empty side). A file the list does not hold opens as
+it is, and a failed read shows an error toast.
+
+### Why the click is a one-shot request and not derived from the tab
+
+A tab keeps its target across scope changes, so a tab opened from a chip and a
+tab where the person picked Last turn by hand look the same. Deriving the
+fallback from the tab would send that person back to Changed every time.
+
+### Why the count waits for the turn to end outside the scope
+
+A read of a running step makes OpenCode capture a fresh working-copy snapshot.
+Reading on every step only to keep a count current would cost one capture per
+step of every turn while the panel is open on another scope.
 
 ## Pull request comparisons
 
@@ -325,6 +430,10 @@ from a file scrolled far down, an editor under the header in the flow sat at
 the file's top, out of view. The trigger is always visible, like
 the header's other actions, and toggles the editor: a second click closes it
 unsaved, so an empty editor never stays stuck open.
+Files view takes the same comment from its toolbar, as a `file` draft beside
+its line comments. Its editor and cards sit between the toolbar and the
+scroller, so they stay on screen at any scroll; the CodeMirror line widgets
+filter those drafts out, and the fullscreen overlay shows them while it is open.
 Changes hands its PR source to walkthrough; walkthrough's Changes action opens
 PR mode with the shared selection. Picking a PR never generates a walkthrough.
 
@@ -415,6 +524,10 @@ joined, not repeated: a session's subsessions come back one by one, and each
 would start it. Deleting an archive for good deletes only its sessions still in
 the archive that no other archive of the project holds.
 
+A right-click on a desktop row opens a menu of three items named as in the
+sidebar: Copy session ID, Restore where the row offers it, and Delete. The
+session ID is otherwise reachable only by opening the session.
+
 The phone shows the same page in one column: the groups are a row of chips
 that scrolls sideways (hidden while searching, since a search spans them
 all), and a selected project's archived worktrees are tiles above its other
@@ -434,3 +547,40 @@ after it stops. The check runs on the live `exit` event and on a snapshot that
 reports `exited`, so a tab whose process ended while the panel was closed goes
 away when it is shown. VS Code has neither tabs nor the setting and keeps the
 exited terminal.
+
+In the desktop app Cmd/Ctrl+W closes the shown terminal tab the same way,
+without asking, so a command still running in it ends. It reaches the terminal
+through `lib/closeTabTarget.ts` when the terminal's zone was the place clicked
+or focused last among the surfaces with a tab to close.
+
+## A terminal that cannot connect
+
+The terminal socket (`lib/terminalApi.ts`) retries forever, 0.5 s doubling to
+8 s, and reports each failure as a `reconnecting` event with its attempt
+number. `TerminalView` covers the pane with "Terminal couldn't connect" and a
+Try again button once five attempts in a row have failed, about 8 s, and keeps
+it there until a snapshot arrives. Try again drops the subscription and opens a
+new one, which dials at once; its own failures start the count over without
+hiding the error.
+
+### Why a count of failed attempts and not the retry giving up
+
+The retry never gives up: after a server restart or a dropped network it has to
+come back on its own, so ending it would trade a blank pane for a dead one. A
+browser WebSocket also never sees the upgrade's 401 or 403, so a refused token
+cannot be told apart from a server that is down. Five attempts span a typical
+server restart, so a short outage shows nothing, and an outage that lasts shows
+the error while the retry goes on underneath.
+
+## Office documents in a diff
+
+`getFileDiff` and `getCommitFileDiff` return docx, xlsx, pptx, odt, ods and odp as
+two data URLs, the way images travel, because a text patch of a zip says nothing.
+`OfficeDocumentDiff` reads them in the app: a workbook lists changed cells, a
+text document goes through the regular viewer as its extracted text, so comments
+work there, and layout changes do not show. Branch and pull request comparisons
+ask for the two versions apart from their patches: `useGitComparison.fetchVersions`
+reads them from `GET /api/git/range-file-versions` or from the change request
+route with `binary=true`. A provider that ignores the flag, as an extension
+provider may, answers text that is no data URL, and the diff keeps the binary
+placeholder.

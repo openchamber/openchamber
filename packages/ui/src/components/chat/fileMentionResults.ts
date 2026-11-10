@@ -25,6 +25,35 @@ export const mentionServerQuery = (query: string): string => {
 };
 
 /**
+ * Names the server search a mention query needs: the same key means the same
+ * results. Null when the query needs none (no directory, nothing typed, or a
+ * space, which only a session title holds).
+ */
+export const mentionSearchKey = (
+  directory: string,
+  query: string,
+  options: { includeHidden: boolean; respectGitignore: boolean },
+): string | null => {
+  const serverQuery = mentionServerQuery(query);
+  if (!directory || !serverQuery || query.includes(' ')) {
+    return null;
+  }
+  return JSON.stringify([directory, serverQuery, options.includeHidden, options.respectGitignore]);
+};
+
+type MentionListState = 'rows' | 'loading' | 'empty';
+
+/**
+ * Rows while there are any to show, even the last query's while the next one
+ * searches; the one-line loading row only with nothing to show yet; "no
+ * matches" only once the current query's search has settled.
+ */
+export const mentionListState = (rowCount: number, pending: boolean): MentionListState => {
+  if (rowCount > 0) return 'rows';
+  return pending ? 'loading' : 'empty';
+};
+
+/**
  * Merge directory and file hits into one list ranked by match quality against
  * the relative path, letters in order like the server's own file search;
  * matches in the name rank above matches only across folders. Multi-token queries require every token to match the path, in any order.

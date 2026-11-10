@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test"
 import { createRuntimeOpencodeClient } from "./client"
 import { configureRuntimeUrlResolver, getRuntimeUrlResolver, setRuntimeUrlResolver } from "../runtime-url"
-import { getOpenCodeTrustSnapshot, settleOpenCodeTrust, subscribeOpenCodeTrust } from "../opencodeTrust"
+import { forgetOpenCodeTrustDeclines, getOpenCodeTrustSnapshot, isOpenCodeTrustPaused, requestOpenCodeTrust, settleOpenCodeTrust, subscribeOpenCodeTrust } from "../opencodeTrust"
 
 const previous = getRuntimeUrlResolver()
 beforeEach(() => {
@@ -66,6 +66,7 @@ describe("OpenCode folder trust in the client", () => {
       expect(calls).toEqual([
         "GET /api/agent",
         "GET /api/opencode/trust",
+        "GET /api/opencode/trust",
         "POST /api/opencode/trust",
         "GET /api/agent",
       ])
@@ -97,6 +98,153 @@ describe("OpenCode folder trust in the client", () => {
       await nextPrompt()
       await settleOpenCodeTrust("skip")
       expect(await create).toBe("refused")
+
+      // So is moving a session into it.
+      const move = client.session.move({ sessionID: "ses_1", directory }).catch(() => "refused")
+      await nextPrompt()
+      await settleOpenCodeTrust("skip")
+      expect(await move).toBe("refused")
+    } finally {
+      fetch.mockRestore()
+    }
+  })
+
+  test("asks once when identical worktrees wait for the same repository trust", async () => {
+    const directories = Array.from({ length: 6 }, (_, index) => `/repo/worktree-${index + 1}`)
+    const assessed = new Set<string>()
+    const prompts: string[] = []
+    let trusted = false
+    let savedAnswers = 0
+    let answerFollowingPrompts = false
+    let markAssessed: () => void
+    const allAssessed = new Promise<void>((resolve) => { markAssessed = resolve })
+    const fetch = spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const request = input instanceof Request ? input : new Request(input.toString(), init)
+      const url = new URL(request.url)
+      const directory = decodeURIComponent(request.headers.get("x-opencode-directory") ?? "")
+      if (url.pathname === "/api/opencode/trust") {
+        if (request.method === "POST") {
+          savedAnswers += 1
+          trusted = true
+          return assessment((await request.json()).directory, true)
+        }
+        const assessedDirectory = url.searchParams.get("directory") ?? ""
+        assessed.add(assessedDirectory)
+        if (assessed.size === directories.length) markAssessed()
+        return assessment(assessedDirectory, trusted)
+      }
+      return trusted ? Response.json({ data: [{ id: "build" }] }) : refusal(directory)
+    })
+    const unsubscribe = subscribeOpenCodeTrust(() => {
+      const prompt = getOpenCodeTrustSnapshot()
+      if (!prompt) return
+      prompts.push(prompt.directory)
+      if (answerFollowingPrompts) void settleOpenCodeTrust("trust")
+    })
+    try {
+      const pending = directories.map((directory) => createRuntimeOpencodeClient({
+        baseUrl: "https://trust.test/api", directory,
+      }).agent.list())
+      await allAssessed
+      await nextPrompt()
+      // Finish every unexpected duplicate too, so the regression fails on the
+      // observed prompt count instead of leaving requests waiting for a timer.
+      answerFollowingPrompts = true
+      expect(await settleOpenCodeTrust("trust")).toBe("saved")
+      expect(await Promise.all(pending)).toHaveLength(directories.length)
+      expect(prompts).toHaveLength(1)
+      expect(savedAnswers).toBe(1)
+    } finally {
+      unsubscribe()
+      fetch.mockRestore()
+    }
+  })
+
+  test("a declined folder stays paused until the user trusts it again", async () => {
+    const directory = "/repo/paused"
+    let trusted = false
+    const fetch = spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const request = input instanceof Request ? input : new Request(input.toString(), init)
+      const url = new URL(request.url)
+      if (url.pathname === "/api/opencode/trust") {
+        if (request.method === "POST") {
+          trusted = true
+          return assessment(directory, true)
+        }
+        return assessment(directory, trusted)
+      }
+      return trusted ? Response.json({ data: [] }) : refusal(directory)
+    })
+    try {
+      const client = createRuntimeOpencodeClient({ baseUrl: "https://trust.test/api", directory })
+      const first = client.agent.list().catch(() => "refused")
+      await nextPrompt()
+      await settleOpenCodeTrust("skip")
+      expect(await first).toBe("refused")
+      expect(isOpenCodeTrustPaused(directory)).toBe(true)
+
+      // Opening another folder forgets the decline but not the pause.
+      forgetOpenCodeTrustDeclines()
+      expect(isOpenCodeTrustPaused(directory)).toBe(true)
+
+      const resumed = requestOpenCodeTrust(directory, { deliberate: true })
+      await nextPrompt()
+      expect(await settleOpenCodeTrust("trust")).toBe("saved")
+      expect(await resumed).toBe(true)
+      expect(isOpenCodeTrustPaused(directory)).toBe(false)
+    } finally {
+      fetch.mockRestore()
+    }
+  })
+
+  test("a pause holds under the folder's own spelling and lifts when OpenCode answers for it", async () => {
+    // The app opened the folder through a symlink; the server names its real path.
+    const linked = "/link/repo"
+    const resolved = "/real/repo"
+    let trusted = false
+    const fetch = spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const request = input instanceof Request ? input : new Request(input.toString(), init)
+      const url = new URL(request.url)
+      if (url.pathname === "/api/opencode/trust") return assessment(resolved, trusted)
+      // Session lists pass the gate for a paused folder.
+      if (url.pathname === "/api/session") return Response.json({ data: [] })
+      return trusted ? Response.json({ data: [] }) : refusal(resolved)
+    })
+    try {
+      const client = createRuntimeOpencodeClient({ baseUrl: "https://trust.test/api", directory: linked })
+      const first = client.agent.list().catch(() => "refused")
+      await nextPrompt()
+      await settleOpenCodeTrust("skip")
+      expect(await first).toBe("refused")
+      expect(isOpenCodeTrustPaused(linked)).toBe(true)
+      expect(isOpenCodeTrustPaused(resolved)).toBe(true)
+
+      await client.session.list().catch(() => undefined)
+      expect(isOpenCodeTrustPaused(linked)).toBe(true)
+
+      // Trusted in another window: the next catalog read goes through.
+      trusted = true
+      await client.agent.list()
+      expect(isOpenCodeTrustPaused(linked)).toBe(false)
+      expect(isOpenCodeTrustPaused(resolved)).toBe(false)
+    } finally {
+      fetch.mockRestore()
+    }
+  })
+
+  test("callers that share one prompt each keep their spelling paused", async () => {
+    const resolved = "/real/shared"
+    const linked = "/link/shared"
+    const fetch = spyOn(globalThis, "fetch").mockImplementation(async () => assessment(resolved, false))
+    try {
+      const first = requestOpenCodeTrust(resolved, { deliberate: false })
+      const joined = requestOpenCodeTrust(resolved, { deliberate: false, alias: linked })
+      await nextPrompt()
+      await settleOpenCodeTrust("skip")
+      expect(await first).toBe(false)
+      expect(await joined).toBe(false)
+      expect(isOpenCodeTrustPaused(resolved)).toBe(true)
+      expect(isOpenCodeTrustPaused(linked)).toBe(true)
     } finally {
       fetch.mockRestore()
     }

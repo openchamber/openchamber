@@ -160,16 +160,62 @@ describe('opening a page before any view exists', () => {
     expect(posted[0]?.data).toEqual({ url: 'https://example.test', opened: true, tabId: 'tab-new', drivable: false });
   });
 
-  test('on a driving host, an open reports that the page can be driven', async () => {
+  test('on a driving host, an open whose view never appears is drivable and not settled', async () => {
     // Only an Electron renderer can drive the page it shows.
     Object.defineProperty(globalThis, 'window', { value: { __OPENCHAMBER_ELECTRON__: {} }, configurable: true, writable: true });
     cleanups.push(() => Reflect.deleteProperty(globalThis, 'window'));
     cleanups.push(registerBrowserOpener(() => 'tab-new'));
 
     emitOpen({ url: 'https://example.test' });
-    await wait(20);
+    // Past the client's own attach deadline.
+    await wait(2_400);
 
-    expect(posted[0]?.data).toEqual({ url: 'https://example.test', opened: true, tabId: 'tab-new', drivable: true });
+    expect(posted[0]?.data).toEqual({ url: 'https://example.test', opened: true, tabId: 'tab-new', settled: false, drivable: true });
+  });
+
+  test('on a driving host, an open waits for the new view to say how its page came out', async () => {
+    Object.defineProperty(globalThis, 'window', { value: { __OPENCHAMBER_ELECTRON__: {} }, configurable: true, writable: true });
+    cleanups.push(() => Reflect.deleteProperty(globalThis, 'window'));
+    const ran: string[] = [];
+    cleanups.push(registerBrowserOpener(() => {
+      setTimeout(() => {
+        cleanups.push(registerBrowserController({
+          tabId: 'tab-new',
+          directory: REPO,
+          ownerSessionId: null,
+          describe: () => ({ title: '', url: '' }),
+          run: async (action) => { ran.push(action); return { title: 'App', settled: true }; },
+        }));
+      }, 120);
+      return 'tab-new';
+    }));
+
+    emitOpen({ url: 'https://example.test' });
+    await wait(400);
+
+    expect(ran).toEqual(['browser.settle']);
+    expect(posted[0]?.data).toEqual({
+      url: 'https://example.test', opened: true, tabId: 'tab-new', title: 'App', settled: true, drivable: true,
+    });
+  });
+
+  test('a failed wait on a new tab still reports the open, as not settled', async () => {
+    Object.defineProperty(globalThis, 'window', { value: { __OPENCHAMBER_ELECTRON__: {} }, configurable: true, writable: true });
+    cleanups.push(() => Reflect.deleteProperty(globalThis, 'window'));
+    cleanups.push(registerBrowserController({
+      tabId: 'tab-new',
+      directory: REPO,
+      ownerSessionId: null,
+      describe: () => ({ title: '', url: '' }),
+      run: async () => { throw new Error('The browser panel is not ready'); },
+    }));
+    cleanups.push(registerBrowserOpener(() => 'tab-new'));
+
+    emitOpen({ url: 'https://example.test' });
+    await wait(50);
+
+    expect(posted[0]?.ok).toBe(true);
+    expect(posted[0]?.data).toEqual({ url: 'https://example.test', opened: true, tabId: 'tab-new', settled: false, drivable: true });
   });
 
   test('says the layout was not applied when no view ever appears', async () => {

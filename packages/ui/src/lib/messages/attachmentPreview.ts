@@ -1,4 +1,5 @@
 import { getLanguageFromExtension } from '@/lib/toolHelpers';
+import { attachmentBasename } from '@/lib/attachmentIdentity';
 import { normalizeDroppedPath } from '@/components/chat/composer/attachments/filePaths';
 import type { ToolPopupContent } from '@/components/chat/message/types';
 
@@ -91,8 +92,7 @@ export const decodeDataUrlText = (url: string): string | null => {
 /** The name an attachment chip shows: the basename of its file name. */
 const attachmentDisplayName = (filename: string | undefined): string => {
     if (!filename) return 'file';
-    const parts = filename.replace(/\\/g, '/').split('/');
-    return parts[parts.length - 1] || filename;
+    return attachmentBasename(filename);
 };
 
 /** The fields of a message file part that decide how it opens. */
@@ -175,7 +175,7 @@ export const resolveAttachmentOpenTarget = (
     };
 };
 
-const filenameKey = (filename: string): string => filename.trim().toLowerCase();
+const filenameKey = (filename: string): string => attachmentBasename(filename).trim().toLowerCase();
 
 /**
  * The message file a `[name]` citation names. Citations match attachments

@@ -10,7 +10,7 @@
 import { create } from "zustand"
 import { clearDesktopSessionNotifications } from "@/lib/desktop"
 import { runtimeFetch } from "@/lib/runtime-fetch"
-import { markSessionUnreadSeen } from "./session-unread"
+import { getUnreadSessionIds, markSessionsUnreadSeen, markSessionUnreadSeen } from "./session-unread"
 
 export type ErrorNotification = {
   directory?: string
@@ -56,6 +56,16 @@ export function markSessionViewed(sessionId: string) {
   markSessionUnreadSeen(sessionId)
   clearDesktopSessionNotifications(sessionId)
   runtimeFetch(`/api/sessions/${encodeURIComponent(sessionId)}/view`, { method: "POST" })
+    .catch(() => { /* the badge resets on the next engagement signal */ })
+}
+
+/** Every unread session the client knows of is marked seen, the same way opening each would. */
+export function markAllSessionsViewed() {
+  const marked = markSessionsUnreadSeen(getUnreadSessionIds())
+  if (marked.length === 0) return
+  for (const sessionId of marked) clearDesktopSessionNotifications(sessionId)
+  // The route only resets the push badge, so one call covers them all.
+  runtimeFetch(`/api/sessions/${encodeURIComponent(marked[0])}/view`, { method: "POST" })
     .catch(() => { /* the badge resets on the next engagement signal */ })
 }
 

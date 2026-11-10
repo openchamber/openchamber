@@ -20,9 +20,10 @@ extensions.
     blocked as mixed content even with cleartext allowed in the manifest. LAN transport is a core
     feature; iOS (`capacitor://`) has no such issue, and relay and tunnel traffic is TLS anyway.
   - Keyboard `resize: 'none'`: the WebView keeps its full height and the UI follows the keyboard
-    through the `--oc-keyboard-inset` CSS variable driven by `keyboardWillShow`
-    (`useNativeMobileChrome`). The built-in `native` resize lands only after the keyboard
-    animation ends, which looked like a ~1.5s lag.
+    itself from `keyboardWillShow` (`apps/mobileNativeChrome.ts`): layouts take the keyboard once,
+    where the change is invisible, and what sits above it rides it on a compositor transform
+    (performance-engineering skill, `references/ios-webkit.md`). The built-in `native` resize
+    lands only after the keyboard animation ends, which looked like a ~1.5s lag.
   - StatusBar `overlaysWebView: true`.
   - PushNotifications `presentationOptions: []`: iOS never shows an alert while the app is in
     the foreground. The server always sends (no racy visibility gate); background pushes show as

@@ -27,6 +27,13 @@ The prompt lives in the shared UI (`packages/ui/src/lib/opencodeTrust.ts`,
 refusal to it, shows what would run, saves a "trust" answer here and sends the
 refused request again.
 
+Session admission also uses this prompt before registering an unknown host
+destination as a project. A configuration that runs nothing or whose current
+fingerprint is trusted registers without another dialog. There is no separate
+folder-consent store. The destination registration route and VS Code workspace
+bridge recheck trust before changing the registry. Runtime switches dismiss
+pending UI prompts and invalidate their continuations.
+
 Where the check runs:
 
 | Runtime | Path to OpenCode | Check |
@@ -41,10 +48,31 @@ Where the check runs:
 - A request that names a folder (`x-opencode-directory`, `?directory=`,
   `location[directory]`) or acts on a session reaches OpenCode only when that
   folder's configuration runs nothing or its current fingerprint is trusted.
-  Routes that start no location (session list and detail, message pages, the
-  event stream, credentials, deleting, moving or viewing a session, unloading a
+  A header is read the way OpenCode reads it: percent-decoded, or as it
+  arrived when decoding fails, so a folder named `1%72epo%ZZ` is checked under
+  that literal name. Routes that start no location (session list and detail, message pages, the
+  event stream, credentials, deleting or viewing a session, unloading a
   location) pass, so a paused folder still lists and shows its sessions. Any
   other route, including ones OpenCode adds later, is checked.
+- Moving a session (`POST /api/session/:id/move`) is checked against the
+  folder it moves into, read from the body and resolved the way OpenCode
+  resolves it (`~` from home, a relative path from the session's folder), and
+  against the session's current folder: OpenCode opens the destination to
+  validate it and the source to see whether it still runs. A source folder
+  that is gone opens nothing and passes, so sessions still move out of deleted
+  folders. A move whose body names no directory, or that the runtime cannot
+  read, answers 400 without reaching OpenCode. Every runtime hands the body to
+  `refusalFor` through `readBody`: the proxy parses it, `guardOpenCodeFetch`
+  reads a copy, the VS Code bridge decodes its base64 body.
+  The proxy's worktree checkout gate (`../opencode/proxy.js`) resolves the
+  destination with the same `readMoveDestination`, so both gates agree on
+  which folder a move opens.
+- A session route is checked against the session's folder as well, read from
+  OpenCode's session record. The `global` owner is the exception: OpenCode
+  files MCP elicitation forms under it, it has no session record, and its
+  routes, such as a form's reply and cancel, run in the folder the request
+  names, so only that folder is checked. A lookup of `global` answers 400, which would refuse
+  every reply to such a form.
 - Trust is per repository: every worktree of one repository shares the
   answers, and a worktree whose configuration differs from every trusted one
   asks. The latest 20 fingerprints per repository are kept, so switching
@@ -89,6 +117,14 @@ in `vscode/src/opencodeTrust.ts`.
   OpenCode with no folder of their own keep working on a folder that may open.
 
 ## Decisions
+
+### Why queued prompts read trust again
+
+Several worktrees can have untrusted assessments before the user answers the
+first prompt. Each queued prompt reads the server's current assessment when
+its turn arrives, so the first saved answer also opens unchanged worktrees
+without another confirmation. Already-trusted requests bypass the prompt queue;
+a failed assessment still leaves its folder closed.
 
 ### Why a gate in OpenChamber and not a setting in OpenCode
 
@@ -135,6 +171,9 @@ it keeps its own middleware.
 
 ### Known limits
 
+- The agent's own `session_move` tool runs inside OpenCode and reaches no
+  OpenChamber runtime, so the gate does not see it. OpenCode opens the
+  destination from there as it would for the CLI.
 - A folder OpenCode already runs reloads its plugins when they change on disk.
   The gate decides when a location starts; switching a running folder to a
   branch with different plugins loads them as the OpenCode CLI would.

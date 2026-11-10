@@ -8,7 +8,7 @@
       "id": "5525a5ee-9c03-44d1-a401-1e4b9397765c",
       "name": "DevHMR",
       "command": "bun run dev",
-      "icon": "rocket",
+      "icon": "desktop",
       "autoOpenUrl": true,
       "openUrl": "http://localhost:5180"
     },
@@ -16,7 +16,7 @@
       "id": "acd3f2c9-eae2-4956-88e3-80633a9e38df",
       "name": "Mobile",
       "command": "bun run dev",
-      "icon": "stack",
+      "icon": "mobile",
       "autoOpenUrl": true,
       "openUrl": "http://localhost:5180/mobile.html"
     },
@@ -30,13 +30,13 @@
       "id": "oc-electron-build",
       "name": "Build Electron app",
       "command": "bun run oc-dev build-electron-app",
-      "icon": "build"
+      "icon": "command"
     },
     {
       "id": "oc-ios-device-debug",
       "name": "iOS device debug",
       "command": "bun run oc-dev mobile-tools --mobile-task ios-device-sync-debug",
-      "icon": "bug",
+      "icon": "apple",
       "platforms": [
         "macos"
       ]
@@ -45,7 +45,7 @@
       "id": "oc-android-run",
       "name": "Android build + run",
       "command": "bun run oc-dev mobile-tools --mobile-task android-deploy-usb",
-      "icon": "play"
+      "icon": "android"
     },
     {
       "id": "oc-vscode-install",

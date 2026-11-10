@@ -2,6 +2,7 @@ import React from 'react';
 import { create } from 'zustand';
 
 import { useUIStore } from '@/stores/useUIStore';
+import { selectWorkflowsShown } from '@/lib/workflows/availability';
 import { fetchProjectWorkflowRuns, fetchWorkflowRuns } from './api';
 import type { WorkflowRun } from './model';
 import { isRunInScope, type WorkflowProjectScope } from './project-scope';
@@ -138,6 +139,15 @@ export const createWorkflowRunsStore = (
     },
 
     reloadLoaded: () => {
+      // Nothing shows them while workflows are off: mark them unread instead,
+      // so the surfaces read them again once workflows are turned on.
+      if (!selectWorkflowsShown(useUIStore.getState())) {
+        set((state) => ({
+          bySession: Object.fromEntries(Object.entries(state.bySession).map(([id, entry]) => [id, { ...entry, status: 'idle' as const }])),
+          byDirectory: Object.fromEntries(Object.keys(state.byDirectory).map((key) => [key, 'idle' as const])),
+        }));
+        return;
+      }
       for (const [sessionId, entry] of Object.entries(get().bySession)) {
         if (entry.status !== 'idle') void get().load(sessionId);
       }
@@ -159,10 +169,10 @@ export const useWorkflowRunsStore = createWorkflowRunsStore(fetchWorkflowRuns, f
 
 /**
  * The workflow runs of a session, read from the server the first time a
- * surface asks. Empty in builds without workflows.
+ * surface asks. Empty while workflows are not shown (`selectWorkflowsShown`).
  */
 export const useSessionWorkflowRuns = (sessionId: string | null): WorkflowRun[] => {
-  const available = useUIStore((state) => state.agentWorkflowFeatureAvailable);
+  const available = useUIStore(selectWorkflowsShown);
   const runs = useWorkflowRunsStore((state) => (sessionId ? state.bySession[sessionId]?.runs : undefined) ?? EMPTY_RUNS);
   const load = useWorkflowRunsStore((state) => state.load);
 
@@ -188,10 +198,10 @@ export const useWorkflowRun = (sessionId: string | null, runId: string | null): 
 /**
  * The runs of every session in a project (its folder and its worktrees),
  * oldest first, read from the server the first time a surface asks; events
- * keep them current after that. Empty in builds without workflows.
+ * keep them current after that. Empty while workflows are not shown (`selectWorkflowsShown`).
  */
 export const useProjectWorkflowRuns = (scope: WorkflowProjectScope | null): WorkflowRun[] => {
-  const available = useUIStore((state) => state.agentWorkflowFeatureAvailable);
+  const available = useUIStore(selectWorkflowsShown);
   const bySession = useWorkflowRunsStore((state) => state.bySession);
   const loadDirectory = useWorkflowRunsStore((state) => state.loadDirectory);
   const key = scope ? scope.directories.join('\n') : '';

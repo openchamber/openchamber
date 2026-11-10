@@ -7,6 +7,9 @@ import { getChatDraftIdentityKey, readChatDraft, writeChatDraft, type ChatDraftI
 import { getDeferredSafeStorage } from '@/stores/utils/safeStorage';
 import { useInputStore } from '@/sync/input-store';
 import { useComposerDraft } from '../useComposerDraft';
+import { readLinkedReferences, useLinkedReferenceDrafts } from '../../linkedReferenceDrafts';
+
+const reference = { kind: 'repository-issue' as const, number: 7, title: 'Issue', url: 'https://github.com/acme/app/issues/7', contextText: 'Issue context' };
 
 const projectDraft: ChatDraftIdentity = { runtimeKey: 'runtime-a', directory: '/repo-a', sessionId: null };
 const otherProjectDraft: ChatDraftIdentity = { ...projectDraft, directory: '/repo-b' };
@@ -67,6 +70,7 @@ function renderComposer(initialText: string) {
 }
 
 beforeEach(() => {
+    useLinkedReferenceDrafts.setState({ drafts: new Map() });
     getDeferredSafeStorage().removeItem('openchamber.chatDrafts.v2');
     useInputStore.setState({ pendingComposerRestore: null, attachmentDraftKey: null, attachmentDrafts: new Map() });
     useInputStore.getState().clearAttachedFiles();
@@ -74,12 +78,15 @@ beforeEach(() => {
 
 describe('new-session draft changing its directory', () => {
     test('takes the typed text and files along and leaves nothing behind', () => {
+        useLinkedReferenceDrafts.getState().set([reference], projectDraft);
         useInputStore.getState().selectAttachmentDraft(projectDraft);
         useInputStore.getState().addRestoredAttachment(file);
         const composer = renderComposer('fix the login form @a.ts');
         try {
             composer.render(otherProjectDraft);
             composer.flushFrames();
+            expect(readLinkedReferences(otherProjectDraft)).toEqual([reference]);
+            expect(readLinkedReferences(projectDraft)).toEqual([]);
 
             expect(composer.result.text).toBe('fix the login form @a.ts');
             // The mention named a file of the old directory.
@@ -141,12 +148,15 @@ describe('new-session draft changing its directory', () => {
     });
 
     test('a new chat opened in another directory leaves the typed text where it was', () => {
+        useLinkedReferenceDrafts.getState().set([reference], projectDraft);
         useInputStore.getState().selectAttachmentDraft(projectDraft);
         useInputStore.getState().addRestoredAttachment(file);
         const composer = renderComposer('typed in project a');
         try {
             // Another feature opens a new draft (new id) for another directory.
             composer.render(otherProjectDraft, 2);
+            expect(readLinkedReferences(projectDraft)).toEqual([reference]);
+            expect(readLinkedReferences(otherProjectDraft)).toEqual([]);
             expect(composer.result.text).toBe('');
             expect(readChatDraft(projectDraft).text).toBe('typed in project a');
             expect(useInputStore.getState().attachmentDrafts.get(getChatDraftIdentityKey(projectDraft))?.map((attached) => attached.filename)).toEqual(['notes.txt']);
@@ -156,11 +166,14 @@ describe('new-session draft changing its directory', () => {
     });
 
     test('attached files move even without text', () => {
+        useLinkedReferenceDrafts.getState().set([reference], projectDraft);
         useInputStore.getState().selectAttachmentDraft(projectDraft);
         useInputStore.getState().addRestoredAttachment(file);
         const composer = renderComposer('');
         try {
             composer.render(otherProjectDraft);
+            expect(readLinkedReferences(otherProjectDraft)).toEqual([reference]);
+            expect(readLinkedReferences(projectDraft)).toEqual([]);
             expect(useInputStore.getState().attachedFiles.map((attached) => attached.filename)).toEqual(['notes.txt']);
             expect(useInputStore.getState().attachmentDrafts.get(getChatDraftIdentityKey(projectDraft)) ?? []).toEqual([]);
         } finally {
@@ -174,6 +187,7 @@ describe('session moved to another directory', () => {
 
     test('takes the typed text and files along and leaves nothing behind', () => {
         writeChatDraft(session, 'typed before the move', []);
+        useLinkedReferenceDrafts.getState().set([reference], session);
         const composer = renderComposer('');
         try {
             composer.render(session, null);
@@ -183,6 +197,8 @@ describe('session moved to another directory', () => {
 
             composer.render(movedSession, null);
             composer.flushFrames();
+            expect(readLinkedReferences(movedSession)).toEqual([reference]);
+            expect(readLinkedReferences(session)).toEqual([]);
 
             expect(composer.result.text).toBe('typed before the move');
             expect(composer.result.restored).toEqual([]);

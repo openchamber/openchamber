@@ -90,6 +90,8 @@
         "referenceDetail": true,
         "listStatuses": true,
         "referencesAcross": true,
+        "reviewDraftFileComments": true,
+        "reviewDrafts": true,
         "startThread": false,
         "authorCanReview": false,
         "projectUploads": false,
@@ -176,6 +178,8 @@
         "referenceDetail": false,
         "listStatuses": false,
         "referencesAcross": false,
+        "reviewDraftFileComments": true,
+        "reviewDrafts": true,
         "startThread": true,
         "authorCanReview": true,
         "projectUploads": true,
@@ -216,9 +220,11 @@
       },
       "auth": {
         "methods": [
-          "pat"
+          "pat",
+          "cli"
         ],
         "cliTransport": false,
+        "cliName": "gt",
         "token": {
           "scopes": [
             "write:repository",
@@ -232,6 +238,11 @@
         "fields": [
           {
             "id": "instance",
+            "kind": "instance-url",
+            "secret": false
+          },
+          {
+            "id": "sshUrl",
             "kind": "instance-url",
             "secret": false
           },
@@ -261,6 +272,8 @@
         "referenceDetail": false,
         "listStatuses": false,
         "referencesAcross": false,
+        "reviewDraftFileComments": false,
+        "reviewDrafts": true,
         "startThread": false,
         "authorCanReview": false,
         "projectUploads": false,
@@ -417,6 +430,8 @@
         "referenceDetail": false,
         "listStatuses": false,
         "referencesAcross": false,
+        "reviewDraftFileComments": true,
+        "reviewDrafts": true,
         "startThread": false,
         "authorCanReview": true,
         "projectUploads": false,

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-  buildReferenceSearchQuery, fetchDiscussionDetail, fetchReferenceDetail, parseReferenceLookup, readPullStatusRefs,
+  buildReferenceSearchQuery, fetchDiscussionDetail, fetchReferenceDetail, parseReferenceLink, parseReferenceLookup, readPullStatusRefs,
   readReferencePeople, readReferenceState, reviewCommentExcerpt, searchGitHubReferences, searchGitHubReferencesAcross, toReference,
 } from './reference-search.js';
 
@@ -199,6 +199,20 @@ describe('searchGitHubReferencesAcross', () => {
   });
 });
 
+
+describe('parseReferenceLink', () => {
+  it('names the repository and number of a link on the host', () => {
+    expect(parseReferenceLink('https://github.com/dotnet/runtime/issues/118826', 'github.com')).toEqual({ owner: 'dotnet', repo: 'runtime', number: 118826 });
+    expect(parseReferenceLink('https://www.github.com/dotnet/runtime/pull/7/files', 'github.com')).toEqual({ owner: 'dotnet', repo: 'runtime', number: 7 });
+    expect(parseReferenceLink('https://ghe.example.com/a/b/issues/1', 'ghe.example.com')).toEqual({ owner: 'a', repo: 'b', number: 1 });
+  });
+
+  it('refuses another host and anything that is no link to an item', () => {
+    expect(parseReferenceLink('https://ghe.example.com/a/b/issues/1', 'github.com')).toBeNull();
+    expect(parseReferenceLink('#12', 'github.com')).toBeNull();
+    expect(parseReferenceLink('https://github.com/a/b', 'github.com')).toBeNull();
+  });
+});
 
 describe('parseReferenceLookup', () => {
   it('looks a number up in every repo of the network', () => {

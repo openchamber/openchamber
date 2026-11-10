@@ -40,7 +40,7 @@ Expanda o cartão **GitHub** e escolha **Connect GitHub** para entrar com um có
 GitLab, Gitea, Forgejo e Gerrit têm cada um seu próprio cartão ao lado do GitHub. Depois de conectados, as issues e pull requests deles (merge requests no GitLab, alterações no Gerrit) aparecem no quadro [Issues e PRs](/pt-br/issues-and-prs/) e no menu **+** do chat, como os do GitHub.
 
 - **GitLab**: no gitlab.com, entre com um código curto de dispositivo, um personal access token ou o login do `glab` no servidor. Para um GitLab self-managed, adicione o endereço dele e cole um personal access token com o escopo `api`. O login por código de dispositivo só funciona ali quando o servidor define `OPENCHAMBER_GITLAB_CLIENT_ID` com um aplicativo registrado naquela instância.
-- **Gitea**: adicione o endereço da sua instância, como `https://gitea.example.com`, e cole um personal access token com os escopos `write:repository`, `write:issue` e `read:user`. O cartão tem um link para a página da sua instância que cria um. O Gitea não tem login por código de dispositivo nem por CLI. Ele precisa do Gitea 1.21 ou mais novo, servido na raiz do próprio endereço.
+- **Gitea**: adicione o endereço da sua instância, como `https://gitea.example.com`, e cole um personal access token com os escopos `write:repository`, `write:issue` e `read:user`. O cartão tem um link para a página da sua instância que cria um. Se você estiver logado com a CLI `gt` do Gitea no servidor (`gt auth login`), a instância aparece sozinha no cartão: escolha **Usar gt CLI** para trabalhar com esse login. O login do `gt` cobre issues e pull requests; para push e pull, conecte um token ou configure o Git você mesmo, por exemplo com `gt auth setup-git`. Ele precisa do Gitea 1.21 ou mais novo, servido na raiz do próprio endereço.
 - **Forgejo**: o Codeberg já está no cartão, então para conectá-lo basta um personal access token com os escopos `write:repository`, `write:issue` e `read:user`; o cartão tem um link para a página do Codeberg que cria um. Para outro servidor Forgejo, adicione o endereço dele, como `https://forgejo.example.com`, e cole um token com os mesmos escopos. Ele precisa do Forgejo 7.0 ou mais novo, servido na raiz do próprio endereço. Um servidor Forgejo se conecta neste cartão, e um servidor Gitea no cartão do Gitea.
 - **Gerrit**: adicione o endereço da sua instância, como `https://gerrit.example.com`, e depois seu nome de usuário do Gerrit e uma senha HTTP. Gere a senha no Gerrit em **Settings → HTTP Credentials**; o cartão tem um link para lá. Sua senha de login não funciona, e uma conta sem nome de usuário não consegue conectar. Ele precisa do Gerrit 3.8 ou mais novo, servido na raiz do próprio endereço. Sites cujo endereço de revisão é diferente do endereço Git, como o googlesource.com com `.gitcookies`, não são suportados.
 
@@ -90,6 +90,18 @@ Ative **Session comments** no cartão do Linear e uma sessão iniciada a partir 
 4. Escolha **Set up** e faça login. Os modelos aparecem então no seletor de modelos do chat.
 
 As integrações são instaladas para o seu usuário, então funcionam em todos os projetos. Você pode atualizá-las ou removê-las do mesmo cartão a qualquer momento.
+
+## Canais de notificação por extensões
+
+Uma [extensão](/pt-br/extensions/) pode entregar suas notificações para o Slack, o Matrix ou um servidor próprio. Depois que você a permite em **Settings → Extensions**, ela ganha um cartão em **Extension accounts** nesta página. Informe ali o token da conta, e o endereço do servidor quando o cartão pedir, e conecte: a partir daí a extensão recebe as mesmas notificações que o seu celular receberia, seguindo as suas [opções de notificação](/pt-br/notifications/). O token fica no OpenChamber; o serviço da extensão envia pelo OpenChamber e nunca o vê.
+
+Se o servidor recusar o token mais tarde, o cartão diz que a conta precisa de atenção; conecte de novo com um token novo. Desconecte para interromper as entregas sem remover a extensão, ou pause a extensão. Remover a extensão esquece a conta.
+
+## Rastreadores por extensões
+
+Uma [extensão](/pt-br/extensions/) pode adicionar um rastreador de itens de trabalho ao lado do Linear. Depois que você a permite em **Settings → Extensions**, ela ganha um cartão em **Extension accounts** nesta página. Informe o endereço do servidor quando o cartão pedir, depois conecte uma conta: cole um token, ou salve o client id do app que você registrou no rastreador e entre pelo navegador. Quando o rastreador guarda várias contas, **Add account** conecta outra e **Switch to** troca a que está em uso. O mapeamento de projetos e os comentários de sessão aparecem no cartão quando o rastreador os oferece, como acontece com o Linear.
+
+Os itens dele passam a aparecer no seletor, no menu **+** do chat, em New Worktree, nos itens vinculados de uma sessão e nos estados ao vivo dos itens que você acompanha. Os tokens ficam no OpenChamber; o serviço da extensão chega ao rastreador pelo OpenChamber e nunca os vê. Se o rastreador recusar uma credencial mais tarde, o cartão diz que a conta precisa de atenção; conecte-a de novo. Pausar a extensão tira o rastreador de todos os lugares e mantém as contas; removê-la as esquece.
 
 ## Claude Code
 

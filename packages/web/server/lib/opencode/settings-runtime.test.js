@@ -50,6 +50,65 @@ const createRuntime = async ({
 };
 
 describe('settings runtime', () => {
+  it('serializes session project registration with settings writes without changing navigation', async () => {
+    const { runtime, settingsFilePath, cleanup } = await createRuntime({ mergePersistedSettings: (current, changes) => ({ ...current, ...changes }) });
+    try {
+      const kept = createProjectIdFromPath('/kept');
+      const added = createProjectIdFromPath('/new');
+      await fsPromises.writeFile(settingsFilePath, JSON.stringify({ projects: [{ id: kept, path: '/kept', label: 'Kept' }], activeProjectId: kept, lastDirectory: '/kept', future: 42 }));
+      const append = () => runtime.registerSessionProject((projects) => projects.find(p => p.id === added) ?? { id: added, path: '/new' });
+      await Promise.all([append(), runtime.persistSettings({ lightThemeId: 'test' }), append()]);
+      const stored = JSON.parse(await fsPromises.readFile(settingsFilePath, 'utf8'));
+      expect(stored.projects).toEqual([{ id: kept, path: '/kept', label: 'Kept' }, { id: added, path: '/new' }]);
+      expect(stored).toMatchObject({ activeProjectId: kept, lastDirectory: '/kept', future: 42, lightThemeId: 'test' });
+    } finally { await cleanup(); }
+  });
+
+  it('resolves changes against the settings left by the save queued before them', async () => {
+    const { runtime, settingsFilePath, cleanup } = await createRuntime({ mergePersistedSettings: (current, changes) => ({ ...current, ...changes }) });
+    try {
+      await fsPromises.writeFile(settingsFilePath, JSON.stringify({ lightThemeId: 'old' }));
+      await Promise.all([
+        runtime.persistSettings({ lightThemeId: 'queued-first' }),
+        runtime.persistResolvedSettings((current) => ({ darkThemeId: `after-${current.lightThemeId}` })),
+      ]);
+      const stored = JSON.parse(await fsPromises.readFile(settingsFilePath, 'utf8'));
+      expect(stored).toMatchObject({ lightThemeId: 'queued-first', darkThemeId: 'after-queued-first' });
+    } finally { await cleanup(); }
+  });
+
+  it('does not overwrite a malformed registry and allows registration after repair', async () => {
+    const { runtime, settingsFilePath, cleanup } = await createRuntime();
+    try {
+      await fsPromises.writeFile(settingsFilePath, '{broken');
+      const append = () => runtime.registerSessionProject(() => ({ id: 'new', path: '/new' }));
+      await expect(append()).rejects.toThrow();
+      expect(await fsPromises.readFile(settingsFilePath, 'utf8')).toBe('{broken');
+      await fsPromises.writeFile(settingsFilePath, '{"projects":[]}');
+      await expect(append()).resolves.toEqual({ id: 'new', path: '/new' });
+    } finally { await cleanup(); }
+  });
+
+  it('preserves the registry after a failed session append and allows retry', async () => {
+    let fail = true;
+    const { runtime, settingsFilePath, cleanup } = await createRuntime({ fs: {
+      ...fsPromises,
+      rename: async (...args) => {
+        if (fail) throw Object.assign(new Error('disk full'), { code: 'ENOSPC' });
+        return fsPromises.rename(...args);
+      },
+    } });
+    try {
+      const original = '{"projects":[],"lastDirectory":"/kept"}';
+      await fsPromises.writeFile(settingsFilePath, original);
+      const append = () => runtime.registerSessionProject(() => ({ id: 'new', path: '/new' }));
+      await expect(append()).rejects.toThrow();
+      expect(await fsPromises.readFile(settingsFilePath, 'utf8')).toBe(original);
+      fail = false;
+      await expect(append()).resolves.toEqual({ id: 'new', path: '/new' });
+    } finally { await cleanup(); }
+  });
+
   it('reports the directory the UI moved to, once per change', async () => {
     const onLastDirectoryChanged = vi.fn();
     const { runtime, cleanup } = await createRuntime({
@@ -217,13 +276,14 @@ describe('settings runtime', () => {
     }
   });
 
-  it('round-trips shared sidebar preferences through preferences.json', async () => {
+  it('round-trips shared profile preferences through preferences.json', async () => {
     const { runtime, settingsFilePath, tempRoot, cleanup } = await createRuntime();
     const preferences = {
       sidebarProjectDisplayMode: 'single',
       sidebarViewMode: 'timeline',
       sidebarProjectSortOrder: 'date-added',
       sidebarShowChatsSection: false,
+      selectionApprovalText: '认可此方案 👍',
     };
     try {
       await runtime.persistSettings(preferences);
@@ -233,6 +293,8 @@ describe('settings runtime', () => {
       expect(JSON.parse(await fsPromises.readFile(settingsFilePath, 'utf8'))).toEqual(preferences);
       const stored = JSON.parse(await fsPromises.readFile(path.join(tempRoot, 'preferences.json'), 'utf8'));
       expect(Object.fromEntries(Object.entries(stored.fields).map(([key, entry]) => [key, entry.value]))).toEqual(preferences);
+      await runtime.persistSettings({ ...preferences, selectionApprovalText: '' });
+      await expect(runtime.readSettingsFromDisk()).resolves.toEqual({ ...preferences, selectionApprovalText: '' });
     } finally {
       await cleanup();
     }

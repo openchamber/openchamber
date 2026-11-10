@@ -44,14 +44,15 @@ send never re-resolves mutable UI state:
   contextPreview?, // bounded display-only summary captured by the UI
   text,           // text to deliver (agent mention stripped, file mentions resolved); defaults to content
   agentMention?,  // delivered as an `agent` part
-  attachments: [{ id, filename, mimeType, size, source, serverPath?, dataUrl }],
+  attachments: [{ id, filename, mimeType, size, source, serverPath?, agentPath?, dataUrl }],
   context: [      // what the composer had attached, in send order
     { kind: 'context', text, metadata, instructions? },  // a draft chip or linked issue/PR; metadata is the UI's structured payload
     { kind: 'instruction', text },                       // derived from the text (skill instruction)
     { kind: 'synthetic', text },                         // handed to the composer by another surface
   ],
   sendConfig: { providerID, modelID, agent?, variant? },  // required
-  goal?: { objective?, tokenBudget }  // queued with "run as goal" armed
+  goal?: { objective?, tokenBudget },  // queued with "run as goal" armed
+  syntheticIds?   // minted by the first delivery attempt, one per record admitted ahead of the message
 }
 ```
 
@@ -68,11 +69,19 @@ before it and its `metadata` riding the part verbatim so the timeline renders
 the context block back. The payload inside `metadata` is the UI's contract
 (`lib/messages/contextParts.ts`), parsed by the UI on the way back.
 
+An attachment's `agentPath` — the file's on-disk location the desktop client
+resolved at intake — travels to OpenCode as the prompt file's `name`, the
+field the model reads as the file identity, falling back to `filename` when
+absent. `filename` itself still rides the attachment unchanged for the UI's
+own display.
+
 `parseQueuedItemInput` rejects anything the server could not deliver later
 (no text, attachments, or context; missing model; malformed attachment or
 context entry). Public snapshots and broadcasts strip the payloads —
 attachment `dataUrl` (megabytes of base64) and `context` (a PR diff, say) —
 so they do not ride every update; the only way to get them back is a `take`.
+`syntheticIds` comes only from the queue file: `parseQueuedItemInput` drops it
+from client input, and snapshots leave it out.
 
 Snapshots retain `contextPreview`, capped at 100 characters plus an ellipsis.
 It carries the attached comment or context label when `content` is empty and
@@ -163,20 +172,32 @@ persisted "sending" flag would strand a message forever.
    scheduled goal does: `createSessionGoal` (`../session-goal/create.js`)
    saves the goal through the injected `persistSessionGoal` before anything is
    admitted, so a failed save leaves nothing for the retry to duplicate, and
-   the goal briefing goes as the last synthetic message. Then the message itself:
+   the goal briefing goes as the last synthetic message. Before the goal save
+   and the first synthetic message, the item's `syntheticIds` are minted and
+   saved, and a revert staged on the session (`revert` on its record) is
+   committed (`POST /session/:id/revert/commit`): OpenCode's commit deletes
+   everything admitted past the revert's boundary, so committing at the prompt
+   would delete the context admitted just before it. An item with nothing to
+   admit ahead of its message mints no ids and reads no record; a failed save
+   or an unreadable record fails the send. Then the message itself:
    - text starting with `/` that names a command in OpenCode's `/command`
      list (skills included) goes to `POST /session/:id/command` (body fields
      `name` and `text` since OpenCode 2.0.8) with its file attachments. The
      command route takes files only, which is why the context went ahead of
      it; sending "/name args" as a prompt instead would skip the template
      OpenCode expands only on that route. The command lookup runs before
-     anything is admitted, so a failed lookup fails the send without leaving
-     context behind for the retry to duplicate;
+     anything is admitted, so a failed lookup fails the send with nothing in
+     the session;
    - otherwise `POST /session/:id/prompt` with the user's text, files and
      agent mention.
    Success removes the item, persists, broadcasts, and calls `onPromptSent`.
    Failure keeps the item, backs off
    2 s → 60 s (doubling per consecutive failure of that item), and re-arms.
+   A retry, also after a restart, reuses the `syntheticIds`: OpenCode answers a
+   second admission of an id with the first one, so a failure between the
+   context and the message leaves each synthetic record in the session once.
+   The ids end at the mint time, one millisecond apart, so they sort in
+   admission order and ahead of the message, whose id OpenCode assigns.
 6. The next item goes out after the next busy → idle cycle.
 
 A 2xx HTML app-shell response is a failed dispatch, not acceptance. The queued item stays persisted and uses the existing retry backoff.

@@ -76,7 +76,9 @@ const trackerEntryKind = (provider) => (provider === 'linear' ? 'linear' : 'trac
  */
 export const buildLinkEntry = (input, linkedAt, { matchTrackerUrl = () => null } = {}) => {
   const parsed = linkInputSchema.safeParse(input);
-  if (!parsed.success) return { error: 'link needs url, title, and kind (change or issue); identifier is optional' };
+  // Fields put straight into parameters never arrive: the tool schema has no
+  // url or kind there and drops them, so the message names the nesting.
+  if (!parsed.success) return { error: 'Pass the link as parameters.link: { url, title, kind: "change" | "issue", identifier? }; the link was not added' };
   const { title, kind, identifier } = parsed.data;
   const url = parseHttpUrl(parsed.data.url);
   if (!url) return { error: 'link.url must be an absolute http(s) URL' };

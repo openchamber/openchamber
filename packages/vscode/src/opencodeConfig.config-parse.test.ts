@@ -6,10 +6,13 @@ import os from 'node:os';
 import path from 'node:path';
 
 import {
+  deletePluginEntry,
   listPluginEntries,
+  updatePluginEntry,
   updateMcpConfig,
   createMcpConfig,
   deleteMcpConfig,
+  setSkillEnabled,
   type JsonValue,
 } from './opencodeConfig';
 import { parse as parseJsonc, type ParseError } from 'jsonc-parser';
@@ -137,6 +140,38 @@ describe('opencodeConfig JSONC parse safety (issue #2923)', () => {
     assert.deepEqual(specs, ['opencode-see-image']);
     assert.equal(fs.readFileSync(projectFile, 'utf8'), PARTIAL_PARSE_CONFIG);
     assert.equal(fs.existsSync(`${projectFile}.openchamber.backup`), false);
+  });
+
+  test('lists plugins from every folder config OpenCode finds above the project', () => {
+    delete process.env.OPENCODE_CONFIG;
+    const parentDir = path.join(tempDir, 'parent');
+    const projectDir = path.join(parentDir, 'project');
+    fs.mkdirSync(path.join(projectDir, '.opencode'), { recursive: true });
+    fs.writeFileSync(path.join(parentDir, 'opencode.json'), '{ "plugins": ["parent-plugin"] }', 'utf8');
+    fs.writeFileSync(path.join(projectDir, 'opencode.jsonc'), '{\n  // mine\n  "plugins": ["root-plugin",],\n}\n', 'utf8');
+    fs.writeFileSync(path.join(projectDir, '.opencode', 'opencode.json'), '{ "plugins": ["dot-plugin"] }', 'utf8');
+
+    const entries = listPluginEntries(projectDir).map((entry) => [entry.spec, entry.scope]);
+    assert.deepEqual(entries.filter(([spec]) => String(spec).endsWith('-plugin')), [
+      ['parent-plugin', 'user'],
+      ['root-plugin', 'project'],
+      ['dot-plugin', 'project'],
+    ]);
+  });
+
+  test('deletes the listed project plugin when OPENCODE_CONFIG is another project file', () => {
+    const projectDir = path.join(tempDir, 'project');
+    const customPath = path.join(projectDir, '.opencode', 'opencode.json');
+    const rootPath = path.join(projectDir, 'opencode.json');
+    fs.mkdirSync(path.dirname(customPath), { recursive: true });
+    fs.writeFileSync(customPath, '{ "plugins": ["shared-plugin"] }', 'utf8');
+    fs.writeFileSync(rootPath, '{ "plugins": ["shared-plugin", "root-plugin"] }', 'utf8');
+    process.env.OPENCODE_CONFIG = customPath;
+
+    deletePluginEntry(Buffer.from('config:project:shared-plugin').toString('base64url'), projectDir);
+
+    assert.deepEqual(JSON.parse(fs.readFileSync(rootPath, 'utf8')).plugins, ['root-plugin']);
+    assert.deepEqual(JSON.parse(fs.readFileSync(customPath, 'utf8')).plugins, ['shared-plugin']);
   });
 
   test('keeps a valid custom layer writable when a project layer is unparseable', () => {
@@ -361,6 +396,41 @@ describe('opencodeConfig comment-preserving config writes (issue #3587)', () => 
     assert.equal(fs.readFileSync(configPath, 'utf8'), COMMENTED_CONFIG);
   });
 
+  test('preserves untouched array entries during a plugin version update', () => {
+    const original = [
+      '{',
+      '  "plugins": [',
+      '    // plugin A stays as written',
+      '    {',
+      '      "package": "example-plugin-a",',
+      '      "options": {',
+      '        // keep this timeout comment',
+      '        "timeoutMs": 5000,',
+      '      },',
+      '    }, /* after plugin A */',
+      '    // plugin B changes version',
+      '    "example-plugin-b@1.0.0", // keep this entry comment',
+      '  ],',
+      '}',
+      '',
+    ].join('\r\n');
+    const configPath = writeConfigFile('plugins.jsonc', original);
+    process.env.OPENCODE_CONFIG = configPath;
+    const entry = listPluginEntries().find((plugin) => plugin.spec === 'example-plugin-b@1.0.0');
+    assert.ok(entry);
+
+    updatePluginEntry(entry.id, { spec: 'example-plugin-b@2.0.0' });
+
+    assert.equal(fs.readFileSync(configPath, 'utf8'), original.replace('example-plugin-b@1.0.0', 'example-plugin-b@2.0.0'));
+    assert.deepEqual(readConfigFileJsonc(configPath), {
+      plugins: [
+        { package: 'example-plugin-a', options: { timeoutMs: 5000 } },
+        'example-plugin-b@2.0.0',
+      ],
+    });
+    assert.equal(fs.readFileSync(`${configPath}.openchamber.backup`, 'utf8'), original);
+  });
+
   test('preserves CRLF line endings and comments', () => {
     const configPath = writeConfigFile('crlf.jsonc', [
       '{',
@@ -387,6 +457,35 @@ describe('opencodeConfig comment-preserving config writes (issue #3587)', () => 
         },
       },
     });
+  });
+
+  test('adds and removes only its own skill statement, every other line stays as written', () => {
+    const rules = [
+      '{',
+      '  "policies": [',
+      '    // team rule: no internal skills',
+      '    { "action": "skill.use", "resource": "internal-*", "effect": "deny" }',
+    ];
+    const original = [...rules, '  ]', '}', ''].join('\n');
+    const configPath = writeConfigFile('skills.jsonc', original);
+    process.env.OPENCODE_CONFIG = configPath;
+
+    assert.deepEqual(setSkillEnabled({ id: 'deploy', enabled: false, scope: 'user' }), { changed: [configPath] });
+    assert.equal(fs.readFileSync(configPath, 'utf8'), [
+      ...rules.slice(0, -1),
+      `${rules.at(-1)},`,
+      '    {',
+      '      "action": "skill.use",',
+      '      "resource": "deploy",',
+      '      "effect": "deny"',
+      '    }',
+      '  ]',
+      '}',
+      '',
+    ].join('\n'));
+
+    setSkillEnabled({ id: 'deploy', enabled: true, scope: 'user' });
+    assert.equal(fs.readFileSync(configPath, 'utf8'), original);
   });
 
   test('falls back to a normalized rewrite when the edit cannot round-trip', () => {

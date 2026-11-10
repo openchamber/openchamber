@@ -34,8 +34,10 @@ export const SETTINGS_SELECT_ROW_TRIGGER_CLASS = SETTINGS_TRIGGER_WIDTH_CLASS;
  * clips its own digits once the interface font is scaled up. The explicit
  * `typography-ui-label` pins `ch` to the same scaled font the inner numeric
  * field renders in, since the wrapper would otherwise inherit an unscaled one.
+ * The rem part holds the two buttons, which are wider on a phone than `ch`
+ * grows; the `ch` part holds five digits, the longest value (a port).
  */
-export const SETTINGS_NUMBER_INPUT_CLASS = 'typography-ui-label w-[16ch]';
+export const SETTINGS_NUMBER_INPUT_CLASS = 'typography-ui-label w-[calc(5.75rem+5ch)]';
 
 /** Compact reset / icon action next to a settings control (matches h-8 controls). */
 export const SETTINGS_ICON_BUTTON_CLASS =
@@ -50,9 +52,6 @@ export const SETTINGS_CUSTOM_TRIGGER_CLASS = cn(
 
 /** Shared width for stacked control clusters (select/input + reset). */
 export const SETTINGS_CONTROL_CLUSTER_CLASS = 'w-full max-w-[24rem]';
-
-/** Fill a control cluster the same way as a full-width select. */
-export const SETTINGS_CLUSTER_CONTROL_CLASS = 'min-w-0 flex-1';
 
 /**
  * Row wrapping a NumberInput + unit label + reset.
@@ -96,6 +95,12 @@ export const SETTINGS_CALLOUT_TITLE_CLASS = 'typography-meta font-medium text-fo
 /** Brand / product name under a logo — quieter than L1 page title. */
 export const SETTINGS_BRAND_TITLE_CLASS =
   'typography-settings-section-title text-foreground';
+
+export const SettingsBadge: React.FC<{ children: React.ReactNode }> = ({ children }) => (
+  <span className="shrink-0 typography-micro px-1 rounded leading-none pb-px text-[var(--status-warning)] bg-[var(--status-warning)]/10">
+    {children}
+  </span>
+);
 
 interface SettingsSectionProps {
   /** Section title. Strings render as the shared h2 style. */
@@ -142,7 +147,7 @@ export const SettingsSection: React.FC<SettingsSectionProps> = ({
       data-settings-item={settingsItem}
       className={cn(
         'space-y-5',
-        divider ? 'border-t border-border/60 py-8' : 'pb-8',
+        divider ? 'border-t border-edge py-8' : 'pb-8',
         className,
       )}
     >
@@ -305,6 +310,8 @@ interface SettingsFieldRowProps {
   settingsItem?: string;
   className?: string;
   controlClassName?: string;
+  /** Extra node next to the label, before the info hint (e.g. a "new" badge). */
+  labelAccessory?: React.ReactNode;
   /** Align control to the trailing edge on desktop. @default true */
   alignEnd?: boolean;
 }
@@ -325,6 +332,7 @@ export const SettingsFieldRow: React.FC<SettingsFieldRowProps> = ({
   settingsItem,
   className,
   controlClassName,
+  labelAccessory,
   alignEnd = true,
 }) => {
   return (
@@ -338,6 +346,7 @@ export const SettingsFieldRow: React.FC<SettingsFieldRowProps> = ({
       <div className="min-w-0 @xl:w-56 @xl:shrink-0">
         <div className="flex min-w-0 items-center gap-1.5">
           <div className={cn('min-w-0 truncate', SETTINGS_FIELD_LABEL_CLASS)}>{label}</div>
+          {labelAccessory}
           {info != null ? <SettingsInfoHint>{info}</SettingsInfoHint> : null}
         </div>
         {description != null ? (
@@ -560,6 +569,8 @@ interface SettingsChipOption<T extends string> {
   value: T;
   label: React.ReactNode;
   disabled?: boolean;
+  /** Replaces the raised look while this option is the chosen one (a brand colour, for example). */
+  selectedClassName?: string;
   /**
    * Shown on hover (long-press on touch). The popup stays open while the
    * pointer is on it, so it may carry a link. Keep what the user must read
@@ -674,7 +685,8 @@ export function SettingsChipGroup<T extends string>({
               selected
                 // Light themes paint elevated darker than the canvas, so the
                 // raised option takes the canvas colour there, like the tab pill.
-                ? 'oc-raised bg-[var(--surface-background)] text-foreground hover:bg-[var(--surface-background)] dark:bg-[var(--surface-elevated)] dark:hover:bg-[var(--surface-elevated)]'
+                ? option.selectedClassName
+                  ?? 'oc-raised bg-[var(--surface-background)] text-foreground hover:bg-[var(--surface-background)] dark:bg-[var(--surface-elevated)] dark:hover:bg-[var(--surface-elevated)]'
                 : 'text-muted-foreground hover:bg-transparent hover:text-foreground',
             )}
             onClick={() => onChange(option.value)}

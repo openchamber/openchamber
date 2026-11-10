@@ -1,7 +1,6 @@
 import React from 'react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { useMobileAppActions } from '@/apps/mobileAppContext';
 import { useI18n } from '@/lib/i18n';
 import { useUIStore } from '@/stores/useUIStore';
 import { AdditionalRemoteGrants, AuxiliaryBindingSettings } from './RepositoryBindingEditors';
@@ -13,7 +12,7 @@ type RepositoryConfigurationDialogProps = {
 };
 
 /** Every editor after the first in the dialog is separated by the settings divider. */
-const DIALOG_DIVIDER_CLASS = 'border-t border-border/60 pt-4';
+const DIALOG_DIVIDER_CLASS = 'border-t border-edge pt-4';
 
 /**
  * What a repository needs beyond its identity.
@@ -26,7 +25,6 @@ const DIALOG_DIVIDER_CLASS = 'border-t border-border/60 pt-4';
  */
 export const RepositoryConfigurationDialog: React.FC<RepositoryConfigurationDialogProps> = ({ open, onOpenChange, directory }) => {
   const { t } = useI18n();
-  const mobileActions = useMobileAppActions();
   const setSettingsPage = useUIStore((state) => state.setSettingsPage);
   const setSettingsDialogOpen = useUIStore((state) => state.setSettingsDialogOpen);
 
@@ -43,8 +41,7 @@ export const RepositoryConfigurationDialog: React.FC<RepositoryConfigurationDial
             <Button size="sm" variant="ghost" onClick={() => {
               onOpenChange(false);
               setSettingsPage('git');
-              if (mobileActions) mobileActions.openSettings();
-              else setSettingsDialogOpen(true);
+              setSettingsDialogOpen(true);
             }}>{t('gitView.context.settings')}</Button>
             <Button size="sm" variant="outline" onClick={() => onOpenChange(false)}>{t('dialog.common.actions.close')}</Button>
           </DialogFooter>

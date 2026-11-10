@@ -50,7 +50,16 @@ Mostrar um painel e ler qual projeto e sessão estão abertos não precisa de pe
 - **Usar seu Small Model**: geração de texto avulsa fora das suas sessões, com o modelo de Configurações → Sessões → Small Model. Custa tokens.
 - **Conectar a um serviço externo**: com a conta que você conecta em Configurações → Integrações.
 - **Ler a conversa de uma sessão**: só quando você executa a ação da extensão naquela sessão.
-- **Executar um serviço local**: um programa separado com todo o acesso do seu usuário. Permita só se confiar no autor.
+- **Executar um serviço local**: um programa separado com todo o acesso do seu usuário. Permita só se confiar no autor. Quando a extensão quer ser avisada do que acontece nas suas sessões, esta linha também lista os momentos de que ela fica sabendo: um turno termina, um turno falha, o agente pede permissão, o agente faz uma pergunta. Ela fica sabendo deles em todos os projetos, sem nenhuma janela aberta, e recebe só identificadores: a sessão, o projeto dela e os itens que você anexou a ela.
+- **Ler o que o agente diz em segundo plano**: a resposta final de cada turno, as perguntas que o agente faz e o que ele pede permissão para fazer, em todos os projetos, enviados ao serviço local da extensão. Permita só se confiar no destino para onde a extensão envia isso.
+- **Iniciar sessões e enviar mensagens por conta própria**: o serviço local dela faz isso sem nenhuma janela aberta, o que gasta tokens e pode executar ferramentas.
+- **Adicionar ao que os agentes leem**: texto nas instruções das suas sessões, e skills oferecidas a todos os agentes enquanto a extensão estiver ativa.
+- **Adicionar um plugin ao OpenCode**: o plugin do pacote é carregado no seu OpenCode enquanto a extensão estiver ativa. O código do plugin roda dentro do OpenCode com todo o seu acesso, como um serviço local, então permita só se você confia no autor.
+- **Reconhecer seus links nos chats**: identificadores como `DEMO-12` e links para o site da extensão ficam clicáveis nas suas mensagens do chat. O diálogo lista quais são e diz se um clique os abre na extensão ou os anexa à sua mensagem. Links que o OpenChamber já conhece, como pull requests do GitHub e issues do Linear, mantêm o comportamento de sempre.
+
+Um serviço local também pode continuar rodando enquanto o OpenChamber estiver em execução, ou despertar em um horário. O diálogo diz isso em **Executar um serviço local**, e diz quando o que você digita depois de `@` vai para o serviço. Uma extensão pode adicionar suas próprias linhas ao menu `@` e seus próprios blocos às respostas do agente. Pausar a extensão tira tudo isso.
+
+Uma extensão que entrega suas notificações, para o Slack, o Matrix ou um servidor próprio, diz isso também em **Executar um serviço local**, com uma linha que começa com **Entrega suas notificações**. Nada sai até você conectar uma conta para ela em [Configurações → Integrações](/pt-br/integrations/#canais-de-notificação-por-extensões); depois disso ela recebe o que o seu celular receberia, e pausar a extensão interrompe isso.
 
 Quando uma versão mais nova pede mais do que você permitiu, o card mostra **Precisa de aprovação** e um botão **Revisar permissões**. Até você permitir a nova lista, essa extensão fica desligada.
 
@@ -59,6 +68,14 @@ Quando uma versão mais nova pede mais do que você permitiu, o card mostra **Pr
 Além do painel na barra lateral, uma extensão pode adicionar entradas a menus que você já usa: as ações de uma mensagem do chat, o menu de uma sessão, o menu + ao lado da caixa de chat e comandos de barra como `/task ABC-12`, que anexam algo sem abrir nada. Ela também pode dar às próprias ferramentas um ícone, um título e um layout de saída adequados no chat, como as ferramentas embutidas do OpenChamber têm. A extensão decide quais deles oferece; todos ficam desligados até você permitir a extensão.
 
 Algumas extensões mostram uma imagem ao vivo em vez de um painel próprio: aquilo em que um agente está trabalhando no servidor, como um navegador ou um simulador. Clique na imagem ou digite para assumir o controle; a linha de status mostra **Você está no controle** e as ações de navegador do agente são recusadas até você pressionar **Devolver ao agente**. Copiar e colar funcionam normalmente. Outro dispositivo conectado ao mesmo tempo vê quem está no controle e não pode tomá-lo. Uma extensão assim pode adicionar seus próprios controles ao lado da imagem, por exemplo uma barra de endereço acima ou uma coluna de ferramentas ao lado.
+
+## Uma extensão com um plugin do OpenCode
+
+Uma extensão pode trazer um plugin do OpenCode, para que você instale uma coisa só em vez de duas. O diálogo de permissões dela tem uma linha que começa com **Adicionar um plugin ao OpenCode**. Depois que você permite, o OpenChamber adiciona o plugin ao OpenCode que ele roda para você em alguns segundos, sem reinício; desativar ou remover a extensão tira o plugin do mesmo jeito. Nada é escrito no seu próprio `opencode.json`, então o plugin nunca sobrevive à extensão e nunca roda no OpenCode que você inicia em um terminal.
+
+Quando o OpenChamber não iniciou o OpenCode com o qual conversa, ou o seu ambiente define o próprio `OPENCODE_CONFIG`, a configuração do OpenChamber não chega a esse OpenCode. A tela da extensão diz isso e oferece **Adicionar à configuração global**. Isso escreve a pasta do plugin na sua configuração global do OpenCode: ele passa a rodar em todo OpenCode deste computador, inclusive no terminal, continua ativo enquanto a extensão estiver desativada, e é seu para gerenciar em **Configurações → Plugins**. Se você remover a extensão, o OpenCode mostra essa entrada como um plugin com falha e continua funcionando até você apagar a entrada lá. Um OpenCode em outra máquina não consegue carregar uma pasta desta; a tela diz isso.
+
+O VS Code e o app móvel não carregam extensões. Uma sessão dentro de um espaço isolado roda o próprio OpenCode, que nunca recebe o plugin. No modo empresarial o plugin conta como um serviço local: a extensão só instala a partir de um repositório listado pelo seu administrador.
 
 ## Uma extensão como host Git
 
@@ -71,6 +88,28 @@ Seu token fica no OpenChamber. A extensão pede ao OpenChamber que chame o host 
 Pausar a extensão tira o host até você ligá-la de novo, e sua conta continua. Remover a extensão esquece a conta. O VS Code não mostra hosts Git de extensões.
 
 O SDK do OpenChamber tem um exemplo funcional, `examples/source-control-provider`, para começar ao construir um. Veja [Construir uma extensão](/pt-br/sdk/).
+
+## Uma extensão como rastreador
+
+Uma extensão pode adicionar um rastreador de itens de trabalho ao lado do Linear: YouTrack, Jira, Plane ou um rastreador próprio. A caixa de permissões dela passa a ter uma linha que começa com **Atua como o rastreador** e dá o nome dele. A linha também diz o que o OpenChamber envia a ele: suas buscas e os itens que você abre, e que ele é solicitado a mudar o estado deles e publicar comentários de sessão por você.
+
+Depois que você permite, o rastreador ganha seu próprio card em **Configurações → Integrações** sob **Contas de extensões**. Conecte uma conta ali: com um token, ou entrando pelo navegador depois de informar o client id do app que você registrou no rastreador, e antes o endereço do servidor se o card pedir. A partir daí, os itens dele estão onde os do Linear estão: o menu **+** do chat e o seletor, New Worktree, os itens vinculados de uma sessão e os estados ao vivo dos itens que você acompanha. Um link colado para um dos itens dele é reconhecido do mesmo jeito. Veja [Linear](/pt-br/integrations/#linear) para o que cada uma dessas coisas faz.
+
+Seus tokens ficam no OpenChamber. A extensão pede ao OpenChamber que chame o rastreador por ela, e o OpenChamber adiciona a credencial a cada chamada, só para o servidor que você conectou. A extensão nunca a recebe, e só as chamadas dela de mudança de estado e de comentário podem escrever algo lá.
+
+Pausar a extensão tira o rastreador até você ligá-la de novo, e suas contas continuam. Remover a extensão as esquece. O VS Code não mostra rastreadores; no celular os itens do rastreador aparecem, e as contas são conectadas pelo app web ou desktop.
+
+O SDK do OpenChamber tem um exemplo funcional, `examples/tracker-provider`, com um rastreador falso para rodar ao lado. Veja [Construir uma extensão](/pt-br/sdk/).
+
+## Uma extensão como provedor de uso
+
+Uma extensão pode adicionar um provedor de uso ao lado dos integrados: um provedor que o OpenChamber não lê sozinho, ou um dela mesma. Seu diálogo de permissões passa a ter uma linha que começa com **Informa o uso como um provedor integrado** e lista os provedores do OpenCode cujas credenciais ela lê, como `openrouter`; uma extensão que não lista nenhum diz isso.
+
+Depois que você a permite, o cartão dela fica depois dos provedores integrados em **Configurações → Uso**, com o nome e o ícone da extensão, e entra nos limites do cabeçalho, no status de trabalho, no popover do celular e na bandeja do desktop quando você marca **Mostrar no status de trabalho**, como qualquer provedor integrado. A cada atualização o OpenChamber entrega à extensão a credencial que o OpenCode guarda para cada provedor listado, e nada mais; uma versão que lista outro provedor pede sua aprovação de novo. A extensão lê o uso por conta própria, e o OpenChamber o desenha como desenha o de um provedor integrado.
+
+Pausar a extensão tira o cartão até você ligá-la de novo, e suas configurações de uso para ela continuam. Remover a extensão tira o cartão de vez. O VS Code não mostra uso de extensões; no celular o cartão aparece, e a extensão é configurada no aplicativo web ou desktop. Uma sessão dentro de um espaço isolado lê o uso do servidor próprio desse espaço, que não tem extensões.
+
+O SDK do OpenChamber tem um exemplo funcional, `examples/quota-provider`, com uma API de uso falsa para rodar ao lado. Veja [Construir uma extensão](/pt-br/sdk/).
 
 ## Conectar a conta dela
 

@@ -1,4 +1,5 @@
 import React from 'react';
+import { useI18n } from '@/lib/i18n';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useUIStore } from '@/stores/useUIStore';
 import { useSessionFoldersStore } from '@/stores/useSessionFoldersStore';
@@ -10,10 +11,12 @@ type Props = {
   getFolderScopesForProject: (projectId: string) => readonly { scopeKey: string; directory: string | null }[];
   isInlineEditing: boolean;
   startFolderRename: (scopeKey: string, folder: { id: string; name: string }) => void;
+  folderOwnerKeyBySessionId: ReadonlyMap<string, string>;
 };
 
 /** Owns the sidebar selection projection and its destructive confirmation. */
-export function SessionBulkActions({ getFolderScopesForProject, isInlineEditing, startFolderRename }: Props): React.ReactNode {
+export function SessionBulkActions({ getFolderScopesForProject, isInlineEditing, startFolderRename, folderOwnerKeyBySessionId }: Props): React.ReactNode {
+  const { t } = useI18n();
   const [bulkDeleteConfirm, setBulkDeleteConfirm] = React.useState<BulkDeleteSessionsConfirmState>(null);
   const showDeletionDialog = useUIStore((state) => state.showDeletionDialog);
   const setShowDeletionDialog = useUIStore((state) => state.setShowDeletionDialog);
@@ -29,10 +32,11 @@ export function SessionBulkActions({ getFolderScopesForProject, isInlineEditing,
     showDeletionDialog,
     foldersMap,
     getFolderScopesForProject,
+    folderOwnerKeyBySessionId,
     addSessionsToFolder,
     removeSessionsFromFolders,
     createFolderAndStartRename: (scopeKey) => {
-      const folder = createFolder(scopeKey, 'New folder');
+      const folder = createFolder(scopeKey, t('sessions.sidebar.folders.newFolderTitle'));
       startFolderRename(scopeKey, folder);
       return folder;
     },
@@ -52,6 +56,7 @@ export function SessionBulkActions({ getFolderScopesForProject, isInlineEditing,
       onMoveToFolder={bulk.handleBulkMoveToFolder}
       onCreateFolderAndMove={bulk.handleBulkCreateFolderAndMove}
       onRemoveFromFolder={bulk.handleBulkRemoveFromFolder}
+      canFileSelection={bulk.bulkCanMoveToFolder}
       canRemoveFromFolder={bulk.bulkCanRemoveFromFolder}
       onRestore={bulk.handleBulkRestore}
       onArchive={bulk.handleBulkArchive}

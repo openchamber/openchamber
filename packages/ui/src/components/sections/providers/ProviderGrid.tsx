@@ -14,7 +14,7 @@ import {
   SettingsCard,
   SettingsCardChip,
   SettingsCardPill,
-  SettingsCardSearch,
+  SettingsCardToolbar,
   type SettingsCardTone,
 } from '@/components/sections/shared/SettingsCards';
 import { findIntegrationForProvider, getProviderCardStatus, readProviderApiKeySetting, usesMachineCredentials, type ProviderCardStatus } from './providerAuth';
@@ -200,10 +200,11 @@ const StatusPill: React.FC<{ status: ProviderCardStatus }> = ({ status }) => {
     case 'reauthNeeded': label = t('settings.providers.card.status.reauthNeeded'); break;
     case 'accounts': label = t('settings.providers.card.status.accounts', { count: status.count }); break;
     case 'connected': label = t('settings.providers.card.status.connected'); break;
+    case 'noModels': label = t('settings.providers.card.status.noModels'); break;
     case 'environment': label = t('settings.providers.card.status.environment'); break;
     case 'signInNeeded': label = t('settings.providers.card.status.signInNeeded'); break;
   }
-  const tone: SettingsCardTone = status.kind === 'signInNeeded' || status.kind === 'reauthNeeded'
+  const tone: SettingsCardTone = status.kind === 'signInNeeded' || status.kind === 'reauthNeeded' || status.kind === 'noModels'
     ? 'warning'
     : status.kind === 'environment'
       ? 'neutral'
@@ -228,14 +229,14 @@ export const ProviderGrid: React.FC<ProviderGridProps> = ({ providers, integrati
   return (
     <SettingsPageLayout
       title={t('settings.page.providers.title')}
-      description={t('settings.providers.grid.description')}
-      headerEnd={<SettingsProjectSelector className="w-full min-w-0 @xl:w-56" />}
+      namedBySidebar
       className="[&>section:first-of-type]:pt-8"
     >
       {locked ? <EnterpriseProvidersNotice directory={directory} integrations={integrations} /> : null}
-      {providers.length > 0 ? (
-        <SettingsCardSearch value={query} onChange={setQuery} placeholder={t('settings.providers.grid.searchPlaceholder')} />
-      ) : null}
+      <SettingsCardToolbar
+        search={providers.length > 0 ? { value: query, onChange: setQuery, placeholder: t('settings.providers.grid.searchPlaceholder') } : null}
+        actions={<SettingsProjectSelector className="min-w-0 w-56" />}
+      />
 
       {providers.length === 0 ? (
         <p className="py-6 typography-meta text-muted-foreground">{t('settings.providers.grid.empty')}</p>
@@ -259,6 +260,7 @@ export const ProviderGrid: React.FC<ProviderGridProps> = ({ providers, integrati
             providerId: provider.id,
             optionsApiKey: readProviderApiKeySetting(provider),
             machineCredentials: usesMachineCredentials(provider),
+            noModels: provider.models.length === 0,
           });
           return (
             <SettingsCard

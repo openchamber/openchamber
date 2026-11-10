@@ -1,8 +1,8 @@
 import React from 'react';
+import { createPortal } from 'react-dom';
 import { renderMermaidASCII, renderMermaidSVG } from 'beautiful-mermaid';
 import type { CustomRendererProps } from 'streamdown';
-import { Button } from '@/components/ui/button';
-import { Icon } from '@/components/icon/Icon';
+import { ToolbarTooltipButton } from '@/components/ui/action-toolbar';
 import { useI18n } from '@/lib/i18n';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { useUIStore } from '@/stores/useUIStore';
@@ -61,7 +61,7 @@ const MermaidSvg = React.memo(function MermaidSvg({ svg, viewer }: { svg: string
 });
 
 export function MarkdownMermaid({ code, isIncomplete }: CustomRendererProps) {
-  const { theme, purpose, mermaidControls: controls, onShowPopup, allowMermaidWheelEvents } = useMarkdownPresentation();
+  const { theme, purpose, mermaidControls: controls, onShowPopup } = useMarkdownPresentation();
   const mode = useUIStore((state) => state.mermaidRenderingMode);
   const { t } = useI18n();
   const host = React.useRef<HTMLDivElement>(null);
@@ -145,58 +145,66 @@ export function MarkdownMermaid({ code, isIncomplete }: CustomRendererProps) {
     URL.revokeObjectURL(url);
   };
 
+  const panZoom = controls.showPanZoomControls && Boolean(svg);
+  const canDownload = controls.download && Boolean(svg);
+  const showToolbar = !purpose && (panZoom || controls.copy || canDownload);
+
+  const buttons = (
+    <>
+      {panZoom && (
+        <>
+          <ToolbarTooltipButton label={t('markdownRenderer.mermaid.actions.zoomInTitle')} icon="zoom-in" onClick={() => controller.current?.zoomIn()} />
+          <ToolbarTooltipButton label={t('markdownRenderer.mermaid.actions.zoomOutTitle')} icon="zoom-out" onClick={() => controller.current?.zoomOut()} />
+          <ToolbarTooltipButton label={t('markdownRenderer.mermaid.actions.resetViewTitle')} icon="focus-3" onClick={() => controller.current?.fit()} />
+        </>
+      )}
+      {controls.copy && (
+        <ToolbarTooltipButton
+          label={t(copied ? 'markdownRenderer.code.actions.copiedTitle' : 'markdownRenderer.mermaid.actions.copyTitle')}
+          icon="file-copy"
+          done={copied}
+          onClick={() => { void copy(); }}
+        />
+      )}
+      {canDownload && (
+        <ToolbarTooltipButton label={t('markdownRenderer.mermaid.actions.downloadSvgTitle')} icon="download" onClick={download} />
+      )}
+    </>
+  );
+
   return (
-    <div
-      ref={host}
-      dir="ltr"
-      data-streamdown="mermaid-block"
-      data-oc-mermaid-source={source}
-      data-mermaid-render={svg ? 'svg' : 'ascii'}
-      onClick={preview}
-      onWheelCapture={(event) => {
-        if (!allowMermaidWheelEvents && !event.ctrlKey && !event.metaKey) event.stopPropagation();
-      }}
-    >
-      <div data-streamdown="mermaid-scroll">
-        {svg ? (
-          <div data-streamdown="mermaid-viewport">
-            <MermaidSvg svg={purpose ? exportSvg() : svg} viewer={!purpose} />
-          </div>
-        ) : (
-          <pre data-streamdown="mermaid-ascii">{text}</pre>
-        )}
-      </div>
-      {!purpose && (
+    // The controls sit in a row of their own above the diagram, like a shown
+    // page's: they never cover it, and fading in moves nothing. A surface with
+    // its own header (the full-screen viewer) takes them there instead.
+    <div data-streamdown="mermaid-frame" className="group/mermaid">
+      {showToolbar && controls.toolbarSlot ? createPortal(buttons, controls.toolbarSlot) : null}
+      {showToolbar && !controls.toolbarSlot && (
         <div
           data-streamdown="mermaid-toolbar"
           data-export-ignore
-          className="absolute top-1 inset-e-2 flex items-center gap-1"
+          className="flex h-6 items-center justify-end gap-0.5 opacity-0 transition-opacity duration-150 focus-within:opacity-100 group-hover/mermaid:opacity-100 pointer-coarse:opacity-100"
         >
-          {controls.showPanZoomControls && svg && (
-            <>
-              <Button variant="ghost" size="xs" title={t('markdownRenderer.mermaid.actions.zoomInTitle')} onClick={() => controller.current?.zoomIn()}>
-                <Icon name="add" className="size-3.5" />
-              </Button>
-              <Button variant="ghost" size="xs" title={t('markdownRenderer.mermaid.actions.zoomOutTitle')} onClick={() => controller.current?.zoomOut()}>
-                <Icon name="subtract" className="size-3.5" />
-              </Button>
-              <Button variant="ghost" size="xs" title={t('markdownRenderer.mermaid.actions.resetViewTitle')} onClick={() => controller.current?.fit()}>
-                <Icon name="refresh" className="size-3.5" />
-              </Button>
-            </>
-          )}
-          {controls.copy && (
-            <Button variant="ghost" size="xs" title={t(copied ? 'markdownRenderer.code.actions.copiedTitle' : 'markdownRenderer.mermaid.actions.copyTitle')} onClick={copy}>
-              <Icon name={copied ? 'check' : 'file-copy'} className="size-3.5" />
-            </Button>
-          )}
-          {controls.download && svg && (
-            <Button variant="ghost" size="xs" title={t('markdownRenderer.mermaid.actions.downloadSvgTitle')} onClick={download}>
-              <Icon name="download" className="size-3.5" />
-            </Button>
-          )}
+          {buttons}
         </div>
       )}
+      <div
+        ref={host}
+        dir="ltr"
+        data-streamdown="mermaid-block"
+        data-oc-mermaid-source={source}
+        data-mermaid-render={svg ? 'svg' : 'ascii'}
+        onClick={preview}
+      >
+        <div data-streamdown="mermaid-scroll">
+          {svg ? (
+            <div data-streamdown="mermaid-viewport">
+              <MermaidSvg svg={purpose ? exportSvg() : svg} viewer={!purpose} />
+            </div>
+          ) : (
+            <pre data-streamdown="mermaid-ascii">{text}</pre>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { spawnSync } from 'node:child_process';
+import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -13,8 +15,10 @@ const {
   checkForUpdates,
   detectPackageManager,
   executeUpdate,
+  fetchRequiredOpenCodeVersion,
   getCurrentVersion,
   getUpdateCommand,
+  readUpdateChannel,
 } = await import('./package-manager.js');
 
 /** Helper: create a fetch mock that routes by URL pattern */
@@ -44,15 +48,21 @@ function createFetchMock() {
 describe('checkForUpdates', () => {
   let fetchMock;
   let originalFetch;
+  let previousDataDir;
 
   beforeEach(() => {
     fetchMock = createFetchMock();
     originalFetch = globalThis.fetch;
     globalThis.fetch = fetchMock;
+    // No channel picked: these are the release checks, whatever the machine's own settings say.
+    previousDataDir = process.env.OPENCHAMBER_DATA_DIR;
+    process.env.OPENCHAMBER_DATA_DIR = path.join(os.tmpdir(), 'oc-update-check-no-settings');
   });
 
   afterEach(() => {
     globalThis.fetch = originalFetch;
+    if (previousDataDir === undefined) delete process.env.OPENCHAMBER_DATA_DIR;
+    else process.env.OPENCHAMBER_DATA_DIR = previousDataDir;
   });
 
   // --- Scenario: API says update available, npm confirms ---
@@ -253,32 +263,19 @@ describe('checkForUpdates', () => {
     }
   });
 
-  it('resolves an Android APK asset when the update API returns an AAB', async () => {
+  it('offers a Canary Android app the newest APK of the canary pre-release', async () => {
     fetchMock
       .when('api.openchamber.dev', {
         ok: true,
-        json: async () => ({
-          latestVersion: '1.10.0',
-          updateAvailable: true,
-          downloadUrl: 'https://github.com/openchamber/openchamber/releases/download/v1.10.0/OpenChamber-1.10.0-42-android.aab',
-        }),
+        json: async () => ({ latestVersion: '2.5.3', updateAvailable: false }),
       })
-      .when('api.github.com/repos/openchamber/openchamber/releases/tags/v1.10.0', {
+      .when('api.github.com/repos/openchamber/openchamber/releases/tags/canary', {
         ok: true,
         json: async () => ({
           assets: [
-            {
-              name: 'OpenChamber-1.10.0-42-android.aab',
-              browser_download_url: 'https://downloads.example/OpenChamber-1.10.0-42-android.aab',
-            },
-            {
-              name: 'app-release.apk',
-              browser_download_url: 'https://downloads.example/app-release.apk',
-            },
-            {
-              name: 'OpenChamber-1.10.0-42-android.apk',
-              browser_download_url: 'https://downloads.example/OpenChamber-1.10.0-42-android.apk',
-            },
+            { name: 'OpenChamber-2.5.4-canary.20261030.4-29857000-android.apk', browser_download_url: 'https://downloads.example/old.apk' },
+            { name: 'OpenChamber-2.5.4-canary.20261031.5-29858440-android.apk', browser_download_url: 'https://downloads.example/new.apk' },
+            { name: 'OpenChamber-2.5.4-canary.20261031.5-29858440-android.aab', browser_download_url: 'https://downloads.example/new.aab' },
           ],
         }),
       });
@@ -286,31 +283,71 @@ describe('checkForUpdates', () => {
     const result = await checkForUpdates({
       appType: 'mobile-capacitor',
       platform: 'android',
-      currentVersion: '1.9.10',
+      currentVersion: '2.5.4-canary.20261030.4',
     });
 
-    expect(result.downloadUrl).toBe('https://downloads.example/OpenChamber-1.10.0-42-android.apk');
+    expect(result).toMatchObject({
+      available: true,
+      version: '2.5.4-canary.20261031.5',
+      downloadUrl: 'https://downloads.example/new.apk',
+    });
+
+    // An APK from a release, whose releases carry no APK any more, moves to Canary.
+    const fromRelease = await checkForUpdates({
+      appType: 'mobile-capacitor',
+      platform: 'android',
+      currentVersion: '2.5.3',
+    });
+    expect(fromRelease.available).toBe(true);
+    expect(fromRelease.downloadUrl).toBe('https://downloads.example/new.apk');
+
+    const upToDate = await checkForUpdates({
+      appType: 'mobile-capacitor',
+      platform: 'android',
+      currentVersion: '2.5.4-canary.20261031.5',
+    });
+    expect(upToDate.available).toBe(false);
+    expect(upToDate.downloadUrl).toBeUndefined();
   });
 
-  it('keeps a direct Android APK URL from the update API', async () => {
-    const apkUrl = 'https://github.com/openchamber/openchamber/releases/download/v1.10.0/OpenChamber-1.10.0-42-android.apk';
-    fetchMock.when('api.openchamber.dev', {
-      ok: true,
-      json: async () => ({
-        latestVersion: '1.10.0',
-        updateAvailable: true,
-        downloadUrl: apkUrl,
-      }),
-    });
+  it('offers the Canary APK from the R2 mirror once the mirror has it', async () => {
+    fetchMock
+      .when('api.openchamber.dev', {
+        ok: true,
+        json: async () => ({ latestVersion: '2.5.3', updateAvailable: false }),
+      })
+      .when('api.github.com/repos/openchamber/openchamber/releases/tags/canary', {
+        ok: true,
+        json: async () => ({
+          assets: [{ name: 'OpenChamber-2.5.4-canary.20261031.5-29858440-android.apk', browser_download_url: 'https://downloads.example/new.apk' }],
+        }),
+      })
+      .when('downloads.openchamber.dev/desktop/canary/OpenChamber-2.5.4-canary.20261031.5-29858440-android.apk', { ok: true });
 
     const result = await checkForUpdates({
       appType: 'mobile-capacitor',
       platform: 'android',
-      currentVersion: '1.9.10',
+      currentVersion: '2.5.4-canary.20261030.4',
+    });
+    expect(result.downloadUrl).toBe('https://downloads.openchamber.dev/desktop/canary/OpenChamber-2.5.4-canary.20261031.5-29858440-android.apk');
+  });
+
+  it('reports an unreadable canary pre-release as an error for a Canary Android app', async () => {
+    fetchMock
+      .when('api.openchamber.dev', {
+        ok: true,
+        json: async () => ({ latestVersion: '2.5.3', updateAvailable: false }),
+      })
+      .when('api.github.com/repos/openchamber/openchamber/releases/tags/canary', { ok: false, status: 503 });
+
+    const result = await checkForUpdates({
+      appType: 'mobile-capacitor',
+      platform: 'android',
+      currentVersion: '2.5.4-canary.20261030.4',
     });
 
-    expect(result.downloadUrl).toBe(apkUrl);
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(result.available).toBe(false);
+    expect(result.error).toBe('Unable to determine versions');
   });
 
   it('returns available=false when API claims update but npm is behind', async () => {
@@ -422,10 +459,135 @@ describe('checkForUpdates', () => {
   });
 });
 
+describe('checkForUpdates on the update channels', () => {
+  let fetchMock;
+  let originalFetch;
+  let dataDir;
+  let previousDataDir;
+
+  const pickChannel = (channel) => {
+    fs.writeFileSync(path.join(dataDir, 'settings.json'), JSON.stringify({ serverUpdateChannel: channel }));
+  };
+  const serveDistTags = (distTags) => {
+    fetchMock
+      .when('api.openchamber.dev', { ok: true, json: async () => ({ latestVersion: '2.5.3', updateAvailable: true }) })
+      .when('registry.npmjs.org', { ok: true, json: async () => ({ 'dist-tags': distTags }) });
+  };
+
+  beforeEach(() => {
+    fetchMock = createFetchMock();
+    originalFetch = globalThis.fetch;
+    globalThis.fetch = fetchMock;
+    previousDataDir = process.env.OPENCHAMBER_DATA_DIR;
+    dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'oc-update-channel-'));
+    process.env.OPENCHAMBER_DATA_DIR = dataDir;
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+    if (previousDataDir === undefined) delete process.env.OPENCHAMBER_DATA_DIR;
+    else process.env.OPENCHAMBER_DATA_DIR = previousDataDir;
+    fs.rmSync(dataDir, { recursive: true, force: true });
+  });
+
+  it('offers the Canary build once Canary is picked', async () => {
+    pickChannel('canary');
+    serveDistTags({ latest: '2.5.3', canary: '2.5.4-canary.20261031.7' });
+
+    const result = await checkForUpdates({ currentVersion: '2.5.3' });
+
+    expect(result).toMatchObject({ available: true, version: '2.5.4-canary.20261031.7', updateCommand: 'openchamber update' });
+    // The website still counts the check-in.
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes('api.openchamber.dev'))).toBe(true);
+  });
+
+  it('offers the next night and not the same or an earlier one', async () => {
+    pickChannel('canary');
+    serveDistTags({ latest: '2.5.3', canary: '2.5.4-canary.20261031.7' });
+
+    expect((await checkForUpdates({ currentVersion: '2.5.4-canary.20261030.6' })).available).toBe(true);
+    expect((await checkForUpdates({ currentVersion: '2.5.4-canary.20261031.7' })).available).toBe(false);
+    expect((await checkForUpdates({ currentVersion: '2.5.4-canary.20261101.8' })).available).toBe(false);
+  });
+
+  it('is up to date on Canary before the first Canary is published', async () => {
+    pickChannel('canary');
+    serveDistTags({ latest: '2.5.3' });
+
+    const result = await checkForUpdates({ currentVersion: '2.5.3' });
+
+    expect(result.available).toBe(false);
+    expect(result.error).toBeUndefined();
+  });
+
+  it('reports an unreadable registry as a failed check, not as up to date', async () => {
+    pickChannel('canary');
+    fetchMock
+      .when('api.openchamber.dev', { ok: true, json: async () => ({ latestVersion: '2.5.3', updateAvailable: false }) })
+      .when('registry.npmjs.org', Promise.reject(new Error('Registry unreachable')));
+
+    const result = await checkForUpdates({ currentVersion: '2.5.3' });
+
+    expect(result.available).toBe(false);
+    expect(result.error).toBe('Unable to determine versions');
+  });
+
+  it('offers the older release on Stable from a Canary build', async () => {
+    pickChannel('stable');
+    serveDistTags({ latest: '2.5.3', canary: '2.5.4-canary.20261031.7' });
+
+    const result = await checkForUpdates({ currentVersion: '2.5.4-canary.20261031.7' });
+
+    expect(result).toMatchObject({ available: true, version: '2.5.3' });
+  });
+
+  it('keeps a Canary build installed from the terminal on Canary until a channel is picked', async () => {
+    serveDistTags({ latest: '2.5.3', canary: '2.5.4-canary.20261031.7' });
+
+    expect(readUpdateChannel('2.5.4-canary.20261031.7')).toBe('canary');
+    expect(readUpdateChannel('2.5.3')).toBe('stable');
+    expect((await checkForUpdates({ currentVersion: '2.5.4-canary.20261031.7' })).available).toBe(false);
+  });
+
+  it('leaves the desktop app, VS Code and phones on releases', async () => {
+    pickChannel('canary');
+    serveDistTags({ latest: '2.5.3', canary: '2.5.4-canary.20261031.7' });
+
+    const result = await checkForUpdates({ currentVersion: '2.5.3', appType: 'vscode' });
+
+    expect(result.version).toBe('2.5.3');
+    expect(result.available).toBe(false);
+  });
+});
+
 describe('getCurrentVersion', () => {
   it('is exported for the CLI update command', () => {
     expect(typeof getCurrentVersion).toBe('function');
     expect(getCurrentVersion()).toMatch(/^\d+\.\d+\.\d+|unknown$/);
+  });
+});
+
+describe('fetchRequiredOpenCodeVersion', () => {
+  let originalFetch;
+  beforeEach(() => {
+    originalFetch = globalThis.fetch;
+  });
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  it('reads the oldest OpenCode from engines.opencode of the published release', async () => {
+    const cases = [
+      [{ opencode: '>=2.3.0' }, '2.3.0'],
+      [{ node: '>=24.14.0' }, null],
+      [{ opencode: '^2.3.0' }, null],
+    ];
+    for (const [engines, expected] of cases) {
+      globalThis.fetch = createFetchMock().when('@openchamber%2Fweb/2.7.1', { ok: true, json: async () => ({ version: '2.7.1', engines }) });
+      expect(await fetchRequiredOpenCodeVersion('2.7.1')).toBe(expected);
+    }
+    globalThis.fetch = createFetchMock().when('@openchamber%2Fweb/2.7.1', { ok: false, status: 404 });
+    expect(await fetchRequiredOpenCodeVersion('2.7.1')).toBeNull();
   });
 });
 

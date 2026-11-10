@@ -122,4 +122,22 @@ describe('Open VSX theme catalog', () => {
     expect(calls).toBe(1);
     await expect(catalog.readPackage({ ...identity, name: '../secret' })).rejects.toThrow();
   });
+
+  test('an empty query lists the most downloaded color themes', async () => {
+    const catalog = createThemeCatalog({ fetchImpl: async (url) => {
+      expect(url.searchParams.get('query')).toBeNull();
+      expect(url.searchParams.get('category')).toBe('Themes');
+      expect(url.searchParams.get('sortBy')).toBe('downloadCount');
+      expect(url.searchParams.get('sortOrder')).toBe('desc');
+      return Response.json({ extensions: [
+        { ...identity, name: 'material-icon-theme', displayName: 'Material Icon Theme', files: {} },
+        { ...identity, displayName: 'Dune', description: 'A warm dark theme', files: {} },
+        { ...identity, name: 'fluent-icons', displayName: 'Fluent Icons', files: {} },
+        { ...identity, namespace: 'vscode', name: 'theme-red', displayName: 'Red Theme (built-in)', files: {} },
+        { ...identity, name: 'powershell', displayName: 'PowerShell', description: 'Develop PowerShell modules', files: {} },
+        { ...identity, name: 'nord', displayName: 'Nord', description: 'An arctic, north-bluish Visual Studio Code theme.', files: {} },
+      ] });
+    } });
+    expect((await catalog.search({ query: '  ' })).map((item) => item.label)).toEqual(['Dune', 'Nord']);
+  });
 });

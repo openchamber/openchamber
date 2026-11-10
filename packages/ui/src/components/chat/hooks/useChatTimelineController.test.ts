@@ -190,6 +190,8 @@ describe('useChatTimelineController identity lifecycle', () => {
         let messages: ChatMessageEntry[] = [{ info: { id: 'new', sessionID: 'session', role: 'user', time: { created: 3 } }, parts: [] }];
         let controller!: UseChatTimelineControllerResult;
         const list: MessageListHandle = {
+            resolveUiPageMessageId: (messageId) => messageId,
+            scrollToUiPageRow: () => false,
             captureViewportAnchor: () => null, restoreViewportAnchor: () => false, alignViewportAnchor: () => 'missing',
             isHistoryVirtualized: () => false, scrollToTurnId: () => false, scrollToMessageId: () => false,
             holdViewportAnchor: () => {}, scrollToBottom: () => {},

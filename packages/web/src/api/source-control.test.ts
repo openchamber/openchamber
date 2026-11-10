@@ -36,6 +36,7 @@ const createMutationContext: SourceControlMutationContext<SourceControlCreateMut
 };
 
 interface MutationTestResult {
+  outcome?: string;
   merged?: boolean | string;
   message?: string;
   ready?: boolean;
@@ -72,6 +73,15 @@ afterEach(() => {
 });
 
 describe('createWebSourceControlAPI', () => {
+  it('keeps extension user IDs as strings in auth and accepts their exact mutation actor', async () => {
+    const api = createWebSourceControlAPI({ fetch: runtimeFetchMock });
+    const extension = { provider: 'ext-forge', instance: 'https://forge.example' };
+    runtimeFetchMock.mockResolvedValueOnce(Response.json({ connected: true, user: { id: ' ', login: 'mona' }, accounts: [] }));
+    expect(await api.authStatus(extension)).toMatchObject({ user: { id: ' ', username: 'mona' } });
+    const receipt = { ...mutationReceipt(), actor: { ...extension, providerAccountId: `${extension.instance}#member:mona` } };
+    runtimeFetchMock.mockResolvedValueOnce(Response.json(receipt));
+    expect(await api.issueComment({ ...mutationContext, ...extension, body: 'Synthetic comment' })).toEqual(receipt);
+  });
   it('posts across-search contexts and parses items with their directory and folder outcomes', async () => {
     const api = createWebSourceControlAPI({ fetch: runtimeFetchMock });
     const payload = { items: [{ kind: 'issue', number: 1, title: 'Issue', url: 'https://github.com/acme/app/issues/1',
@@ -967,6 +977,16 @@ describe('createWebSourceControlAPI', () => {
     }));
   });
 
+  it.each(['queued', 'merging', 'auto-merge', 'cancelled'])('accepts a waiting or cancelled merge receipt (%s)', async (outcome) => {
+    runtimeFetchMock.mockResolvedValueOnce(Response.json(mutationReceipt({ merged: false, outcome })));
+    const api = createWebSourceControlAPI({ fetch: runtimeFetchMock });
+    await expect(api.changeRequestMerge({ ...mutationContext, method: 'squash', cancel: outcome === 'cancelled' }))
+      .resolves.toEqual(mutationReceipt({ merged: false, outcome }));
+    expect(runtimeFetchMock).toHaveBeenCalledWith('/api/source-control/github/pr/merge', expect.objectContaining({
+      body: expect.stringContaining(`"cancel":${outcome === 'cancelled'}`),
+    }));
+  });
+
   it("posts comments and reviews to their routes and reads whether a review's text posted", async () => {
     const api = createWebSourceControlAPI({ fetch: runtimeFetchMock });
     runtimeFetchMock
@@ -1254,6 +1274,22 @@ describe('createWebSourceControlAPI', () => {
     });
     expect(runtimeFetchMock).toHaveBeenLastCalledWith('/api/source-control/github/auth/status', expect.objectContaining({
       query: new URLSearchParams({ instance: 'github.example.com' }),
+    }));
+  });
+
+  it('saves an instance SSH address and returns the stored value', async () => {
+    const api = createWebSourceControlAPI({ fetch: runtimeFetchMock });
+    runtimeFetchMock.mockResolvedValueOnce(Response.json({ sshUrl: 'ssh://giteassh.example.com:2222' }));
+
+    await expect(api.authSetSshUrl(
+      { provider: 'gitea', instance: 'https://gitea.example.com/' },
+      'ssh://git@giteassh.example.com:2222',
+    )).resolves.toEqual({ sshUrl: 'ssh://giteassh.example.com:2222' });
+
+    expect(runtimeFetchMock).toHaveBeenCalledWith('/api/source-control/gitea/auth/ssh-url', expect.objectContaining({
+      method: 'POST',
+      query: new URLSearchParams({ instance: 'https://gitea.example.com' }),
+      body: JSON.stringify({ sshUrl: 'ssh://git@giteassh.example.com:2222' }),
     }));
   });
 

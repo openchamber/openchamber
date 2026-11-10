@@ -37,8 +37,9 @@ the machine running your OpenChamber server. Create the `themes` directory if
 it does not exist. A custom OpenChamber data directory uses its own `themes`
 folder. When connected to a remote server, put the file on that server.
 
-Open **Settings → Appearance → Reload themes**, then select your theme in the
-dark theme dropdown. After editing the file, use **Reload themes** again.
+OpenChamber picks up the file within a couple of seconds. Select your theme in
+the dark theme dropdown under **Settings → Appearance**. Saved edits apply the
+same way in every open window; **Reload themes** reads the folder at once.
 
 For a light companion, create another file with a different ID, such as
 `my-theme-light`, and set `metadata.variant` to `light`. Both files can share

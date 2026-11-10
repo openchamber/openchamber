@@ -187,6 +187,7 @@ describe("projectToolPart", () => {
       status: "error",
       input: { command: "false" },
       error: "exit 1",
+      errorType: "tool.failed",
       output: "partial",
       time: { start: 6, end: 9 },
     })
@@ -384,6 +385,40 @@ describe("integration policies", () => {
       { type: "document", path: "/repo/opencode.json", info: { policies: [{ action: "integration.use", resource: "mcp:github", effect: "deny" }] } },
     ])
     expect(isIntegrationDenied(policies, "mcp:github")).toBe(true)
+  })
+
+  test("reads the skill.use and mcp.use statements OpenCode decodes the legacy prefix into", () => {
+    // OpenCode 2.2.3+ serves `integration.use` `skill:<id>` as `skill.use` `<id>`.
+    const policies = readIntegrationPolicies([
+      { type: "document", path: "/repo/opencode.json", info: { policies: [
+        { action: "skill.use", resource: "gemini-imagen", effect: "deny" },
+        { action: "mcp.use", resource: "github*", effect: "deny" },
+        { action: "skill.use", resource: "review", effect: "allow" },
+      ] } },
+    ])
+    expect(findIntegrationPolicy(policies, "skill:gemini-imagen")).toEqual({ resource: "skill:gemini-imagen", effect: "deny", path: "/repo/opencode.json" })
+    expect(isIntegrationDenied(policies, "mcp:github-enterprise")).toBe(true)
+    expect(isIntegrationDenied(policies, "skill:review")).toBe(false)
+    expect(isIntegrationDenied(policies, "skill:deploy")).toBe(false)
+  })
+
+  test("ignores an integration.use statement without an mcp:, skill: or plugin: prefix, which decides providers and accounts", () => {
+    const policies = readIntegrationPolicies([
+      { type: "document", path: "/repo/opencode.json", info: { policies: [{ action: "integration.use", resource: "*", effect: "deny" }] } },
+    ])
+    expect(policies).toEqual([])
+    expect(isIntegrationDenied(policies, "skill:deploy")).toBe(false)
+  })
+
+  test("reads plugin statements in both spellings", () => {
+    const policies = readIntegrationPolicies([
+      { type: "document", path: "/repo/opencode.json", info: { policies: [
+        { action: "plugin.use", resource: "leakshield", effect: "deny" },
+        { action: "integration.use", resource: "plugin:other", effect: "allow" },
+      ] } },
+    ])
+    expect(isIntegrationDenied(policies, "plugin:leakshield")).toBe(true)
+    expect(findIntegrationPolicy(policies, "plugin:other")).toEqual({ resource: "plugin:other", effect: "allow", path: "/repo/opencode.json" })
   })
 })
 

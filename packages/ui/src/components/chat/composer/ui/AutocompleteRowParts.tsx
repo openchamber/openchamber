@@ -1,5 +1,6 @@
 import React from 'react';
 
+import { Spinner } from '@/components/ui/spinner';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 
@@ -18,6 +19,21 @@ const SCOPE_LABEL = {
   opencode: 'chat.autocomplete.scope.opencode',
   openchamber: 'chat.autocomplete.scope.openchamber',
 } as const;
+
+/**
+ * A list's one row while its items load, as tall as the "no matches" row that
+ * often follows it, so the popup does not move between the two.
+ */
+export function AutocompleteLoadingRow() {
+  const { t } = useI18n();
+  return (
+    <div className="flex items-center px-2 py-1.5 typography-ui-label text-muted-foreground">
+      <span className="flex h-[1lh] items-center">
+        <Spinner className="size-3.5" aria-label={t('common.loading')} />
+      </span>
+    </div>
+  );
+}
 
 /**
  * The rest of an autocomplete row after its name: the description, muted on

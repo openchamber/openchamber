@@ -16,7 +16,7 @@ on:
         default: false
         type: boolean
       finish_published_release:
-        description: 'Finish an already published release: build and add only macOS and iOS, skip npm, Windows, Linux and Android'
+        description: 'Finish a release whose macOS build failed: build and add only macOS, rebuild the Windows update manifests from the installers on the release, skip npm, Windows and Linux. Publishes only when everything succeeds'
         required: false
         default: false
         type: boolean
@@ -65,13 +65,12 @@ jobs:
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           tag_name: v${{ steps.get_version.outputs.version }}
-          # A release being finished is already public; keep it that way.
-          # Every later upload step sets draft: true. Without it the action
+          # Every upload step sets draft: true. Without it the action
           # publishes the draft after uploading, and updaters would see the
           # release before every platform and manifest is on it. Only
-          # finalize-release publishes. On a release that is already public,
-          # draft: true changes nothing.
-          draft: ${{ github.event.inputs.finish_published_release != 'true' }}
+          # finalize-release publishes. The action keeps the draft state of
+          # a release that exists, so a public one being finished stays public.
+          draft: true
           generate_release_notes: false
           body_path: artifacts/release-notes.md
           name: ${{ steps.release_notes.outputs.name }}
@@ -247,7 +246,19 @@ jobs:
           fi
 
           # Require notary ticket stapled
-          xcrun stapler validate "$APP_PATH"
+          # stapler validate looks the ticket up in Apple CloudKit, which drops
+          # connections now and then (error 68); retry before failing the build.
+          for attempt in 1 2 3 4 5; do
+            if xcrun stapler validate "$APP_PATH"; then
+              break
+            fi
+            if [ "$attempt" -eq 5 ]; then
+              echo "Error: stapler validate failed after $attempt attempts"
+              exit 1
+            fi
+            echo "stapler validate failed (attempt $attempt), retrying in 30s"
+            sleep 30
+          done
 
           ENTITLEMENTS=$(codesign -d --entitlements :- "$APP_PATH" 2>&1 || true)
           if echo "$ENTITLEMENTS" | grep -q "com.apple.security.app-sandbox"; then
@@ -571,7 +582,9 @@ jobs:
 
       - name: Finalize combined manifests
         env:
-          MAC_ONLY: ${{ github.event.inputs.finish_published_release == 'true' && '1' || '' }}
+          WINDOWS_FROM_RELEASE: ${{ github.event.inputs.finish_published_release == 'true' && '1' || '' }}
+          RELEASE_ID: ${{ needs.create-release.outputs.release_id }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           LATEST_YML_DIR: ${{ github.workspace }}/artifacts
           GH_REPO: ${{ github.repository }}
           OPENCHAMBER_VERSION: ${{ needs.create-release.outputs.version }}
@@ -589,20 +602,8 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  mobile-release:
-    needs: create-release
-    if: ${{ github.event.inputs.dry_run != 'true' }}
-    uses: ./.github/workflows/mobile-release.yml
-    with:
-      version_name: ${{ needs.create-release.outputs.version }}
-      build_number: ${{ github.run_number }}
-      release_tag: v${{ needs.create-release.outputs.version }}
-      upload_github_release: true
-      build_android: ${{ github.event.inputs.finish_published_release != 'true' }}
-    secrets: inherit
-
   finalize-release:
-    needs: [create-release, build-desktop-electron-macos, build-desktop-electron-windows, build-desktop-electron-linux, publish-electron-linux, publish-npm, combine-electron-manifests, mobile-release]
+    needs: [create-release, build-desktop-electron-macos, build-desktop-electron-windows, build-desktop-electron-linux, publish-electron-linux, publish-npm, combine-electron-manifests]
     # Jobs a finishing run skips count as done; any failure still stops the release.
     if: ${{ !cancelled() && !failure() }}
     runs-on: ubuntu-latest
@@ -651,6 +652,53 @@ jobs:
             process.exit(1);
           });
           NODE
+
+      # Everything that announces the release (publishing it, the Discord post,
+      # the website rebuild) waits until its files are on the R2 mirror, where
+      # the desktop app and the website download them. A failed upload stops
+      # here with the release still a draft; re-running the job finishes it.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: ${{ github.event.inputs.dry_run != 'true' }}
+
+      # The draft's files through the API by release id: a draft has no
+      # public download address, and the API keeps working when
+      # github.com/.../releases/download does not.
+      - name: Download the release's desktop files
+        if: ${{ github.event.inputs.dry_run != 'true' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPOSITORY: ${{ github.repository }}
+          VERSION: ${{ needs.create-release.outputs.version }}
+          RELEASE_ID: ${{ needs.create-release.outputs.release_id }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/release"
+          gh api --paginate "repos/$REPOSITORY/releases/$RELEASE_ID/assets" \
+            -q ".[] | select(.name | startswith(\"OpenChamber-$VERSION-\") or test(\"^latest.*\\\\.yml$\")) | \"\\(.id) \\(.name)\"" |
+            while read -r id name; do
+              gh api -H 'Accept: application/octet-stream' "repos/$REPOSITORY/releases/assets/$id" > "$RUNNER_TEMP/release/$name"
+            done
+          ls -la "$RUNNER_TEMP/release"
+
+      - name: Mirror to R2
+        if: ${{ github.event.inputs.dry_run != 'true' }}
+        env:
+          VERSION: ${{ needs.create-release.outputs.version }}
+          R2_ACCOUNT_ID: ${{ vars.R2_ACCOUNT_ID }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          # R2 rejects the checksums newer AWS CLI versions send by default.
+          AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+          AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPOSITORY: ${{ github.repository }}
+        # The latest published release is what the website links until it is
+        # rebuilt; its files stay even if a release in between never got out.
+        run: |
+          set -euo pipefail
+          LIVE=$(gh release view -R "$REPOSITORY" --json tagName -q .tagName | sed 's/^v//')
+          node scripts/release-mirror/mirror-to-r2.mjs --channel stable --dir "$RUNNER_TEMP/release" --version "$VERSION" --keep "$LIVE"
 
       - name: Publish release
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2

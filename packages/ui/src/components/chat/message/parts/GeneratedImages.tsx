@@ -9,10 +9,10 @@ import { useI18n } from '@/lib/i18n';
 import type { ToolPart } from '@/lib/opencode/model';
 import { useUIStore } from '@/stores/useUIStore';
 import { loadMessageImageBlob } from '../../markdown/markdownImageAssets';
-import { MarkdownContent } from '../../MarkdownRendererImpl';
+import { MarkdownContent } from '../../MarkdownRenderer';
 import type { ToolPopupContent } from '../types';
 import { generatedImageDestination } from './generatedImageDestination';
-import { PageToolButton } from './HtmlRenderFrame';
+import { ToolbarTooltipButton } from '@/components/ui/action-toolbar';
 import { saveFile } from './saveFile';
 
 const ToolOutputDialog = lazyWithChunkRecovery(() => import('../ToolOutputDialog'));
@@ -98,7 +98,7 @@ function GeneratedImage({ part, path, directory, onShowPopup }: {
                 VS Code has no image grant route and its webview no downloads. */}
             {isVSCodeRuntime() ? null : (
                 <div className="flex h-6 items-center justify-end opacity-0 transition-opacity duration-150 focus-within:opacity-100 group-hover/generated-image:opacity-100 pointer-coarse:opacity-100">
-                    <PageToolButton label={t('chat.image.download')} icon="download" onClick={() => { void handleDownload(); }} />
+                    <ToolbarTooltipButton label={t('chat.image.download')} icon="download" onClick={() => { void handleDownload(); }} />
                 </div>
             )}
             <MarkdownContent

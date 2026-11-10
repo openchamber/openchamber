@@ -16,12 +16,12 @@ export const WORK_STATUS_SECTION_IDS = [
   'session',
   'repository',
   'usage',
+  'contextSources',
   'telemetry',
   'subagents',
   'workflows',
   'mcp',
   'pinned',
-  'contextSources',
 ] as const;
 
 export type WorkStatusSectionId = (typeof WORK_STATUS_SECTION_IDS)[number];
@@ -66,8 +66,28 @@ const readStoredSectionId = (value: unknown): WorkStatusPanelSectionId | null =>
   return parsed.success ? parsed.data : null;
 };
 
-/** Preserve chosen positions, discard obsolete ids, and append newly added built-in sections. */
-export const sanitizeWorkStatusSectionOrder = (value: readonly string[] | null | undefined): WorkStatusPanelSectionId[] => {
+// The default before Context sources moved up. Clients saved the default as
+// their order without the user choosing it, and Turn stats and Workflows were
+// appended to those saved lists wherever they stood, so those two don't count.
+const DEFAULT_ORDER_WITH_CONTEXT_SOURCES_LAST: readonly WorkStatusPanelSectionId[] = [
+  'session', 'repository', 'usage', 'subagents', 'mcp', 'pinned', 'contextSources',
+];
+
+const isDefaultOrderWithContextSourcesLast = (order: readonly WorkStatusPanelSectionId[]): boolean => {
+  const placed = order.filter((id) => id !== 'telemetry' && id !== 'workflows');
+  return placed.length === DEFAULT_ORDER_WITH_CONTEXT_SOURCES_LAST.length
+    && placed.every((id, index) => id === DEFAULT_ORDER_WITH_CONTEXT_SOURCES_LAST[index]);
+};
+
+/**
+ * Preserve chosen positions, discard obsolete ids, and append newly added
+ * built-in sections. `arranged` is false for an order the user never set by
+ * hand, which follows the default's move of Context sources.
+ */
+export const sanitizeWorkStatusSectionOrder = (
+  value: readonly string[] | null | undefined,
+  arranged = true,
+): WorkStatusPanelSectionId[] => {
   const ordered = new Set<WorkStatusPanelSectionId>();
   if (Array.isArray(value)) {
     for (const entry of value) {
@@ -76,7 +96,11 @@ export const sanitizeWorkStatusSectionOrder = (value: readonly string[] | null |
     }
   }
   for (const id of WORK_STATUS_SECTION_IDS) ordered.add(id);
-  return [...ordered];
+  const order = [...ordered];
+  if (arranged || !isDefaultOrderWithContextSourcesLast(order)) return order;
+  const moved: WorkStatusPanelSectionId[] = order.filter((id) => id !== 'contextSources');
+  moved.splice(moved.indexOf('usage') + 1, 0, 'contextSources');
+  return moved;
 };
 
 /**

@@ -397,6 +397,7 @@ export async function handleProxyBridgeMessage(
         path: resolvedPath,
         headers: normalizeHeaderKeys(headers),
         resolveSessionDirectory: createSessionDirectoryResolver(ctx),
+        readBody: async () => (bodyBase64 ? JSON.parse(Buffer.from(bodyBase64, 'base64').toString('utf8')) : undefined),
       });
       if (trustRefusal) {
         return { id, type, success: true, data: trustAnswerResponse(trustRefusal) };

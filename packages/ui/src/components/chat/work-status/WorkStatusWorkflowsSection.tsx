@@ -11,6 +11,7 @@ import { useUIStore } from '@/stores/useUIStore';
 import { WorkStatusCollapsibleSection, WorkStatusRow, WorkStatusRowAction, WorkStatusValue } from './WorkStatusPrimitives';
 import { useReportWorkStatusPresence } from './presenceContext';
 import { useOpenChildSession } from './useOpenChildSession';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 
 type Props = {
   sessionId: string | null;
@@ -66,7 +67,7 @@ export const WorkStatusWorkflowsSection: React.FC<Props> = ({ sessionId, directo
         defaultExpanded
         summary={openRuns > 0 ? `${openRuns}/${runs.length}` : runs.length}
       >
-        <div className="max-h-72 overflow-y-auto">
+        <ScrollableOverlay outerClassName="max-h-72" disableHorizontal>
           {newestFirst.map((run) => {
             const look = workflowRunLook(run.state);
             const busy = pending === run.id;
@@ -76,6 +77,7 @@ export const WorkStatusWorkflowsSection: React.FC<Props> = ({ sessionId, directo
                 key={run.id}
                 leading={<StateGlyph icon={look.icon} color={look.color} />}
                 label={run.name}
+                labelDir="auto"
                 tooltip={run.error ?? run.description}
                 onClick={() => openWorkflowRunInPanel(directory, sessionId, run.id)}
                 ariaLabel={[t('chat.workStatus.workflow.openRun', { name: run.name }), t(look.labelKey)].join('. ')}
@@ -93,7 +95,7 @@ export const WorkStatusWorkflowsSection: React.FC<Props> = ({ sessionId, directo
               />
             );
           })}
-        </div>
+        </ScrollableOverlay>
       </WorkStatusCollapsibleSection>
     );
   }
@@ -134,6 +136,7 @@ export const WorkStatusWorkflowsSection: React.FC<Props> = ({ sessionId, directo
         className="ps-8"
         leading={<StateGlyph icon={look.icon} color={look.color} />}
         label={agent.label}
+        labelDir="auto"
         tooltip={agent.error ?? agent.preview}
         onClick={sessionOf ? () => openChildSession(sessionOf, agent.label) : undefined}
         ariaLabel={[t('chat.workStatus.workflow.openAgent', { name: agent.label }), t(look.labelKey)].join('. ')}
@@ -154,7 +157,7 @@ export const WorkStatusWorkflowsSection: React.FC<Props> = ({ sessionId, directo
       defaultExpanded
       summary={openRuns > 0 ? `${openRuns}/${runs.length}` : runs.length}
     >
-      <div className="max-h-72 overflow-y-auto">
+      <ScrollableOverlay outerClassName="max-h-72" disableHorizontal>
         {newestFirst.map((run) => {
           const look = workflowRunLook(run.state);
           const expanded = isWorkflowRunOpen(run) !== toggled.has(run.id);
@@ -163,6 +166,7 @@ export const WorkStatusWorkflowsSection: React.FC<Props> = ({ sessionId, directo
               <WorkStatusRow
                 leading={<StateGlyph icon={look.icon} color={look.color} />}
                 label={run.name}
+                labelDir="auto"
                 tooltip={run.error ?? run.description}
                 onClick={() => toggle(run.id)}
                 ariaLabel={[run.name, t(look.labelKey)].join('. ')}
@@ -173,6 +177,7 @@ export const WorkStatusWorkflowsSection: React.FC<Props> = ({ sessionId, directo
                   <WorkStatusRow
                     className="ps-5"
                     label={phase.title ?? t('chat.workflow.phase.unphased')}
+                    labelDir={phase.title ? 'auto' : undefined}
                     value={phase.agents.length > 0 ? (
                       <WorkStatusValue tone="muted">{`${phase.done}/${phase.agents.length}`}</WorkStatusValue>
                     ) : null}
@@ -183,7 +188,7 @@ export const WorkStatusWorkflowsSection: React.FC<Props> = ({ sessionId, directo
             </React.Fragment>
           );
         })}
-      </div>
+      </ScrollableOverlay>
     </WorkStatusCollapsibleSection>
   );
 };

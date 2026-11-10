@@ -5,9 +5,9 @@ description: Use when creating or modifying OpenChamber UI layout, horizontal po
 
 # RTL Layout
 
-Arabic and Hebrew mirror the whole interface. `getLocaleDirection` in `packages/ui/src/lib/i18n/runtime.ts` derives the direction from the UI locale; the i18n provider puts it on `<html dir>` and hands it to Base UI's `DirectionProvider`. Components read it as `useI18n().direction`, or as `isRightToLeft(el)` from `@/lib/i18n` in event handlers and code outside React. Do not call `el.matches(':dir(rtl)')`: it throws on WebKit before 16.4. Adding a right-to-left locale follows `locale-ui-patterns` and also puts it in `RTL_LOCALES` there.
+Arabic and Hebrew mirror the whole interface. Components read direction as `useI18n().direction`, or as `isRightToLeft(el)` from `@/lib/i18n` in event handlers and code outside React. Do not call `el.matches(':dir(rtl)')`: it throws on WebKit before 16.4. Adding a right-to-left locale follows `locale-ui-patterns`.
 
-Every layout change works in both directions. The test: English stays pixel-identical, and Arabic is its mirror image.
+Every layout change works in both directions.
 
 ## Logical by default
 
@@ -17,7 +17,7 @@ What CSS cannot express flips with the `rtl:` variant: `translate-x-*` (`data-[c
 
 ## Physical on purpose
 
-Some sides belong to the screen, not the line. The lint rule `openchamber/no-physical-sides` (`tools/oxlint/openchamber`, enabled in `oxlint.config.ts`) flags physical classes in `packages/ui` class lists, so a deliberate one carries `// oxlint-disable-next-line openchamber/no-physical-sides -- <why it is physical>`:
+Some sides belong to the screen. The lint rule `openchamber/no-physical-sides` flags physical classes in `packages/ui` class lists, so a deliberate one carries `// oxlint-disable-next-line openchamber/no-physical-sides -- <why it is physical>`:
 
 - **OS window controls.** macOS traffic lights stay top left in every language; frameless Windows/Linux controls stay on the side the user picked. The titlebar publishes `--oc-titlebar-start-inset` and maps controls through `getInlineStartSide(direction)` (see `Header.tsx`, `TitlebarLeftControls.tsx`).
 - **Geometry from measurement.** An element moved by `offsetLeft`, `getBoundingClientRect().left` or `clientX` anchors with `left-0`, because the numbers are physical (the active-tab pill in `sortable-tabs-strip.tsx`).
@@ -34,7 +34,7 @@ Some sides belong to the screen, not the line. The lint rule `openchamber/no-phy
 
 ## Mixed-direction text
 
-User content (session titles, run names, file names in lists) gets `dir="auto"` so it shows its own start when truncated. Text whose direction differs from the UI aligns with the interface through `oc-ui-start-align`, so it lines up with the rows around it. Values made of numbers and units ("~41 tok/s", "6.6K ↑ · 242 ↓") also take `dir="auto"`. Markdown already resolves direction per block; see `components/chat/message/parts/DOCUMENTATION.md` before touching it.
+User content (session titles, run names, file names in lists) gets `dir="auto"` so it shows its own start when truncated. Text whose direction differs from the UI aligns with the interface through `oc-ui-start-align`, so it lines up with the rows around it. Values made of numbers and units ("~41 tok/s", "6.6K ↑ · 242 ↓") also take `dir="auto"`. `dir="auto"` goes by the first letter, so a block assembled from several texts (a question with its options) takes `dominantTextDirection` from `lib/i18n/textDirection.ts` on its container instead. A shared primitive that also receives translated strings gets no `dir="auto"` of its own (a Hebrew string opening with "rebase" would flip); its callers opt in, as `WorkStatusRow`'s `labelDir` does. Inputs and textareas need no `dir`: a rule in `index.css` resolves typed text per line and leaves an empty field in the interface's direction. Markdown already resolves direction per block; see `components/chat/message/parts/DOCUMENTATION.md` before touching it.
 
 ## Icons
 
@@ -43,5 +43,5 @@ User content (session titles, run names, file names in lists) gets `dir="auto"` 
 ## Verify
 
 1. Take English screenshots of the affected screens before the change and after it; they match pixel for pixel.
-2. Switch to Arabic (`localStorage['openchamber.i18n.v1'] = '{"locale":"ar"}'`) and check the same screens, then drag, scroll and use the arrow keys on whatever changed.
+2. Switch to Arabic (`localStorage['openchamber.i18n.v1'] = '{"locale":"ar"}'`) and check that the same screens mirror English, then drag, scroll and use the arrow keys on whatever changed: each moves toward the mirrored side.
 3. For phone layouts, check the drawer and swipe direction at a 390px touch viewport.

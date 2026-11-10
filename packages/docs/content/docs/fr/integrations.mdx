@@ -40,7 +40,7 @@ Déplie la carte **GitHub** et choisis **Connect GitHub** pour te connecter avec
 GitLab, Gitea, Forgejo et Gerrit ont chacun leur propre carte à côté de GitHub. Une fois connectés, leurs issues et pull requests (merge requests sur GitLab, changements sur Gerrit) apparaissent sur le tableau [Issues et PR](/fr/issues-and-prs/) et dans le menu **+** du chat, comme celles de GitHub.
 
 - **GitLab** : sur gitlab.com, connecte-toi avec un code d'appareil court, un jeton d'accès personnel ou la connexion `glab` du serveur. Pour un GitLab auto-hébergé, ajoute son adresse et colle un jeton d'accès personnel avec le scope `api`. La connexion par code d'appareil n'y fonctionne que si le serveur définit `OPENCHAMBER_GITLAB_CLIENT_ID` sur une application enregistrée sur cette instance.
-- **Gitea** : ajoute l'adresse de ton instance, comme `https://gitea.example.com`, et colle un jeton d'accès personnel avec les scopes `write:repository`, `write:issue` et `read:user`. La carte renvoie vers la page de ton instance qui en crée un. Gitea n'a pas de connexion par code d'appareil ni par CLI. Il faut Gitea 1.21 ou plus récent, servi à la racine de son adresse.
+- **Gitea** : ajoute l'adresse de ton instance, comme `https://gitea.example.com`, et colle un jeton d'accès personnel avec les scopes `write:repository`, `write:issue` et `read:user`. La carte renvoie vers la page de ton instance qui en crée un. Si tu es connecté avec la CLI `gt` de Gitea sur le serveur (`gt auth login`), l'instance apparaît d'elle-même sur la carte : choisis **Utiliser gt CLI** pour travailler avec cette connexion. La connexion `gt` couvre les issues et les pull requests ; pour le push et le pull, connecte un jeton ou configure Git toi-même, par exemple avec `gt auth setup-git`. Il faut Gitea 1.21 ou plus récent, servi à la racine de son adresse.
 - **Forgejo** : Codeberg est déjà sur la carte, donc pour le connecter il suffit d'un jeton d'accès personnel avec les scopes `write:repository`, `write:issue` et `read:user` ; la carte renvoie vers la page de Codeberg qui en crée un. Pour un autre serveur Forgejo, ajoute son adresse, comme `https://forgejo.example.com`, et colle un jeton avec les mêmes scopes. Il faut Forgejo 7.0 ou plus récent, servi à la racine de son adresse. Un serveur Forgejo se connecte sur cette carte et un serveur Gitea sur la carte Gitea.
 - **Gerrit** : ajoute l'adresse de ton instance, comme `https://gerrit.example.com`, puis ton nom d'utilisateur Gerrit et un mot de passe HTTP. Génère le mot de passe dans Gerrit sous **Settings → HTTP Credentials** ; la carte renvoie vers cette page. Ton mot de passe de connexion ne fonctionne pas, et un compte sans nom d'utilisateur ne peut pas se connecter. Il faut Gerrit 3.8 ou plus récent, servi à la racine de son adresse. Les sites dont l'adresse de review diffère de l'adresse Git, comme googlesource.com avec `.gitcookies`, ne sont pas pris en charge.
 
@@ -90,6 +90,18 @@ Active **Session comments** dans la carte Linear : une session démarrée depuis
 4. Choisis **Set up** et connecte-toi. Les modèles apparaissent ensuite dans le sélecteur de modèles du chat.
 
 Les intégrations s'installent pour ton utilisateur et fonctionnent donc dans tous les projets. Tu peux les mettre à jour ou les retirer à tout moment depuis la même carte.
+
+## Canaux de notification des extensions
+
+Une [extension](/fr/extensions/) peut transmettre tes notifications vers Slack, Matrix ou un serveur à elle. Une fois que tu l'as autorisée dans **Settings → Extensions**, elle reçoit une carte sous **Extension accounts** sur cette page. Saisis-y le jeton du compte, et l'adresse du serveur quand la carte la demande, puis connecte : à partir de là, l'extension reçoit les mêmes notifications que ton téléphone, selon tes [réglages de notification](/fr/notifications/). Le jeton reste dans OpenChamber ; le service de l'extension envoie via OpenChamber et ne le voit jamais.
+
+Si le serveur refuse le jeton plus tard, la carte indique que le compte a besoin d'attention ; reconnecte-le avec un nouveau jeton. Déconnecte pour arrêter les envois sans retirer l'extension, ou mets l'extension en pause. Retirer l'extension oublie le compte.
+
+## Outils de suivi des extensions
+
+Une [extension](/fr/extensions/) peut ajouter un outil de suivi des tâches à côté de Linear. Une fois que tu l'as autorisée dans **Settings → Extensions**, elle reçoit une carte sous **Extension accounts** sur cette page. Saisis l'adresse du serveur quand la carte la demande, puis connecte un compte : colle un jeton, ou enregistre le client id de l'application que tu as enregistrée auprès de l'outil et connecte-toi dans le navigateur. Quand l'outil gère plusieurs comptes, **Add account** en connecte un autre et **Switch to** change celui en usage. L'association de projets et les commentaires de session apparaissent sur la carte quand l'outil les propose, comme pour Linear.
+
+Ses éléments apparaissent alors dans le sélecteur, le menu **+** du chat, New Worktree, les éléments liés d'une session et les états en direct des éléments que tu suis. Les jetons restent dans OpenChamber ; le service de l'extension atteint l'outil via OpenChamber et ne les voit jamais. Si l'outil refuse un identifiant plus tard, la carte indique que le compte a besoin d'attention ; reconnecte-le. Mettre l'extension en pause retire l'outil de tous les endroits où il apparaît et garde les comptes ; la retirer les oublie.
 
 ## Claude Code
 

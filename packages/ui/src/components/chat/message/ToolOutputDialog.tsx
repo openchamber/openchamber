@@ -23,12 +23,15 @@ import {
 } from './toolRenderers';
 import type { ToolPopupContent, DiffViewMode } from './types';
 import { DiffViewToggle } from './DiffViewToggle';
+import { ToolbarTooltipButton } from '@/components/ui/action-toolbar';
 import { useDefaultDiffViewMode } from './useDefaultDiffViewMode';
 import { VirtualizedCodeBlock, type CodeLine } from './parts/VirtualizedCodeBlock';
 import { JsonTreeView } from '@/components/ui/JsonTreeView';
+import { StatusImage } from '@/components/ui/status-image';
 import { Icon } from "@/components/icon/Icon";
 import { getToolIcon } from './parts/toolPresentation';
 import { useGuestToolPresentation } from '@/lib/guests/tool-presentation';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n, type I18nKey, type I18nParams } from '@/lib/i18n';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { isVSCodeRuntime } from '@/lib/desktop';
@@ -36,6 +39,7 @@ import { toast } from '@/components/ui';
 import { saveFile } from './parts/saveFile';
 import { MermaidLoadFailure, getMermaidDataUrlSourcePromise, isCurrentMermaidLoadRequest, isMermaidLoadFailure, nextMermaidLoadRequestId } from './toolOutputDialogMermaid';
 import { PIERRE_DIFF_TINT_CSS } from '@/lib/shiki/pierreDiffTint';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 
 interface ToolOutputDialogProps {
     popup: ToolPopupContent;
@@ -98,15 +102,15 @@ const usePierreThemeConfig = (): PierreThemeConfig => {
         [availableThemes, darkThemeId, fallbackDarkTheme],
     );
 
-    React.useEffect(() => {
-        ensurePierreThemeRegistered(lightTheme);
-        ensurePierreThemeRegistered(darkTheme);
-    }, [darkTheme, lightTheme]);
+    // Registered during render, as in the tool diff preview: an edited theme
+    // gets a new name, and the dialog must not render with one not yet known.
+    const lightThemeName = ensurePierreThemeRegistered(lightTheme);
+    const darkThemeName = ensurePierreThemeRegistered(darkTheme);
 
     const currentVariant = themeSystem?.currentTheme.metadata.variant ?? 'light';
 
     return {
-        theme: { light: lightTheme.metadata.id, dark: darkTheme.metadata.id },
+        theme: { light: lightThemeName, dark: darkThemeName },
         themeType: currentVariant === 'dark' ? 'dark' : 'light',
     };
 };
@@ -437,24 +441,34 @@ const ImagePreviewDialog: React.FC<{
 
             {hasMultipleImages && (
                 <>
-                    <button
-                        type="button"
-                        onMouseDown={(event) => event.stopPropagation()}
-                        onClick={showPrevious}
-                        className="absolute inset-s-3 top-1/2 -translate-y-1/2 z-10 h-10 w-10 flex items-center justify-center rounded-full bg-surface-elevated/90 text-surface-elevated-foreground hover:bg-surface-elevated focus:outline-none focus:ring-2 focus:ring-ring"
-                        aria-label={t('chat.toolOutputDialog.image.previousAria')}
-                    >
-                        <Icon name="arrow-left-s" className="h-6 w-6" />
-                    </button>
-                    <button
-                        type="button"
-                        onMouseDown={(event) => event.stopPropagation()}
-                        onClick={showNext}
-                        className="absolute inset-e-3 top-1/2 -translate-y-1/2 z-10 h-10 w-10 flex items-center justify-center rounded-full bg-surface-elevated/90 text-surface-elevated-foreground hover:bg-surface-elevated focus:outline-none focus:ring-2 focus:ring-ring"
-                        aria-label={t('chat.toolOutputDialog.image.nextAria')}
-                    >
-                        <Icon name="arrow-right-s" className="h-6 w-6" />
-                    </button>
+                    <Tooltip>
+                        <TooltipTrigger asChild>
+                            <button
+                                type="button"
+                                onMouseDown={(event) => event.stopPropagation()}
+                                onClick={showPrevious}
+                                className="absolute inset-s-3 top-1/2 -translate-y-1/2 z-10 h-10 w-10 flex items-center justify-center rounded-full bg-surface-elevated/90 text-surface-elevated-foreground hover:bg-surface-elevated focus:outline-none focus:ring-2 focus:ring-ring"
+                                aria-label={t('chat.toolOutputDialog.image.previousAria')}
+                            >
+                                <Icon name="arrow-left-s" className="h-6 w-6" />
+                            </button>
+                        </TooltipTrigger>
+                        <TooltipContent side="top" sideOffset={6}>{t('chat.toolOutputDialog.image.previousAria')}</TooltipContent>
+                    </Tooltip>
+                    <Tooltip>
+                        <TooltipTrigger asChild>
+                            <button
+                                type="button"
+                                onMouseDown={(event) => event.stopPropagation()}
+                                onClick={showNext}
+                                className="absolute inset-e-3 top-1/2 -translate-y-1/2 z-10 h-10 w-10 flex items-center justify-center rounded-full bg-surface-elevated/90 text-surface-elevated-foreground hover:bg-surface-elevated focus:outline-none focus:ring-2 focus:ring-ring"
+                                aria-label={t('chat.toolOutputDialog.image.nextAria')}
+                            >
+                                <Icon name="arrow-right-s" className="h-6 w-6" />
+                            </button>
+                        </TooltipTrigger>
+                        <TooltipContent side="top" sideOffset={6}>{t('chat.toolOutputDialog.image.nextAria')}</TooltipContent>
+                    </Tooltip>
                 </>
             )}
 
@@ -476,35 +490,26 @@ const ImagePreviewDialog: React.FC<{
                         <div className="min-w-0 flex-1 text-foreground typography-ui-header font-semibold truncate" title={imageTitle}>
                             {imageTitle}
                         </div>
-                        {loadCurrentImage ? (
-                            <button
-                                type="button"
-                                className="h-8 w-8 flex items-center justify-center rounded-lg text-muted-foreground hover:text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-                                onClick={() => { void handleDownload(); }}
-                                aria-label={t('chat.image.download')}
-                                title={t('chat.image.download')}
-                            >
-                                <Icon name="download" className="h-4 w-4" />
-                            </button>
-                        ) : null}
-                        <button
-                            type="button"
-                            className="h-8 w-8 flex items-center justify-center rounded-lg text-muted-foreground hover:text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-                            onClick={() => onOpenChange(false)}
-                            aria-label={t('chat.toolOutputDialog.image.closeAria')}
-                        >
-                            <Icon name="close" className="h-4 w-4" />
-                        </button>
+                        <div className="flex shrink-0 items-center gap-0.5">
+                            {loadCurrentImage ? (
+                                <ToolbarTooltipButton label={t('chat.image.download')} icon="download" onClick={() => { void handleDownload(); }} />
+                            ) : null}
+                            <ToolbarTooltipButton
+                                label={t('chat.toolOutputDialog.image.closeAria')}
+                                icon="close"
+                                onClick={() => onOpenChange(false)}
+                            />
+                        </div>
                     </div>
 
-                    <img
+                    <StatusImage
                         src={currentImage.url}
                         alt={imageTitle}
-                        className="block object-contain"
+                        variant="large"
                         style={{ width: `${imageDisplaySize.width}px`, height: `${imageDisplaySize.height}px` }}
-                        loading="lazy"
-                        onLoad={(event) => {
-                            const element = event.currentTarget;
+                        imgClassName="block h-full w-full object-contain"
+                        lazy
+                        onLoad={(element) => {
                             const width = element.naturalWidth;
                             const height = element.naturalHeight;
                             const url = element.getAttribute('src') ?? '';
@@ -661,6 +666,8 @@ const MermaidPreviewDialog: React.FC<{
     const viewport = usePreviewViewport(popup.open);
     const requestIdRef = React.useRef(0);
     const mermaidPreviewRef = React.useRef<HTMLDivElement | null>(null);
+    const [toolbarSlot, setToolbarSlot] = React.useState<HTMLDivElement | null>(null);
+    const mermaidControls = React.useMemo(() => ({ ...MERMAID_CONTROLS, toolbarSlot }), [toolbarSlot]);
 
     const normalizeFilePath = React.useCallback((rawPath: string): string | null => {
         const input = rawPath.trim();
@@ -925,15 +932,14 @@ const MermaidPreviewDialog: React.FC<{
                     style={{ width: `${dialogSize.width}px` }}
                     onMouseDown={(event) => event.stopPropagation()}
                 >
-                    <div className="flex items-center justify-end">
-                        <button
-                            type="button"
-                            className="h-8 w-8 flex items-center justify-center rounded-lg text-muted-foreground hover:text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                    {/* The diagram puts its zoom controls in this row, beside close. */}
+                    <div className="flex items-center justify-end gap-0.5">
+                        <div ref={setToolbarSlot} className="flex items-center gap-0.5" />
+                        <ToolbarTooltipButton
+                            label={t('chat.toolOutputDialog.mermaid.closeAria')}
+                            icon="close"
                             onClick={() => onOpenChange(false)}
-                            aria-label={t('chat.toolOutputDialog.mermaid.closeAria')}
-                        >
-                            <Icon name="close" className="h-4 w-4" />
-                        </button>
+                        />
                     </div>
                     <div
                         className="relative overflow-hidden"
@@ -976,11 +982,11 @@ const MermaidPreviewDialog: React.FC<{
                             {status === 'ready' && (
                                 <div ref={mermaidPreviewRef} className="h-full">
                                     <SimpleMarkdownRenderer
+                                        singleTilde={false}
                                         content={mermaidMarkdown}
                                         variant="tool"
-                                        allowMermaidWheelEvents
                                         className="markdown-mermaid-fullscreen h-full"
-                                        mermaidControls={MERMAID_CONTROLS}
+                                        mermaidControls={mermaidControls}
                                         enableFileReferences={false}
                                     />
                                 </div>
@@ -1043,7 +1049,7 @@ const ToolOutputDialog: React.FC<ToolOutputDialogProps> = ({ popup, onOpenChange
                     </div>
                 </div>
                 <div className="flex-1 min-h-0 rounded-xl oc-tile overflow-hidden">
-                    <div className="tool-output-surface h-full max-h-[75vh] overflow-y-auto px-3 pe-4">
+                    <ScrollableOverlay outerClassName="h-full max-h-[75vh]" className="tool-output-surface px-3 pe-4" disableHorizontal>
                         {popup.metadata?.input && typeof popup.metadata.input === 'object' &&
                             Object.keys(popup.metadata.input).length > 0 &&
                             popup.metadata?.tool !== 'patch' ? (() => {
@@ -1058,7 +1064,7 @@ const ToolOutputDialog: React.FC<ToolOutputDialogProps> = ({ popup, onOpenChange
                                 // v2 file tools report `path`.
                                 const writeTarget = getInputValue('path') || getInputValue('filePath') || getInputValue('file_path') || '';
                                 return (
-                                <div className="border-b border-border/20 p-4 -mx-3">
+                                <div className="border-b border-edge-muted p-4 -mx-3">
                                     <div className="typography-markdown font-medium text-muted-foreground mb-2 px-3">
                                         {isShellTool(metaTool)
                                             ? 'Command:'
@@ -1149,7 +1155,7 @@ const ToolOutputDialog: React.FC<ToolOutputDialogProps> = ({ popup, onOpenChange
                                 if (isSubagentTool(tool) || tool === 'reasoning') {
                                     return (
                                         <div className={tool === 'reasoning' ? "text-muted-foreground" : ""}>
-                                            <SimpleMarkdownRenderer content={popup.content} variant="tool" />
+                                            <SimpleMarkdownRenderer content={popup.content} singleTilde={false} variant="tool" />
                                         </div>
                                     );
                                 }
@@ -1201,7 +1207,7 @@ const ToolOutputDialog: React.FC<ToolOutputDialogProps> = ({ popup, onOpenChange
                             <div className="typography-meta">{t('chat.toolOutputDialog.noOutputProduced')}</div>
                         </div>
                     )}
-                    </div>
+                    </ScrollableOverlay>
                 </div>
             </DialogContent>
         </Dialog>

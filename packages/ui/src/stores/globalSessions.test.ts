@@ -4,6 +4,7 @@ import { describe, expect, test } from 'bun:test'
 import type { SessionListOptions, SessionPage } from '@/lib/opencode/client'
 import type { Session } from '@/lib/opencode/model'
 import { OpenCode } from '@opencode/client'
+import { switchRuntimeEndpoint } from '@/lib/runtime-switch'
 
 import {
   filterManagedChatsForRuntime,
@@ -47,6 +48,43 @@ describe('managed Chats runtime visibility', () => {
 })
 
 describe('listGlobalSessionPages', () => {
+  test('a retired page fails without publishing an empty or partial snapshot', async () => {
+    switchRuntimeEndpoint({ apiBaseUrl: 'http://page-a.test', runtimeKey: 'page-a' })
+    const pages: Session[][] = []
+    const load = listGlobalSessionPages(async () => {
+      switchRuntimeEndpoint({ apiBaseUrl: 'http://page-b.test', runtimeKey: 'page-b' })
+      return { sessions: [], cursor: {} }
+    }, { pageSize: 1, onPage: (page) => pages.push(page) })
+    await expect(load).rejects.toThrow('Runtime instance changed')
+    expect(pages).toEqual([])
+  })
+
+  test('pagination never issues the next old-directory request after a round trip', async () => {
+    switchRuntimeEndpoint({ apiBaseUrl: 'http://page-a.test', runtimeKey: 'page-a' })
+    let calls = 0
+    const load = listGlobalSessionPages(async () => {
+      calls++
+      return { sessions: [makeSession({ id: `ses_${calls}` })], cursor: calls === 1 ? { next: 'next' } : {} }
+    }, { directory: '/old', pageSize: 1, onPage: () => {
+      switchRuntimeEndpoint({ apiBaseUrl: 'http://page-b.test', runtimeKey: 'page-b' })
+      switchRuntimeEndpoint({ apiBaseUrl: 'http://page-a.test', runtimeKey: 'page-a' })
+    } })
+    await expect(load).rejects.toThrow('Runtime instance changed')
+    expect(calls).toBe(1)
+  })
+
+  test('failure after an instance change stops the old page retry', async () => {
+    switchRuntimeEndpoint({ apiBaseUrl: 'http://page-a.test', runtimeKey: 'page-a' })
+    let calls = 0
+    const load = listGlobalSessionPages(async () => {
+      calls++
+      switchRuntimeEndpoint({ apiBaseUrl: 'http://page-b.test', runtimeKey: 'page-b' })
+      throw new Error('offline')
+    }, { pageSize: 1 })
+    await expect(load).rejects.toThrow('offline')
+    expect(calls).toBe(1)
+  })
+
   test('uses the next cursor from the SDK HTTP response rather than guessing from session timestamps', async () => {
     const cursors: Array<string | null> = []
     const apiClient = OpenCode.make({
@@ -187,6 +225,23 @@ describe('listGlobalSessionPages', () => {
     expect(await listGlobalSessionPages(pager([
       { sessions: [], cursor: {} },
     ]), { pageSize: 2 })).toEqual([])
+  })
+
+  test('honors intentional page stops after checking pagination progress', async () => {
+    const calls: SessionListOptions[] = []
+    const sessions = await listGlobalSessionPages(pager([
+      { sessions: [makeSession({ id: 'ses_1' })], cursor: { next: 'c1' } },
+      { sessions: [makeSession({ id: 'ses_2' })], cursor: {} },
+    ], calls), { pageSize: 1, stopAfterPage: () => true })
+
+    expect(calls).toHaveLength(1)
+    expect(sessions.map((session) => session.id)).toEqual(['ses_1'])
+  })
+
+  test('an intentional page stop cannot hide a continuing pagination stall', async () => {
+    await expect(listGlobalSessionPages(pager([
+      { sessions: [], cursor: { next: 'c1' } },
+    ]), { pageSize: 1, stopAfterPage: () => true })).rejects.toThrow('Session pagination did not advance')
   })
 
   test('retries a failed page before treating the load as failed', async () => {

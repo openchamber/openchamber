@@ -33,6 +33,14 @@ A place to keep longer plans as saved files. Type a title in the field and press
 
 Click a plan to read and edit it in the panel. Like notes, a plan can be pinned to the current session. The row menu moves a plan into the repository's plans folder, so everyone who pulls the repository sees it, or back into your own plans, and deletes it.
 
+## Memory
+
+Memory is what agents keep for themselves between sessions: your corrections and preferences, decisions and their reasons, facts about the project that took effort to find. Agents save entries as they work, and every new session gets the list of titles and opens an entry when it's relevant. The Memory tab shows what's stored, with a switch between **About you**, which every project sees, and **Project**, which only this project sees. Entries added or changed since you last looked are marked **new** or **changed**.
+
+You can edit an entry where you read it, or forget it from its menu. **Tidy up** starts a session in which an agent checks every entry against the project, merges duplicates, rewrites what went stale, and reports what it changed. An entry that reads like an instruction to the agent is stored but kept out of what sessions are told, and the tab shows it with a warning.
+
+Memory is off by default. Turn it on in **Settings → General → OpenChamber Tools** with **Agent memory tool**; turning it off again hides the tab and stops giving sessions the list. Like the project knowledge tool, it needs OpenChamber's own OpenCode server.
+
 ## Deleting and undo
 
 Deleting a note, a plan, or a stored memory shows a toast with **Undo** for a few seconds. The entry is only removed for good when that time runs out.

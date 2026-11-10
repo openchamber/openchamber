@@ -11,7 +11,10 @@ import {
   GUEST_GENERATE_PROMPT_MAX,
   GUEST_GENERATE_SYSTEM_MAX,
   GUEST_GENERATE_TIMEOUT_MS,
+  isGuestAttachItem,
+  isGuestLinkItem,
   readHostMessage,
+  type JsonValue,
 } from './contract.ts';
 import { GUEST_POPOVER_DATA_MAX, isGuestPopoverRequest } from './popover.ts';
 import {
@@ -970,5 +973,26 @@ describe('actions, commands, and badge wire shapes', () => {
       .toMatchObject({ type: 'result', ok: true, payload: { output: 'tick', cursor: 14, skipped: false } });
     expect(parseHostMessage({ ...envelope, type: 'result', id: 'c2', ok: true, payload: { stopped: true } }))
       .toMatchObject({ type: 'result', ok: true, payload: { stopped: true } });
+  });
+});
+
+describe('the link item', () => {
+  const push = (item: JsonValue) => parseHostMessage({ channel: OPENCHAMBER_SDK_CHANNEL, v: 1, type: 'item', payload: { item } });
+
+  test('reaches the guest as a link, never as a composer chip', () => {
+    const item = { kind: 'link', identifier: 'DEMO-12', url: 'https://tasks.example.com/tasks/DEMO-12' };
+    const message = push(item);
+    expect(message?.type === 'item' && message.payload.item).toEqual(item);
+    if (message?.type === 'item') {
+      expect(isGuestLinkItem(message.payload.item)).toBe(true);
+      expect(isGuestAttachItem(message.payload.item)).toBe(false);
+    }
+    expect(push({ kind: 'link', identifier: 'DEMO-12' })?.type).toBe('item');
+  });
+
+  test('refuses a link item with extra or empty fields', () => {
+    expect(push({ kind: 'link', identifier: '' })).toBeNull();
+    expect(push({ kind: 'link', identifier: 'DEMO-12', title: 'x' })).toBeNull();
+    expect(push({ kind: 'link', identifier: 'D'.repeat(129) })).toBeNull();
   });
 });

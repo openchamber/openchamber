@@ -12,6 +12,7 @@ import { isChatDirectoryPath } from '@/lib/chatDirectories';
 import { useI18n } from '@/lib/i18n';
 import { isSessionPinned } from '@/lib/sessionPins';
 import { isDoneSuggested } from '@/lib/sessionWorkMetadata';
+import { getSessionGoal } from '@/lib/sessionGoalMetadata';
 import { collectSessionWorkInWork } from '@/components/session/sidebar/works/sidebarWorks';
 import { cn } from '@/lib/utils';
 import { useProjectsStore } from '@/stores/useProjectsStore';
@@ -130,12 +131,15 @@ export const MobileSessionRow: React.FC<{
     selectMobileSession(session, row.projectId, actions.close);
   };
   const stopRename = () => useMobileSidebarRowsStore.getState().stopRename();
+  // As on the desktop, a request waiting on the user stands for the turn:
+  // the running mark and its timer step aside for the warning badge.
+  const waitingOnUser = pendingRequests.hasPermission || pendingRequests.hasForm;
   const liveState = aiRename.pending
-    ? <Icon name="loader-4" className="size-3 shrink-0 animate-spin text-primary" aria-label={t('sessions.aiRename.generating')} />
-    : isStreaming || showUnread ? <SessionActivityIndicator state={turnActivity ?? 'unread'} /> : null;
+    ? <Icon name="loader-4" className="size-3 shrink-0 animate-spin text-status-info" aria-label={t('sessions.aiRename.generating')} />
+    : (isStreaming || showUnread) && !waitingOnUser ? <SessionActivityIndicator state={turnActivity ?? 'unread'} /> : null;
   // No date, as on the desktop: the list is ordered by recency. A turn's
   // duration shows while it runs and until it is read.
-  const timeSlot = showActivityDuration
+  const timeSlot = showActivityDuration && !waitingOnUser
     ? <SessionActivityDuration sessionId={session.id} running={isStreaming} className="shrink-0 typography-micro" />
     : null;
   const pinMarker = pinned && !pinnedZoneShown
@@ -176,11 +180,11 @@ export const MobileSessionRow: React.FC<{
           : <>
             {titleText}
             {pinMarker}
-            {liveState}
             {doneHint}
+            {liveState}
             {timeSlot}
           </>}
-        secondLine={<>
+        secondLine={project || branch || getSessionGoal(session) || primaryRef || waitingOnUser ? <>
           {lead}
           {branch ? <>
             {inSpace
@@ -189,11 +193,11 @@ export const MobileSessionRow: React.FC<{
             <span className="block min-w-0 truncate typography-micro">{branch}</span>
           </> : null}
           <span className="ms-auto flex shrink-0 items-center gap-1.5">
-            {refMark(true)}
             <MobileSessionGoalGlyph session={session} />
+            {refMark(true)}
             <MobileSessionPendingBadges {...pendingRequests} />
           </span>
-        </>}
+        </> : null}
       />
     );
   } else {
@@ -212,12 +216,15 @@ export const MobileSessionRow: React.FC<{
           style={{ paddingInlineStart: geometry.textLeft(depth), touchAction: 'manipulation' }}
           onClick={select}
         >
+          {/* The desktop row's order: the goal, the PR and the requests
+              waiting on the user, then the pin, the done hint, the live
+              state and its time. */}
           {titleText}
+          <MobileSessionGoalGlyph session={session} />
+          {refMark(false)}
+          <MobileSessionPendingBadges {...pendingRequests} />
           {pinMarker}
           {doneHint}
-          {refMark(false)}
-          <MobileSessionGoalGlyph session={session} />
-          <MobileSessionPendingBadges {...pendingRequests} />
           {liveState}
           {timeSlot}
         </button>

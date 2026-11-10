@@ -28,6 +28,7 @@ import {
     DialogHeader,
     DialogTitle,
 } from '@/components/ui/dialog';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/lib/i18n';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { useDeviceInfo } from '@/lib/device';
@@ -56,7 +57,7 @@ const TRASH_DROPPABLE_ID = '__draft-starter-trash__';
 // layout or changes the button size. shrink-0 keeps it from being compressed by
 // the wrapping flex row.
 const CHIP_ICON_BUTTON_CLASS =
-    'inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-border/60 transition-colors';
+    'inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-edge transition-colors';
 
 const PICKER_SECTIONS: { key: PinnableSection; headingKey: 'chat.draftStarters.sectionBuiltIn' | 'chat.draftStarters.sectionCommands' | 'chat.draftStarters.sectionSkills' }[] = [
     { key: 'built-in', headingKey: 'chat.draftStarters.sectionBuiltIn' },
@@ -89,42 +90,54 @@ const SortableChip: React.FC<{
             style={{ transform: CSS.Translate.toString(transform), transition }}
             className={cn('group/chip relative', isDragging && 'z-10 opacity-60')}
         >
-            <button
-                type="button"
-                {...attributes}
-                {...listeners}
-                onClick={() => onSubmit(item)}
-                className="group inline-flex h-6 touch-none select-none items-center gap-1.5 rounded-full border border-border/60 px-2.5 typography-meta text-muted-foreground transition-colors hover:bg-[var(--interactive-hover)] hover:text-foreground"
-                style={chipStyle}
-                title={item.shared ? t('chat.draftStarters.sharedTitle') : undefined}
-            >
-                <Icon name={item.icon} className="h-3 w-3 shrink-0 opacity-70 transition-opacity group-hover:opacity-100" />
-                <span className="whitespace-nowrap">{item.label}</span>
-            </button>
+            <Tooltip disabled={!item.shared}>
+                <TooltipTrigger asChild>
+                    <button
+                        type="button"
+                        {...attributes}
+                        {...listeners}
+                        onClick={() => onSubmit(item)}
+                        className="group inline-flex h-6 touch-none select-none items-center gap-1.5 rounded-full border border-edge px-2.5 typography-meta text-muted-foreground transition-colors hover:bg-[var(--interactive-hover)] hover:text-foreground"
+                        style={chipStyle}
+                    >
+                        <Icon name={item.icon} className="h-3 w-3 shrink-0 opacity-70 transition-opacity group-hover:opacity-100" />
+                        <span className="whitespace-nowrap">{item.label}</span>
+                    </button>
+                </TooltipTrigger>
+                <TooltipContent side="top" sideOffset={6}>{t('chat.draftStarters.sharedTitle')}</TooltipContent>
+            </Tooltip>
             {onToggleShared && !hideRemove ? (
-                <button
-                    type="button"
-                    onClick={(e) => { e.stopPropagation(); onToggleShared(); }}
-                    aria-label={t(item.shared ? 'chat.draftStarters.makePersonal' : 'chat.draftStarters.share')}
-                    title={t(item.shared ? 'chat.draftStarters.makePersonal' : 'chat.draftStarters.share')}
-                    className="absolute -inset-s-1.5 -top-1.5 hidden h-4 w-4 items-center justify-center rounded-full border text-muted-foreground shadow-sm hover:text-foreground group-hover/chip:flex"
-                    style={chipStyle}
-                >
-                    <Icon name={item.shared ? 'user' : 'team'} className="h-2.5 w-2.5" />
-                </button>
+                <Tooltip>
+                    <TooltipTrigger asChild>
+                        <button
+                            type="button"
+                            onClick={(e) => { e.stopPropagation(); onToggleShared(); }}
+                            aria-label={t(item.shared ? 'chat.draftStarters.makePersonal' : 'chat.draftStarters.share')}
+                            className="absolute -inset-s-1.5 -top-1.5 hidden h-4 w-4 items-center justify-center rounded-full border text-muted-foreground shadow-sm hover:text-foreground group-hover/chip:flex"
+                            style={chipStyle}
+                        >
+                            <Icon name={item.shared ? 'user' : 'team'} className="h-2.5 w-2.5" />
+                        </button>
+                    </TooltipTrigger>
+                    <TooltipContent side="top" sideOffset={6}>{t(item.shared ? 'chat.draftStarters.makePersonal' : 'chat.draftStarters.share')}</TooltipContent>
+                </Tooltip>
             ) : null}
             {/* A shared starter is the team's: it leaves only through the repo file. */}
             {hideRemove || item.shared ? null : (
-                <button
-                    type="button"
-                    onClick={(e) => { e.stopPropagation(); onRemove(); }}
-                    aria-label={t('chat.draftStarters.remove')}
-                    title={t('chat.draftStarters.remove')}
-                    className="absolute -inset-e-1.5 -top-1.5 hidden h-4 w-4 items-center justify-center rounded-full border text-muted-foreground shadow-sm hover:text-foreground group-hover/chip:flex"
-                    style={chipStyle}
-                >
-                    <Icon name="close" className="h-2.5 w-2.5" />
-                </button>
+                <Tooltip>
+                    <TooltipTrigger asChild>
+                        <button
+                            type="button"
+                            onClick={(e) => { e.stopPropagation(); onRemove(); }}
+                            aria-label={t('chat.draftStarters.remove')}
+                            className="absolute -inset-e-1.5 -top-1.5 hidden h-4 w-4 items-center justify-center rounded-full border text-muted-foreground shadow-sm hover:text-foreground group-hover/chip:flex"
+                            style={chipStyle}
+                        >
+                            <Icon name="close" className="h-2.5 w-2.5" />
+                        </button>
+                    </TooltipTrigger>
+                    <TooltipContent side="top" sideOffset={6}>{t('chat.draftStarters.remove')}</TooltipContent>
+                </Tooltip>
             )}
         </div>
     );
@@ -234,20 +247,24 @@ const AddStarterPicker: React.FC<{
                 if (next) onOpen();
             }}
         >
-            <DialogTrigger asChild>
-                <button
-                    type="button"
-                    aria-label={t('chat.draftStarters.add')}
-                    title={t('chat.draftStarters.add')}
-                    className={cn(CHIP_ICON_BUTTON_CLASS, 'text-muted-foreground hover:bg-[var(--interactive-hover)] hover:text-foreground')}
-                    style={{
-                        backgroundColor: currentTheme?.colors?.surface?.elevated,
-                        borderColor: currentTheme?.colors?.interactive?.border,
-                    }}
-                >
-                    <Icon name="add" className="h-3.5 w-3.5" />
-                </button>
-            </DialogTrigger>
+            <Tooltip>
+                <TooltipTrigger asChild>
+                    <DialogTrigger asChild>
+                        <button
+                            type="button"
+                            aria-label={t('chat.draftStarters.add')}
+                            className={cn(CHIP_ICON_BUTTON_CLASS, 'text-muted-foreground hover:bg-[var(--interactive-hover)] hover:text-foreground')}
+                            style={{
+                                backgroundColor: currentTheme?.colors?.surface?.elevated,
+                                borderColor: currentTheme?.colors?.interactive?.border,
+                            }}
+                        >
+                            <Icon name="add" className="h-3.5 w-3.5" />
+                        </button>
+                    </DialogTrigger>
+                </TooltipTrigger>
+                <TooltipContent side="top" sideOffset={6}>{t('chat.draftStarters.add')}</TooltipContent>
+            </Tooltip>
             <DialogContent className="gap-0 overflow-hidden p-0 sm:max-w-sm">
                 <DialogHeader className="px-4 pb-2 pt-4 text-start">
                     <DialogTitle>{t('chat.draftStarters.add')}</DialogTitle>

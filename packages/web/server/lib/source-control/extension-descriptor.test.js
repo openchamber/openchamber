@@ -49,6 +49,18 @@ const isDeeplyFrozen = (value) => {
 afterEach(() => detachExtensionDescriptors());
 
 describe('extension source-control descriptors', () => {
+  it('publishes a service-owned login and omits token settings only when no token is declared', () => {
+    const login = { kind: 'service', hint: 'Run forge auth login on the server' };
+    const descriptor = build({ login, token: undefined });
+    expect(descriptor.authMethods).toEqual({ device: false, pat: false, cli: login });
+    expect(descriptor.settings.map((field) => field.key)).toEqual(['instance']);
+    expect(descriptor.extension).not.toHaveProperty('token');
+    const published = publicProviderDescriptor(descriptor, 5);
+    expect(published.auth).toEqual({ methods: ['cli'], cliTransport: false, login });
+    expect(sourceControlProviderListSchema.parse([published])[0].auth.login).toEqual(login);
+    expect(build({ login }).settings.map((field) => field.key)).toEqual(['instance', 'token']);
+  });
+
   it('derives the id from the guest and freezes the whole descriptor', () => {
     const descriptor = build();
     expect(descriptor.id).toBe('ext-forge');

@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
+import { useUIStore } from '@/stores/useUIStore';
 import type { WorkflowRun } from './model';
 import { createWorkflowRunsStore } from './store';
 
@@ -119,6 +120,7 @@ describe('workflow runs store', () => {
   });
 
   test('reads again the sessions a surface asked about, after a gap in events', async () => {
+    useUIStore.setState({ agentWorkflowFeatureAvailable: true, agentWorkflowToolEnabled: true });
     let reads = 0;
     const store = createWorkflowRunsStore(async (sessionId) => {
       reads += 1;
@@ -132,5 +134,22 @@ describe('workflow runs store', () => {
 
     expect(reads).toBe(2);
     expect(store.getState().bySession.ses_parent?.runs.map((entry) => entry.state)).toEqual(['completed']);
+  });
+
+  test('after a gap while workflows are off, marks the lists unread instead of reading them', async () => {
+    let reads = 0;
+    const store = createWorkflowRunsStore(async (sessionId) => {
+      reads += 1;
+      return [run({ parentSessionId: sessionId })];
+    });
+    useUIStore.setState({ agentWorkflowFeatureAvailable: true, agentWorkflowToolEnabled: true });
+    await store.getState().load('ses_parent');
+    useUIStore.setState({ agentWorkflowToolEnabled: false });
+    store.getState().reloadLoaded();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(reads).toBe(1);
+    // The surfaces read it again once workflows are turned on.
+    expect(store.getState().bySession.ses_parent?.status).toBe('idle');
   });
 });

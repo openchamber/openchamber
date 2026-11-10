@@ -1,9 +1,11 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import type { SyncEvent } from "@/lib/opencode/events"
-import type { Message, Part, SessionOutcome } from "@/lib/opencode/model"
+import type { Message, Part, SessionOutcome, ToolPart } from "@/lib/opencode/model"
 import { getRuntimeKey } from "@/lib/runtime-switch"
 import { ChildStoreManager } from "./child-store"
 import { createEventRoutingIndex, handleEvent, markRecordedInterruptedTurn } from "./sync-context"
+import { materializeSessionSnapshots, type MaterializedMessageRecord } from "./materialization"
+import { deriveRecoveredQuestions, noteQuestionFormSnapshot, resetRecoverableQuestions, useRecoverableQuestionsStore } from "./recoverable-questions"
 
 const cleanups: Array<() => void> = []
 afterEach(() => { for (const cleanup of cleanups.splice(0).reverse()) cleanup() })
@@ -42,6 +44,51 @@ const failedWith = (message: Message | undefined) => (
 )
 
 describe("markRecordedInterruptedTurn", () => {
+  for (const outcome of ["interrupted", "failed", "succeeded", undefined] as const) {
+    test(`a completed message with a stale question recovers only with an interrupted or failed record: ${outcome}`, () => {
+      resetRecoverableQuestions()
+      const { store } = setup([])
+      const question = { ...runningTool, tool: "question" }
+      const completed = { ...openAssistant, time: { created: 2, completed: 3 } }
+      const records: MaterializedMessageRecord[] = [{ info: completed, parts: [question] }]
+      if (outcome) records.push({ info: idle(outcome), parts: [] })
+      const snapshot = materializeSessionSnapshots(store.getState(), "ses_1", records)
+      store.setState({ message: snapshot.message, part: snapshot.part })
+      noteQuestionFormSnapshot("/repo", [{
+        id: "frm_1", sessionID: "ses_1", title: "Question", fields: [{ key: "q0", type: "string" }],
+        metadata: { kind: "question", tool: { messageID: "msg_a", id: "prt_t" } },
+      }])
+
+      markRecordedInterruptedTurn(store, "ses_1")
+
+      const recovered = deriveRecoveredQuestions(store.getState(), useRecoverableQuestionsStore.getState(), new Set(["ses_1"]))
+      expect(recovered).toHaveLength(outcome === "interrupted" || outcome === "failed" ? 1 : 0)
+      // The server's completed assistant record remains authoritative.
+      expect(store.getState().message.ses_1[0]).toBe(completed)
+      const settled = store.getState()
+      markRecordedInterruptedTurn(store, "ses_1")
+      expect(store.getState()).toBe(settled)
+      resetRecoverableQuestions()
+    })
+  }
+
+  for (const state of [
+    { status: "completed", input: {}, output: "answered", time: { start: 2, end: 3 } },
+    { status: "error", input: {}, error: "Interaction cancelled because the location shut down", errorType: "aborted", time: { start: 2, end: 3 } },
+  ] satisfies ToolPart["state"][]) {
+    test(`a recorded interruption preserves the question's terminal ${state.status} outcome`, () => {
+      const completed = { ...openAssistant, time: { created: 2, completed: 3 } }
+      const { store } = setup([user, completed, idle("interrupted")])
+      const question: ToolPart = { ...runningTool, type: "tool", tool: "question", state }
+      store.setState({ part: { msg_a: [question] } })
+
+      markRecordedInterruptedTurn(store, "ses_1")
+
+      expect(store.getState().part.msg_a[0]).toBe(question)
+      expect(store.getState().message.ses_1[1]).toBe(completed)
+    })
+  }
+
   for (const outcome of ["interrupted", "failed"] as const) {
     test(`marks the turn OpenCode recorded as ${outcome}`, () => {
       const { store } = setup([user, openAssistant, idle(outcome)])

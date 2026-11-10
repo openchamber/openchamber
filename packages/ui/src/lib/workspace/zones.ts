@@ -90,6 +90,24 @@ export const isZoneShown = (panel: ZonedPanel | undefined, placement: ContextZon
   Boolean(panel && getZoneView(panel, zone).isOpen && resolveZoneActiveTab(panel, placement, zone))
 );
 
+/**
+ * A shown zone that can expand, as ContextPanel draws it: a side zone showing
+ * only the file tree does not, and keeps any expanded flag suspended.
+ */
+export const canZoneExpand = (
+  panel: ZonedPanel<ZonedTab & { targetPath?: string | null }> | undefined,
+  view: { contextSurfaceZones: ContextZonePlacement; contextEditorVisible: boolean; contextEditorTreeVisible: boolean },
+  zone: ContextZone,
+): boolean => {
+  const tab = panel && isZoneShown(panel, view.contextSurfaceZones, zone)
+    ? resolveZoneActiveTab(panel, view.contextSurfaceZones, zone)
+    : null;
+  if (!panel || !tab) return false;
+  if (zone === 'bottom' || tab.mode !== 'file') return true;
+  return panel.tabs.some((entry) => entry.mode === 'file' && entry.targetPath)
+    && (view.contextEditorVisible || !view.contextEditorTreeVisible);
+};
+
 /** The store fields that size a side zone, under the store's own names. */
 type SideZoneSizing = {
   contextZoneSizes: Partial<Record<ContextZone, number>>;

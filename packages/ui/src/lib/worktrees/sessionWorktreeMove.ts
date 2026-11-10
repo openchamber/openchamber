@@ -2,7 +2,7 @@ import type { Session } from '@/lib/opencode/model';
 import type { I18nKey } from '@/lib/i18n';
 import { toast } from '@/components/ui';
 import { checkIsGitRepository, getGitStatus, setGitWorktreeTitle } from '@/lib/gitApi';
-import { hasWorkTitle } from '@/lib/sessionWorkTitle';
+import { carriedWorkTitleOwner } from '@/lib/sessionWorkTitle';
 import { normalizePath } from '@/lib/pathNormalization';
 import { createQuickWorktree, resolveFolderProjectRef, resolveProjectRef } from '@/lib/worktreeSessionCreator';
 import { getLatestWorktreeMetadata, removeProjectWorktree, type ProjectRef } from '@/lib/worktrees/worktreeManager';
@@ -10,7 +10,7 @@ import { checkoutHoldsDirectory, findWorktreeHoldingDirectory } from '@/lib/work
 import { resolveWorktreeStartDirectory } from '@/lib/worktrees/worktreeStartDirectory';
 import { refreshGlobalSessionsForDirectories } from '@/stores/useGlobalSessionsStore';
 import { isAmbiguousSendFailure } from '@/sync/send-failure-classification';
-import { getSessionLiveActivity, isSessionBusyNow, moveSessionToDirectory } from '@/sync/session-actions';
+import { isSessionBusyNow, moveSessionToDirectory, readSessionsLiveActivity } from '@/sync/session-actions';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import type { WorktreeMetadata } from '@/types/worktree';
 import { waitForWorktreeGitReady } from '@/lib/worktrees/worktreeBootstrap';
@@ -57,8 +57,8 @@ export type SessionTreeMoveIntent =
       messages: SessionTreeMoveMessages;
     }
   | {
-      // A chat promoted into a project: the conversation moves to the
-      // project's root folder; files the chat wrote stay where they are.
+      // The conversation moves to a folder the user picked, usually a
+      // project's root; files the session wrote stay where they are.
       kind: 'project';
       root: Session;
       descendants: Session[];
@@ -114,16 +114,14 @@ const resolveSourceBranch = async (directory: string, projectDirectory: string):
   throw new Error('Unable to determine the current branch');
 };
 
-// Scans every child store instead of the source directory's: a session's live
-// status can be reported by a directory other than the one that wins the
-// directory dedup, and a directory-scoped read would then see no status at all
-// and move a running session.
-const assertSessionsIdle = (sessions: Session[]): void => {
-  for (const session of sessions) {
-    const activity = getSessionLiveActivity(session.id);
-    if (activity === 'unknown') throw new Error('Session status is unavailable');
-    if (activity === 'active') throw new Error('Session is not idle');
-  }
+// A session's live status can be reported by a directory other than the one
+// that wins the directory dedup, so the answer covers every child store. The
+// source directory only picks the server asked when no store knows: the host,
+// or the isolated space that holds it.
+const assertSessionsIdle = async (sessions: Session[], sourceDirectory: string): Promise<void> => {
+  const activity = await readSessionsLiveActivity(sessions.map((session) => session.id), sourceDirectory);
+  if (activity === 'unknown') throw new Error('Session status is unavailable');
+  if (activity === 'active') throw new Error('Session is not idle');
 };
 
 type RollbackFailure = {
@@ -224,7 +222,7 @@ const moveSessionTreeTransaction = async (
         useSessionUIStore.getState().getWorktreeMetadata(session.id),
       ]),
     );
-    assertSessionsIdle(sessions);
+    await assertSessionsIdle(sessions, input.sourceDirectory);
 
     let destination: Awaited<ReturnType<typeof prepareDestination>> | null = null;
     const moved: Session[] = [];
@@ -235,7 +233,7 @@ const moveSessionTreeTransaction = async (
         // Setup and earlier moves can take long enough for a not-yet-moved
         // session to start running, so re-check the remaining source tree
         // immediately before each move. The root moves last.
-        assertSessionsIdle(sessions.slice(index));
+        await assertSessionsIdle(sessions.slice(index), input.sourceDirectory);
         try {
           await moveSessionToDirectory(session, input.sourceDirectory, destination.directory);
         } catch (error) {
@@ -357,12 +355,11 @@ const moveSessionTreeToQuickWorktree = async (input: {
       onMoveFailure: async (error) => removeFailedWorktree(project, worktree, error),
     };
   });
-  // A named task keeps its name in the new worktree, whose row would otherwise
-  // show the bare placeholder branch: the agent does not name a task twice.
-  // Any folder of the worktree names its branch.
+  // Seed from the current session title. Generated titles stay agent-owned so
+  // work.name can replace them; an explicit user title keeps its ownership.
   const taskTitle = input.root.title?.trim();
-  if (taskTitle && hasWorkTitle(input.root.metadata)) {
-    await setGitWorktreeTitle(directory, taskTitle).catch((error) => {
+  if (taskTitle) {
+    await setGitWorktreeTitle(directory, taskTitle, carriedWorkTitleOwner(input.root.metadata)).catch((error) => {
       console.warn('[session-worktree-move] Failed to carry the task name into the new worktree', error);
     });
   }

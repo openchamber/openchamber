@@ -15,7 +15,10 @@
         "mode": "dialog",
         "entry": "panel/attach.html"
       },
-      "page": { "entry": "panel/page.html", "title": "Tasks board" },
+      "page": {
+        "entry": "panel/page.html",
+        "title": "Tasks board"
+      },
       "capabilities": [
         "prompt",
         "sessions",
@@ -60,7 +63,22 @@
             "status"
           ]
         }
-      ]
+      ],
+      "links": {
+        "action": "open",
+        "identifier": {
+          "keys": [
+            "DEMO"
+          ]
+        },
+        "urls": {
+          "origin": "https://example.com",
+          "identifier": "short-code",
+          "item": [
+            "/tasks/{id}"
+          ]
+        }
+      }
     }
   },
   "dependencies": {

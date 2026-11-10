@@ -181,6 +181,40 @@ describe("SessionMessageLoader", () => {
     childStores.disposeAll()
   })
 
+  test("records only completed replies from older pages and retains their provenance after a trim", async () => {
+    const target = { directory: "/repo", sessionID: "session-a" }
+    const answer = (id: string, created: number) => ({
+      info: { id, sessionID: target.sessionID, role: "assistant" as const, time: { created, completed: created + 1 }, finish: "stop" as const, agent: "build", providerID: "test", modelID: "test" },
+      parts: [{ id: `part_${id}`, messageID: id, sessionID: target.sessionID, type: "text" as const, text: id }],
+    })
+    const older = answer("old-answer", 2)
+    const unfinished = answer("unfinished", 3)
+    const olderPage = deferred<MessagePage>()
+    const { childStores, loader } = createLoader(async ({ sessionID, cursor }) => cursor
+      ? olderPage.promise
+      : response([...Array.from({ length: 10 }, (_, i) => createRecord(sessionID, `prompt-${i}`, 10 + i)), answer("latest", 20)], "older-cursor"))
+
+    await loader.ensure(target)
+    expect([...loader.getSnapshot(target).olderCompletedReplyIds]).toEqual([])
+    const loading = loader.loadOlder(target)
+    const live = answer("live-answer", 30)
+    const store = childStores.ensureChild(target.directory, { bootstrap: false })
+    store.setState((state) => ({
+      message: { ...state.message, [target.sessionID]: [...state.message[target.sessionID], live.info] },
+      part: { ...state.part, [live.info.id]: live.parts },
+    }))
+    olderPage.resolve(response([createRecord(target.sessionID, "old-prompt", 1), older, { ...unfinished, info: { ...unfinished.info, time: { created: 3 } } }]))
+    await loading
+    expect([...loader.getSnapshot(target).olderCompletedReplyIds]).toEqual(["old-answer"])
+    expect(store.getState().message[target.sessionID].at(-1)?.id).toBe("live-answer")
+    loader.invalidateSession(target, [older.info])
+    expect([...loader.getSnapshot(target).olderCompletedReplyIds]).toEqual(["old-answer"])
+    loader.invalidateDirectory(target.directory)
+    expect([...loader.getSnapshot(target).olderCompletedReplyIds]).toEqual([])
+    loader.dispose()
+    childStores.disposeAll()
+  })
+
   test("keeps a post-rollover tail after legacy messages for shared runtime identities", async () => {
     const runtimes = ["web", "desktop", "vscode", "mobile"]
     for (const runtimeKey of runtimes) {

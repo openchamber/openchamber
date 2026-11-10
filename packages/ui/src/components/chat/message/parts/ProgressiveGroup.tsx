@@ -1,5 +1,6 @@
 import { isSkillTool, toolDescription } from '@/lib/opencode/tools';
 import React from 'react';
+import { ChatExternalLink } from './ChatExternalLink';
 import { useMobileAppActions } from '@/apps/mobileAppContext';
 import { cn } from '@/lib/utils';
 import type { TurnActivityRecord as TurnActivityPart } from '../../lib/turns/types';
@@ -10,11 +11,12 @@ import { Text } from '@/components/ui/text';
 import { getToolIcon } from './toolPresentation';
 import { getToolMetadata, isImageFile } from '@/lib/toolHelpers';
 import { Icon } from '@/components/icon/Icon';
+import { HoverTooltip } from '@/components/ui/row-tooltip';
 import { useI18n } from '@/lib/i18n';
 import { useDeviceInfo } from '@/lib/device';
 import { useGuestToolPresentation } from '@/lib/guests/tool-presentation';
 import { RuntimeAPIContext } from '@/contexts/runtimeAPIContext';
-import { useDirectoryStore } from '@/stores/useDirectoryStore';
+import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useUIStore } from '@/stores/useUIStore';
 import { useSkillsStore } from '@/stores/useSkillsStore';
 import { areRenderRelevantPartsEqual } from '../renderCompare';
@@ -257,7 +259,7 @@ const StaticToolRowInner: React.FC<{
     const isReadGroup = toolName.toLowerCase() === 'read';
     const runtime = React.useContext(RuntimeAPIContext);
     const mobileActions = useMobileAppActions();
-    const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
+    const currentDirectory = useEffectiveDirectory() ?? '';
     const skills = useSkillsStore((state) => state.skills);
     const hasRunningActivity = React.useMemo(() => activities.some((activity) => isActivityRunning(activity)), [activities]);
     const skillByName = React.useMemo(() => new Map(skills.map((skill) => [skill.name, skill])), [skills]);
@@ -400,23 +402,24 @@ const StaticToolRowInner: React.FC<{
                 ? readFileEntries.map((entry) => (
                     <React.Fragment key={entry.path}>
                         {canOpenImageExpanded && isImageFile(entry.path) ? (
-                            <button
-                                type="button"
-                                onClick={(event) => {
-                                    event.preventDefault();
-                                    event.stopPropagation();
-                                    handleOpenImageExpanded(entry.path);
-                                }}
-                                className={cn(
-                                    'flex-shrink-0 inline-flex h-4 w-4 items-center justify-center rounded transition-opacity hover:bg-interactive-hover',
-                                    'opacity-60 hover:opacity-100 focus-visible:opacity-100',
-                                )}
-                                style={{ color: 'var(--tools-icon)' }}
-                                title={t('chat.toolPart.openImageExpanded')}
-                                aria-label={t('chat.toolPart.openImageExpanded')}
-                            >
-                                <Icon name="fullscreen" className="h-3 w-3" />
-                            </button>
+                            <HoverTooltip label={t('contextTooltips.chat.openImage')}>
+                                <button
+                                    type="button"
+                                    onClick={(event) => {
+                                        event.preventDefault();
+                                        event.stopPropagation();
+                                        handleOpenImageExpanded(entry.path);
+                                    }}
+                                    className={cn(
+                                        'flex-shrink-0 inline-flex h-4 w-4 items-center justify-center rounded transition-opacity hover:bg-interactive-hover',
+                                        'opacity-60 hover:opacity-100 focus-visible:opacity-100',
+                                    )}
+                                    style={{ color: 'var(--tools-icon)' }}
+                                    aria-label={t('chat.toolPart.openImageExpanded')}
+                                >
+                                    <Icon name="fullscreen" className="h-3 w-3" />
+                                </button>
+                            </HoverTooltip>
                         ) : null}
                         <button
                             type="button"
@@ -451,11 +454,9 @@ const StaticToolRowInner: React.FC<{
                 : null}
             {isFetchGroup && descriptions.length > 0
                 ? descriptions.map((url, index) => (
-                    <a
+                    <ChatExternalLink
                         key={`${url}-${index}`}
                         href={url}
-                        target="_blank"
-                        rel="noopener noreferrer"
                         className={cn(
                             'min-w-0 flex-1 inline-flex items-center gap-1.5 underline decoration-[color:var(--status-info)] underline-offset-2 hover:opacity-90',
                             'truncate whitespace-nowrap', TOOL_ROW_DESCRIPTION_CLASS
@@ -465,7 +466,7 @@ const StaticToolRowInner: React.FC<{
                     >
                         <ExternalLinkFavicon href={url} />
                         <span className="min-w-0 truncate">{url}</span>
-                    </a>
+                    </ChatExternalLink>
                 ))
                 : null}
             {isSkillGroup && skillEntries.length > 0

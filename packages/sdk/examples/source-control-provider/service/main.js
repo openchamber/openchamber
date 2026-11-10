@@ -60,6 +60,26 @@ function installGuestScrollbarActivity(doc) {
   }, { capture: true, passive: true });
 }
 var GUEST_SCROLLBAR_SCRIPT = `(${installGuestScrollbarActivity.toString()})(document);`;
+// packages/sdk/src/manifest.ts
+var GUEST_PROVIDER_LOGO_BYTES_MAX = 1024 * 1024;
+var TRACKER_URL_TOKENS = ["{id}", "{segment}", "{segments+}"];
+var TRACKER_URL_TOKEN_SET = new Set(TRACKER_URL_TOKENS);
+// packages/sdk/src/session-events.ts
+var GUEST_SESSION_EVENT_TYPES = [
+  "turn-finished",
+  "turn-failed",
+  "permission-asked",
+  "question-asked",
+  "turn-started",
+  "session-created",
+  "session-archived",
+  "session-deleted"
+];
+var SESSION_EVENTS_IDLE_MS = 10 * 60000;
+var EVENT_TYPES = new Set(GUEST_SESSION_EVENT_TYPES);
+// packages/sdk/src/service-host.ts
+var SERVICE_SCHEDULE_IDLE_MS = 10 * 60000;
+var MENTIONS_IDLE_MS = 10 * 60000;
 // packages/sdk/src/file-editor.ts
 var patternExpressions = new Map;
 // packages/sdk/src/contract.ts
@@ -104,6 +124,7 @@ var HOST_PUSH_TYPES = new Set([
   "item",
   "resolve",
   "action",
+  "service-event",
   "status-control-event",
   "popover-closed",
   "file-open",
@@ -133,6 +154,7 @@ var SOURCE_CONTROL_PROVIDER_WIRE_VERSION = 1;
 var SOURCE_CONTROL_PROVIDER_METHODS = [
   "auth.verify",
   "auth.probe",
+  "auth.status",
   "changeRequestStatus",
   "listChangeRequests",
   "changeRequestContext",
@@ -164,9 +186,12 @@ var readSessionUser = (user) => {
   if (Object(user) !== user || user === undefined)
     return;
   const { id, login } = user;
-  if (!Number.isSafeInteger(id) || String(login) !== login || login.length === 0)
+  const isPositiveSafeIntegerId = typeof id === "number" && Number.isSafeInteger(id) && id > 0;
+  const isBoundedStringId = typeof id === "string" && id.length > 0 && id.length <= 256;
+  const validId = isPositiveSafeIntegerId || isBoundedStringId;
+  if (!validId || String(login) !== login || login.length === 0)
     return;
-  return { id: Number(id), login };
+  return { id, login };
 };
 var readSession = (session) => {
   if (session === null)
@@ -218,47 +243,51 @@ class SourceControlForgeError extends Error {
     this.status = status;
   }
 }
+var postOutbound = async (url, handle, request, timeoutMs, fail) => {
+  let response;
+  try {
+    response = await fetch(url, {
+      method: "POST",
+      headers: { authorization: `Bearer ${handle}`, "content-type": "application/json" },
+      body: JSON.stringify(request),
+      signal: AbortSignal.timeout(timeoutMs + 5000)
+    });
+  } catch (error) {
+    throw fail(`OpenChamber did not answer: ${error instanceof Error ? error.message : String(error)}`, "HOST_UNAVAILABLE", 0);
+  }
+  let answer;
+  try {
+    answer = Object(await response.json());
+  } catch {
+    throw fail("OpenChamber answered with something other than JSON", "HOST_UNAVAILABLE", response.status);
+  }
+  if (!response.ok) {
+    const message = answer.error?.message;
+    const code = answer.error?.code;
+    throw fail(String(message) === message && message.length > 0 ? message : `OpenChamber refused the request (${response.status})`, String(code) === code && code.length > 0 ? code : "OUTBOUND_REFUSED", response.status);
+  }
+  if (!Number.isSafeInteger(answer.status) || String(answer.body) !== answer.body) {
+    throw fail("OpenChamber relayed a malformed answer", "HOST_UNAVAILABLE", response.status);
+  }
+  const headers = {};
+  for (const [name, text] of Object.entries(Object(answer.headers ?? {}))) {
+    if (String(text) === text)
+      headers[name] = text;
+  }
+  return { status: Number(answer.status), headers, body: answer.body };
+};
 var createSourceControlForge = ({ env }) => {
   const base = env[OPENCHAMBER_HOST_CALLBACK_URL];
   if (!base)
     throw new Error(`${OPENCHAMBER_HOST_CALLBACK_URL} is not set: only a service that provides "source-control" can reach a forge.`);
   const url = `${base.replace(/\/+$/, "")}${SOURCE_CONTROL_OUTBOUND_PATH}`;
   return {
-    async request(handle, request) {
-      let response;
-      try {
-        response = await fetch(url, {
-          method: "POST",
-          headers: { authorization: `Bearer ${handle}`, "content-type": "application/json" },
-          body: JSON.stringify(request),
-          signal: AbortSignal.timeout(SOURCE_CONTROL_OUTBOUND_TIMEOUT_MS + 5000)
-        });
-      } catch (error) {
-        throw new SourceControlForgeError(`OpenChamber did not answer: ${error instanceof Error ? error.message : String(error)}`, "HOST_UNAVAILABLE", 0);
-      }
-      let answer;
-      try {
-        answer = Object(await response.json());
-      } catch {
-        throw new SourceControlForgeError("OpenChamber answered with something other than JSON", "HOST_UNAVAILABLE", response.status);
-      }
-      if (!response.ok) {
-        const message = answer.error?.message;
-        const code = answer.error?.code;
-        throw new SourceControlForgeError(String(message) === message && message.length > 0 ? message : `OpenChamber refused the request (${response.status})`, String(code) === code && code.length > 0 ? code : "OUTBOUND_REFUSED", response.status);
-      }
-      if (!Number.isSafeInteger(answer.status) || String(answer.body) !== answer.body) {
-        throw new SourceControlForgeError("OpenChamber relayed a malformed forge answer", "HOST_UNAVAILABLE", response.status);
-      }
-      const headers = {};
-      for (const [name, text] of Object.entries(Object(answer.headers ?? {}))) {
-        if (String(text) === text)
-          headers[name] = text;
-      }
-      return { status: Number(answer.status), headers, body: answer.body };
-    }
+    request: (handle, request) => postOutbound(url, handle, request, SOURCE_CONTROL_OUTBOUND_TIMEOUT_MS, (message, code, status) => new SourceControlForgeError(message, code, status))
   };
 };
+var NOTIFICATIONS_PROVIDER_IDLE_MS = 10 * 60000;
+var TRACKER_PROVIDER_IDLE_MS = 10 * 60000;
+var QUOTA_PROVIDER_IDLE_MS = 10 * 60000;
 // packages/sdk/src/service-surface.ts
 var SURFACE_CONTROLLERS = ["none", "agent", "user"];
 var CONTROLLERS = new Set(SURFACE_CONTROLLERS);
@@ -561,6 +590,7 @@ var unsupported = async (_call, _input, request) => {
   throw new CallError(`${request.method} is not something this Git host offers`, 501, "UNSUPPORTED");
 };
 var handlers = {
+  "auth.status": unsupported,
   "auth.verify": async (call) => {
     const { data } = await api(call, "GET", "/user");
     const user = { id: data.id, login: data.login };

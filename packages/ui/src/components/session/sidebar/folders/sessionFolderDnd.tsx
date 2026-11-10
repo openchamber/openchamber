@@ -2,17 +2,14 @@ import React from 'react';
 import {
   DndContext,
   DragOverlay,
-  MouseSensor,
-  TouchSensor,
-  useSensor,
-  useSensors,
   useDraggable,
   useDroppable,
   type DragEndEvent,
 } from '@dnd-kit/core';
-import { Icon } from "@/components/icon/Icon";
 import { sessionFolderCollision } from './sessionFolderCollision';
-import { getSessionFolderIdentityKey, isArchivedFolderScope } from '../sessions/sessionFolderIdentity';
+import { copyDragSource, keepRowInList, ROW_DRAG_AUTO_SCROLL, useRowDragSensors } from '../rowDrag';
+import { RowDragPreview } from '../RowDragPreview';
+import { getSessionDragId, getSessionFolderDropId, isArchivedFolderScope } from '../sessions/sessionFolderIdentity';
 
 type SessionFolderDropTarget = {
   folderId: string;
@@ -49,10 +46,10 @@ export const DraggableSessionRow: React.FC<{
 }> = ({ sessionId, dragKey, ownerKey = null, sessionDirectory, sessionTitle, archivedBucket = false, children }) => {
   const folderOwners = React.useContext(SessionFolderOwnersContext);
   const hasFolderToDropInto = folderOwners === null || (ownerKey !== null && folderOwners.has(ownerKey));
-  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
-    id: `session-drag:${dragKey ?? sessionId}`,
+  const { attributes, listeners, setNodeRef, node, isDragging } = useDraggable({
+    id: getSessionDragId(dragKey ?? sessionId),
     disabled: archivedBucket || !hasFolderToDropInto,
-    data: { type: 'session', sessionId, ownerKey, sessionDirectory, sessionTitle, archivedBucket },
+    data: { type: 'session', sessionId, ownerKey, sessionDirectory, sessionTitle, archivedBucket, element: () => node.current },
   });
 
   const handlePointerDown = React.useCallback(
@@ -89,13 +86,16 @@ export const DroppableFolderWrapper: React.FC<{
     isOver: boolean,
   ) => React.ReactNode;
 }> = ({ folderId, scopeKey, ownerKey, disabled = false, children }) => {
-  const { setNodeRef, isOver } = useDroppable({
-    id: `folder-drop:${getSessionFolderIdentityKey(scopeKey, folderId)}`,
+  const { active, setNodeRef, isOver } = useDroppable({
+    id: getSessionFolderDropId(scopeKey, folderId),
     disabled: disabled || isArchivedFolderScope(scopeKey),
     data: { type: 'folder', folderId, scopeKey, ownerKey },
   });
-  return <>{children(setNodeRef, isOver)}</>;
+  // A session of another owner cannot land here, so the folder does not offer to take it.
+  return <>{children(setNodeRef, isOver && active?.data.current?.ownerKey === ownerKey)}</>;
 };
+
+const ROW_DRAG_MODIFIERS = [keepRowInList];
 
 export const SessionFolderDndScope: React.FC<{
   scopeKey: string | null;
@@ -104,23 +104,15 @@ export const SessionFolderDndScope: React.FC<{
   onSessionDroppedOnFolder: (sessionId: string, target: SessionFolderDropTarget, sourceOwnerKey: string) => void;
   children: React.ReactNode;
 }> = ({ scopeKey, ownerKey = null, hasFolders, onSessionDroppedOnFolder, children }) => {
-  const sensors = useSensors(
-    useSensor(MouseSensor, { activationConstraint: { distance: 8 } }),
-    useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 6 } }),
-  );
-  const [activeDragId, setActiveDragId] = React.useState<string | null>(null);
-  const [activeDragTitle, setActiveDragTitle] = React.useState<string>('Session');
-  const [activeDragWidth, setActiveDragWidth] = React.useState<number | null>(null);
-  const [activeDragHeight, setActiveDragHeight] = React.useState<number | null>(null);
+  const sensors = useRowDragSensors();
+  const [dragSource, setDragCopy] = React.useState<Element | null>(null);
 
   if (!scopeKey) {
     return <>{children}</>;
   }
 
   const handleDragEnd = (event: DragEndEvent) => {
-    setActiveDragId(null);
-    setActiveDragWidth(null);
-    setActiveDragHeight(null);
+    setDragCopy(null);
     const { active, over } = event;
     if (!over) return;
     // SAFETY: both payloads are created by the draggable and droppable components in this module.
@@ -151,41 +143,16 @@ export const SessionFolderDndScope: React.FC<{
     <DndContext
       sensors={sensors}
       collisionDetection={sessionFolderCollision}
-      onDragStart={(event) => {
-        // SAFETY: drag payloads are created by DraggableSessionRow in this module.
-        const data = event.active.data.current as { type?: string; sessionId?: string; sessionTitle?: string } | undefined;
-        if (data?.type === 'session' && data.sessionId) {
-          setActiveDragId(data.sessionId);
-          setActiveDragTitle(data.sessionTitle ?? 'Session');
-          const width = event.active.rect.current.initial?.width;
-          const height = event.active.rect.current.initial?.height;
-          setActiveDragWidth(width ?? null);
-          setActiveDragHeight(height ?? null);
-        }
-      }}
-      onDragCancel={() => {
-        setActiveDragId(null);
-        setActiveDragWidth(null);
-        setActiveDragHeight(null);
-      }}
+      modifiers={ROW_DRAG_MODIFIERS}
+      autoScroll={ROW_DRAG_AUTO_SCROLL}
+      onDragStart={(event) => setDragCopy(copyDragSource(event.active.data.current))}
+      onDragCancel={() => setDragCopy(null)}
       onDragEnd={handleDragEnd}
     >
       {children}
-      <DragOverlay>
-        {activeDragId && hasFolders ? (
-          <div
-            style={{
-              width: activeDragWidth ? `${activeDragWidth}px` : 'auto',
-              height: activeDragHeight ? `${activeDragHeight}px` : 'auto',
-            }}
-            className="flex items-center rounded-lg border border-[var(--interactive-border)] bg-[var(--surface-elevated)] px-2.5 py-1 shadow-none pointer-events-none"
-          >
-            <Icon name="sticky-note" className="h-4 w-4 text-muted-foreground me-2 flex-shrink-0" />
-            <div className="min-w-0 flex-1 truncate typography-ui-label font-normal text-foreground">
-              {activeDragTitle}
-            </div>
-          </div>
-        ) : null}
+      {/* Dropped, the row is where it lands at once: no flight back. */}
+      <DragOverlay dropAnimation={null}>
+        {dragSource && hasFolders ? <RowDragPreview copy={dragSource} /> : null}
       </DragOverlay>
     </DndContext>
   );

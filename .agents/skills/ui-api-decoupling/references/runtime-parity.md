@@ -21,7 +21,7 @@ React components use `useRuntimeAPIs()` or `useRuntimeAPI()`. Non-React modules 
 | Session message POST | Use the dedicated session-message path |
 | Unsupported native feature | Return stable explicit unsupported behavior, normally 501 JSON |
 
-Register explicit OpenChamber handling before generic proxy fallback. Silent empty fallback is not parity.
+Silent empty fallback is not parity.
 
 ## Electron Boundary
 
@@ -31,7 +31,6 @@ Electron normally reuses the web runtime/server implementation. Keep privileged 
 - Client tokens, home paths, filesystem/shell access, and privileged IPC remain local-page gated.
 - Do not trust arbitrary loopback, `file://`, or `about:blank` origins as packaged UI.
 - Remote pages and preview iframes must not gain local host privileges.
-- Deep links that import hosts, store credentials, or switch runtimes require explicit in-app confirmation before mutation.
 
 ## Shared Contract Rule
 

@@ -40,7 +40,7 @@ description: 连接 OpenChamber 所使用的服务和订阅。
 GitLab、Gitea、Forgejo 和 Gerrit 各自在 GitHub 旁边有一张卡片。连接后，它们的 issue 和拉取请求（GitLab 上叫合并请求，Gerrit 上叫变更）会像 GitHub 的一样，显示在 [Issue 与 PR](/zh-cn/issues-and-prs/) 看板和聊天的 **+** 菜单中。
 
 - **GitLab**：在 gitlab.com 上，用一个简短的设备码、个人访问令牌或服务器上的 `glab` 登录状态登录。对于自托管 GitLab，添加它的地址并粘贴一个带 `api` 权限范围的个人访问令牌。只有当服务器把 `OPENCHAMBER_GITLAB_CLIENT_ID` 设为在该实例上注册的应用时，那里才能使用设备码登录。
-- **Gitea**：添加你的实例地址，例如 `https://gitea.example.com`，并粘贴一个带 `write:repository`、`write:issue` 和 `read:user` 权限范围的个人访问令牌。卡片会链接到你实例上创建令牌的页面。Gitea 没有设备码或 CLI 登录。需要 Gitea 1.21 或更新版本，并且部署在地址的根路径上。
+- **Gitea**：添加你的实例地址，例如 `https://gitea.example.com`，并粘贴一个带 `write:repository`、`write:issue` 和 `read:user` 权限范围的个人访问令牌。卡片会链接到你实例上创建令牌的页面。如果服务器上已用 Gitea 的 `gt` CLI 登录（`gt auth login`），该实例会自动出现在卡片上：选择 **使用 gt CLI** 即可以该登录身份工作。`gt` 登录用于 issue 和 pull request；push 和 pull 需要连接一个令牌，或自行配置 Git，例如使用 `gt auth setup-git`。需要 Gitea 1.21 或更新版本，并且部署在地址的根路径上。
 - **Forgejo**：Codeberg 已经在卡片上，所以连接它只需要一个带 `write:repository`、`write:issue` 和 `read:user` 权限范围的个人访问令牌；卡片会链接到 Codeberg 上创建令牌的页面。对于其他 Forgejo 服务器，添加它的地址，例如 `https://forgejo.example.com`，并粘贴一个带相同权限范围的令牌。需要 Forgejo 7.0 或更新版本，并且部署在地址的根路径上。Forgejo 服务器在这张卡片上连接，Gitea 服务器在 Gitea 卡片上连接。
 - **Gerrit**：添加你的实例地址，例如 `https://gerrit.example.com`，然后填写你的 Gerrit 用户名和 HTTP 密码。在 Gerrit 的 **Settings → HTTP Credentials** 中生成这个密码，卡片会链接到那里。你的登录密码不能用，没有用户名的账号也无法连接。需要 Gerrit 3.8 或更新版本，并且部署在地址的根路径上。评审地址与 Git 地址不同的站点，例如使用 `.gitcookies` 的 googlesource.com，不受支持。
 
@@ -90,6 +90,18 @@ Linear issue 位于 **Issues and PRs** 看板。点击侧边栏顶部的拉取�
 4. 选择 **Set up** 并登录。之后模型会出现在聊天室的模型选择器中。
 
 集成按用户安装，因此在所有项目中都可用。你可以随时在同一张卡片上更新或移除它们。
+
+## 扩展通知渠道
+
+[扩展](/zh-cn/extensions/)可以把你的通知投递到 Slack、Matrix 或它自己的服务器。在 **设置 → 扩展** 中允许它之后，它会在本页的 **扩展账户** 下获得一张卡片。在那里输入账户的令牌，如果卡片要求，再填写服务器地址，然后连接。从此扩展会按照你的[通知设置](/zh-cn/notifications/)收到你的手机会收到的同样通知。令牌保留在 OpenChamber 中。扩展的服务通过 OpenChamber 发送，永远看不到它。
+
+如果服务器之后拒绝了令牌，卡片会显示 **账户需要处理**。用新令牌重新连接即可。要停止投递又不移除扩展，可以 **断开** 或暂停扩展。移除扩展会忘记该账户。
+
+## 扩展跟踪器
+
+[扩展](/zh-cn/extensions/)可以在 Linear 旁边添加一个工作项跟踪器。在 **设置 → 扩展** 中允许它之后，它会在本页的 **扩展账户** 下获得一张卡片。如果卡片要求，先输入服务器地址，然后连接账户：粘贴令牌，或者保存你在跟踪器注册的应用的 client id 并在浏览器中登录。如果跟踪器支持多个账户，**添加账户** 可以再连接一个，**切换到** 可以更换正在使用的账户。跟踪器提供项目映射和会话评论时，它们会像 Linear 一样出现在卡片上。
+
+之后它的条目会出现在选择器、聊天的 **+** 菜单、New Worktree、会话的关联条目，以及你关注的条目的实时状态中。令牌保留在 OpenChamber 中；扩展的服务通过 OpenChamber 访问跟踪器，永远看不到令牌。如果跟踪器之后拒绝了凭据，卡片会显示 **账户需要处理**，重新连接即可。暂停扩展会让跟踪器从所有地方消失，账户仍会保留；移除扩展会忘记这些账户。
 
 ## Claude Code
 

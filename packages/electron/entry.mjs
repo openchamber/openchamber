@@ -10,6 +10,7 @@
 
 import { app, protocol } from 'electron';
 import path from 'node:path';
+import { plainChromeUserAgent } from './browser-panel-security.mjs';
 import { enableMainProcessCompileCache } from './compile-cache.mjs';
 import { shouldIgnoreLoopbackConnectionLimit } from './startup-url-selection.mjs';
 import {
@@ -41,6 +42,12 @@ if (app.getVersion() !== versionBeforeRename) {
 if (process.platform === 'linux') {
   app.setDesktopName('openchamber.desktop');
 }
+// Shared and service workers ignore the browser panel's session user agent and
+// use this fallback. Left at Electron's default, a page saw plain Chrome in its
+// window and Electron plus the app name in those workers, and Cloudflare
+// Turnstile rejected it (error 600010). Set before the first window: once one
+// has loaded, the default session keeps Electron's agent for its own requests.
+app.userAgentFallback = plainChromeUserAgent(app.userAgentFallback);
 if (isDev) {
   app.setPath('userData', path.join(app.getPath('appData'), 'OpenChamber Dev'));
 }

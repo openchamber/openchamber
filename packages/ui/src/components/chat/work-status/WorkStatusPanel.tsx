@@ -1,4 +1,5 @@
 import React from 'react';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { DockedPanelSurfaceContext } from '@/hooks/usePageColors';
@@ -256,14 +257,19 @@ export const WorkStatusPanel: React.FC<Props> = ({ sessionId, directory, visible
       >
       {/* Overlaid rather than placed in flow: the panel has no header of its
           own, and giving it one would cost a row of height on every session. */}
-      <button
-        type="button"
-        aria-label={t('chat.workStatus.sections.open')}
-        onClick={() => setSectionsDialogOpen(true)}
-        className="absolute inset-e-2 top-1.5 z-10 rounded p-0.5 text-muted-foreground transition-colors hover:text-foreground"
-      >
-        <Icon name="equalizer-2" className="size-4" />
-      </button>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            type="button"
+            aria-label={t('chat.workStatus.sections.open')}
+            onClick={() => setSectionsDialogOpen(true)}
+            className="absolute inset-e-2 top-1.5 z-10 rounded p-0.5 text-muted-foreground transition-colors hover:text-foreground"
+          >
+            <Icon name="equalizer-2" className="size-4" />
+          </button>
+        </TooltipTrigger>
+        <TooltipContent side="bottom" sideOffset={6}>{t('chat.workStatus.sections.open')}</TooltipContent>
+      </Tooltip>
 
       {contentMounted ? (
       <WorkStatusPresenceProvider onChange={setRenderedSections}>
@@ -280,6 +286,7 @@ export const WorkStatusPanel: React.FC<Props> = ({ sessionId, directory, visible
           directory={directory}
           repositoryEnabled={repositoryEnabled}
           layout={sectionLayout}
+          visible={visible}
         />
       </ScrollShadow>
       </WorkStatusPresenceProvider>

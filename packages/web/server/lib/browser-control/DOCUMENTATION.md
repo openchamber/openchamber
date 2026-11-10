@@ -96,8 +96,39 @@ itself; it can only ask and wait.
   pane. `browser.capture` never opens the panel or switches its tab: a hidden
   pane is drawn at zero opacity inside the window for the screenshot, because
   Chromium composites a transparent webview but not a hidden or clipped one.
+  A Wayland compositor sends no frame callbacks to a window it is not showing
+  (minimized, on a hidden workspace or tab, the screen locked or off). Such a
+  window has no frame to put the stage in and no surface to copy, so the
+  capture waits for two frames and answers with an error that names the cause
+  and points to `browser.snapshot` once 1 s passes without one. A wait that
+  saw a frame, or whose timer ran late behind a busy thread, starts over.
+  Without that limit it waited out the broker's 20 s timeout, and agents
+  retried it. Forcing a frame
+  by capturing the host window with `stayHidden` and retrying was tried and
+  rejected: the first capture came back, every later one hung until the
+  timeout.
   A hidden page also gets no animation frames, so `browser.scroll` waits for
   two frames at most 100 ms (`pageActions.ts`) and then answers anyway.
+  `browser.open` reports `settled` only once the page has loaded and then gone
+  quiet: no new resource and no DOM tree or text change for 500 ms
+  (`buildQuietScript`), waited at most 5 s. The load event alone came while an
+  app was still fetching its lazy chunks behind its splash screen, so a capture
+  right after it showed the splash. An open without `tabId` on a driving host
+  waits for the new tab's view and asks it the same through the pane-only
+  `browser.settle`; the tab is open either way, so a failed wait answers
+  `settled: false`, never an error. `browser.capture` waits the same way for at
+  most 3 s, then shoots what is there. Attribute changes do not count, because
+  a finished page changes classes and styles on hover all the time; a running
+  animation that will end does count, and one that loops forever or follows
+  scrolling does not. A
+  background tab gets no animation frames while `visibilityState` still says
+  `visible`, so an app's splash that fades out by style starts fading only
+  when a capture shows the page: without the animation check the capture shot
+  the first frame of that fade (seen on `/mobile.html`). A page can
+  report a resource only once it has arrived, so a single chunk slower than
+  500 ms behind an unchanging splash still ends the wait early; the next
+  snapshot shows the splash, and nothing in the page can see a request in
+  flight.
   Agent work never takes keyboard focus from the user
   (`useWebviewFocusGuard` beside `BrowserPane`): a page may take focus only
   while the user can see it and no agent action is driving it, otherwise focus
@@ -125,6 +156,25 @@ itself; it can only ask and wait.
   `tabId` is validated and passed through by
   `../openchamber-control/service.js` for every action, so an extension
   provider receives it untouched (`BrowserTabTarget` in `@openchamber/sdk`).
+
+## Running the panel's code
+
+The agent tool reaches the panel of the app the agent works from, so a change
+to `BrowserPane`, `controlClient` or `pageActions` shows there only after that
+app is rebuilt. Run it in `electron:dev` instead and send the actions to that
+instance's API port, the one its log prints after `OpenChamber server
+listening on`; the route has no session, so name the tab after the open:
+
+```sh
+curl -s -X POST http://127.0.0.1:<api-port>/api/openchamber/control \
+  -H 'content-type: application/json' \
+  -d '{"action":"browser.open","input":{"url":"http://localhost:<ui-port>/mobile.html","viewport":"mobile"},"contextDirectory":"<repo>"}'
+```
+
+`browser.capture`, `browser.snapshot` and the rest take `{"tabId": "<tabId from the open>"}`
+in `input`. The tab stays in the background, as an agent's does, and the page
+inside it is a `webview` target on the instance's debugging port for reading
+what the actions alone do not show (frame rate, animations).
 
 ## Invariants
 

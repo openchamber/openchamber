@@ -40,7 +40,7 @@ Despliega la tarjeta **GitHub** y elige **Connect GitHub** para iniciar sesión 
 GitLab, Gitea, Forgejo y Gerrit tienen cada uno su propia tarjeta junto a GitHub. Una vez conectados, sus issues y pull requests (merge requests en GitLab, cambios en Gerrit) aparecen en el tablero [Issues y PRs](/es/issues-and-prs/) y en el menú **+** del chat, igual que los de GitHub.
 
 - **GitLab**: en gitlab.com, inicia sesión con un código de dispositivo corto, un token de acceso personal o el login de `glab` en el servidor. Para un GitLab autogestionado, añade su dirección y pega un token de acceso personal con el scope `api`. El inicio de sesión con código de dispositivo solo funciona ahí si el servidor define `OPENCHAMBER_GITLAB_CLIENT_ID` con una aplicación registrada en esa instancia.
-- **Gitea**: añade la dirección de tu instancia, como `https://gitea.example.com`, y pega un token de acceso personal con los scopes `write:repository`, `write:issue` y `read:user`. La tarjeta enlaza a la página de tu instancia que lo crea. Gitea no tiene inicio de sesión con código de dispositivo ni por CLI. Necesita Gitea 1.21 o posterior, servido desde la raíz de su dirección.
+- **Gitea**: añade la dirección de tu instancia, como `https://gitea.example.com`, y pega un token de acceso personal con los scopes `write:repository`, `write:issue` y `read:user`. La tarjeta enlaza a la página de tu instancia que lo crea. Si tienes sesión iniciada con la CLI `gt` de Gitea en el servidor (`gt auth login`), la instancia aparece sola en la tarjeta: elige **Usar gt CLI** para trabajar con esa sesión. La sesión de `gt` cubre issues y pull requests; para push y pull, conecta un token o configura Git por tu cuenta, por ejemplo con `gt auth setup-git`. Necesita Gitea 1.21 o posterior, servido desde la raíz de su dirección.
 - **Forgejo**: Codeberg ya está en la tarjeta, así que para conectarlo solo hace falta un token de acceso personal con los scopes `write:repository`, `write:issue` y `read:user`; la tarjeta enlaza a la página de Codeberg que lo crea. Para otro servidor Forgejo, añade su dirección, como `https://forgejo.example.com`, y pega un token con los mismos scopes. Necesita Forgejo 7.0 o posterior, servido desde la raíz de su dirección. Un servidor Forgejo se conecta en esta tarjeta y un servidor Gitea en la tarjeta de Gitea.
 - **Gerrit**: añade la dirección de tu instancia, como `https://gerrit.example.com`, y luego tu usuario de Gerrit y una contraseña HTTP. Genera la contraseña en Gerrit en **Settings → HTTP Credentials**; la tarjeta enlaza ahí. Tu contraseña de inicio de sesión no sirve, y una cuenta sin nombre de usuario no puede conectarse. Necesita Gerrit 3.8 o posterior, servido desde la raíz de su dirección. No se admiten sitios cuya dirección de revisión difiere de la dirección de Git, como googlesource.com con `.gitcookies`.
 
@@ -90,6 +90,18 @@ Activa **Session comments** en la tarjeta de Linear y una sesión iniciada desde
 4. Elige **Set up** e inicia sesión. Los modelos aparecerán luego en el selector de modelos del chat.
 
 Las integraciones se instalan para tu usuario, así que funcionan en todos los proyectos. Puedes actualizarlas o eliminarlas desde la misma tarjeta en cualquier momento.
+
+## Canales de notificación de extensiones
+
+Una [extensión](/es/extensions/) puede entregar tus notificaciones a Slack, Matrix o a un servidor propio. Una vez que la permites en **Settings → Extensions**, recibe una tarjeta bajo **Extension accounts** en esta página. Introduce ahí el token de la cuenta, y la dirección del servidor cuando la tarjeta la pida, y conecta: a partir de ahí la extensión recibe las mismas notificaciones que tu teléfono, siguiendo tus [ajustes de notificaciones](/es/notifications/). El token se queda en OpenChamber; el servicio de la extensión envía a través de OpenChamber y nunca lo ve.
+
+Si el servidor rechaza el token más adelante, la tarjeta indica que la cuenta necesita atención; conecta de nuevo con un token nuevo. Desconecta para detener las entregas sin quitar la extensión, o pausa la extensión. Quitar la extensión olvida la cuenta.
+
+## Gestores de incidencias de extensiones
+
+Una [extensión](/es/extensions/) puede añadir un gestor de incidencias junto a Linear. Una vez que la permites en **Settings → Extensions**, recibe una tarjeta bajo **Extension accounts** en esta página. Introduce la dirección del servidor cuando la tarjeta la pida y luego conecta una cuenta: pega un token, o guarda el client id de la app que registraste en el gestor e inicia sesión en el navegador. Si el gestor admite varias cuentas, **Add account** conecta otra y **Switch to** cambia la que está en uso. La asignación de proyectos y los comentarios de sesión aparecen en la tarjeta cuando el gestor los ofrece, como ocurre con Linear.
+
+Sus elementos aparecen entonces en el selector, el menú **+** del chat, New Worktree, los elementos vinculados de una sesión y los estados en vivo de los elementos que sigues. Los tokens se quedan en OpenChamber; el servicio de la extensión llega al gestor a través de OpenChamber y nunca los ve. Si el gestor rechaza una credencial más adelante, la tarjeta indica que la cuenta necesita atención; conéctala de nuevo. Pausar la extensión quita el gestor de todos los sitios donde aparece y conserva las cuentas; quitarla las olvida.
 
 ## Claude Code
 

@@ -38,6 +38,9 @@ export const SessionRetentionSettings: React.FC = () => {
   const setAutoDeleteAfterDays = useUIStore((state) => state.setAutoDeleteAfterDays);
   const setSessionRetentionAction = useUIStore((state) => state.setSessionRetentionAction);
   const setOnlyArchived = useUIStore((state) => state.setSessionRetentionOnlyArchived);
+  const sessionWorkEnabled = useUIStore((state) => state.sessionWorkEnabled);
+  const includeInWork = useUIStore((state) => state.sessionRetentionIncludeInWork);
+  const setIncludeInWork = useUIStore((state) => state.setSessionRetentionIncludeInWork);
 
   const { candidates, isRunning, runCleanup, action, status } = useSessionAutoCleanup({ autoRun: false });
   const pendingCount = candidates.length;
@@ -104,6 +107,19 @@ export const SessionRetentionSettings: React.FC = () => {
           label={t('settings.openchamber.sessionRetention.field.enableAutoCleanup')}
           ariaLabel={t('settings.openchamber.sessionRetention.field.enableAutoCleanupAria')}
         />
+        {/* Without sessions in work there is no block to include; In work then keeps nothing.
+            The block never holds an archived session, so that target has nothing to include. */}
+        {sessionWorkEnabled ? (
+          <SettingsCheckboxRow
+            settingsItem="sessions.retention-include-in-work"
+            checked={includeInWork}
+            disabled={onlyArchived}
+            onChange={setIncludeInWork}
+            label={t('settings.openchamber.sessionRetention.field.includeInWork')}
+            ariaLabel={t('settings.openchamber.sessionRetention.field.includeInWork')}
+            info={t('settings.openchamber.sessionRetention.field.includeInWorkInfo')}
+          />
+        ) : null}
       </div>
 
       {/* The period, the target and the action also drive "Run cleanup now",
@@ -112,7 +128,11 @@ export const SessionRetentionSettings: React.FC = () => {
         <SettingsFieldRow
           settingsItem="sessions.retention-only-archived"
           label={t('settings.layout.sessions.retention.target')}
-          info={t('settings.openchamber.sessionRetention.field.onlyArchivedDescription')}
+          info={t(onlyArchived
+            ? 'settings.openchamber.sessionRetention.field.archivedDescription'
+            : action === 'archive'
+              ? 'settings.openchamber.sessionRetention.field.unarchivedArchiveDescription'
+              : 'settings.openchamber.sessionRetention.field.unarchivedDeleteDescription')}
         >
           <SettingsChipGroup
             value={onlyArchived ? 'archived' : 'unarchived'}

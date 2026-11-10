@@ -106,7 +106,11 @@ mock.module('@/contexts/useThemeSystem', () => ({
   }),
 }));
 mock.module('@/hooks/useFontPreferences', () => ({ useFontPreferences: () => ({ monoFont: 'geist-mono' }) }));
-mock.module('@/lib/device', () => ({ useDeviceInfo: () => deviceInfo }));
+mock.module('@/lib/device', () => ({
+  useDeviceInfo: () => deviceInfo,
+  // Dialogs ask whether to lay out as a tablet; these tests run on a phone or a desktop.
+  useTabletLayout: () => ({ enabled: false, roomyForPanels: false }),
+}));
 mock.module('@/stores/useUIStore', () => ({ useUIStore: useUiStoreMock }));
 mock.module('@/stores/useInlineCommentDraftStore', () => ({ useInlineCommentDraftStore: () => ({ addDraft: () => undefined }) }));
 mock.module('@/components/terminal/TerminalViewport', () => ({
@@ -150,7 +154,7 @@ mock.module('@/components/ui/sortable-tabs-strip', () => ({
     )),
   ),
 }));
-mock.module('@/lib/i18n', () => ({ useI18n: () => i18n }));
+mock.module('@/lib/i18n', () => ({ useI18n: () => i18n, isRightToLeft: () => false }));
 
 const { TerminalView } = await import('./TerminalView');
 
@@ -283,7 +287,7 @@ describe('TerminalView project action tab indicator', () => {
     // What the panel hands to the draft stays on the draft's folder.
     const tabId = useTerminalStore.getState().getDirectoryState('/spaces/a1b2c3d4e5f6/repo')!.tabs[0]!.id;
     await act(async () => useTerminalStore.getState().setTabPreviewUrl('/spaces/a1b2c3d4e5f6/repo', tabId, 'https://preview.example.test'));
-    host.querySelector<HTMLElement>('[title="terminalView.preview.openTitle"]')?.click();
+    host.querySelector<HTMLElement>('[aria-label="terminalView.preview.openTitle"]')?.click();
     expect(openContextPreviewCalls).toEqual([['/repo', 'https://preview.example.test']]);
   });
 
@@ -424,7 +428,7 @@ describe('TerminalView project action tab indicator', () => {
     });
     await flushEffects();
     const paste = host.querySelector<HTMLButtonElement>('[aria-label="terminalView.actions.paste"]');
-    expect(paste?.previousElementSibling?.getAttribute('aria-label')).toBe('terminalView.actions.copySelection');
+    expect(paste?.parentElement?.previousElementSibling?.querySelector('[aria-label="terminalView.actions.copySelection"]')).not.toBeNull();
     expect(paste?.querySelector('[data-icon]')?.getAttribute('data-icon')).toBe('clipboard');
 
     const activeTabId = useTerminalStore.getState().getDirectoryState('/repo')!.activeTabId;
@@ -452,7 +456,7 @@ describe('TerminalView project action tab indicator', () => {
     expect(createSessionCalls.length).toBe(1);
     expect(createSessionCalls[0]?.cwd).toBe('/repo');
 
-    const previewButton = host.querySelector<HTMLElement>('[title="terminalView.preview.openTitle"]');
+    const previewButton = host.querySelector<HTMLElement>('[aria-label="terminalView.preview.openTitle"]');
     expect(previewButton).not.toBeNull();
     previewButton?.click();
     expect(openContextPreviewCalls).toEqual([['/repo-worktree', 'https://preview.example.test']]);
@@ -534,6 +538,43 @@ describe('TerminalView project action tab indicator', () => {
     expect(host.textContent).not.toContain('terminalView.error.connectionFailed');
     expect(store.getActiveTab('/repo')?.terminalSessionId).toBeNull();
     expect(store.getActiveTab('/repo')?.lifecycle).toBe('exited');
+  });
+
+  test('a terminal that keeps failing to reconnect shows the error and Try again until it is back', async () => {
+    const store = useTerminalStore.getState();
+    const tab = store.getDirectoryState('/repo')!.tabs.find((entry) => entry.label === 'Interactive')!;
+    store.setTabSessionId('/repo', tab.id, 'srv-Interactive');
+    store.setActiveTab('/repo', tab.id);
+    let handlers: TerminalHandlers | null = null;
+    connectBehavior = (_sessionId, next) => {
+      // A later subscription replays the snapshot another holder of the session cached.
+      if (handlers) next.onEvent({ type: 'snapshot', sequence: 0, data: '', status: 'running' });
+      handlers = next;
+      return { close: () => undefined };
+    };
+    await act(async () => root.render(React.createElement(TerminalView, { visible: true })));
+    await flushEffects();
+    const emit = async (attempt: number) => act(async () => handlers!.onEvent({ type: 'reconnecting', attempt, maxAttempts: Number.POSITIVE_INFINITY }));
+    const tryAgainButton = () => Array.from(host.querySelectorAll('button')).find((button) => button.textContent === 'terminalView.actions.tryAgain');
+
+    // A short outage recovers within a few attempts and shows nothing.
+    for (let attempt = 1; attempt <= 4; attempt += 1) await emit(attempt);
+    expect(host.textContent).not.toContain('terminalView.error.cannotConnect');
+
+    await emit(5);
+    expect(host.textContent).toContain('terminalView.error.cannotConnect');
+    expect(tryAgainButton()).toBeDefined();
+
+    await act(async () => tryAgainButton()!.click());
+    expect(connectCalls).toEqual(['srv-Interactive', 'srv-Interactive']);
+    expect(host.textContent).toContain('terminalView.error.cannotConnect');
+    // The retry dials once and fails: its count starts over, and the error stays.
+    await act(async () => handlers!.onError?.(new Error('Terminal WebSocket closed'), false));
+    await emit(1);
+    expect(host.textContent).toContain('terminalView.error.cannotConnect');
+
+    await act(async () => handlers!.onEvent({ type: 'snapshot', sequence: 1, data: '$ ', status: 'running' }));
+    expect(host.textContent).not.toContain('terminalView.error.cannotConnect');
   });
 
   test('would fail if revisit attach skipped the active running project-action snapshot restore', async () => {

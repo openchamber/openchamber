@@ -71,20 +71,20 @@ describe('sidebar works', () => {
       });
     });
 
-    test('a root in work no project section holds is a work of its own, listed once', () => {
+    test('a root in work without a registered project stays hidden', () => {
       const index = buildSidebarWorkIndex([section]);
       const tracked = session('tracked', { ...outside, ...inWork });
       const order = [session('w1', inWork), tracked, session('root', inWork)];
       const rootIndex = buildSessionRootIndex([tracked, session('root')], new Map());
       expect(orderInWorkWorks(order, index, rootIndex, notChat).map((ref) => ref.key))
-        .toEqual(['p:wt', 'session:tracked', 'session:root']);
+        .toEqual(['p:wt', 'session:root']);
     });
 
-    test('a nested session in work lists the work of its root, which is not in work itself', () => {
+    test('a nested session cannot admit a root without a registered project', () => {
       const index = buildSidebarWorkIndex([section]);
       const order = [promoted.session, subagent.session, outsideRoot.session];
       expect(orderInWorkWorks(order, index, rootOf, notChat).map((ref) => ({ key: ref.key, projectId: ref.projectId })))
-        .toEqual([{ key: 'session:outside-root', projectId: null }]);
+        .toEqual([]);
     });
 
     test('archived sessions, chats and sessions not in work are left out', () => {

@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { Window } from 'happy-dom';
 
 import { placeCaretPopup, viewportLimits } from './placement';
+import { writeMobileKeyboardVar } from '@/lib/mobileKeyboardInsets';
 
 const bounds = { left: 100, right: 900 };
 const limits = { top: 0, bottom: 1000 };
@@ -34,9 +35,9 @@ describe('caret popup placement', () => {
   test('the iOS app\'s keyboard inset ends the visible room, where the visual viewport does not', () => {
     const dom = new Window({ width: 400, height: 800 });
     Object.assign(globalThis, { window: dom, document: dom.document });
-    dom.document.documentElement.style.setProperty('--oc-keyboard-inset', '300px');
+    writeMobileKeyboardVar('--oc-keyboard-inset', 300);
     expect(viewportLimits().bottom).toBe(500);
-    dom.document.documentElement.style.removeProperty('--oc-keyboard-inset');
+    writeMobileKeyboardVar('--oc-keyboard-inset', null);
     expect(viewportLimits().bottom).toBe(800);
   });
 

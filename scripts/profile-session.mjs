@@ -34,7 +34,8 @@ import { summarizeCpuProfile } from "./perf/cpu-profile.mjs"
 import { growthPerSecond, longestTaskInWindow, metricMap, round, summarizeFrameBudget, summarizeLongTasks, summarizeThreads, summarizeTraceEvents } from "./perf/metrics.mjs"
 import { createProcessCpuSampler, openBrowserClient, resolveServerProcesses } from "./perf/process-cpu.mjs"
 import { buildRenderProbeSource, printRenderProbe, readRenderProbe, RENDER_PROBE_GLOBAL, summarizeRenderProbe } from "./perf/render-probe.mjs"
-import { expandProjects, expandSessionLists } from "./perf/scenario.mjs"
+import { buildPageSignalsSource, startPageSignals } from "./perf/page-signals.mjs"
+import { expandProjects, expandSessionLists, settlePage } from "./perf/scenario.mjs"
 import { rendererMainThread, traceWindow } from "./perf/trace-analysis.mjs"
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..")
@@ -78,7 +79,8 @@ Options:
   --prompt <text>          Prompt to send (default: a long markdown+code answer)
   --model <provider/model> Model override (default: configured selection)
   --agent <id>             Agent override (default: configured selection)
-  --settle <seconds>       Wait after load before recording (default: 12)
+  --settle <seconds>       Longest wait after load for the app to be ready and
+                           its main thread quiet (default: 12)
   --timeout <seconds>      Give up waiting for idle (default: 600)
   --tail <seconds>         Keep recording after idle (default: 5)
   --output <directory>     Artifact directory
@@ -121,6 +123,12 @@ Options:
   --heap-sampling          Record a sampling heap profile (heap.heapprofile,
                            opens in the DevTools Memory panel) and list the
                            top allocation sites. Adds overhead: attribution only.
+  --timing                 Timing run: no sampler, no RunTask trace, no probes.
+                           Long tasks, layout shift and requests come from the
+                           browser's own observers; a narrow trace still says
+                           whether an accessibility tree was built. The figures
+                           to compare between builds; attribution needs a
+                           run without this flag.
   --process-cpu-only       Record per-process CPU with every in-page instrument
                            off: no sampler, trace, probe or stream counters.
                            The sampler and the trace run inside the renderer
@@ -170,6 +178,7 @@ const parseArgs = (argv) => {
     attach: null,
     samplingInterval: 200,
     processCpuOnly: false,
+    timing: false,
     threadBreakdown: false,
     saveTrace: false,
     injectCss: null,
@@ -193,6 +202,7 @@ const parseArgs = (argv) => {
     else if (value === "--json") options.json = true
     else if (value === "--keep-session") options.keepSession = true
     else if (value === "--process-cpu-only") options.processCpuOnly = true
+    else if (value === "--timing") options.timing = true
     else if (value === "--thread-breakdown") options.threadBreakdown = true
     else if (value === "--save-trace") options.saveTrace = true
     else if (value === "--url") options.url = argv[++index]
@@ -235,6 +245,8 @@ const parseArgs = (argv) => {
   if (!Number.isFinite(options.cpuThrottle) || options.cpuThrottle < 1) throw new Error("--cpu-throttle must be a rate of 1 or more")
   if (options.grow > 0 && options.viewSession) throw new Error("--grow fills the displayed session; it cannot run with --view-session")
   if (options.processCpuOnly && (options.renderProbe || options.heapSampling)) throw new Error("--process-cpu-only switches every in-page instrument off; it cannot run with --render-probe or --heap-sampling")
+  if (options.timing && (options.processCpuOnly || options.renderProbe || options.heapSampling || options.saveTrace)) throw new Error("--timing cannot run with --process-cpu-only, --render-probe, --heap-sampling or --save-trace")
+  if ((options.timing || options.processCpuOnly) && (options.budgetLongTasks !== null || options.budgetLongest !== null)) throw new Error("--budget-long-tasks and --budget-longest read the trace, which --timing and --process-cpu-only switch off")
   const parsed = new URL(options.url)
   options.port = options.port ?? parsed.port ?? "3000"
   options.dir = resolve(options.dir)
@@ -689,8 +701,10 @@ const main = async () => {
       client.send("Network.enable", { maxTotalBufferSize: 0, maxResourceBufferSize: 0 }),
     ])
     await client.send("Network.setBypassServiceWorker", { bypass: true })
-    const instrumented = !options.processCpuOnly
+    const instrumented = !options.processCpuOnly && !options.timing
     if (instrumented) await client.send("Page.addScriptToEvaluateOnNewDocument", { source: buildIdleProbeSource() })
+    const collectsSignals = !options.processCpuOnly
+    if (collectsSignals) await client.send("Page.addScriptToEvaluateOnNewDocument", { source: buildPageSignalsSource() })
     // React registers with the hook while its module initialises, so the probe
     // has to exist before any application code runs.
     if (options.renderProbe) await client.send("Page.addScriptToEvaluateOnNewDocument", { source: buildRenderProbeSource({ traceHook: options.renderProbeHook }) })
@@ -743,13 +757,14 @@ const main = async () => {
     await client.send("Page.reload", { ignoreCache: false })
     await loaded
 
-    console.log(`Opened the session; settling for ${options.settle}s.`)
-    await wait(options.settle * 1000)
+    console.log(`Opened the session; settling for up to ${options.settle}s.`)
+    const settle = await settlePage(client, options.settle)
+    console.log(`Settled after ${settle.seconds}s.`)
 
     if (options.expandSessions) {
       const expanded = await expandSessionLists(client)
-      console.log(`Expanded ${expanded} collapsed session lists; settling ${options.settle}s again.`)
-      await wait(options.settle * 1000)
+      console.log(`Expanded ${expanded} collapsed session lists; settling again.`)
+      await settlePage(client, options.settle, { afterLoad: false })
     }
 
     if (options.grow > 0) {
@@ -769,8 +784,7 @@ const main = async () => {
         await scrollChatToEnd(client)
         if (turn % 10 === 0 || turn === options.grow) console.log(`Grew ${turn}/${options.grow} turns`)
       }
-      console.log(`Settling ${options.settle}s after growing the history.`)
-      await wait(options.settle * 1000)
+      await settlePage(client, options.settle, { afterLoad: false })
     }
     const historyRecordsBefore = await readHistoryRecords(client, sessionId)
     console.log(`History in memory: ${historyRecordsBefore ?? "unknown"} records.`)
@@ -789,7 +803,9 @@ const main = async () => {
     }
     // `RunTask` is only emitted under the disabled-by-default timeline
     // category. Without it the capture silently reports zero long tasks.
-    const categories = [...new Set([
+    // A timing run records only what says whether a tree was built: `RunTask`
+    // on every thread is what makes the full set cost the page time.
+    const categories = options.timing ? [ACCESSIBILITY_CATEGORY] : [...new Set([
       "devtools.timeline",
       "disabled-by-default-devtools.timeline",
       "disabled-by-default-devtools.timeline.frame",
@@ -800,11 +816,14 @@ const main = async () => {
       ...(options.threadBreakdown ? ["toplevel", "cc", "viz", "gpu", "v8.gc", "disabled-by-default-v8.gc"] : []),
       ...options.extraCategories,
     ])]
-    if (instrumented) await client.send("Tracing.start", { transferMode: "ReportEvents", categories: categories.join(",") })
+    const traced = instrumented || options.timing
+    if (traced) await client.send("Tracing.start", { transferMode: "ReportEvents", categories: categories.join(",") })
 
+    const pageSignals = collectsSignals ? await startPageSignals(client) : null
     const before = metricMap((await client.send("Performance.getMetrics")).metrics)
     const renderedBefore = await countRenderedMessages(client)
     const directoryAlignment = options.viewSession ? null : await readDirectoryAlignment(client)
+    await processCpu.sampleWakeups()
     await processCpu.sample()
     // The idle edge comes from the realtime channel the page itself listens
     // to, timestamped by the browser, so the finalize window starts when the
@@ -884,6 +903,8 @@ const main = async () => {
     // Closed before the tail so the per-process figures describe the stream
     // itself and are not diluted by the quiet seconds recorded after it.
     await processCpu.sample()
+    await processCpu.sampleWakeups()
+    const signals = pageSignals ? await pageSignals.stop() : null
     const assistantResponse = quiet ? null : await readAssistantResponse(cliBase, sessionId)
     if (options.tail > 0) await wait(options.tail * 1000)
 
@@ -906,8 +927,8 @@ const main = async () => {
     const profile = instrumented ? (await client.send("Profiler.stop")).profile : null
     const heapProfile = options.heapSampling ? (await client.send("HeapProfiler.stopSampling")).profile : null
 
-    let traceComplete = instrumented
-    if (instrumented) {
+    let traceComplete = traced
+    if (traced) {
       const tracingComplete = client.once("Tracing.tracingComplete", 120_000)
       try {
         await client.send("Tracing.end")
@@ -960,7 +981,7 @@ const main = async () => {
       : null
     const traceBreakdown = summarizeTraceEvents(traceEvents)
     const recordedWindow = traceWindow(traceEvents)
-    const accessibility = instrumented
+    const accessibility = traced
       ? accessibilityInWindow(traceEvents, { main: rendererMainThread(traceEvents, recordedWindow).main, ...recordedWindow, recorded: true })
       : null
     const threadBreakdown = options.threadBreakdown ? summarizeThreads(traceEvents) : null
@@ -984,6 +1005,8 @@ const main = async () => {
       reachedIdle: becameIdle,
       quiet,
       instrumented,
+      timing: options.timing,
+      settle,
       directoryAlignment,
       injectedCss: options.injectCss,
       injectedScript: options.injectScript,
@@ -1001,10 +1024,11 @@ const main = async () => {
       traceComplete,
       disposableSession: !options.keepSession && !options.session,
       sessionIdle,
-      accessibility: instrumented ? accessibilityState(traceEvents, { categories, forced: options.forceAccessibility }) : null,
+      accessibility: traced ? accessibilityState(traceEvents, { categories, forced: options.forceAccessibility }) : null,
+      pageSignals: signals,
       metrics: {
-        ...tasks,
-        ...frameBudget,
+        // Without `RunTask` these are placeholders, and a zero must be a measurement.
+        ...(instrumented ? { ...tasks, ...frameBudget } : Object.fromEntries(Object.keys({ ...tasks, ...frameBudget }).map((key) => [key, null]))),
         // The end-of-reply spike: the turn is finalised (markdown settles,
         // code highlights, the list re-measures) right after the session goes idle.
         finalizeLongestTaskMs: finalize?.longestMs ?? null,
@@ -1013,7 +1037,7 @@ const main = async () => {
         // client is on (`accessibility` says whether it was).
         accessibilityMs: accessibility?.ms ?? null,
         accessibilityLongestPassMs: accessibility?.longestPassMs ?? null,
-        blockedPercent: round((tasks.longTaskTotalMs / (elapsedSeconds * 1000)) * 100),
+        blockedPercent: instrumented ? round((tasks.longTaskTotalMs / (elapsedSeconds * 1000)) * 100) : null,
         mainThreadBusyPercent: round((delta("TaskDuration") / elapsedSeconds) * 100),
         recalcStylePerSecond: perSecond("RecalcStyleCount"),
         layoutsPerSecond: perSecond("LayoutCount"),

@@ -89,7 +89,7 @@ export const openCodeCredentialSource = ({
       return projectEnvironmentKeys(data, environment);
     },
     // Location-scoped like integrations, so it reads in the directory OpenCode already runs.
-    readUsageLimits: async () => (await client(getDefaultDirectory()).usage.limits()).data,
+    readUsageLimits: async () => (await client(getDefaultDirectory()).experimental.usage.limits()).data,
   };
 };
 

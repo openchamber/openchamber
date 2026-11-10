@@ -10,6 +10,7 @@ import type { Snippet } from '@/types/snippet';
 import { findSnippetByTrigger, isValidSnippetName } from '@/lib/snippetNames';
 import { useMobileAutocompleteMaxHeight } from './useMobileAutocompleteMaxHeight';
 import { AutocompleteRowDetail } from './composer/ui/AutocompleteRowParts';
+import { useHeightMorph } from '@/lib/motion/useSizeMorph';
 
 export interface SnippetAutocompleteHandle {
   handleKeyDown: (key: string) => void;
@@ -50,8 +51,12 @@ export const SnippetAutocomplete = React.forwardRef<SnippetAutocompleteHandle, S
 }, ref) => {
   const { t } = useI18n();
   const containerRef = React.useRef<HTMLDivElement | null>(null);
+  // Narrowing as the user types, the box eases into its new height; its
+  // bottom edge stays on the composer (`bottom-full`), so it moves upward.
+  useHeightMorph(containerRef);
   const isMobile = useUIStore((state) => state.isMobile);
-  const mobileMaxHeight = useMobileAutocompleteMaxHeight(containerRef, true, 240);
+  // A caret placement brings its own max-height.
+  const mobileMaxHeight = useMobileAutocompleteMaxHeight(containerRef, style?.maxHeight === undefined, 240);
   const [selectedIndex, setSelectedIndex] = React.useState(0);
   const selectedIndexRef = React.useRef(0);
   const itemRefs = React.useRef<(HTMLDivElement | null)[]>([]);

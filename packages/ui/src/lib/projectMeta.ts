@@ -1,27 +1,11 @@
 import React from 'react';
 import type { ProjectEntry } from '@/lib/api/types';
-import { runtimeFetch } from '@/lib/runtime-fetch';
-import { getRuntimeApiBaseUrl } from '@/lib/runtime-switch';
+import { useRuntimeObjectUrl } from '@/lib/runtimeObjectUrl';
 import type { IconName } from "@/components/icon/icons";
 import { isHexColor } from '@/lib/colorPresets';
 
 type ThemeVariant = 'light' | 'dark';
 type ProjectIconImageOptions = { themeVariant?: ThemeVariant; iconColor?: string };
-
-const PROJECT_ICON_OBJECT_URL_CACHE_LIMIT = 200;
-
-type ProjectIconObjectUrlCacheEntry = {
-  url?: string;
-  promise?: Promise<string | null>;
-};
-
-type ProjectIconObjectUrlRequest = {
-  cacheKey: string;
-  projectId: string;
-  query: URLSearchParams;
-};
-
-const projectIconObjectUrlCache = new Map<string, ProjectIconObjectUrlCacheEntry>();
 
 export const PROJECT_ICONS: Array<{ key: string; Icon: IconName; label: string }> = [
   { key: 'code',       Icon: 'code-box',      label: 'Code' },
@@ -43,6 +27,34 @@ export const PROJECT_ICONS: Array<{ key: string; Icon: IconName; label: string }
   { key: 'camera',     Icon: 'camera',        label: 'Media' },
   { key: 'book',       Icon: 'book-open',      label: 'Docs' },
   { key: 'heart',      Icon: 'heart',         label: 'Favorite' },
+  { key: 'cpu',        Icon: 'cpu',            label: 'Hardware' },
+  { key: 'cloud',      Icon: 'cloud',          label: 'Cloud' },
+  { key: 'store',      Icon: 'store-2',        label: 'Store' },
+  { key: 'school',     Icon: 'graduation-cap', label: 'Study' },
+  { key: 'chat',       Icon: 'chat-3',         label: 'Chat' },
+  { key: 'mail',       Icon: 'mail',           label: 'Mail' },
+  { key: 'map',        Icon: 'map-pin-2',      label: 'Places' },
+  { key: 'robot',      Icon: 'robot-2',        label: 'Bot' },
+  { key: 'ai',         Icon: 'brain-ai-3',     label: 'AI' },
+  { key: 'plugin',     Icon: 'puzzle-2',       label: 'Plugin' },
+  { key: 'tools',      Icon: 'tools',          label: 'Tools' },
+  { key: 'chart',      Icon: 'bar-chart-box',  label: 'Analytics' },
+  { key: 'writing',    Icon: 'pen-nib',        label: 'Writing' },
+  { key: 'image',      Icon: 'image-2',        label: 'Images' },
+  { key: 'film',       Icon: 'film',           label: 'Video' },
+  { key: 'trophy',     Icon: 'trophy',         label: 'Goals' },
+  { key: 'travel',     Icon: 'plane',          label: 'Travel' },
+  { key: 'coffee',     Icon: 'cup',            label: 'Coffee' },
+  { key: 'bug',        Icon: 'bug',            label: 'Bugs' },
+  { key: 'apple',      Icon: 'apple',          label: 'Apple' },
+  { key: 'android',    Icon: 'android',        label: 'Android' },
+  { key: 'windows',    Icon: 'windows',        label: 'Windows' },
+  { key: 'github',     Icon: 'github',         label: 'GitHub' },
+  { key: 'stack',      Icon: 'stack',          label: 'Stack' },
+  { key: 'finance',    Icon: 'bank',           label: 'Finance' },
+  { key: 'team',       Icon: 'team',           label: 'Team' },
+  { key: 'fire',       Icon: 'fire',           label: 'Hot' },
+  { key: 'planet',     Icon: 'planet',         label: 'Space' },
 ];
 
 export const PROJECT_ICON_MAP: Record<string, IconName> = Object.fromEntries(
@@ -96,119 +108,13 @@ const buildProjectIconQuery = (updatedAt: number | null | undefined, options?: P
   return params;
 };
 
-const buildProjectIconObjectUrlCacheKey = (
-  projectId: string,
-  query: URLSearchParams,
-): string | null => {
-  if (!projectId) return null;
-  return [
-    getRuntimeApiBaseUrl() || 'same-origin',
-    projectId,
-    query.toString(),
-  ].join('|');
-};
-
-const buildProjectIconObjectUrlRequest = (
-  projectId: string,
-  updatedAt: number | null | undefined,
-  options?: ProjectIconImageOptions,
-): ProjectIconObjectUrlRequest | null => {
-  const query = buildProjectIconQuery(updatedAt, options);
-  if (!query) return null;
-
-  const cacheKey = buildProjectIconObjectUrlCacheKey(projectId, query);
-  if (!cacheKey) return null;
-
-  return { cacheKey, projectId, query };
-};
-
-const trimProjectIconObjectUrlCache = (): void => {
-  while (projectIconObjectUrlCache.size > PROJECT_ICON_OBJECT_URL_CACHE_LIMIT) {
-    const firstKey = projectIconObjectUrlCache.keys().next().value;
-    if (typeof firstKey !== 'string') return;
-    const entry = projectIconObjectUrlCache.get(firstKey);
-    if (entry?.url && typeof URL !== 'undefined' && typeof URL.revokeObjectURL === 'function') {
-      URL.revokeObjectURL(entry.url);
-    }
-    projectIconObjectUrlCache.delete(firstKey);
-  }
-};
-
-const loadProjectIconObjectUrl = (
-  request: ProjectIconObjectUrlRequest,
-): Promise<string | null> => {
-  const cached = projectIconObjectUrlCache.get(request.cacheKey);
-  if (cached?.url) return Promise.resolve(cached.url);
-  if (cached?.promise) return cached.promise;
-
-  const promise = runtimeFetch(`/api/projects/${encodeURIComponent(request.projectId)}/icon`, {
-    method: 'GET',
-    headers: { Accept: 'image/*' },
-    query: request.query,
-  })
-    .then(async (response) => {
-      if (!response.ok) return null;
-      if (typeof URL === 'undefined' || typeof URL.createObjectURL !== 'function') return null;
-      const blob = await response.blob();
-      const url = URL.createObjectURL(blob);
-      projectIconObjectUrlCache.set(request.cacheKey, { url });
-      trimProjectIconObjectUrlCache();
-      return url;
-    })
-    .catch(() => null)
-    .finally(() => {
-      const entry = projectIconObjectUrlCache.get(request.cacheKey);
-      if (entry?.promise === promise && !entry.url) {
-        projectIconObjectUrlCache.delete(request.cacheKey);
-      }
-    });
-
-  projectIconObjectUrlCache.set(request.cacheKey, { promise });
-  return promise;
-};
-
 const useProjectIconImageObjectUrl = (
   project: Pick<ProjectEntry, 'id' | 'iconImage'>,
   options?: ProjectIconImageOptions,
 ): string | null => {
-  const projectId = project.id;
-  const updatedAt = project.iconImage?.updatedAt;
-  const themeVariant = options?.themeVariant;
-  const iconColor = options?.iconColor;
-  const request = React.useMemo(() => buildProjectIconObjectUrlRequest(projectId, updatedAt, { themeVariant, iconColor }), [
-    projectId,
-    updatedAt,
-    themeVariant,
-    iconColor,
-  ]);
-  const [url, setUrl] = React.useState(() => {
-    return request ? projectIconObjectUrlCache.get(request.cacheKey)?.url ?? null : null;
-  });
-
-  React.useEffect(() => {
-    if (!request) {
-      setUrl(null);
-      return;
-    }
-
-    const cached = projectIconObjectUrlCache.get(request.cacheKey)?.url;
-    if (cached) {
-      setUrl(cached);
-      return;
-    }
-
-    let cancelled = false;
-    setUrl(null);
-    void loadProjectIconObjectUrl(request).then((nextUrl) => {
-      if (!cancelled) setUrl(nextUrl);
-    });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [request]);
-
-  return url;
+  const query = buildProjectIconQuery(project.iconImage?.updatedAt, options);
+  const path = query && project.id ? `/api/projects/${encodeURIComponent(project.id)}/icon` : null;
+  return useRuntimeObjectUrl(path, query?.toString() ?? '').url;
 };
 
 type ProjectIconImageProps = {

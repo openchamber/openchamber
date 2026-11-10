@@ -1,7 +1,7 @@
 import React, { act } from 'react';
 import type { Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, spyOn, test } from 'bun:test';
-import { Window } from 'happy-dom';
+import { Window, type HTMLElement as HappyHTMLElement } from 'happy-dom';
 import { OpenCode } from '@opencode/client';
 
 import type { CommandAutocompleteHandle } from './CommandAutocomplete';
@@ -135,4 +135,47 @@ for (const kind of ['command', 'skill'] as const) {
     await press('Enter');
     expect(selections).toEqual(['oc-scroll']);
   });
+
+  test(`${kind}: a list placed below the caret keeps the height its placement gave it`, async () => {
+    // A list placed below the line grows downward: its bottom edge is its top
+    // plus its height, here 12px under the chat area's top. The phone's
+    // keyboard puts a composer there (#5687).
+    const rect = spyOn(dom.HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HappyHTMLElement) {
+      const top = this.tagName === 'MAIN' ? 288 : 300;
+      const height = this.classList.contains('oc-glass-popover') ? Number.parseFloat(this.style.maxHeight) || 256 : 0;
+      return new dom.DOMRect(0, top, 378, height);
+    });
+    const placed = { top: '48px', bottom: 'auto', maxHeight: '120px' };
+    await act(async () => root.render(
+      <SyncProvider sdk={sdk} directory="">
+        <I18nProvider>
+          <main>
+            {kind === 'command'
+              ? <CommandAutocomplete searchQuery="" onClose={() => undefined} onCommandSelect={() => undefined} style={placed} />
+              : <SkillAutocomplete searchQuery="" onClose={() => undefined} onSkillSelect={() => undefined} style={placed} />}
+          </main>
+        </I18nProvider>
+      </SyncProvider>,
+    ));
+    rect.mockRestore();
+    expect(host.querySelector<HTMLElement>('.oc-glass-popover')?.style.maxHeight).toBe('120px');
+  });
 }
+
+test('skill: loads in one row until the project\'s skills are read, then says there are none at the same height', async () => {
+  const { useSkillsStore } = await import('@/stores/useSkillsStore');
+  useSkillsStore.setState({ skillsByDirectory: {} });
+  const picker = <SyncProvider sdk={sdk} directory=""><I18nProvider><SkillAutocomplete searchQuery="" onClose={() => undefined} onSkillSelect={() => undefined} /></I18nProvider></SyncProvider>;
+  await act(async () => root.render(picker));
+  const loadingRow = host.querySelector('[data-spinner]')?.closest('div');
+  expect(loadingRow).not.toBeNull();
+  expect(host.textContent).not.toContain('No skills found');
+
+  await act(async () => useSkillsStore.setState({ skillsByDirectory: { [directory]: [] } }));
+  expect(host.querySelector('[data-spinner]')).toBeNull();
+  const emptyRow = Array.from(host.querySelectorAll('div')).filter((node) => node.textContent === 'No skills found').pop();
+  // The same box, so the popup keeps its height between the two.
+  expect(emptyRow?.className.split(' ').filter((name) => name.startsWith('p'))).toEqual(
+    loadingRow?.className.split(' ').filter((name) => name.startsWith('p')),
+  );
+});

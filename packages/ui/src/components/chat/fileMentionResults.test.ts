@@ -2,6 +2,8 @@ import { describe, expect, test } from 'bun:test';
 
 import {
   filterStaleRecentFiles,
+  mentionListState,
+  mentionSearchKey,
   mentionServerQuery,
   rankFileMentionResults,
   tokenizeMentionQuery,
@@ -68,5 +70,36 @@ describe('filterStaleRecentFiles', () => {
     const file2 = hit('file2.ts');
     const stale = new Set([file1.path]);
     expect(filterStaleRecentFiles([file1, file2], stale)).toEqual([file2]);
+  });
+});
+
+describe('mentionSearchKey', () => {
+  const options = { includeHidden: false, respectGitignore: true };
+
+  test('needs no search without a directory, a query, or for a session title', () => {
+    expect(mentionSearchKey('', 'src', options)).toBeNull();
+    expect(mentionSearchKey('/repo', '  ', options)).toBeNull();
+    expect(mentionSearchKey('/repo', 'fix login', options)).toBeNull();
+  });
+
+  test('queries the server sends alike share a key; anything that changes the answer does not', () => {
+    const key = mentionSearchKey('/repo', 'Src', options);
+    expect(mentionSearchKey('/repo', './src', options)).toBe(key);
+    expect(mentionSearchKey('/repo', 'srcs', options)).not.toBe(key);
+    expect(mentionSearchKey('/other', 'src', options)).not.toBe(key);
+    expect(mentionSearchKey('/repo', 'src', { ...options, includeHidden: true })).not.toBe(key);
+    expect(mentionSearchKey('/repo', 'src', { ...options, respectGitignore: false })).not.toBe(key);
+  });
+});
+
+describe('mentionListState', () => {
+  test('rows stay while the next query searches', () => {
+    expect(mentionListState(3, true)).toBe('rows');
+    expect(mentionListState(3, false)).toBe('rows');
+  });
+
+  test('with nothing to show, loads until the search settles, then says nothing matched', () => {
+    expect(mentionListState(0, true)).toBe('loading');
+    expect(mentionListState(0, false)).toBe('empty');
   });
 });

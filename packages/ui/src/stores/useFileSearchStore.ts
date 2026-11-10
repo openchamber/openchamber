@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { devtools } from 'zustand/middleware';
 import { opencodeClient, type ProjectFileSearchHit } from '@/lib/opencode/client';
 import { getRuntimeKey } from '@/lib/runtime-switch';
+import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 
 const CACHE_TTL_MS = 30_000;
 const MAX_CACHE_ENTRIES = 40;
@@ -20,7 +21,7 @@ interface FileSearchStoreState {
     directory: string,
     query: string,
     limit?: number,
-    options?: { includeHidden?: boolean; respectGitignore?: boolean; type?: 'file' | 'directory' }
+    options?: { includeHidden?: boolean; respectGitignore?: boolean; type?: 'file' | 'directory'; signal?: AbortSignal }
   ) => Promise<ProjectFileSearchHit[]>;
   invalidateDirectory: (directory?: string | null) => void;
   resetForRuntimeSwitch: () => void;
@@ -47,6 +48,28 @@ const cacheKeyMatchesDirectory = (cacheKey: string, directory: string) => {
   } catch {
     return false;
   }
+};
+
+// A running search behind the toggles stops once nobody waits for it. A caller
+// without a signal never stops waiting.
+interface SupplementalWalk {
+  controller: AbortController;
+  waiters: number;
+  abandon: () => void;
+}
+
+const supplementalWalks = new WeakMap<Promise<ProjectFileSearchHit[]>, SupplementalWalk>();
+
+const waitForWalk = (walk: SupplementalWalk, signal: AbortSignal | undefined) => {
+  if (!signal) {
+    walk.waiters = Infinity;
+    return;
+  }
+  walk.waiters += 1;
+  signal.addEventListener('abort', () => {
+    walk.waiters -= 1;
+    if (walk.waiters === 0) walk.abandon();
+  }, { once: true });
 };
 
 export const useFileSearchStore = create<FileSearchStoreState>()(
@@ -76,19 +99,68 @@ export const useFileSearchStore = create<FileSearchStoreState>()(
 
         const inflight = get().inFlight[key];
         if (inflight) {
+          const walk = supplementalWalks.get(inflight);
+          if (walk) waitForWalk(walk, options?.signal);
           return inflight;
         }
 
-        const searchPromise = opencodeClient
-          // OpenCode v2's file search takes a type filter only; hidden-file and
-          // gitignore handling are the server's, so those options stay in the
-          // cache key but are not sent.
-          .searchFiles(normalizedQuery, {
-            directory: normalizedDirectory,
-            limit,
-            type,
+        const runtimeFiles = type === 'file' && (includeHidden || !respectGitignore)
+          ? getRegisteredRuntimeAPIs()?.files
+          : undefined;
+        // Through the plain search's own entry, so a caller showing those hits
+        // before the supplement answers costs no second OpenCode request.
+        const indexedSearch = runtimeFiles
+          ? get().searchFiles(normalizedDirectory, normalizedQuery, limit, { type })
+          : opencodeClient.searchFiles(normalizedQuery, {
+              directory: normalizedDirectory,
+              limit,
+              type,
+            });
+        let supplementalFailed = false;
+        const walkController = new AbortController();
+        const supplementalSearch = runtimeFiles
+          ? runtimeFiles.search({
+              directory: normalizedDirectory,
+              query: normalizedQuery,
+              maxResults: limit,
+              includeHidden,
+              respectGitignore,
+              signal: walkController.signal,
+            }).then((results) =>
+              results.map((result) => {
+                const normalizedPath = result.path.replace(/\\/g, '/');
+                const previewPath = result.preview?.[0]
+                  ? result.preview[0].replace(/\\/g, '/')
+                  : normalizedPath;
+                const name = previewPath.split('/').filter(Boolean).pop() || normalizedPath.split('/').filter(Boolean).pop() || '';
+                return {
+                  name,
+                  path: normalizedPath,
+                  relativePath: previewPath,
+                  extension: name.includes('.') ? name.split('.').pop()?.toLowerCase() : undefined,
+                };
+              })
+            ).catch((error: unknown) => {
+              supplementalFailed = true;
+              if (!walkController.signal.aborted) {
+                console.warn('Supplemental file search failed; keeping indexed results:', error);
+              }
+              return [];
+            })
+          : Promise.resolve([]);
+
+        const searchPromise = Promise.all([indexedSearch, supplementalSearch])
+          .then(([indexed, supplemental]) => {
+            if (supplemental.length === 0) return indexed;
+            const seen = new Set(indexed.map((file) => file.path.replace(/\\/g, '/')));
+            return [...indexed, ...supplemental.filter((file) => {
+              if (seen.has(file.path)) return false;
+              seen.add(file.path);
+              return true;
+            })].slice(0, limit);
           })
           .then((files) => {
+            if (supplementalFailed) return files;
             set((state) => {
               if (state.inFlight[key] !== searchPromise) {
                 return state;
@@ -112,17 +184,19 @@ export const useFileSearchStore = create<FileSearchStoreState>()(
             });
             return files;
           })
-          .finally(() => {
-            set((state) => {
-              if (state.inFlight[key] !== searchPromise) {
-                return state;
-              }
+          .finally(dropInFlight);
 
-              const nextInFlight = { ...state.inFlight };
-              delete nextInFlight[key];
-              return { inFlight: nextInFlight };
-            });
+        function dropInFlight() {
+          set((state) => {
+            if (state.inFlight[key] !== searchPromise) {
+              return state;
+            }
+
+            const nextInFlight = { ...state.inFlight };
+            delete nextInFlight[key];
+            return { inFlight: nextInFlight };
           });
+        }
 
         set((state) => ({
           inFlight: {
@@ -130,6 +204,21 @@ export const useFileSearchStore = create<FileSearchStoreState>()(
             [key]: searchPromise,
           },
         }));
+
+        if (runtimeFiles) {
+          const walk: SupplementalWalk = {
+            controller: walkController,
+            waiters: 0,
+            // Out of the in-flight list at once: the same query asked again
+            // starts its own walk instead of joining the stopped one.
+            abandon: () => {
+              walkController.abort();
+              dropInFlight();
+            },
+          };
+          supplementalWalks.set(searchPromise, walk);
+          waitForWalk(walk, options?.signal);
+        }
 
         return searchPromise;
       },

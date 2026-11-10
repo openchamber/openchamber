@@ -35,6 +35,32 @@ describe('session runtime', () => {
     expect(runtime.getPendingBlockingRequestsSnapshot()).toEqual({});
   });
 
+  it('keeps each session\'s latest context reading, unknown after a compaction, and drops a deleted session', () => {
+    const runtime = createSessionRuntime({
+      writeSseEvent() {},
+      getNotificationClients: () => new Set(),
+      broadcastEvent: () => {},
+    });
+    runtimes.push(runtime);
+    const step = (sessionID, tokens) => runtime.processOpenCodeSsePayload({
+      type: 'message.updated',
+      properties: { sessionID, info: { id: `msg-${sessionID}`, sessionID, role: 'assistant', tokens } },
+    });
+
+    step('session-1', { total: 52000, input: 400000, output: 900, reasoning: 0, cache: { read: 0, write: 0 } });
+    step('session-2', { input: 1000, output: 200, reasoning: 0, cache: { read: 300, write: 0 } });
+    step('session-3', { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } });
+    runtime.processOpenCodeSsePayload({ type: 'message.updated', properties: { info: { id: 'msg-u', sessionID: 'session-3', role: 'user' } } });
+    expect(runtime.getSessionContextSnapshot()).toEqual({
+      'session-1': { state: 'measured', tokens: 52000 },
+      'session-2': { state: 'measured', tokens: 1500 },
+    });
+
+    runtime.processOpenCodeSsePayload({ type: 'session.compacted', properties: { sessionID: 'session-1' } });
+    runtime.processOpenCodeSsePayload({ type: 'session.deleted', properties: { sessionID: 'session-2', info: { id: 'session-2' } } });
+    expect(runtime.getSessionContextSnapshot()).toEqual({ 'session-1': { state: 'compacted' } });
+  });
+
   it('keeps a page that waits for an answer beside the session\'s forms until it stops waiting', () => {
     const runtime = createSessionRuntime({
       writeSseEvent() {},
@@ -50,6 +76,29 @@ describe('session runtime', () => {
 
     runtime.trackWaitingPage({ type: 'settled', sessionId: 'session-1', callId: 'call-1' });
     expect(runtime.getPendingBlockingRequestsSnapshot()).toEqual({});
+  });
+
+  it('drops a permission with its turn and keeps the session\'s other requests', () => {
+    const runtime = createSessionRuntime({
+      writeSseEvent() {},
+      getNotificationClients: () => new Set(),
+      broadcastEvent: () => {},
+    });
+    runtimes.push(runtime);
+    const form = { id: 'form-1', sessionID: 'session-1', title: 'Pick one', fields: {} };
+    const idle = (sessionID) => ({ type: 'session.status', properties: { sessionID, status: { type: 'idle' } } });
+    runtime.processOpenCodeSsePayload({ type: 'permission.asked', properties: { id: 'perm-1', sessionID: 'session-1', action: 'edit' } });
+    runtime.processOpenCodeSsePayload({ type: 'form.created', properties: { sessionID: 'session-1', form } });
+    runtime.processOpenCodeSsePayload({ type: 'permission.asked', properties: { id: 'perm-2', sessionID: 'session-2', action: 'edit' } });
+
+    runtime.processOpenCodeSsePayload(idle('session-1'));
+    expect(runtime.getPendingBlockingRequestsSnapshot()).toEqual({
+      'session-1': { permissions: [], forms: [form], pages: [] },
+      'session-2': { permissions: [{ id: 'perm-2', sessionID: 'session-2', action: 'edit' }], forms: [], pages: [] },
+    });
+
+    runtime.processOpenCodeSsePayload(idle('session-2'));
+    expect(Object.keys(runtime.getPendingBlockingRequestsSnapshot())).toEqual(['session-1']);
   });
 
   it('drops pending requests when the session is deleted or OpenCode restarts', () => {
@@ -245,6 +294,7 @@ describe('session runtime', () => {
 
     expect(runtime.interruptBusySessionsAfterRestart()).toEqual({
       sessionIds: ['session-busy-1', 'session-busy-2', 'session-busy-3'],
+      autoResumeSessionIds: [],
     });
 
     expect(runtime.getActiveSessionCount()).toBe(0);
@@ -293,7 +343,7 @@ describe('session runtime', () => {
     expect(terminalEvents.some((event) => event.properties.sessionID === 'session-idle')).toBe(false);
 
     events.length = 0;
-    expect(runtime.interruptBusySessionsAfterRestart()).toEqual({ sessionIds: [] });
+    expect(runtime.interruptBusySessionsAfterRestart()).toEqual({ sessionIds: [], autoResumeSessionIds: [] });
     expect(events).toEqual([]);
   });
 

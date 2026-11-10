@@ -20,6 +20,7 @@ import {
   DEFAULT_LOCAL_STT_MODEL,
   DEFAULT_LOCAL_TTS_MODEL,
   PREVIOUS_DEFAULT_LOCAL_STT_MODEL,
+  REPLACED_DEFAULT_LOCAL_STT_MODEL,
   getLocalTtsDefaultSpeaker,
   resolveLocalTtsModelForLanguage,
   LOCAL_STT_MODEL_CATALOG,
@@ -85,6 +86,8 @@ export function createDictationService({ modelsDir }) {
    * The model to dictate with. Without a model the user picked (or with one
    * the catalog no longer has), someone who already dictated with Parakeet v2,
    * the default before v3, keeps it: it is installed and better on English.
+   * Someone with only v3, the default before Ultra, dictates with v3 until
+   * Ultra is installed (createSttSession downloads it in the background).
    */
   const resolveLocalModelId = async (requested) => {
     if (isLocalSttModelId(requested)) {
@@ -92,6 +95,12 @@ export function createDictationService({ modelsDir }) {
     }
     if (await isLocalSttModelInstalled(modelsDir, PREVIOUS_DEFAULT_LOCAL_STT_MODEL)) {
       return PREVIOUS_DEFAULT_LOCAL_STT_MODEL;
+    }
+    if (
+      !(await isLocalSttModelInstalled(modelsDir, DEFAULT_LOCAL_STT_MODEL))
+      && (await isLocalSttModelInstalled(modelsDir, REPLACED_DEFAULT_LOCAL_STT_MODEL))
+    ) {
+      return REPLACED_DEFAULT_LOCAL_STT_MODEL;
     }
     return DEFAULT_LOCAL_STT_MODEL;
   };
@@ -102,7 +111,7 @@ export function createDictationService({ modelsDir }) {
    * the provider is not ready.
    *
    * @param {{ provider?: string, language?: string, localModel?: string,
-   *           openaiCompatible?: { baseUrl?: string, model?: string, apiKey?: string } }} options
+   *           openaiCompatible?: { baseUrl?: string, model?: string, apiKey?: string, endpointPath?: string } }} options
    */
   const createSttSession = async (options = {}) => {
     const provider = options.provider === 'openai-compatible' ? 'openai-compatible' : 'local';
@@ -116,6 +125,7 @@ export function createDictationService({ modelsDir }) {
         // client older than the server-side store.
         apiKey: config.apiKey || readVoiceKey('stt'),
         language: options.language || undefined,
+        endpointPath: config.endpointPath,
       });
       try {
         await session.connect();
@@ -130,6 +140,12 @@ export function createDictationService({ modelsDir }) {
     }
 
     const modelId = await resolveLocalModelId(options.localModel);
+    // A failed upgrade download waits for the next server start rather than
+    // restarting with every dictation.
+    if (modelId === REPLACED_DEFAULT_LOCAL_STT_MODEL && !isLocalSttModelId(options.localModel)
+      && downloadStates.get(DEFAULT_LOCAL_STT_MODEL) !== 'error') {
+      void startModelDownload(DEFAULT_LOCAL_STT_MODEL);
+    }
     const installed = await isLocalSttModelInstalled(modelsDir, modelId);
     if (!installed) {
       const state = downloadStates.get(modelId);

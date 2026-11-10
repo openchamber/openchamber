@@ -10,8 +10,8 @@ import {
   getStoredProviderConfig,
   removeProviderConfig,
   upsertProviderConfig,
-  validateCustomProviderConfig,
 } from './opencodeConfig';
+import { validateCustomProviderConfig } from '../../web/server/lib/opencode/providers.js';
 import { OPENCODE_CONFIG_DIR } from './opencodeConfigPaths';
 
 let projectDir: string;
@@ -136,6 +136,36 @@ describe('custom provider config persistence (VS Code parity)', () => {
     const sources = getProviderSources('campus-llm', projectDir);
     assert.equal(sources.project.exists, true);
     assert.equal(sources.project.path, result.path);
+  });
+
+  test('upsertProviderConfig keeps model limits, capabilities and variants like the web server', () => {
+    const base = {
+      name: 'Campus LLM',
+      settings: { baseURL: 'https://llm.example.edu/v1' },
+      env: ['CAMPUS_KEY'],
+    };
+    const result = upsertProviderConfig('campus-llm', {
+      ...base,
+      models: {
+        m: {
+          name: 'M',
+          limit: { context: 200_000, output: 32_000 },
+          capabilities: { input: ['text', 'image'] },
+          variants: [{ id: 'low' }, { id: 'high' }],
+        },
+      },
+    }, projectDir, 'project');
+
+    assert.deepEqual(readJson(result.path).providers['campus-llm'].models.m, {
+      modelID: 'm',
+      name: 'M',
+      limit: { context: 200_000, output: 32_000 },
+      capabilities: { tools: true, input: ['text', 'image'], output: ['text'] },
+      variants: [{ id: 'low' }, { id: 'high' }],
+    });
+
+    upsertProviderConfig('campus-llm', { ...base, models: { m: { name: 'M', variants: [] } } }, projectDir, 'project');
+    assert.equal(readJson(result.path).providers['campus-llm'].models.m.variants, undefined);
   });
 
   test('round-trips non-default protocol adapters through project config', () => {
@@ -290,6 +320,57 @@ describe('custom provider config persistence (VS Code parity)', () => {
       env: ['PROXY_KEY'],
       settings: { baseURL: 'https://proxy.example.com/v1' },
       models: { 'gpt-5': { modelID: 'gpt-5', name: 'GPT-5', compatibility } },
+    });
+  });
+
+  test('a form save keeps the type of a hand-marked image model', () => {
+    const configPath = path.join(projectDir, '.opencode', 'opencode.json');
+    writeJson(configPath, {
+      providers: {
+        wawa: {
+          name: 'Wawa',
+          package: 'aisdk:@ai-sdk/openai-compatible',
+          env: ['WAWA_KEY'],
+          settings: { baseURL: 'https://wawa.example.com/v1' },
+          models: { flare: { modelID: 'flare', name: 'Flare', type: 'image' } },
+        },
+      },
+    });
+
+    upsertProviderConfig('wawa', {
+      name: 'Wawa',
+      env: ['WAWA_KEY'],
+      settings: { baseURL: 'https://wawa.example.com/v1' },
+      models: { flare: { name: 'Flare' } },
+    }, projectDir, 'project');
+
+    assert.deepEqual(readJson(configPath).providers.wawa.models.flare, { modelID: 'flare', name: 'Flare', type: 'image' });
+  });
+
+  test('a form save writes the type it sends, any type OpenCode knows', () => {
+    const configPath = path.join(projectDir, '.opencode', 'opencode.json');
+    writeJson(configPath, {
+      providers: {
+        wawa: {
+          name: 'Wawa',
+          package: 'aisdk:@ai-sdk/openai-compatible',
+          env: ['WAWA_KEY'],
+          settings: { baseURL: 'https://wawa.example.com/v1' },
+          models: { flare: { modelID: 'flare', name: 'Flare', type: 'image' } },
+        },
+      },
+    });
+
+    upsertProviderConfig('wawa', {
+      name: 'Wawa',
+      env: ['WAWA_KEY'],
+      settings: { baseURL: 'https://wawa.example.com/v1' },
+      models: { flare: { name: 'Flare', type: 'chat' }, judge: { name: 'Judge', type: 'decision' } },
+    }, projectDir, 'project');
+
+    assert.deepEqual(readJson(configPath).providers.wawa.models, {
+      flare: { modelID: 'flare', name: 'Flare', type: 'chat' },
+      judge: { modelID: 'judge', name: 'Judge', type: 'decision' },
     });
   });
 

@@ -24,6 +24,7 @@ import {
   listSetupCommands,
   moveSetupCommand,
   removeSetupCommand,
+  type WorktreeCommandKind,
 } from './projectSetupModel';
 import type { ProjectSetupState } from './useProjectSetup';
 
@@ -61,18 +62,32 @@ const CommandInput: React.FC<{
   );
 };
 
-const SetupCommands: React.FC<{ projectRef: ProjectRef; setup: ProjectSetup; setupState: ProjectSetupState }> = ({ projectRef, setup, setupState }) => {
+const COMMAND_TEXT = {
+  setup: {
+    aria: 'settings.projects.worktrees.commandAria',
+    placeholder: 'settings.openchamber.worktrees.setup.commandPlaceholder',
+    saveFailed: 'settings.openchamber.worktrees.setup.toast.saveFailed',
+  },
+  teardown: {
+    aria: 'settings.projects.worktrees.teardownCommandAria',
+    placeholder: 'settings.openchamber.worktrees.teardown.commandPlaceholder',
+    saveFailed: 'settings.openchamber.worktrees.teardown.toast.saveFailed',
+  },
+} as const;
+
+const SetupCommands: React.FC<{ projectRef: ProjectRef; setup: ProjectSetup; setupState: ProjectSetupState; kind: WorktreeCommandKind }> = ({ projectRef, setup, setupState, kind }) => {
   const { t } = useI18n();
   const { write, reload } = setupState;
   const [adding, setAdding] = React.useState(false);
   const [wait, setWait] = React.useState(setup.setupWorktreeWait);
   React.useEffect(() => setWait(setup.setupWorktreeWait), [setup.setupWorktreeWait]);
-  const entries = listSetupCommands(setup);
+  const entries = listSetupCommands(setup, kind);
   const shareable = canWriteShared(setup);
   const replaceMode = setup.personal.setupWorktreeMode === 'replace';
+  const text = COMMAND_TEXT[kind];
 
   const settle = async (ok: boolean) => {
-    if (!ok) toast.error(t('settings.openchamber.worktrees.setup.toast.saveFailed'));
+    if (!ok) toast.error(t(text.saveFailed));
     await reload();
   };
 
@@ -88,8 +103,8 @@ const SetupCommands: React.FC<{ projectRef: ProjectRef; setup: ProjectSetup; set
                 <CommandInput
                   value={entry.command}
                   disabled={!editable}
-                  ariaLabel={t('settings.projects.worktrees.commandAria', { position: position + 1 })}
-                  onCommit={(text) => void editSetupCommand(setup, write, entry, text).then(settle)}
+                  ariaLabel={t(text.aria, { position: position + 1 })}
+                  onCommit={(command) => void editSetupCommand(setup, write, entry, command).then(settle)}
                 />
                 {entry.skipped ? (
                   <SettingsCardPill tone="neutral">{t('settings.projects.worktrees.skipped')}</SettingsCardPill>
@@ -99,7 +114,7 @@ const SetupCommands: React.FC<{ projectRef: ProjectRef; setup: ProjectSetup; set
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <Button type="button" variant="ghost" size="icon" className="h-7 w-7 shrink-0 text-muted-foreground" aria-label={t('settings.projects.worktrees.commandMenuAria')} disabled={!editable}>
-                      <Icon name="more-2" className="size-4" />
+                      <Icon name="more" className="size-4" />
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end" className="w-fit min-w-40">
@@ -124,11 +139,11 @@ const SetupCommands: React.FC<{ projectRef: ProjectRef; setup: ProjectSetup; set
           <CommandInput
             value=""
             autoFocus
-            placeholder={t('settings.openchamber.worktrees.setup.commandPlaceholder')}
+            placeholder={t(text.placeholder)}
             ariaLabel={t('settings.openchamber.worktrees.setup.addCommand')}
-            onCommit={(text) => {
+            onCommit={(command) => {
               setAdding(false);
-              if (text.trim()) void addSetupCommand(setup, write, text).then(settle);
+              if (command.trim()) void addSetupCommand(setup, write, kind, command).then(settle);
             }}
           />
         </div>
@@ -139,25 +154,27 @@ const SetupCommands: React.FC<{ projectRef: ProjectRef; setup: ProjectSetup; set
         </Button>
       )}
 
-      <div className={SETTINGS_OPTION_STACK_CLASS}>
-        {setup.shared.setupWorktree.length > 0 ? (
+      {kind === 'setup' ? (
+        <div className={SETTINGS_OPTION_STACK_CLASS}>
+          {setup.shared.setupWorktree.length > 0 ? (
+            <SettingsCheckboxRow
+              settingsItem="projects.worktree.setup.replace"
+              checked={replaceMode}
+              onChange={(next) => void updateProjectSetup(projectRef, { setupWorktreeMode: next ? 'replace' : 'append' }).then(settle)}
+              label={t('settings.projects.shared.replaceMode')}
+            />
+          ) : null}
           <SettingsCheckboxRow
-            settingsItem="projects.worktree.setup.replace"
-            checked={replaceMode}
-            onChange={(next) => void updateProjectSetup(projectRef, { setupWorktreeMode: next ? 'replace' : 'append' }).then(settle)}
-            label={t('settings.projects.shared.replaceMode')}
+            settingsItem="projects.worktree.setup.wait"
+            checked={wait}
+            onChange={(next) => {
+              setWait(next);
+              void saveWorktreeSetupWaitEnabled(projectRef, next).then(settle);
+            }}
+            label={t('settings.openchamber.worktrees.setup.waitForCommands')}
           />
-        ) : null}
-        <SettingsCheckboxRow
-          settingsItem="projects.worktree.setup.wait"
-          checked={wait}
-          onChange={(next) => {
-            setWait(next);
-            void saveWorktreeSetupWaitEnabled(projectRef, next).then(settle);
-          }}
-          label={t('settings.openchamber.worktrees.setup.waitForCommands')}
-        />
-      </div>
+        </div>
+      ) : null}
     </div>
   );
 };
@@ -210,9 +227,27 @@ export const ProjectWorktreesTab: React.FC<{
         )}
       >
         {setupState.load.state === 'ready'
-          ? <SetupCommands projectRef={projectRef} setup={setupState.load.setup} setupState={setupState} />
+          ? <SetupCommands projectRef={projectRef} setup={setupState.load.setup} setupState={setupState} kind="setup" />
           : <ProjectSetupUnavailable setupState={setupState} />}
       </SettingsSection>
+
+      {setupState.load.state === 'ready' ? (
+        <SettingsSection
+          title={t('settings.openchamber.worktrees.teardown.title')}
+          settingsItem="projects.worktree.teardown"
+          titleAccessory={(
+            <SettingsInfoHint>
+              {t('settings.openchamber.worktrees.teardown.tooltipPrefix')}
+              {' '}
+              <code className="rounded bg-sidebar-accent/50 px-1 font-mono text-xs">$ROOT_PROJECT_PATH</code>
+              {' '}
+              {t('settings.openchamber.worktrees.teardown.tooltipSuffix')}
+            </SettingsInfoHint>
+          )}
+        >
+          <SetupCommands projectRef={projectRef} setup={setupState.load.setup} setupState={setupState} kind="teardown" />
+        </SettingsSection>
+      ) : null}
 
       {onOpenWorktrees ? (
         <SettingsSection title={t('settings.projects.worktrees.manageTitle')}>

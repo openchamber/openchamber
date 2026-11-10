@@ -4,6 +4,7 @@ import { SessionSidebar } from '@/components/session/SessionSidebar';
 import { SessionDialogs } from '@/components/session/SessionDialogs';
 import { ChatView } from '@/components/views/ChatView';
 import { useSessionUIStore } from '@/sync/session-ui-store';
+import { openSession } from '@/lib/router/openSessionFromRoute';
 import { useViewportStore } from '@/sync/viewport-store';
 import { useSessions, useDirectorySync, useSessionMessages, useSessionMessagesResolved } from '@/sync/sync-context';
 import { useSubagentCostRollup } from '@/components/chat/work-status/useSubagentCostRollup';
@@ -38,7 +39,7 @@ import { toast } from '@/components/ui';
 import { ProviderLogo } from '@/components/ui/ProviderLogo';
 import { UsageProgressBar } from '@/components/sections/usage/UsageProgressBar';
 import { Icon } from "@/components/icon/Icon";
-import { formatQuotaValueLabel, formatQuotaResetLabel, formatWindowLabel, QUOTA_PROVIDERS } from '@/lib/quota';
+import { formatQuotaWindowValueLabel, formatQuotaResetLabel, formatWindowLabel, QUOTA_PROVIDERS } from '@/lib/quota';
 import { useQuotaAutoRefresh, useQuotaStore } from '@/stores/useQuotaStore';
 import { updateDesktopSettings } from '@/lib/persistence';
 import { formatTimeForPreference } from '@/lib/timeFormat';
@@ -140,14 +141,17 @@ export const VSCodeLayout: React.FC = () => {
       return state.session.find((session) => session.id === currentSessionId)?.title || null;
     }, [currentSessionId]),
   );
-  const initialSessionExists = useDirectorySync(
+  const initialGlobalSessionDirectory = useGlobalSessionsStore((state) => {
+    const session = initialSessionId ? state.entityById.get(initialSessionId) : null;
+    return session ? resolveGlobalSessionDirectory(session) : null;
+  });
+  const initialLocalSessionDirectory = useDirectorySync(
     React.useCallback((state) => {
-      if (!initialSessionId) {
-        return false;
-      }
-      return state.session.some((session) => session.id === initialSessionId);
+      const session = state.session.find((session) => session.id === initialSessionId);
+      return session ? resolveGlobalSessionDirectory(session) : null;
     }, [initialSessionId]),
   );
+  const initialSessionDirectory = initialGlobalSessionDirectory ?? initialLocalSessionDirectory;
 
   const activeSessionTitle = currentSessionId
     ? activeSessionTitleValue || t('vscodeLayout.title.sessionFallback')
@@ -455,13 +459,13 @@ export const VSCodeLayout: React.FC = () => {
       return;
     }
 
-    if (!initialSessionExists) {
+    if (!initialSessionDirectory) {
       return;
     }
 
     hasAppliedInitialSession.current = true;
-    void useSessionUIStore.getState().setCurrentSession(initialSessionId);
-  }, [bootstrapWorkspaceFolder, connectionStatus, hasInitializedOnce, initialParallelComposer, initialSessionExists, initialSessionId, openNewSessionDraft, viewMode]);
+    void openSession(initialSessionId, { directory: initialSessionDirectory });
+  }, [bootstrapWorkspaceFolder, connectionStatus, hasInitializedOnce, initialParallelComposer, initialSessionDirectory, initialSessionId, openNewSessionDraft, viewMode]);
 
   // Track container width for the expanded sessions/chat layout.
   React.useEffect(() => {
@@ -587,6 +591,7 @@ export const VSCodeLayout: React.FC = () => {
           <div className="flex-1 flex flex-col min-w-0">
             <VSCodeHeader
               title={chatTitle}
+              showArchiveToggle
               showMcp
               showContextUsage
               showRateLimits
@@ -652,6 +657,7 @@ interface VSCodeHeaderProps {
   showBack?: boolean;
   onBack?: () => void;
   onArchiveAll?: () => void;
+  showArchiveToggle?: boolean;
   onNewSession?: () => void;
   onSettings?: () => void;
   showMcp?: boolean;
@@ -661,7 +667,7 @@ interface VSCodeHeaderProps {
 }
 
 
-const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, onArchiveAll, onNewSession, onSettings, showMcp, showContextUsage, showRateLimits, enableSessionSwitcher }) => {
+const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, onArchiveAll, showArchiveToggle = Boolean(onArchiveAll), onNewSession, onSettings, showMcp, showContextUsage, showRateLimits, enableSessionSwitcher }) => {
   const { t } = useI18n();
   const showArchivedSessions = useSessionDisplayStore((state) => state.showArchivedSessions);
   const toggleArchivedSessions = useSessionDisplayStore((state) => state.toggleArchivedSessions);
@@ -679,14 +685,14 @@ const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, on
   const quotaDisplayMode = useQuotaStore((state) => state.displayMode);
   const timeFormatPreference = useUIStore((state) => state.timeFormatPreference);
   const dropdownProviderIds = useQuotaStore((state) => state.dropdownProviderIds);
-  const loadQuotaSettings = useQuotaStore((state) => state.loadSettings);
   const setQuotaDisplayMode = useQuotaStore((state) => state.setDisplayMode);
 
-  useQuotaAutoRefresh();
-
+  const [quotaOpen, setQuotaOpen] = React.useState(false);
+  useQuotaAutoRefresh(Boolean(showRateLimits) && quotaOpen);
   React.useEffect(() => {
-    void loadQuotaSettings();
-  }, [loadQuotaSettings]);
+    if (!showRateLimits) setQuotaOpen(false);
+  }, [showRateLimits]);
+
 
   const { context: contextLimit, output: outputLimit } = useContextWindowLimits(currentSessionId ?? null);
 
@@ -716,6 +722,7 @@ const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, on
     const groups: Array<{
       providerId: string;
       providerName: string;
+      accountLabel?: string | null;
       entries: Array<[string, UsageWindow]>;
       error?: string;
     }> = [];
@@ -729,7 +736,7 @@ const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, on
       const entries = Object.entries(windows);
       const error = (result && !result.ok && result.configured) ? result.error : undefined;
       if (entries.length > 0 || error) {
-        groups.push({ providerId: provider.id, providerName: provider.name, entries, error });
+        groups.push({ providerId: provider.id, providerName: provider.name, accountLabel: result?.accountLabel, entries, error });
       }
     }
 
@@ -771,7 +778,7 @@ const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, on
         <SessionsTabTitle title={title} />
       )}
       <div className="min-w-0 flex-1" />
-      {onArchiveAll && (
+      {showArchiveToggle && (
         <button
           type="button"
           onClick={toggleArchivedSessions}
@@ -803,11 +810,7 @@ const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, on
       )}
       {showRateLimits && (
         <DropdownMenu
-          onOpenChange={(open) => {
-            if (open && quotaResults.length === 0) {
-              fetchAllQuotas();
-            }
-          }}
+          onOpenChange={setQuotaOpen}
         >
           <DropdownMenuTrigger asChild>
             <button
@@ -882,6 +885,11 @@ const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, on
                 <DropdownMenuLabel className="flex items-center gap-2 bg-[var(--surface-elevated)] typography-ui-label text-foreground">
                   <ProviderLogo providerId={group.providerId} className="h-4 w-4" />
                   {group.providerName}
+                  {group.accountLabel ? (
+                    <span className="min-w-0 truncate typography-micro font-normal text-muted-foreground" title={group.accountLabel}>
+                      {group.accountLabel}
+                    </span>
+                  ) : null}
                 </DropdownMenuLabel>
                 {group.entries.length === 0 ? (
                   <DropdownMenuItem
@@ -898,7 +906,7 @@ const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, on
                     const displayPercent = quotaDisplayMode === 'remaining'
                       ? window.remainingPercent
                       : window.usedPercent;
-                    const metricLabel = formatQuotaValueLabel(window.valueLabel, displayPercent);
+                    const metricLabel = formatQuotaWindowValueLabel(window, displayPercent, t);
                     return (
                     <DropdownMenuItem
                       key={`${group.providerId}-${label}`}

@@ -1,5 +1,6 @@
 import type { Message, Part } from "@/lib/opencode/model"
 import type { MessagePage, PendingInboxMessage } from "@/lib/opencode/client"
+import { findCompletedReplyIds } from "@/lib/messages/latestReply"
 import { olderMessagesCursor } from "@/lib/opencode/messageCursor"
 import type { ChildStoreManager, DirectoryStore } from "./child-store"
 import { retry } from "./retry"
@@ -64,6 +65,8 @@ export type SessionMessageLoadState = {
   complete: boolean
   generation: number
   updatedAt: number | undefined
+  /** Completed replies fetched through older pages, never live completions. */
+  olderCompletedReplyIds: ReadonlySet<string>
 }
 
 type LoaderEntry = {
@@ -257,6 +260,7 @@ const createDefaultState = (generation = 0): SessionMessageLoadState => ({
   complete: false,
   generation,
   updatedAt: undefined,
+  olderCompletedReplyIds: new Set(),
 })
 
 export const EMPTY_SESSION_MESSAGE_LOAD_STATE = createDefaultState()
@@ -628,6 +632,10 @@ export class SessionMessageLoader {
       const committed = this.commitPage(normalized, entry, store, page, "prepend", isCurrent)
       if (!committed || !isCurrent()) return
       this.patchEntry(entry, {
+        olderCompletedReplyIds: new Set([
+          ...entry.snapshot.olderCompletedReplyIds,
+          ...findCompletedReplyIds(page.session.map((info) => ({ info, parts: page.partsByMessageID.get(info.id) ?? [] }))),
+        ]),
         status: "ready",
         loadingKind: null,
         error: null,

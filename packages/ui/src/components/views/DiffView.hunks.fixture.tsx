@@ -223,7 +223,7 @@ export async function exerciseDiffHunkActions(snapshotCase?: 'cold' | 'cached' |
       await waitForActions(changes.length);
       expect(container.querySelectorAll('[data-hunk-actions]')).toHaveLength(changes.length);
       expect(normalReads).toBe(2);
-      await click('button[title="Open this file in editor at change"]');
+      await click('button[aria-label="Open this file in editor at change"]');
       expect(openedPatch).toContain('+v2-changed1\n');
       await click('button[aria-label="Stage hunk 1"]');
       expect(mutations).toBe(1);
@@ -444,7 +444,7 @@ export async function exerciseMobileComparisonContextExpansion() {
   try {
     await act(async () => root.render(<I18nProvider><SyncProvider sdk={opencodeClient.getSdkClient()} directory=""><RuntimeAPIContext.Provider value={createWebAPIs()}>
       <MobileChangesPane rootDirectory="/repo" visible initialDiff={null}
-        repository={{ rootIsGitRepo: true, gitDirectory: '/repo', nestedRepos: null, nestedRepoSelection: null, repositoryOptions: null }} />
+        repository={{ rootIsGitRepo: true, gitDirectory: '/repo', nestedRepos: null, nestedRepoSelection: null, repositoryOptions: null, repositoriesKnown: true, unreadable: null }} />
     </RuntimeAPIContext.Provider></SyncProvider></I18nProvider>));
     await click('[aria-label="Select change mode"]');
     const commitMode = [...document.querySelectorAll<HTMLElement>('[role="menuitemradio"]')].find((element) => element.textContent === 'Commit');

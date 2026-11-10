@@ -2,6 +2,7 @@ import React from 'react';
 import { Icon } from '@/components/icon/Icon';
 import { toast } from '@/components/ui';
 import { Button } from '@/components/ui/button';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/lib/i18n';
 import { leaveFinishedSessions } from '@/lib/sessionTabs';
 import { isDoneSuggested } from '@/lib/sessionWorkMetadata';
@@ -47,20 +48,27 @@ export const SessionDoneHintRow: React.FC<SessionDoneHintRowProps> = React.memo(
   };
 
   return (
-    <div className="flex oc-composer-row items-center gap-2 border-b border-border/60 ps-3 pe-1.5">
+    <div className="flex oc-composer-row items-center gap-2 border-b border-edge ps-3 pe-1.5">
       <Icon name="check" className="size-3.5 shrink-0 text-muted-foreground" />
       <span className="min-w-0 flex-1 truncate text-sm text-muted-foreground">{t('chat.work.doneHint.text')}</span>
-      <Button
-        type="button"
-        variant="ghost"
-        size="sm"
-        disabled={pending}
-        onClick={() => { void handleMarkDone(); }}
-        onMouseDown={(event) => event.preventDefault()}
-        className="shrink-0 text-status-success/80 hover:bg-transparent hover:text-status-success"
-      >
-        {t('chat.work.doneHint.action')}
-      </Button>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span className="inline-flex shrink-0">
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              disabled={pending}
+              onClick={() => { void handleMarkDone(); }}
+              onMouseDown={(event) => event.preventDefault()}
+              className="shrink-0 text-status-success/80 hover:bg-transparent hover:text-status-success"
+            >
+              {t('chat.work.doneHint.action')}
+            </Button>
+          </span>
+        </TooltipTrigger>
+        <TooltipContent side="top" sideOffset={6}>{t('contextTooltips.chat.markDone')}</TooltipContent>
+      </Tooltip>
     </div>
   );
 });

@@ -6,7 +6,7 @@ import React, { act } from 'react';
 import { describe, expect, mock, test } from 'bun:test';
 import { Window } from 'happy-dom';
 
-import type { TrackerItemSummary, TrackerWorkflowState } from '@/lib/api/types';
+import type { RuntimeAPIs, TrackerItemSummary, TrackerWorkflowState } from '@/lib/api/types';
 
 const rendererWindow = new Window();
 const rendererGlobals = ['window', 'document'] as const;
@@ -33,9 +33,14 @@ const arriving: TrackerWorkflowState[] = [
     { id: 's-beta', name: 'Beta', category: 'in-progress', position: 1 },
 ];
 
-const trackersApi = {
-    states: async () => ({ connected: true, states: arriving }),
-    updateState: async () => ({ connected: true, item: null }),
+// The runtime through its context, not a module mock: a mocked module stays
+// mocked for every test file that runs after this one in the same process.
+const { createWebAPIs } = await import('../../../../web/src/api/index');
+const base = createWebAPIs();
+if (!base.trackers) throw new Error('The web runtime serves trackers');
+const apis: RuntimeAPIs = {
+    ...base,
+    trackers: { ...base.trackers, states: async () => ({ connected: true, states: arriving }) },
 };
 
 const passthrough = ({ children }: React.PropsWithChildren) => <div>{children}</div>;
@@ -50,13 +55,13 @@ mock.module('@/components/ui/dropdown-menu', () => ({
 }));
 mock.module('@/components/icon/Icon', () => ({ Icon: () => null }));
 mock.module('@/components/ui', () => ({ toast: { error: () => undefined, success: () => undefined } }));
-mock.module('@/hooks/useRuntimeAPIs', () => ({ useRuntimeAPIs: () => ({ trackers: trackersApi }) }));
 mock.module('@/components/references/ReferencePreview', () => ({
     StatePill: ({ label }: { label: string }) => <span>{label}</span>,
 }));
 
 const { SourceBoardTrackerStatus } = await import('./SourceBoardTrackerStatus');
 const { I18nProvider } = await import('@/lib/i18n');
+const { RuntimeAPIContext } = await import('@/contexts/runtimeAPIContext');
 const { useTrackerRegistry } = await import('@/lib/trackers/registry');
 const { linearLikeTrackerDescriptor } = await import('@/lib/trackers/descriptor.fixture');
 
@@ -91,7 +96,7 @@ describe('SourceBoardTrackerStatus menu order', () => {
         document.body.appendChild(container);
         const root = createRoot(container);
         try {
-            await act(async () => root.render(<I18nProvider><SourceBoardTrackerStatus item={issue} onChanged={() => undefined} /></I18nProvider>));
+            await act(async () => root.render(<I18nProvider><RuntimeAPIContext.Provider value={apis}><SourceBoardTrackerStatus item={issue} onChanged={() => undefined} /></RuntimeAPIContext.Provider></I18nProvider>));
             await act(async () => { await Promise.resolve(); });
             const order = [...container.querySelectorAll('[data-state-id]')].map((node) => node.getAttribute('data-state-id'));
             expect(order).toEqual(['s-triage', 's-backlog', 's-todo', 's-beta', 's-progress', 's-review', 's-done', 's-canceled', 's-other']);

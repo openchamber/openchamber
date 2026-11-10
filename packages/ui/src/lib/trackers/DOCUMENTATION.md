@@ -2,12 +2,15 @@
 
 ## Ownership
 
-This module owns what the shared UI knows about work-item trackers (Linear
-today): the contract types (`types.ts`, the same shapes as
+This module owns what the shared UI knows about work-item trackers (Linear,
+and the trackers installed extensions serve): the contract types (`types.ts`, the same shapes as
 `packages/web/server/lib/trackers/tracker-contract.d.ts`), the registry of the
 connected server's trackers, their per-id presentation, and the neutral helpers
 every surface uses: state looks, link matching, the agent context text, session
-status posts and project mapping.
+status posts and project mapping. `extension.ts` tells an extension's tracker
+(`ext-<guest id>`) from a built-in one and finds the installed extension behind
+it; `hooks/useTrackerProviderSync.ts` keeps the registry current while the
+server's tracker list changes.
 
 Surfaces (references, board, composer, sidebar, work status, overview, New
 Worktree, Settings cards and search) consume it; none of them names a tracker. Data
@@ -52,7 +55,28 @@ on the source-control side (`lib/source-control/`).
   tracker's served name.
 - Links are a tracker's only through its served `urlPatterns`
   (`matchTrackerUrl.ts`), the same rule as the server's `matchUrl`; one URL
-  table is asserted on both sides (`linearUrlCases.fixture.ts`).
+  table is asserted on both sides (`linearUrlCases.fixture.ts`). A pattern
+  with `query` names the parameter that carries the identifier (Jira's
+  `?selectedIssue=KEY-1`); its path still has to match, and the value is
+  checked against the descriptor's `identifierPattern`. The host compiles both
+  from an extension's link templates; the UI never sees a template. The
+  templates, their compiled patterns and the links each names are one table
+  (`extensionLinkCases.fixture.ts`) that this matcher and the server's
+  compiler and matcher are both held to.
+- The server's tracker list changes while the app runs: an extension that
+  serves a tracker is approved, paused, removed, or connects its first server
+  (which fixes its link patterns). The server announces each with
+  `openchamber:tracker-providers-changed` on the event stream, and
+  `useTrackerProviderSync` (mounted once in `App` and `MobileApp`) answers it,
+  and the stream's reconnect, with `refreshTrackers`, so the registry and every
+  auth status follow. A tracker that leaves the list reads as
+  `unknownTrackerDescriptor` wherever an item still names it: its items stay in
+  the session's linked items and the tracked list, unavailable until the
+  extension is back. VS Code mounts no sync and serves no trackers.
+- An extension's tracker is a tracker like any other to every surface: nothing
+  reads `isExtensionTrackerId` to change behavior except the Integrations page,
+  which draws the card under Extension accounts (`components/sections/`), and
+  the card itself, which asks the server for the connect form.
 - Persisted identity strings do not change: tracked-items key
   `${provider}|${IDENTIFIER}`, Tracker tab key `${provider}:${IDENTIFIER}`,
   linked id `${provider}:${identifier}`, composer and picker key
@@ -88,6 +112,10 @@ on the source-control side (`lib/source-control/`).
   status has not arrived), so the board can wait instead of reading "none
   connected"; it asks a served tracker nobody asked yet, and a failed read
   ends the wait without counting as a disconnect.
+- A status of `connected: false` may still carry `accounts`: every stored
+  account was written off (the server refused its credential). Such a tracker
+  is not signed in for any surface; only the Settings card reads the list, to
+  show the attention state and let the user remove the account.
 - Settings follows the capability gates: one `TrackerSettings` card per served
   tracker (`components/sections/integrations/`), with the account switch and a
   second sign-in only where `multipleAccounts` is set, `TrackerProjectMapping`

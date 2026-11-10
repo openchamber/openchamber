@@ -17,8 +17,9 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { dropdownTriggerVariants } from '@/components/ui/dropdown-trigger';
-import { Input } from '@/components/ui/input';
+import { shouldDismissDropdown } from '@/components/ui/dropdown-navigation';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
+import { MobileSheetRow, MobileSheetSearch, MobileSheetSection } from '@/components/ui/MobileSheetList';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { rankBranchesForQuery } from '@/lib/worktrees/branchSearch';
@@ -127,35 +128,23 @@ export function NewWorktreeBranchPicker({
           {triggerLabel}
           <Icon name="git-branch" className="h-4 w-4 text-muted-foreground" />
         </Button>
-        <MobileOverlayPanel open={open} title={title} onClose={() => changeOpen(false)}>
-          <div className="space-y-4" ref={mobileListRef}>
-            <Input
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder={t('session.newWorktree.searchBranches')}
-              className="h-8"
-            />
+        <MobileOverlayPanel
+          open={open}
+          title={title}
+          onClose={() => changeOpen(false)}
+          subheader={<MobileSheetSearch value={query} onChange={setQuery} placeholder={t('session.newWorktree.searchBranches')} />}
+        >
+          <div ref={mobileListRef}>
             {status ? (
-              <div className="px-2 py-8 text-center typography-small text-muted-foreground">{status}</div>
+              <div className="px-2 py-8 text-center typography-meta text-muted-foreground">{status}</div>
             ) : sections.map((section) => (
-              <div key={section.heading} className="space-y-2">
-                <div className="px-2 typography-small font-semibold text-foreground">{section.heading}</div>
-                <div className="space-y-1">
-                  {section.branches.map((branch) => (
-                    <button
-                      key={branch.value}
-                      type="button"
-                      onClick={() => choose(branch)}
-                      className={cn(
-                        'w-full rounded-md px-3 py-2.5 text-start transition-colors',
-                        value === branch.value ? 'bg-interactive-selection text-interactive-selection-foreground' : 'hover:bg-interactive-hover',
-                      )}
-                    >
-                      <span className="typography-small break-all">{branch.label}</span>
-                    </button>
-                  ))}
-                </div>
-              </div>
+              <MobileSheetSection key={section.heading} title={section.heading}>
+                {section.branches.map((branch) => (
+                  <MobileSheetRow key={branch.value} selected={value === branch.value} onClick={() => choose(branch)}>
+                    {branch.label}
+                  </MobileSheetRow>
+                ))}
+              </MobileSheetSection>
             ))}
           </div>
         </MobileOverlayPanel>
@@ -178,13 +167,17 @@ export function NewWorktreeBranchPicker({
         className="flex max-h-[min(var(--available-height),24rem)] w-[var(--anchor-width)] min-w-[16rem] flex-col overflow-hidden p-0"
         ref={desktopContentRef}
       >
-        <Command shouldFilter={false}>
+        <Command
+          shouldFilter={false}
+          // Let cmdk handle navigation before stopping the menu's typeahead.
+          onKeyDown={(event) => { if (!shouldDismissDropdown(event)) event.stopPropagation(); }}
+        >
           <CommandInput
+            // Chromium's focus scan skips candidates under the display: contents portal.
+            autoFocus
             placeholder={t('session.newWorktree.searchBranches')}
             value={query}
             onValueChange={setQuery}
-            // Typing must reach the search field, not the menu's typeahead.
-            onKeyDown={(event) => event.stopPropagation()}
           />
           <CommandList disableHorizontal>
             {status ? (

@@ -1,10 +1,12 @@
 import http from 'node:http';
 import https from 'node:https';
 
+import express from 'express';
 import { createProxyMiddleware } from 'http-proxy-middleware';
 
 import {
   applyForwardProxyResponseHeaders,
+  BROWSER_FETCH_METADATA_HEADERS,
   collectForwardProxyHeaders,
   shouldForwardProxyResponseHeader,
 } from '../../proxy-headers.js';
@@ -15,7 +17,7 @@ import { getWorktreeBootstrapStatus, waitForWorktreeRemoval } from '../git/servi
 import { PART_SHELLS_HEADER, parsePartShellsHeader, shellMessagePage } from './message-shells.js';
 import { diagnosticApiRoute, diagnosticErrorMessage } from '../diagnostics/vocabulary.js';
 import { withUnreadBaseline } from '../openchamber-sessions/unread-baseline.js';
-import { OPENCODE_TRUST_ROUTE } from '../opencode-trust/index.js';
+import { OPENCODE_TRUST_ROUTE, isGlobalRead, readMoveDestination, sessionMoveOf } from '../opencode-trust/index.js';
 import { createSessionDirectoryResolver } from '../opencode-trust/session-directory.js';
 
 /**
@@ -34,7 +36,8 @@ import { createSessionDirectoryResolver } from '../opencode-trust/session-direct
  * upstream read.
  */
 export const createUpstreamReadSignal = ({ res = null, timeoutMs }) => {
-  const timeout = AbortSignal.timeout(timeoutMs);
+  // AbortSignal.timeout(0) would abort on the next timer tick.
+  const timeout = timeoutMs > 0 ? AbortSignal.timeout(timeoutMs) : null;
   const client = new AbortController();
   const abort = () => {
     // A finished response closes too, and its read is already done. Only a
@@ -48,7 +51,7 @@ export const createUpstreamReadSignal = ({ res = null, timeoutMs }) => {
   } else {
     res?.once?.('close', abort);
   }
-  const signal = AbortSignal.any([timeout, client.signal]);
+  const signal = timeout ? AbortSignal.any([timeout, client.signal]) : client.signal;
   signal.addEventListener('abort', () => res?.off?.('close', abort), { once: true });
   return signal;
 };
@@ -211,7 +214,7 @@ const directoriesAsOpenCodeReadsThem = (req, url) => {
       try {
         directory = decodeURIComponent(header);
       } catch {
-        // OpenCode rejects a malformed value; nothing to match.
+        // OpenCode falls back to the raw header if decoding fails.
       }
     }
     directories.push(directory);
@@ -230,9 +233,16 @@ export const normalizeForwardedDirectoryHeaders = (headers) => {
   }
 
   try {
-    headers['x-opencode-directory'] = decodeURIComponent(rawDirectory);
+    const decodedDirectory = decodeURIComponent(rawDirectory);
+    try {
+      http.validateHeaderValue('x-opencode-directory', decodedDirectory);
+    } catch {
+      // OpenCode can decode this value, but Node cannot carry it as a raw header.
+      return headers;
+    }
+    headers['x-opencode-directory'] = decodedDirectory;
   } catch {
-    // Leave malformed values untouched; upstream will reject invalid paths.
+    // OpenCode falls back to the raw value when URI decoding fails.
   }
   delete headers['x-opencode-directory-encoding'];
   return headers;
@@ -412,6 +422,8 @@ export const registerOpenCodeProxy = (app, deps) => {
     // The folder trust check (`../opencode-trust`): requests for a folder
     // whose configuration runs code wait for the user's trust.
     openCodeTrust = null,
+    // MCP OAuth from a browser on another machine (`mcp-oauth.js`).
+    mcpOAuthSignIn = null,
   } = deps;
 
   /**
@@ -525,6 +537,10 @@ export const registerOpenCodeProxy = (app, deps) => {
     console.log('Setting up OpenCode API gate (OpenCode not started yet)');
   }
   app.set('opencodeProxyConfigured', true);
+
+  // The provider's redirect carries no session and names no folder, so it goes
+  // ahead of the gates below; the attempt it belongs to already passed them.
+  mcpOAuthSignIn?.registerCallbackRoute(app);
 
   // Registered ahead of the readiness hold: the trust answer is OpenChamber's
   // own and needs no running OpenCode.
@@ -663,7 +679,7 @@ export const registerOpenCodeProxy = (app, deps) => {
   };
 
   const normalizeProxyTimeout = (value) => {
-    return Number.isFinite(value) && value > 0 ? value : 4 * 60 * 1000;
+    return Number.isFinite(value) && value >= 0 ? value : 4 * 60 * 1000;
   };
 
   const PROXY_REQUEST_TIMEOUT_MS = normalizeProxyTimeout(LONG_REQUEST_TIMEOUT_MS);
@@ -695,6 +711,10 @@ export const registerOpenCodeProxy = (app, deps) => {
   };
 
   const applyProxyResponseDeadline = (req, res, next) => {
+    if (PROXY_REQUEST_TIMEOUT_MS <= 0) {
+      next();
+      return;
+    }
     const timeout = setTimeout(() => {
       req[PROXY_TIMEOUT_MARKER] = true;
       if (sendProxyErrorResponse(res, 504)) {
@@ -1089,24 +1109,63 @@ export const registerOpenCodeProxy = (app, deps) => {
     next();
   });
 
+  // Routes that run in a session's own location are checked against the
+  // session's folder, whatever folder the request names.
+  const resolveSessionDirectory = createSessionDirectoryResolver({ fetchImpl: fetch, buildOpenCodeUrl, getOpenCodeAuthHeaders });
+  // A move names its destination in the body, which reaches the proxy
+  // unread. Parsed here, it goes upstream through `replayParsedBody`.
+  const parseJsonBody = express.json({ limit: '64kb' });
+  const readBody = (req, res) => new Promise((resolve, reject) => {
+    parseJsonBody(req, res, (error) => (error ? reject(error) : resolve(req.body)));
+  });
+
+  /**
+   * The folders a request opens in OpenCode that the checkout gate holds: the
+   * one it names, and for a session move the folder it moves into and the one
+   * it leaves (OpenCode opens both). An answer to send instead when the move
+   * cannot be read.
+   */
+  const checkoutGateFolders = async (req, res, url) => {
+    const folders = directoriesAsOpenCodeReadsThem(req, url).filter(Boolean);
+    const movedSessionID = sessionMoveOf(req.method, new URL(req.originalUrl || req.url, 'http://localhost').pathname);
+    if (!movedSessionID) return { folders };
+    let source;
+    try {
+      source = await resolveSessionDirectory(movedSessionID, { fresh: true });
+    } catch {
+      return { refusal: { status: 503, body: { error: 'Could not read the folder of the session being moved' } } };
+    }
+    const { refusal, destination } = await readMoveDestination(() => readBody(req, res), source);
+    if (refusal) return { refusal };
+    if (destination) folders.push(destination);
+    if (source) folders.push(source);
+    return { folders };
+  };
+
   // Any directory-scoped read can initialize OpenCode's cached project/config,
   // before session.create runs. Hold all upstream requests until Git population
-  // finishes, independently of the user's optional setup-script wait.
+  // finishes, independently of the user's optional setup-script wait. A failed
+  // checkout stays closed to everything that would start its location; the
+  // session list and the other reads OpenCode answers without one pass, so
+  // the worktree's sessions stay listed while the user repairs it.
   app.use('/api', async (req, res, next) => {
     normalizeForwardedDirectoryHeaders(req.headers);
     const url = new URL(req.url, 'http://localhost');
-    const directory = url.searchParams.get('directory') || req.get('x-opencode-directory');
-    if (!directory) return next();
-
     const deadline = Date.now() + WORKTREE_READY_TIMEOUT_MS;
     try {
+      const { folders, refusal } = await checkoutGateFolders(req, res, url);
+      if (refusal) return res.status(refusal.status).json(refusal.body);
+      if (folders.length === 0) return next();
       while (!res.destroyed && !res.writableEnded && !req.aborted) {
-        const status = await readWorktreeBootstrapStatus(directory);
+        const statuses = await Promise.all(folders.map((folder) => readWorktreeBootstrapStatus(folder)));
         if (res.destroyed || res.writableEnded || req.aborted) return;
-        if (status.status === 'failed') {
-          return res.status(503).json({ error: status.error || 'Worktree bootstrap failed' });
+        const failed = statuses.find((status) => status.status === 'failed');
+        if (failed) {
+          const pathname = new URL(req.originalUrl || req.url, 'http://localhost').pathname;
+          if (isGlobalRead(req.method, pathname)) return next();
+          return res.status(503).json({ error: failed.error || 'Worktree bootstrap failed' });
         }
-        if (status.status === 'ready' || status.phase === 'git-ready' || status.phase === 'setup-ready') {
+        if (statuses.every((status) => status.status === 'ready' || status.phase === 'git-ready' || status.phase === 'setup-ready')) {
           return next();
         }
         if (Date.now() >= deadline) {
@@ -1123,9 +1182,6 @@ export const registerOpenCodeProxy = (app, deps) => {
   // request that names the folder. A folder whose configuration runs code
   // stays closed to OpenCode until the user trusts that configuration.
   if (openCodeTrust) {
-    // Routes that run in a session's own location are checked against the
-    // session's folder, whatever folder the request names.
-    const resolveSessionDirectory = createSessionDirectoryResolver({ fetchImpl: fetch, buildOpenCodeUrl, getOpenCodeAuthHeaders });
     app.use('/api', async (req, res, next) => {
       try {
         const refusal = await openCodeTrust.refusalFor({
@@ -1133,6 +1189,7 @@ export const registerOpenCodeProxy = (app, deps) => {
           path: req.originalUrl || req.url,
           headers: req.headers,
           resolveSessionDirectory,
+          readBody: () => readBody(req, res),
         });
         if (!refusal) return next();
         if (!res.headersSent) res.status(refusal.status).json(refusal.body);
@@ -1248,6 +1305,8 @@ export const registerOpenCodeProxy = (app, deps) => {
   const resolveOpenCodeProxyAgent = createOpenCodeProxyAgentResolver(resolveProxyTarget);
 
   const createApiProxy = (timeoutMs) => createProxyMiddleware({
+    // A timeoutMs of 0 disables both timers: node-http-proxy only applies
+    // them when the option is truthy.
     target: resolveProxyTarget(),
     get agent() {
       return resolveOpenCodeProxyAgent();
@@ -1262,28 +1321,29 @@ export const registerOpenCodeProxy = (app, deps) => {
     // Dynamic target — port can change after restart
     router: () => resolveProxyTarget(),
     on: {
-      proxyReq: (proxyReq, req) => {
+      proxyReq: (proxyReq, req, res) => {
+        // req.aborted misses disconnects after the incoming body is complete.
+        // Watch the response before upstream headers arrive, even without timers.
+        const onClientClose = () => {
+          if (!res.writableEnded) proxyReq.destroy();
+        };
+        res.once('close', onClientClose);
+        proxyReq.once('close', () => res.off('close', onClientClose));
+        if (res.destroyed) onClientClose();
+
         // Inject OpenCode auth headers
         const authHeaders = getOpenCodeAuthHeaders();
         if (authHeaders.Authorization) {
           proxyReq.setHeader('Authorization', authHeaders.Authorization);
         }
 
-        if (req.headers?.['x-opencode-directory-encoding'] === 'uri') {
-          const rawDirectory = req.headers['x-opencode-directory'];
-          if (typeof rawDirectory === 'string') {
-            try {
-              proxyReq.setHeader('x-opencode-directory', decodeURIComponent(rawDirectory));
-            } catch {
-              proxyReq.setHeader('x-opencode-directory', rawDirectory);
-            }
-          }
-          proxyReq.removeHeader?.('x-opencode-directory-encoding');
-        }
-
         // Defensive: request identity encoding from upstream OpenCode.
         // This avoids compressed-body/header mismatches in multi-proxy setups.
         proxyReq.setHeader('accept-encoding', 'identity');
+
+        // Same reason as collectForwardProxyHeaders: OpenCode refuses requests
+        // a packaged client's browser marks cross-site.
+        for (const name of BROWSER_FETCH_METADATA_HEADERS) proxyReq.removeHeader(name);
 
         replayParsedBody(proxyReq, req);
       },
@@ -1332,6 +1392,7 @@ export const registerOpenCodeProxy = (app, deps) => {
   });
 
   app.use('/api', applyProxyResponseDeadline);
+  mcpOAuthSignIn?.registerStartRoutes(app, { readBody });
   // v1's interactive provider/MCP OAuth callbacks are gone: v2 runs provider
   // connection through `/api/integration/*`, which answers immediately and
   // needs no special deadline.

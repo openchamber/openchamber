@@ -1,4 +1,5 @@
 import React from 'react';
+import type { Session } from '@/lib/opencode/model';
 import { subscribeOpenchamberEvents } from '@/lib/openchamberEvents';
 import { refreshGlobalSessions, refreshGlobalSessionsForDirectories, useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { useChildStoreManager } from '@/sync/sync-context';
@@ -11,6 +12,7 @@ import { buildKnownSessionDirectories } from './sessionListDirectories';
 import { useAuthoritativeSessionCleanup } from './useAuthoritativeSessionCleanup';
 
 const EMPTY_WORKTREES_BY_PROJECT = new Map();
+const EMPTY_SESSIONS: Session[] = [];
 
 type UseSessionListSyncOptions = {
   isVSCode: boolean;
@@ -28,9 +30,7 @@ export const useSessionListSync = ({
     () => buildKnownSessionDirectories(projects, availableWorktreesByProject, { includeWorktrees: !isVSCode }),
     [availableWorktreesByProject, isVSCode, projects],
   );
-  const globalActiveSessions = useGlobalSessionsStore((state) => state.activeSessions);
-  const archivedSessions = useGlobalSessionsStore((state) => state.archivedSessions);
-  const hasAuthoritativeGlobalSessions = useGlobalSessionsStore((state) => state.status === 'ready');
+  const authoritativeSessions = useGlobalSessionsStore((state) => state.authoritativeSessions);
   const bootstrapDemandOwner = `session-list-sync:${React.useId()}`;
 
   // The only bootstrap demand owner. Known projects and worktrees are not
@@ -83,13 +83,9 @@ export const useSessionListSync = ({
     };
   }, []);
 
-  const cleanupSessions = React.useMemo(
-    () => [...globalActiveSessions, ...archivedSessions],
-    [archivedSessions, globalActiveSessions],
-  );
   useAuthoritativeSessionCleanup({
     enabled: true,
-    hasAuthoritativeGlobalSessions,
-    sessions: cleanupSessions,
+    hasAuthoritativeGlobalSessions: authoritativeSessions != null,
+    sessions: authoritativeSessions ?? EMPTY_SESSIONS,
   });
 };

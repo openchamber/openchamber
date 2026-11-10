@@ -58,7 +58,7 @@ const JsonTreeView = React.memo(function JsonTreeView({
       <div className={className}>
         <div className="oc-surface-code rounded-md border border-[var(--interactive-border)] bg-[var(--syntax-background)] p-4">
           <div className="mb-1 font-medium text-foreground">{t('jsonTreeView.error.invalidJsonTitle')}</div>
-          <div className="font-mono text-xs text-muted-foreground">{parseError}</div>
+          <div dir={jsonString.trim() ? 'ltr' : undefined} className="font-mono text-xs text-muted-foreground">{parseError}</div>
         </div>
       </div>
     );
@@ -91,13 +91,12 @@ const JsonTreeView = React.memo(function JsonTreeView({
         </Button>
       </div>
       <div
-        className="oc-surface-code min-h-0 flex-1 bg-[var(--syntax-background)] py-1"
-        style={{ maxHeight, overflow: 'auto' }}
+        className="oc-surface-code flex min-h-0 flex-1 flex-col bg-[var(--syntax-background)] py-1"
+        style={{ maxHeight }}
       >
         <JsonTreeViewer
           ref={viewerRef}
           data={parsedData}
-          maxHeight={maxHeight}
           initiallyExpandedDepth={initiallyExpandedDepth}
         />
       </div>

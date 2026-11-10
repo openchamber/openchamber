@@ -70,22 +70,31 @@ Auto. There is no env gate — the feature shipped dark behind
   swallowed and marks the session (`noteModelSelection`), and every
   `POST /api/session/:id/{prompt,command}` in a marked session is routed
   (`routeSend`) and switches the session onto the answer before the send is
-  forwarded. Both sit ahead of the generic proxy, which replays a parsed body.
+  forwarded. So is `POST /api/session/:id/form/:formId/reply`: the answer
+  resumes a turn, so it is routed on the values the user filled in, and a
+  failure answers with an error and leaves the form pending. Both sit ahead of
+  the generic proxy, which replays a parsed body.
   The message queue calls `resolveAutoSelection` itself and applies the answer
   with the model/agent switches it already makes. Without a fallback model the
   runtime throws 400 rather than forwarding. The OpenChamber session service
   (`openchamber-sessions/routes.js`) talks to OpenCode through the SDK and can
   pick Auto up from Session Defaults, so it calls `resolveAutoSelection` itself
-  before switching the session.
+  before switching the session. So do scheduled task runs
+  (`scheduled-tasks/runtime.js`): a run on Auto creates its session without a
+  model, routes on the expanded task prompt with the new session's id, and
+  switches the session before the goal and the first send.
 - The mark lives in process memory. A server restart between the model switch
   and the next send drops it (see the TODO in `runtime.js`).
 - Routing failures keep the user's own behaviour: a Jev error, timeout, unknown
   category or low confidence routes to the fallback model, and the decision
   carries the reason.
-- The routing question sends `ROUTING_INSTRUCTIONS` as one string, the same
-  form as the Test probe. TypeSafe also accepts a list there, but a
-  self-hosted System One server may not: Kev answers a list with 400, so Auto
-  fell back on every send while Test passed (#4175).
+- The routing and safety-net questions send `ROUTING_INSTRUCTIONS` and
+  `SAFETY_INSTRUCTIONS` as one string each, the same form as the Test probe,
+  and the safety-net `ask` question passes `SAFETY_CRITERIA` (`true` / `false`)
+  on `criteria`. TypeSafe and Ollama's `kev` runner accept a list for
+  `instructions`, while `@kev-ai/server` answers a list with 400 (#4175);
+  without `criteria` on `ask`, Ollama `kev` also scored `brew install` and
+  `git checkout -- .` below the 0.6 hold threshold (#6028).
 - The safety net accepts only on a verdict from Jev. With no usable
   classification provider it holds quietly (the session behaves like `ask`);
   when Jev fails it holds, broadcasts `openchamber:routing.safety-skipped` with
@@ -96,7 +105,14 @@ Auto. There is no env gate — the feature shipped dark behind
   entries. `safetyNet.threshold` still applies.
 - A category without a model uses the fallback model *and* variant; a variant
   only travels with the model it was chosen for. A category agent replaces the
-  composer's agent; an empty one keeps it.
+  session's agent, and the runtime remembers which agent it replaced. A send
+  whose category names no agent, or that falls back, keeps the composer's
+  agent, except while the session still runs as the agent routing set: then
+  it goes back to the agent from before (#6392). A session found on any other
+  agent, a composer agent other than the routed one, or a switch off Auto ends
+  that, so an agent the user picked stays. A session that had no agent of its
+  own before the category agent has nothing to go back to. The record is
+  process memory, like the Auto mark.
 - A variant the model's catalog entry does not list is dropped before the
   switch, so the reply runs on the model's default thinking instead of OpenCode
   refusing it (Settings from before #4133 saved list positions like `"2"`).
@@ -127,6 +143,16 @@ Auto. There is no env gate — the feature shipped dark behind
 - The send rewrite reads a body only in a session already marked as routed,
   which the URL alone answers; every other send, and anything that is not JSON,
   reaches the proxy as the stream it arrived as.
+
+## Decisions
+
+### Why the server puts the agent back and not the composer
+
+In Auto the composer hides the agent control and shows the session's agent,
+which after a routed Plan is `plan`, so the composer has no agent of its own
+to send. Only the runtime knows that it set the agent and which one was there
+before. Before #6392 an empty category agent left the routed agent in place,
+and every later send stayed in Plan.
 
 ## Where a Jev request goes
 
@@ -267,7 +293,7 @@ features that need Jev.
 `store.test.js` (defaults, deviation round-trip, the cache setting's default,
 deleted built-ins, malformed
 file, token file mode, classifier pick, custom endpoint file), `runtime.test.js` (request text,
-excerpts, decisions, cache holds and the warm window, endpoints, custom URL normalization and setter,
+excerpts, decisions, the agent a category set and the way back from it, cache holds and the warm window, endpoints, custom URL normalization and setter,
 classifier fallback, rewrite and fallback
 paths, safety net accept/hold/skip/unavailable), `routes.http.test.js`
 (sentinel dropped from a create and swallowed on the model switch, routed send

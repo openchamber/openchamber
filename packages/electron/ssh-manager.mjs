@@ -395,8 +395,8 @@ const parseVersionToken = (raw) => {
   for (const token of String(raw).split(/\s+/)) {
     let candidate = token.trim().replace(/^v/, '');
     candidate = candidate.replace(/[,)]+$/g, '');
-    const parts = candidate.split('.');
-    if (parts.length >= 2 && parts.every((part) => /^\d+$/.test(part))) {
+    // A Canary build carries a pre-release part: 2.5.4-canary.20261030.1.
+    if (/^\d+(\.\d+)+(-[0-9A-Za-z.]+)?$/.test(candidate)) {
       return candidate;
     }
   }
@@ -496,7 +496,8 @@ export class ElectronSshManager {
   async runSshOutput(parsed, preDestinationArgs, remoteCommand = null) {
     return await new Promise((resolve, reject) => {
       const child = this.trackSshProcess(this.spawnProcess('ssh', buildSshArgs(parsed, preDestinationArgs, remoteCommand), {
-        stdio: ['pipe', 'pipe', 'pipe'],
+        // ssh.exe on Windows sometimes hung with an open stdin pipe. No setup command reads stdin.
+        stdio: ['ignore', 'pipe', 'pipe'],
         ...this.hiddenSpawnOptions(),
         env: this.authEnvironment(parsed),
       }), parsed);
@@ -1148,10 +1149,19 @@ export class ElectronSshManager {
 
   // `passwordAccepted` is reported on its own because /api/system/info is
   // public: a server answers it whether or not the password fits.
-  async probeRemoteServer(parsed, controlPath, port, openchamberPassword) {
-    const authPayload = openchamberPassword ? JSON.stringify({ password: openchamberPassword }) : '{}';
-    const authEnabled = openchamberPassword ? '1' : '0';
-    const script = `AUTH_STATUS=0; INFO_STATUS=0; HEALTH_STATUS=0; BODY_FILE="$(mktemp)"; COOKIE_FILE="$(mktemp)"; cleanup(){ rm -f "$BODY_FILE" "$COOKIE_FILE"; }; trap cleanup EXIT; if command -v curl >/dev/null 2>&1; then if [ "${authEnabled}" = "1" ]; then AUTH_STATUS="$(curl -sS --max-time 3 -o /dev/null -w '%{http_code}' -c "$COOKIE_FILE" -H 'content-type: application/json' --data ${shellQuote(authPayload)} http://127.0.0.1:${port}/auth/session || true)"; if [ "$AUTH_STATUS" = "200" ]; then INFO_STATUS="$(curl -sS --max-time 3 -b "$COOKIE_FILE" -o "$BODY_FILE" -w '%{http_code}' http://127.0.0.1:${port}/api/system/info || true)"; else INFO_STATUS="$(curl -sS --max-time 3 -o "$BODY_FILE" -w '%{http_code}' http://127.0.0.1:${port}/api/system/info || true)"; fi; else INFO_STATUS="$(curl -sS --max-time 3 -o "$BODY_FILE" -w '%{http_code}' http://127.0.0.1:${port}/api/system/info || true)"; fi; HEALTH_STATUS="$(curl -sS --max-time 3 -o /dev/null -w '%{http_code}' http://127.0.0.1:${port}/health || true)"; elif command -v wget >/dev/null 2>&1; then wget -qO "$BODY_FILE" http://127.0.0.1:${port}/api/system/info >/dev/null 2>&1; if [ $? -eq 0 ]; then INFO_STATUS=200; fi; wget -qO- http://127.0.0.1:${port}/health >/dev/null 2>&1; if [ $? -eq 0 ]; then HEALTH_STATUS=200; fi; else exit 127; fi; printf 'INFO_STATUS=%s\\nAUTH_STATUS=%s\\nHEALTH_STATUS=%s\\n' "$INFO_STATUS" "$AUTH_STATUS" "$HEALTH_STATUS"; cat "$BODY_FILE" 2>/dev/null || true`;
+  // `environmentPassword` offers the OPENCHAMBER_UI_PASSWORD of the remote
+  // login shell instead, the one `serve` gives a server started without a
+  // password of its own. It is read from stdin, so it never reaches argv.
+  async probeRemoteServer(parsed, controlPath, port, openchamberPassword, { environmentPassword = false } = {}) {
+    const authRequest = `curl -sS --max-time 3 -o /dev/null --write-out '%{http_code}' -c "$COOKIE_FILE"`;
+    let authCommand = null;
+    if (openchamberPassword) {
+      authCommand = `${authRequest} -H 'content-type: application/json' --data ${shellQuote(JSON.stringify({ password: openchamberPassword }))} http://127.0.0.1:${port}/auth/session`;
+    } else if (environmentPassword) {
+      authCommand = `[ -n "$OPENCHAMBER_UI_PASSWORD" ] && printf '%s' "$OPENCHAMBER_UI_PASSWORD" | ${authRequest} --data-urlencode password@- http://127.0.0.1:${port}/auth/session`;
+    }
+    const authEnabled = authCommand ? '1' : '0';
+    const script = `AUTH_STATUS=0; INFO_STATUS=0; HEALTH_STATUS=0; BODY_FILE="$(mktemp)"; COOKIE_FILE="$(mktemp)"; cleanup(){ rm -f "$BODY_FILE" "$COOKIE_FILE"; }; trap cleanup EXIT; if command -v curl >/dev/null 2>&1; then if [ "${authEnabled}" = "1" ]; then AUTH_STATUS="$(${authCommand || 'true'} || true)"; if [ "$AUTH_STATUS" = "200" ]; then INFO_STATUS="$(curl -sS --max-time 3 -b "$COOKIE_FILE" -o "$BODY_FILE" --write-out '%{http_code}' http://127.0.0.1:${port}/api/system/info || true)"; else INFO_STATUS="$(curl -sS --max-time 3 -o "$BODY_FILE" --write-out '%{http_code}' http://127.0.0.1:${port}/api/system/info || true)"; fi; else INFO_STATUS="$(curl -sS --max-time 3 -o "$BODY_FILE" --write-out '%{http_code}' http://127.0.0.1:${port}/api/system/info || true)"; fi; HEALTH_STATUS="$(curl -sS --max-time 3 -o /dev/null --write-out '%{http_code}' http://127.0.0.1:${port}/health || true)"; elif command -v wget >/dev/null 2>&1; then wget -qO "$BODY_FILE" http://127.0.0.1:${port}/api/system/info >/dev/null 2>&1; if [ $? -eq 0 ]; then INFO_STATUS=200; fi; wget -qO- http://127.0.0.1:${port}/health >/dev/null 2>&1; if [ $? -eq 0 ]; then HEALTH_STATUS=200; fi; else exit 127; fi; printf 'INFO_STATUS=%s\\nAUTH_STATUS=%s\\nHEALTH_STATUS=%s\\n' "$INFO_STATUS" "$AUTH_STATUS" "$HEALTH_STATUS"; cat "$BODY_FILE" 2>/dev/null || true`;
     const output = await this.runRemoteCommand(parsed, controlPath, script);
     const lines = output.split(/\r?\n/);
     const infoStatus = parseProbeStatusLine(lines[0], 'INFO_STATUS=') || 0;
@@ -1312,18 +1322,23 @@ export class ElectronSshManager {
     }
 
     for (const server of servers) {
+      // Without a password of its own the instance starts servers with the one
+      // the remote login shell sets, if any, so a protected server is checked
+      // against that one.
+      const checksPassword = Boolean(password) || server.passwordProtected === true;
       let probe;
       try {
-        probe = await this.probeRemoteServer(parsed, controlPath, server.port, password);
+        probe = await this.probeRemoteServer(parsed, controlPath, server.port, password, { environmentPassword: !password && checksPassword });
       } catch (error) {
         // The probe command carries the UI password, and a remote shell may echo it.
         this.appendLogWithLevel(instance.id, 'INFO', `Not reusing the server on remote port ${server.port}: ${sanitizeProcessDiagnostic(error instanceof Error ? error.message : String(error), password)}`);
         continue;
       }
-      // A server that answers is not yet ours: it has to take this instance's
-      // password, or have none when the instance has none. Anything else belongs
-      // to someone else and is neither reused nor stopped.
-      const passwordFits = password ? probe.passwordAccepted : server.passwordProtected !== true;
+      // A server that answers is not yet ours: it has to take the password a
+      // server started now would get, or have none when the instance has none
+      // and the server is not protected. Anything else belongs to someone else
+      // and is neither reused nor stopped.
+      const passwordFits = checksPassword ? probe.passwordAccepted : true;
       if (!passwordFits) {
         this.appendLogWithLevel(instance.id, 'INFO', `Not reusing the server on remote port ${server.port}: it does not take this instance's UI password (auth status ${probe.authStatus})`);
         continue;

@@ -1,4 +1,7 @@
 import React from 'react';
+import { MobilePinToSheet } from '@/apps/mobileSidebar/MobilePinToSheet';
+import { NewFolderDialog } from './sidebar/folders/NewFolderDialog';
+import { NewPinListDialog } from './sidebar/sections/NewPinListDialog';
 import { toast } from '@/components/ui';
 import { useI18n } from '@/lib/i18n';
 import { useDeviceInfo } from '@/lib/device';
@@ -15,6 +18,9 @@ import { useGitStore, useGitAllBranches, useGitRepoStatusMap } from '@/stores/us
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { NewWorktreeDialog } from './NewWorktreeDialog';
 import { useSessionSearchEffects } from './sidebar/shell/useSessionSearchEffects';
+import { useSessionMultiSelectStore } from '@/stores/useSessionMultiSelectStore';
+import { updateDesktopSettings } from '@/lib/persistence';
+import { useKeybinds } from '@/hooks/useKeybind';
 import { useSessionProjectViewState } from './sidebar/projects/useSessionProjectViewState';
 import { useProjectRepoStatus } from './sidebar/projects/useProjectRepoStatus';
 import { ProjectEditDialog } from '@/components/layout/ProjectEditDialog';
@@ -35,10 +41,10 @@ import {
 import { resolveProjectForCreatedSession, resolveProjectsForWorktreeChange } from '@/lib/worktrees/worktreeTopologyRefresh';
 import type { WorktreeMetadata } from '@/types/worktree';
 import { checkIsGitRepository } from '@/lib/gitApi';
-import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
+import { resolveSidebarGrouping, useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { normalizePath } from './sidebar/utils';
 import { recordWorktreesSeen } from './sidebar/projects/worktreeFirstSeen';
-import { getRuntimeKey } from '@/lib/runtime-switch';
+import { captureRuntimeInstance, getRuntimeKey } from '@/lib/runtime-switch';
 import { streamPerfCount, streamPerfMark } from '@/stores/utils/streamDebug';
 import { runBackgroundNetworkTask } from '@/lib/background-network';
 import { buildKnownSessionDirectories } from './sidebar/list/sessionListDirectories';
@@ -147,8 +153,6 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
   const reorderProjects = useProjectsStore((state) => state.reorderProjects);
 
   const setSettingsDialogOpen = useUIStore((state) => state.setSettingsDialogOpen);
-  const toggleHelpDialog = useUIStore((state) => state.toggleHelpDialog);
-  const setAboutDialogOpen = useUIStore((state) => state.setAboutDialogOpen);
   const setSessionSwitcherOpen = useUIStore((state) => state.setSessionSwitcherOpen);
   const setWorktreesPageProjectId = useUIStore((state) => state.setWorktreesPageProjectId);
 
@@ -236,6 +240,7 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
 
     const discoverWorktrees = async () => {
       const discoveryRuntimeKey = runtimeKey;
+      const isCurrent = captureRuntimeInstance();
       const connectedAtStart = useConfigStore.getState().isConnected;
       const projectEntries = useProjectsStore.getState().projects;
       useSessionUIStore.setState({ worktreeDiscoveryByProject: new Map(projectEntries.map((project) => [normalizePath(project.path) ?? project.path, 'loading'])) });
@@ -274,12 +279,13 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
           // check for projects the Git store hasn't seen yet.
           const cachedIsGitRepo = useGitStore.getState().directories.get(projectPath)?.isGitRepo;
           const isGitRepo = cachedIsGitRepo ?? await checkIsGitRepository(projectPath);
+          if (cancelled || !isCurrent()) return;
           if (!isGitRepo) {
             worktreesByProject.delete(projectPath);
             return;
           }
           const worktrees = await listProjectWorktrees({ id: project.id, path: projectPath });
-          if (cancelled) return;
+          if (cancelled || !isCurrent()) return;
           if (worktrees.length === 0) {
             worktreesByProject.delete(projectPath);
           } else {
@@ -291,7 +297,7 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
         }
       })));
 
-      if (cancelled || getRuntimeKey() !== discoveryRuntimeKey) return;
+      if (cancelled || !isCurrent() || getRuntimeKey() !== discoveryRuntimeKey) return;
 
       const activeProjectPaths = new Set(projectEntries.map((project) => normalizePath(project.path)).filter(Boolean));
       for (const projectPath of worktreesByProject.keys()) {
@@ -529,6 +535,79 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
   );
   const projectView = useSessionProjectViewState({ isVSCode, projects: sortedProjects });
 
+  useKeybinds({
+    collapse_sessions_all: () => {
+      if (isVSCode) return false;
+      projectView.actions.collapseAll();
+      return true;
+    },
+    expand_sessions_all: () => {
+      if (isVSCode) return false;
+      projectView.actions.expandAll();
+      return true;
+    },
+    // Sessions-pane display controls. Each mirrors its display-menu item and
+    // declines where that item is hidden, letting another registration take
+    // the chord.
+    toggle_chats_section: () => {
+      if (isVSCode || !isVisible) return false;
+      const store = useSessionDisplayStore.getState();
+      const next = !store.showChatsSection;
+      store.setShowChatsSection(next);
+      void updateDesktopSettings({ sidebarShowChatsSection: next });
+    },
+    toggle_pinned_section: () => {
+      if (isVSCode || !isVisible) return false;
+      const store = useSessionDisplayStore.getState();
+      const next = !store.showPinnedSection;
+      store.setShowPinnedSection(next);
+      void updateDesktopSettings({ sidebarShowPinnedSection: next });
+    },
+    toggle_work_section: () => {
+      if (isVSCode || !isVisible) return false;
+      if (!useUIStore.getState().sessionWorkEnabled) return false;
+      const store = useSessionDisplayStore.getState();
+      const next = !store.showWorkSection;
+      store.setShowWorkSection(next);
+      void updateDesktopSettings({ sidebarShowWorkSection: next });
+    },
+    toggle_detailed_rows: () => {
+      if (isVSCode || !isVisible) return false;
+      const store = useSessionDisplayStore.getState();
+      const next = !store.detailedZoneRows;
+      store.setDetailedZoneRows(next);
+      void updateDesktopSettings({ sidebarDetailedZoneRows: next });
+    },
+    toggle_list_grouping: () => {
+      if (isVSCode || !isVisible) return false;
+      const store = useSessionDisplayStore.getState();
+      const next = resolveSidebarGrouping(store) === 'time' ? 'project' : 'time';
+      store.setSidebarGrouping(next);
+      void updateDesktopSettings({ sidebarGrouping: next });
+    },
+    toggle_project_display: () => {
+      if (isVSCode || !isVisible) return false;
+      const store = useSessionDisplayStore.getState();
+      if (resolveSidebarGrouping(store) === 'time') return false;
+      const next = store.projectDisplayMode === 'single' ? 'all' : 'single';
+      store.setProjectDisplayMode(next);
+      void updateDesktopSettings({ sidebarProjectDisplayMode: next });
+    },
+    cycle_project_sort: () => {
+      if (isVSCode || !isVisible) return false;
+      const store = useSessionDisplayStore.getState();
+      if (resolveSidebarGrouping(store) === 'time') return false;
+      const order = ['manual', 'a-z', 'z-a', 'date-added', 'recent'] as const;
+      const next = order[(order.indexOf(store.projectSortOrder) + 1) % order.length];
+      store.setProjectSortOrder(next);
+      void updateDesktopSettings({ sidebarProjectSortOrder: next });
+    },
+    toggle_selection_mode: () => {
+      if (isVSCode || !isVisible) return false;
+      useSessionMultiSelectStore.getState().toggleMode();
+    },
+  });
+
   // VS Code has no Archive page: its archived sessions sit inline behind the header toggle.
   const searchEmptyState = React.useMemo(() => (
     <SidebarSearchEmptyState query={searchQuery} showArchive={!isVSCode} resetSessionSearch={resetSessionSearch} />
@@ -724,14 +803,13 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
         searchMatchCount={searchMatchCount}
         collapseAll={projectView.actions.collapseAll}
         expandAll={projectView.actions.expandAll}
+        showStats={!isVSCode}
       />
 
       {collection}
 
       <SidebarFooter
         onOpenSettings={handleOpenSettings}
-        onOpenShortcuts={toggleHelpDialog}
-        onOpenAbout={() => setAboutDialogOpen(true)}
         onOpenUpdate={handleOpenUpdateDialog}
         showRuntimeButtons={!isVSCode}
         showUpdateButton={showSidebarUpdateButton}
@@ -773,6 +851,10 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
           openNewSessionDraft({ directoryOverride: worktreePath, preserveDirectoryOverride: true });
         }}
       />
+
+      <NewPinListDialog />
+      <NewFolderDialog />
+      {mobileVariant ? <MobilePinToSheet /> : null}
 
     </div>
     </TooltipProvider>

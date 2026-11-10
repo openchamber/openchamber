@@ -44,4 +44,26 @@ export const registerOpenChamberControlRoutes = (app, { controlService }) => {
       return res.status(controlError.statusCode).json({ error: controlError.message });
     }
   });
+
+  // The fields a waiting secret.run card asks for, without any value.
+  app.get('/api/openchamber/secret/fields', (req, res) => {
+    try {
+      return res.json(controlService.secretFields(req.query ?? {}));
+    } catch (error) {
+      const controlError = asControlError(error, 'Could not read the card');
+      return res.status(controlError.statusCode).json({ error: controlError.message });
+    }
+  });
+
+  // The user saved or declined a secret an agent asked for (secret.request),
+  // or gave the secrets of a secret.run (up to 8 values of 16,000 characters).
+  // The body carries the secrets: it is never logged or echoed back.
+  app.post('/api/openchamber/secret/answer', express.json({ limit: '512kb' }), async (req, res) => {
+    try {
+      return res.json(await controlService.answerSecret(req.body ?? {}));
+    } catch (error) {
+      const controlError = asControlError(error, 'Could not save the secret');
+      return res.status(controlError.statusCode).json({ error: controlError.message });
+    }
+  });
 };

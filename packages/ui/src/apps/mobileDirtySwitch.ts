@@ -22,6 +22,7 @@ type DirtySwitchCommitScope = {
 export const commitAndSwitchBranch = async (message: string, pushAfter: boolean, scope: DirtySwitchCommitScope): Promise<void> => {
   const { targetBranch, directory, sourceBranch, git, publishChooser, toast, t } = scope;
   if (!targetBranch || !directory) return;
+  if (!git.createGitCommit) throw new Error('Git commit is unavailable on this runtime');
   await git.createGitCommit(directory, message, { addAll: true });
   if (pushAfter) {
     try {

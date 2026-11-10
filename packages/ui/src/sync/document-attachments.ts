@@ -10,6 +10,10 @@ const MAX_EMBEDDED_IMAGE_BYTES = 20 * 1024 * 1024
 const MAX_EMBEDDED_IMAGES_BYTES = 40 * 1024 * 1024
 const MAX_EXTRACTED_TEXT_CHARS = 500_000
 const MAX_ODF_SPACES_PER_ELEMENT = 100
+const MAX_ODS_REPEAT = 1_000
+const MAX_ODS_COLUMNS = 1_024
+// Excel's own limit. A longer code is a crafted file, and the scan below is quadratic on it.
+const MAX_NUMBER_FORMAT_CHARS = 255
 const TEXT_TRUNCATION_NOTICE = "\n\n[Document text truncated by OpenChamber]\n"
 
 const OFFICE_EXTENSIONS = new Set(["docx", "pptx", "xlsx", "odt", "odp", "ods"])
@@ -73,7 +77,7 @@ const decodeXmlCodePoint = (code: string, radix: number): string => {
   return String.fromCodePoint(value)
 }
 
-const decodeXml = (value: string): string => value
+export const decodeXml = (value: string): string => value
   .replace(/&#x([0-9a-f]+);/gi, (_, code: string) => decodeXmlCodePoint(code, 16))
   .replace(/&#([0-9]+);/g, (_, code: string) => decodeXmlCodePoint(code, 10))
   .replace(/&lt;/g, "<")
@@ -82,24 +86,32 @@ const decodeXml = (value: string): string => value
   .replace(/&apos;/g, "'")
   .replace(/&amp;/g, "&")
 
-const attribute = (tag: string, name: string): string | undefined => {
+export const attribute = (tag: string, name: string): string | undefined => {
   const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
   const match = tag.match(new RegExp(`(?:^|\\s)${escaped}\\s*=\\s*(?:"([^"]*)"|'([^']*)')`, "i"))
   return decodeXml(match?.[1] ?? match?.[2] ?? "") || undefined
 }
 
-const tagBlocks = (xml: string, tag: string): string[] => {
+export const tagBlocks = (xml: string, tag: string): string[] => {
   const escaped = tag.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
   return Array.from(xml.matchAll(new RegExp(`<${escaped}\\b[^>]*>[\\s\\S]*?<\\/${escaped}>`, "gi")), (match) => match[0])
 }
 
+// Unlike tagBlocks, keeps self-closing elements on their own: an empty styled
+// cell must not swallow the next cell, and `table:table-row` stops matching
+// `table:table-row-group`.
+export const elements = (source: string, tag: string): string[] => {
+  const pattern = new RegExp(`<${tag}(?=[\\s/>])[^>]*?\\/>|<${tag}(?=[\\s/>])[^>]*>[\\s\\S]*?<\\/${tag}>`, "gi")
+  return Array.from(source.matchAll(pattern), (match) => match[0])
+}
+
 const textDecoder = new TextDecoder()
-const xml = (archive: Unzipped, path: string): string => {
+export const xml = (archive: Unzipped, path: string): string => {
   const bytes = archive[path]
   return bytes ? textDecoder.decode(bytes) : ""
 }
 
-const parseRelationships = (archive: Unzipped, sourcePath: string): Relationships => {
+export const parseRelationships = (archive: Unzipped, sourcePath: string): Relationships => {
   const result: Relationships = new Map()
   const source = xml(archive, relationshipsPath(sourcePath))
   for (const match of source.matchAll(/<Relationship\b[^>]*\/?\s*>/gi)) {
@@ -206,7 +218,7 @@ class EmbeddedImages {
   }
 }
 
-const relationshipTarget = (sourcePath: string, relationships: Relationships, id: string | undefined): string | undefined => {
+export const relationshipTarget = (sourcePath: string, relationships: Relationships, id: string | undefined): string | undefined => {
   if (!id) return
   const relationship = relationships.get(id)
   return relationship ? resolveArchivePath(sourcePath, relationship.target) : undefined
@@ -222,7 +234,7 @@ const inlineText = (
   const tokenPattern = /<(?:w:t|a:t|text:span)\b[^>]*>([\s\S]*?)<\/(?:w:t|a:t|text:span)>|<(?:w:tab|text:tab)\b[^>]*\/?>|<(?:w:br|a:br|text:line-break)\b[^>]*\/?>|<(?:a:blip|v:imagedata)\b[^>]*>|<draw:image\b[^>]*>/gi
   for (const match of block.matchAll(tokenPattern)) {
     if (match[1] !== undefined) {
-      pieces.push(decodeXml(match[1]).replace(/<[^>]+>/g, ""))
+      pieces.push(decodeXml(match[1].replace(/<[^>]+>/g, "")))
       continue
     }
     if (/tab/i.test(match[0])) {
@@ -299,7 +311,7 @@ const extractPptx = (archive: Unzipped, images: EmbeddedImages): string | undefi
   return `${sections.join("\n\n")}\n`
 }
 
-const columnName = (index: number): string => {
+export const columnName = (index: number): string => {
   let value = index + 1
   let result = ""
   while (value > 0) {
@@ -310,7 +322,7 @@ const columnName = (index: number): string => {
   return result
 }
 
-const columnIndex = (name: string): number => {
+export const columnIndex = (name: string): number => {
   let result = 0
   for (const character of name.toUpperCase()) result = result * 26 + character.charCodeAt(0) - 64
   return result - 1
@@ -321,15 +333,95 @@ const tsvValue = (value: string): string => {
   return `"${value.replace(/"/g, '""')}"`
 }
 
-const cellValue = (cell: string, sharedStrings: string[]): string => {
-  const type = attribute(cell.match(/^<c\b[^>]*>/i)?.[0] ?? "", "t")
+/** Shows a stored number; `isDate` marks a format whose numbers are days. */
+export type NumberFormat = ((value: number) => string) & { isDate?: boolean }
+
+const BUILT_IN_NUMBER_FORMATS = new Map<number, string>([
+  [1, "0"], [2, "0.00"], [3, "#,##0"], [4, "#,##0.00"], [9, "0%"], [10, "0.00%"],
+  [14, "yyyy-mm-dd"], [15, "d-mmm-yy"], [16, "d-mmm"], [17, "mmm-yy"],
+  [18, "h:mm AM/PM"], [19, "h:mm:ss AM/PM"], [20, "h:mm"], [21, "h:mm:ss"], [22, "yyyy-mm-dd h:mm"],
+  [37, "#,##0"], [38, "#,##0"], [39, "#,##0.00"], [40, "#,##0.00"],
+  [45, "mm:ss"], [46, "[h]:mm:ss"], [47, "mm:ss"], [49, "@"],
+])
+
+// Serial day 25569 is 1970-01-01. Serials below 60 sit before the leap day
+// Excel invented in 1900, so they are one day off from the rest.
+const formatDateSerial = (serial: number, date1904: boolean, hasDate: boolean, hasTime: boolean, hasSeconds: boolean): string | undefined => {
+  const days = date1904 ? serial + 1462 : serial < 60 ? serial + 1 : serial
+  const date = new Date(Math.round((days - 25569) * 86_400_000))
+  if (serial < 0 || Number.isNaN(date.getTime())) return
+  const [day, time] = date.toISOString().slice(0, 19).split("T")
+  return [hasDate ? day : "", hasTime ? time.slice(0, hasSeconds ? 8 : 5) : ""].filter(Boolean).join(" ")
+}
+
+const formatElapsedHours = (value: number): string => {
+  const seconds = Math.round(value * 86_400)
+  const pad = (part: number) => String(part).padStart(2, "0")
+  return `${Math.floor(seconds / 3600)}:${pad(Math.floor(seconds / 60) % 60)}:${pad(seconds % 60)}`
+}
+
+/**
+ * What a cell's format code changes in the shown value. A number only follows
+ * a plain digit pattern with optional decimals; anything richer, such as
+ * scientific or fraction notation, keeps the stored value, because rounding it
+ * through the wrong pattern would show a different number.
+ */
+const numberFormatter = (code: string, date1904: boolean): NumberFormat | undefined => {
+  if (code.length > MAX_NUMBER_FORMAT_CHARS) return
+  if (/\[h+\]/i.test(code)) return formatElapsedHours
+  if (/\[[ms]+\]/i.test(code)) return
+  const section = code.replace(/"[^"]*"|\\.|\[[^\]]*\]/g, "").split(";")[0] ?? ""
+  if (/^(?:general|@)?$/i.test(section.trim())) return
+  const hasTime = /[hs]/i.test(section)
+  const hasDate = /[yd]/i.test(section) || (/m/i.test(section) && !hasTime)
+  if (hasDate || hasTime) {
+    const hasSeconds = /s/i.test(section)
+    const format: NumberFormat = (value) => formatDateSerial(value, date1904, hasDate, hasTime, hasSeconds) ?? String(value)
+    format.isDate = true
+    return format
+  }
+  const digits = section.match(/^[^0#?]*[0#?,]+(?:\.(0+))?[^0#?]*$/)
+  if (!digits) return
+  const decimals = digits[1]?.length ?? 0
+  if (section.includes("%")) return (value) => `${(value * 100).toFixed(decimals)}%`
+  return (value) => value.toFixed(decimals)
+}
+
+/** One format per entry of `cellXfs`, which a cell's `s` attribute indexes. */
+export const spreadsheetNumberFormats = (archive: Unzipped, workbookXml: string): Array<NumberFormat | undefined> => {
+  const stylesXml = xml(archive, "xl/styles.xml")
+  const date1904 = /<workbookPr\b[^>]*\bdate1904\s*=\s*["'](?:1|true)["']/i.test(workbookXml)
+  const codes = new Map(BUILT_IN_NUMBER_FORMATS)
+  for (const format of elements(stylesXml, "numFmt")) {
+    const id = Number(attribute(format, "numFmtId"))
+    const code = attribute(format, "formatCode")
+    if (Number.isInteger(id) && code) codes.set(id, code)
+  }
+  return elements(tagBlocks(stylesXml, "cellXfs")[0] ?? "", "xf").map((style) => {
+    const code = codes.get(Number(attribute(style, "numFmtId")))
+    return code ? numberFormatter(code, date1904) : undefined
+  })
+}
+
+// Decimals in the file carry binary noise: 0.1 + 0.2 is stored as 0.30000000000000004.
+export const numericCellValue = (raw: string, format: NumberFormat | undefined): string => {
+  const value = Number(raw)
+  if (raw === "" || !Number.isFinite(value)) return raw
+  if (format) return format(value)
+  return /[.e]/i.test(raw) ? String(Number(value.toPrecision(15))) : raw
+}
+
+const cellValue = (cell: string, sharedStrings: string[], numberFormats: Array<NumberFormat | undefined>): string => {
+  const tag = cell.match(/^<c\b[^>]*>/i)?.[0] ?? ""
+  const type = attribute(tag, "t")
   if (type === "inlineStr") {
-    return Array.from(cell.matchAll(/<t\b[^>]*>([\s\S]*?)<\/t>/gi), (match) => decodeXml(match[1]).replace(/<[^>]+>/g, "")).join("")
+    return Array.from(cell.matchAll(/<t\b[^>]*>([\s\S]*?)<\/t>/gi), (match) => decodeXml(match[1].replace(/<[^>]+>/g, ""))).join("")
   }
   const value = cell.match(/<v\b[^>]*>([\s\S]*?)<\/v>/i)?.[1] ?? ""
   if (type === "s") return sharedStrings[Number(value)] ?? ""
   if (type === "b") return value === "1" ? "TRUE" : "FALSE"
-  return decodeXml(value)
+  if (type && type !== "n") return decodeXml(value)
+  return numericCellValue(value, numberFormats[Number(attribute(tag, "s"))])
 }
 
 type SpreadsheetCell = {
@@ -359,15 +451,19 @@ const serializeDenseSpreadsheetRow = (row: SpreadsheetRow): string => {
   ).join("\t")
 }
 
-const spreadsheetRows = (worksheet: string, sharedStrings: string[]): SpreadsheetRow[] => {
+const spreadsheetRows = (
+  worksheet: string,
+  sharedStrings: string[],
+  numberFormats: Array<NumberFormat | undefined>,
+): SpreadsheetRow[] => {
   const rows: SpreadsheetRow[] = []
-  for (const rowXml of tagBlocks(worksheet, "row")) {
+  for (const rowXml of elements(worksheet, "row")) {
     const cells: SpreadsheetCell[] = []
-    for (const match of rowXml.matchAll(/<c\b[^>]*>[\s\S]*?<\/c>/gi)) {
-      const tag = match[0].match(/^<c\b[^>]*>/i)?.[0] ?? ""
+    for (const cell of elements(rowXml, "c")) {
+      const tag = cell.match(/^<c\b[^>]*>/i)?.[0] ?? ""
       const reference = attribute(tag, "r")
       const coordinates = reference?.match(/^([a-z]+)([1-9]\d*)$/i)
-      const value = cellValue(match[0], sharedStrings)
+      const value = cellValue(cell, sharedStrings, numberFormats)
       if (!reference || !coordinates || !value) continue
       cells.push({
         reference,
@@ -446,29 +542,42 @@ const drawingCitations = (
   return output
 }
 
-const extractXlsx = (archive: Unzipped, images: EmbeddedImages): string | undefined => {
+type XlsxSheet = { name: string; path: string; rows: SpreadsheetRow[] }
+
+const xlsxSheets = (archive: Unzipped): XlsxSheet[] | undefined => {
   const workbookPath = "xl/workbook.xml"
   const workbookXml = xml(archive, workbookPath)
   if (!workbookXml) return
   const workbookRelationships = parseRelationships(archive, workbookPath)
   const sharedStrings = tagBlocks(xml(archive, "xl/sharedStrings.xml"), "si")
-    .map((item) => Array.from(item.matchAll(/<t\b[^>]*>([\s\S]*?)<\/t>/gi), (match) => decodeXml(match[1]).replace(/<[^>]+>/g, "")).join(""))
-  const sections: string[] = ["# Workbook"]
+    .map((item) => Array.from(item.matchAll(/<t\b[^>]*>([\s\S]*?)<\/t>/gi), (match) => decodeXml(match[1].replace(/<[^>]+>/g, ""))).join(""))
+  const numberFormats = spreadsheetNumberFormats(archive, workbookXml)
+  const sheets: XlsxSheet[] = []
 
   for (const sheet of workbookXml.matchAll(/<sheet\b[^>]*\/?\s*>/gi)) {
-    const name = attribute(sheet[0], "name") ?? "Sheet"
-    const relationshipId = attribute(sheet[0], "r:id")
-    const worksheetPath = relationshipTarget(workbookPath, workbookRelationships, relationshipId)
-    if (!worksheetPath) continue
-    sections.push(`## Sheet: ${name}`)
+    const path = relationshipTarget(workbookPath, workbookRelationships, attribute(sheet[0], "r:id"))
+    if (!path) continue
+    sheets.push({
+      name: attribute(sheet[0], "name") ?? "Sheet",
+      path,
+      rows: spreadsheetRows(xml(archive, path), sharedStrings, numberFormats),
+    })
+  }
+  return sheets
+}
 
-    const rows = serializeSpreadsheetRows(spreadsheetRows(xml(archive, worksheetPath), sharedStrings))
-    sections.push(...(rows.length > 0 ? rows : ["[Empty sheet]"]), ...drawingCitations(archive, worksheetPath, images))
+const extractXlsx = (archive: Unzipped, images: EmbeddedImages): string | undefined => {
+  const sheets = xlsxSheets(archive)
+  if (!sheets) return
+  const sections: string[] = ["# Workbook"]
+  for (const sheet of sheets) {
+    const rows = serializeSpreadsheetRows(sheet.rows)
+    sections.push(`## Sheet: ${sheet.name}`, ...(rows.length > 0 ? rows : ["[Empty sheet]"]), ...drawingCitations(archive, sheet.path, images))
   }
   return `${sections.join("\n\n")}\n`
 }
 
-const expandOdfSpaces = (tag: string): string => {
+export const expandOdfSpaces = (tag: string): string => {
   const rawCount = attribute(tag, "text:c")
   if (!rawCount) return " "
 
@@ -524,27 +633,78 @@ const extractOdp = (archive: Unzipped, images: EmbeddedImages): string | undefin
   return `${sections.join("\n\n")}\n`
 }
 
+export const repeatCount = (tag: string, name: string): number => {
+  const count = Number(attribute(tag, name))
+  return Number.isSafeInteger(count) && count > 0 ? count : 1
+}
+
+/**
+ * ODF stores runs of equal cells and rows once with a repeat count, and pads
+ * every sheet to the format's full size with such runs, so a repeat is expanded
+ * only when it holds a value and only up to a bound.
+ */
+const odsRows = (table: string, cellText: (cell: string) => string) => {
+  const rows: SpreadsheetRow[] = []
+  let omittedRows = 0
+  let rowNumber = 1
+  for (const row of elements(table, "table:table-row")) {
+    const rowRepeat = repeatCount(row, "table:number-rows-repeated")
+    const cells: SpreadsheetCell[] = []
+    let column = 0
+    for (const cell of elements(row, "table:(?:covered-)?table-cell")) {
+      if (column >= MAX_ODS_COLUMNS) break
+      const columnRepeat = repeatCount(cell, "table:number-columns-repeated")
+      const value = cellText(cell)
+      if (value) {
+        for (let offset = 0; offset < Math.min(columnRepeat, MAX_ODS_COLUMNS - column); offset += 1) {
+          cells.push({ reference: `${columnName(column + offset)}${rowNumber}`, column: column + offset, row: rowNumber, value })
+        }
+      }
+      column += columnRepeat
+    }
+    const first = cells[0]
+    const last = cells.at(-1)
+    if (first && last) {
+      for (let offset = 0; offset < Math.min(rowRepeat, MAX_ODS_REPEAT); offset += 1) {
+        rows.push({ cells, firstColumn: first.column, lastColumn: last.column, row: rowNumber + offset })
+      }
+      omittedRows += Math.max(0, rowRepeat - MAX_ODS_REPEAT)
+    }
+    rowNumber += rowRepeat
+  }
+  return { rows, omittedRows }
+}
+
+export const odsSheetName = (table: string): string => attribute(table.match(/^<table:table\b[^>]*>/i)?.[0] ?? "", "table:name") ?? "Sheet"
+
 const extractOds = (archive: Unzipped, images: EmbeddedImages): string | undefined => {
   const contentPath = "content.xml"
   const content = xml(archive, contentPath)
   if (!content) return
   const sections = ["# Workbook"]
   for (const table of tagBlocks(content, "table:table")) {
-    const openTag = table.match(/^<table:table\b[^>]*>/i)?.[0] ?? ""
-    sections.push(`## Sheet: ${attribute(openTag, "table:name") ?? "Sheet"}`)
+    sections.push(`## Sheet: ${odsSheetName(table)}`)
     for (const shapes of tagBlocks(table, "table:shapes")) {
       sections.push(...odfContent(shapes, contentPath, images))
     }
-    for (const row of tagBlocks(table, "table:table-row")) {
-      const cells = tagBlocks(row, "table:table-cell")
-        .map((cell) => odfContent(cell, contentPath, images).join(" "))
-      if (cells.some(Boolean)) sections.push(cells.join(" | "))
+    for (const row of odsRows(table, (cell) => odfContent(cell, contentPath, images).join(" ")).rows) {
+      const values = new Map(row.cells.map((cell) => [cell.column, cell.value]))
+      sections.push(Array.from({ length: row.lastColumn + 1 }, (_, column) => values.get(column) ?? "").join(" | "))
     }
   }
   return `${sections.join("\n\n")}\n`
 }
 
-const createArchiveEntryValidator = () => {
+/** What an archive may hold. A chat attachment keeps the tight default; the viewer reads whole workbooks. */
+type ArchiveLimits = { archive: number; uncompressed: number; entry: number; xmlEntry: number }
+const ATTACHMENT_LIMITS: ArchiveLimits = {
+  archive: MAX_ARCHIVE_BYTES,
+  uncompressed: MAX_UNCOMPRESSED_BYTES,
+  entry: MAX_ENTRY_BYTES,
+  xmlEntry: MAX_XML_ENTRY_BYTES,
+}
+
+const createArchiveEntryValidator = (limits: ArchiveLimits) => {
   let entries = 0
   let uncompressedBytes = 0
 
@@ -552,11 +712,11 @@ const createArchiveEntryValidator = () => {
     entries += 1
     uncompressedBytes += info.originalSize
     if (entries > MAX_ARCHIVE_ENTRIES) throw new Error("Document contains too many files")
-    if (info.originalSize > MAX_ENTRY_BYTES) throw new Error("Document contains an oversized file")
-    if (/\.(?:xml|rels)$/i.test(info.name) && info.originalSize > MAX_XML_ENTRY_BYTES) {
+    if (info.originalSize > limits.entry) throw new Error("Document contains an oversized file")
+    if (/\.(?:xml|rels)$/i.test(info.name) && info.originalSize > limits.xmlEntry) {
       throw new Error("Document contains XML that is too large to process safely")
     }
-    if (uncompressedBytes > MAX_UNCOMPRESSED_BYTES) throw new Error("Document expands beyond the 100 MB safety limit")
+    if (uncompressedBytes > limits.uncompressed) throw new Error("Document expands beyond its safety limit")
     const normalized = normalizeArchivePath(info.name)
     const canonicalName = info.name.endsWith("/") ? info.name.slice(0, -1) : info.name
     if (
@@ -576,8 +736,8 @@ const shouldExtractArchiveEntry = (info: UnzipFileInfo): boolean => {
   return extension === "xml" || extension === "rels" || IMAGE_MIMES.has(extension)
 }
 
-const validateArchiveMetadata = async (data: Uint8Array): Promise<void> => {
-  const validateArchiveEntry = createArchiveEntryValidator()
+const validateArchiveMetadata = async (data: Uint8Array, limits: ArchiveLimits): Promise<void> => {
+  const validateArchiveEntry = createArchiveEntryValidator(limits)
   if ("Bun" in globalThis) {
     unzipSync(data, { filter: (info) => {
       validateArchiveEntry(info)
@@ -597,36 +757,51 @@ const validateArchiveMetadata = async (data: Uint8Array): Promise<void> => {
   })
 }
 
-const validateExtractedArchive = (archive: Unzipped): void => {
+const validateExtractedArchive = (archive: Unzipped, limits: ArchiveLimits): void => {
   let uncompressedBytes = 0
   for (const [path, bytes] of Object.entries(archive)) {
     uncompressedBytes += bytes.byteLength
-    if (bytes.byteLength > MAX_ENTRY_BYTES) throw new Error("Document contains an oversized file")
-    if (/\.(?:xml|rels)$/i.test(path) && bytes.byteLength > MAX_XML_ENTRY_BYTES) {
+    if (bytes.byteLength > limits.entry) throw new Error("Document contains an oversized file")
+    if (/\.(?:xml|rels)$/i.test(path) && bytes.byteLength > limits.xmlEntry) {
       throw new Error("Document contains XML that is too large to process safely")
     }
-    if (uncompressedBytes > MAX_UNCOMPRESSED_BYTES) throw new Error("Document expands beyond the 100 MB safety limit")
+    if (uncompressedBytes > limits.uncompressed) throw new Error("Document expands beyond its safety limit")
   }
 }
 
-const unzipDocument = async (file: File): Promise<Unzipped> => {
-  if (file.size > MAX_ARCHIVE_BYTES) throw new Error("Document exceeds the 20 MB attachment limit")
-  const data = new Uint8Array(await file.arrayBuffer())
-  await validateArchiveMetadata(data)
+const unzipBytes = async (
+  data: Uint8Array,
+  limits: ArchiveLimits,
+  filter: (info: UnzipFileInfo) => boolean,
+): Promise<Unzipped> => {
+  await validateArchiveMetadata(data, limits)
 
   // Bun's browser-style Blob workers do not reliably execute fflate's async decoder.
   // Production browser runtimes use the worker-backed path below.
   const archive = "Bun" in globalThis
-    ? unzipSync(data, { filter: shouldExtractArchiveEntry })
+    ? unzipSync(data, { filter })
     : await new Promise<Unzipped>((resolve, reject) => {
-      unzip(data, { filter: shouldExtractArchiveEntry }, (error, result) => {
+      unzip(data, { filter }, (error, result) => {
         if (error) reject(error)
         else resolve(result)
       })
     })
-  validateExtractedArchive(archive)
+  validateExtractedArchive(archive, limits)
   return archive
 }
+
+const unzipDocument = async (file: File): Promise<Unzipped> => {
+  if (file.size > MAX_ARCHIVE_BYTES) throw new Error("Document exceeds the 20 MB attachment limit")
+  return unzipBytes(new Uint8Array(await file.arrayBuffer()), ATTACHMENT_LIMITS, shouldExtractArchiveEntry)
+}
+
+/** Every entry of a workbook, for a reader that writes the file back. */
+export const unzipWorkbook = (data: Uint8Array): Promise<Unzipped> => unzipBytes(data, {
+  archive: 64 * 1024 * 1024,
+  uncompressed: 512 * 1024 * 1024,
+  entry: 256 * 1024 * 1024,
+  xmlEntry: 128 * 1024 * 1024,
+}, () => true)
 
 const extractDocumentText = (extension: string, archive: Unzipped, images: EmbeddedImages): string | undefined => {
   switch (extension) {

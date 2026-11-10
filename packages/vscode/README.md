@@ -24,6 +24,9 @@ Plus everything from the shared OpenChamber UI: branchable timeline, smart tool 
 
 ## Commands
 
+With no folder open, new sessions start in Chats. Each chat has its own directory
+under `~/.config/openchamber/chats`. Open a workspace folder to use project sessions.
+
 | Command | Description |
 |---------|-------------|
 | `OpenChamber: Focus Chat` | Focus the chat panel |
@@ -54,6 +57,8 @@ Select code in the editor, right-click, and find the **OpenChamber** submenu:
 | `openchamber.apiUrl` | _(empty)_ | URL of an external OpenCode API server. Leave empty to auto-start a local instance. Authenticates with `OPENCODE_PASSWORD` (or the legacy `OPENCODE_SERVER_PASSWORD`); when both are unset and the URL points at OpenCode's background service (`opencode service start`), the service's own password is used. |
 | `openchamber.opencodeBinary` | _(empty)_ | Absolute path to the `opencode` CLI binary. Useful when PATH lookup fails. Requires window reload to apply. |
 
+Both settings belong to one machine. In a Remote-SSH window the extension ignores the values from your local User settings: set them in the Remote or Workspace tab of the Settings editor. With no value on the server, the extension finds `opencode` there on its own.
+
 npm metadata and OpenCode version checks use the registry from the extension host environment or the user's `.npmrc`, including scoped registries and authentication.
 
 ## Requirements
@@ -76,6 +81,7 @@ Optional overrides:
 - `OPENCHAMBER_VSCODE_BIN=cursor bun run vscode:dev`
 - `OPENCHAMBER_VSCODE_DEV_WORKSPACE=/path/to/workspace bun run vscode:dev`
 - `bun run vscode:dev /path/to/workspace`
+- `OPENCHAMBER_VSCODE_REMOTE_DEBUGGING_PORT=9334 bun run vscode:dev` runs the host as its own VS Code instance in a throwaway profile, with Chrome DevTools Protocol on that port, even while another VS Code is open. The OpenChamber webview is the `vscode-webview://` iframe target; its document is that target's inner `iframe`. Stopping the script closes the instance and removes the profile.
 
 To package manually:
 

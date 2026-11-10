@@ -93,7 +93,7 @@ export function PublishDialog({ context, onSelect }: {
           ) : null}
           <SettingsControlGroup
             title={t('gitView.publish.pushDestination')}
-            className={isSync ? 'border-t border-border/60 pt-4' : undefined}
+            className={isSync ? 'border-t border-edge pt-4' : undefined}
             contentClassName={SETTINGS_FIELDS_STACK_CLASS}
           >
             <SettingsStackedField

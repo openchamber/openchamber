@@ -160,13 +160,13 @@ describe('UserTextPart expand affordance (issue #3742)', () => {
                         <I18nProvider>
                             <UserTextPart
                                 part={part}
-                                messageId="msg_3742"
                                 isMobile={false}
                                 messageExpanded={false}
                                 onExpandMessage={onExpandMessage}
                                 partIndex={0}
                                 attachmentFilenames={[]}
                                 onTruncationChange={(_index, truncated) => { truncation.push(truncated); }}
+                                onCollapsedLinesChange={() => undefined}
                             />
                         </I18nProvider>
                     </SyncProvider>,
@@ -210,13 +210,13 @@ describe('UserTextPart expand affordance (issue #3742)', () => {
                         <I18nProvider>
                             <UserTextPart
                                 part={part}
-                                messageId="msg_3742"
                                 isMobile={false}
                                 messageExpanded={false}
                                 onExpandMessage={() => undefined}
                                 partIndex={0}
                                 attachmentFilenames={[]}
                                 onTruncationChange={(_index, truncated) => { truncation.push(truncated); }}
+                                onCollapsedLinesChange={() => undefined}
                             />
                         </I18nProvider>
                     </SyncProvider>,
@@ -256,13 +256,13 @@ describe('UserTextPart expand affordance (issue #3742)', () => {
                         <I18nProvider>
                             <UserTextPart
                                 part={part}
-                                messageId="msg_3742"
                                 isMobile={false}
                                 messageExpanded={false}
                                 onExpandMessage={onExpandMessage}
                                 partIndex={0}
                                 attachmentFilenames={[]}
                                 onTruncationChange={() => undefined}
+                                onCollapsedLinesChange={() => undefined}
                             />
                         </I18nProvider>
                     </SyncProvider>,

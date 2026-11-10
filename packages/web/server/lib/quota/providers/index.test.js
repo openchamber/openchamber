@@ -1,3 +1,7 @@
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
 import { describe, expect, it, vi } from 'vitest';
 
 vi.mock('../../opencode/auth.js', () => ({ readOpenCodeCredentials: async () => ({}) }));
@@ -15,6 +19,20 @@ describe('quota provider registry', () => {
 
   it('can list configured providers without missing provider exports', async () => {
     await expect(listConfiguredQuotaProviders()).resolves.toBeInstanceOf(Array);
+  });
+
+  it('lists ZenMux from its managed credential, whatever the OpenCode auth holds', async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'quota-list-'));
+    vi.stubEnv('OPENCHAMBER_DATA_DIR', dataDir);
+    try {
+      await expect(listConfiguredQuotaProviders()).resolves.not.toContain('zenmux');
+      mkdirSync(join(dataDir, 'quota'), { recursive: true });
+      writeFileSync(join(dataDir, 'quota', 'zenmux.json'), JSON.stringify({ platformApiKey: 'key' }));
+      await expect(listConfiguredQuotaProviders()).resolves.toContain('zenmux');
+    } finally {
+      vi.unstubAllEnvs();
+      rmSync(dataDir, { recursive: true, force: true });
+    }
   });
 
   it('coalesces concurrent refreshes by provider ID', async () => {

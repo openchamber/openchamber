@@ -1,8 +1,11 @@
 import React from 'react';
+import { SessionRecapNote } from '@/components/chat/SessionRecapSpacer';
+import { DraftProjectName } from '@/components/chat/DraftProjectName';
 import { createPortal } from 'react-dom';
 import type { Message, Part, Session } from '@/lib/opencode/model';
 import { getLastConversationRecord, isIncompleteAssistantTurn } from '@/lib/opencode/model';
 import { keepCommandSubagentReports } from '@/lib/opencode/subagent-run';
+import { dropReplyCommandRows } from '@/lib/opencode/reply-command';
 import { isOpencodeNotFound, opencodeClient } from '@/lib/opencode/client';
 
 import { ChatInput } from './ChatInput';
@@ -43,9 +46,10 @@ const TIMELINE_REVEAL_FADE_MS = 100;
 // 1 s turn-end glide windows.
 const HISTORY_TRIM_DELAY_MS = 3000;
 import { hasActiveFormToolInCurrentTurn, recoverPendingFormWithRetry } from '@/sync/form-recovery';
+import { useIsPageWaiting } from '@/sync/global-blocking-requests';
+import { holdPendingSynthetic } from './lib/holdPendingSynthetic';
 import { toast } from '@/components/ui';
 import { StatusRowContainer } from './StatusRowContainer';
-import { SessionRecapNote } from '@/components/chat/SessionRecapSpacer';
 import {
     FLOATING_COMPOSER_DEFAULT_TAIL_INSET_PX,
     FLOATING_COMPOSER_GAP_PX,
@@ -69,6 +73,8 @@ import { TimelineDialog } from './TimelineDialog';
 import { useChatTurnNavigation } from './hooks/useChatTurnNavigation';
 import { ChatQuoteHighlightContext, useChatQuoteHighlightStore } from './hooks/chatQuoteHighlightStore';
 import { ChatQuoteHighlightLayer } from './message/ChatQuoteHighlightLayer';
+import { TextSelectionMenu } from './message/TextSelectionMenu';
+import { loadQuoteSource as loadQuoteSourceMessage, scrollToQuoteSource as scrollToQuoteSourceMessage } from './quoteNavigation';
 import { useChatSurfaceMode } from './useChatSurfaceMode';
 import { useMessageTTS } from '@/hooks/useMessageTTS';
 import { useAutoReadAloud } from '@/hooks/useAutoReadAloud';
@@ -101,8 +107,11 @@ import {
     useSessionStartTimes,
 } from '@/sync/sync-context';
 import { useSync } from '@/sync/use-sync';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/lib/i18n';
+import { useDraftHeading } from './useDraftHeading';
 import { isVSCodeRuntime } from '@/lib/desktop';
+import { SEMANTIC_TYPOGRAPHY, VSCODE_TYPOGRAPHY, getScaledTypographyStyle } from '@/lib/typography';
 import { eventMatchesShortcut, getEffectiveShortcutCombo } from '@/lib/shortcuts';
 import { ChatSearchBar } from './search/ChatSearchBar';
 import { WorkStatusPanel } from './work-status/WorkStatusPanel';
@@ -122,6 +131,14 @@ import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
 import { createFirstVisibleSessionPerformanceTracker } from '@/sync/session-load-performance';
 import { isChatDirectoryPath } from '@/lib/chatDirectories';
 
+function HoistedUiPageSelection({ scrollNode, sessionId }: { scrollNode: HTMLElement; sessionId: string }) {
+    const containerRef = React.useMemo(() => ({ current: scrollNode }), [scrollNode]);
+    const surface = useChatSurfaceMode();
+    const showTTS = useConfigStore((state) => state.showMessageTTSButtons);
+    return <TextSelectionMenu containerRef={containerRef} readingKey={sessionId} uiRenderSelection
+        canReadAloud={surface !== 'mini-chat' && showTTS} />;
+}
+
 const EMPTY_MESSAGES: Array<{ info: Message; parts: Part[] }> = [];
 const IDLE_SESSION_STATUS = { type: 'idle' as const };
 const CHAT_FORCE_SCROLL_BOTTOM_EVENT = 'openchamber:chat-force-scroll-bottom';
@@ -129,6 +146,9 @@ const DEFAULT_RETRY_MESSAGE = 'Quota limit reached. Retrying automatically.';
 const DRAFT_EXIT_DURATION_MS = 120;
 const COMPOSER_MOVE_DURATION_MS = 180;
 const CHAT_SCROLL_STYLE = {
+    // A chat column squeezed to 0px gives the rows no area, and the browser
+    // drops the scroll position with the scrollable height.
+    minWidth: 1,
     overflowAnchor: 'none',
     overscrollBehavior: 'contain',
     overscrollBehaviorY: 'contain',
@@ -225,8 +245,9 @@ type ChatViewportProps = {
     scrollRef: React.RefObject<HTMLDivElement | null>;
     messageListRef: React.RefObject<MessageListHandle | null>;
     registerList: (list: TimelineListHandle | null, sessionKey?: string) => void;
+    captureOutgoingPosition: () => void;
     onIsAtEndChange: (isAtEnd: boolean) => void;
-    onListMetricsChange: (metrics: { readonly footerSize: number }) => void;
+    onListMetricsChange: (metrics: { readonly headerSize: number; readonly footerSize: number }) => void;
     onTimelineDataChange: () => void;
     renderedMessages: SessionMessageRecord[];
     isLoadingOlder: boolean;
@@ -276,6 +297,7 @@ const ChatViewport = React.memo(({
     scrollRef,
     messageListRef,
     registerList,
+    captureOutgoingPosition,
     onIsAtEndChange,
     onListMetricsChange,
     onTimelineDataChange,
@@ -408,7 +430,7 @@ const ChatViewport = React.memo(({
                 queued message) left the last line under the row. */}
             <div
                 ref={registerComposerInsetReader}
-                className="flex-shrink-0"
+                className="relative flex-shrink-0"
                 style={{
                     height: floatingComposer
                         ? `calc(${sessionIsWorking
@@ -416,8 +438,22 @@ const ChatViewport = React.memo(({
                             : `var(--chat-composer-tail-inset, ${FLOATING_COMPOSER_DEFAULT_TAIL_INSET_PX}px)`} + var(--chat-floating-panel-clearance, 0px))`
                         : (isMobile ? '40px' : '10vh'),
                 }}
-                aria-hidden="true"
-            />
+            >
+                {/* The recap of the latest answer lies at the top of this band,
+                    right under the answer's footer: it takes no room, so its
+                    arrival and leaving move nothing. Rows of the list paint
+                    only inside their own box (`contain: paint`), so it lives
+                    here rather than in the answer's row. It goes once a new
+                    prompt makes the session busy, and while the composer grows
+                    into the band or a panel docks over it (design-system.css). */}
+                {floatingComposer && currentSessionId ? (
+                    <div className="oc-recap-hint pointer-events-none absolute inset-x-0 top-0 transition-opacity duration-300 ease-out">
+                        <div className="chat-message-column">
+                            <SessionRecapNote sessionId={currentSessionId} directory={directory} isMobile={isMobile} />
+                        </div>
+                    </div>
+                ) : null}
+            </div>
         </>
     ), [currentSessionId, directory, floatingComposer, isMobile, sessionIsWorking]);
 
@@ -559,6 +595,7 @@ const ChatViewport = React.memo(({
                         key={getRuntimeKey()}
                         cacheKey={showingTranscript ? currentSessionId : null}
                         capacity={retainedTimelines()}
+                        onBeforeHide={captureOutgoingPosition}
                     >
                         <ChatColumnSessionContext.Provider value={session}>
                             <MessageList
@@ -724,21 +761,25 @@ const HydrationSkeleton: React.FC<{ waiting: boolean }> = ({ waiting }) => {
 // `onStop` is set while a subagent's turn runs: its session takes no
 // prompts, but the user can still stop it from here.
 const ReadOnlyPromptBanner: React.FC<{ text: string; onStop?: () => void; stopLabel?: string }> = ({ text, onStop, stopLabel }) => (
-    <div className="w-full py-3">
+    <div className="w-full py-3" data-composer-transient="">
         <div className="chat-input-column">
-            <div className="flex items-center gap-2 rounded-2xl border border-border/70 bg-[var(--surface-background)] px-4 py-3 typography-ui-label text-muted-foreground">
+            <div className="flex items-center gap-2 rounded-2xl border border-edge bg-[var(--surface-background)] px-4 py-3 typography-ui-label text-muted-foreground">
                 <span className="min-w-0 flex-1 text-center">{text}</span>
                 {onStop ? (
-                    <Button
-                        variant="ghost"
-                        size="icon"
-                        className="-my-1.5 -me-2 shrink-0 text-[var(--status-error)] hover:text-[var(--status-error)]"
-                        onClick={onStop}
-                        aria-label={stopLabel}
-                        title={stopLabel}
-                    >
-                        <StopIcon className="size-4" />
-                    </Button>
+                    <Tooltip>
+                        <TooltipTrigger asChild>
+                            <Button
+                                variant="ghost"
+                                size="icon"
+                                className="-my-1.5 -me-2 shrink-0 text-[var(--status-error)] hover:text-[var(--status-error)]"
+                                onClick={onStop}
+                                aria-label={stopLabel}
+                            >
+                                <StopIcon className="size-4" />
+                            </Button>
+                        </TooltipTrigger>
+                        <TooltipContent side="top" sideOffset={6}>{stopLabel}</TooltipContent>
+                    </Tooltip>
                 ) : null}
             </div>
         </div>
@@ -758,14 +799,13 @@ const renderDraftTitle = (title: string, projectLabel: string | null): React.Rea
     return (
         <>
             {title.slice(0, projectIndex)}
-            <span className="font-medium">{projectLabel}</span>
+            <DraftProjectName label={projectLabel} />
             {title.slice(projectIndex + projectLabel.length)}
         </>
     );
 };
 
 const DraftWelcome: React.FC<{ exiting?: boolean }> = ({ exiting = false }) => {
-    const { t } = useI18n();
     const draftTarget = useSessionUIStore((state) => state.newSessionDraft.target);
     const selectedProjectId = useSessionUIStore((state) => state.newSessionDraft.selectedProjectId ?? null);
     const projectLabel = useProjectsStore(React.useCallback((state) => {
@@ -776,6 +816,7 @@ const DraftWelcome: React.FC<{ exiting?: boolean }> = ({ exiting = false }) => {
             : null) ?? state.projects[0] ?? null;
         return project ? getProjectDisplayLabel(project) : null;
     }, [draftTarget, selectedProjectId]));
+    const draftHeading = useDraftHeading(projectLabel);
 
     return (
         <div className={cn(
@@ -783,12 +824,7 @@ const DraftWelcome: React.FC<{ exiting?: boolean }> = ({ exiting = false }) => {
             exiting && 'pointer-events-none opacity-0',
         )}>
             <h1 className="text-balance text-3xl font-normal tracking-tight text-foreground">
-                {renderDraftTitle(
-                    projectLabel
-                        ? t('chat.emptyState.draftTitleWithProject', { project: projectLabel })
-                        : t('chat.emptyState.draftTitle'),
-                    projectLabel,
-                )}
+                {renderDraftTitle(draftHeading, projectLabel)}
             </h1>
             <DraftPresetChips
                 onSubmit={(starter) => useInputStore.getState().requestPresetSubmit(starter.submitText, starter.ref.type)}
@@ -839,8 +875,8 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
     // new session id. A pinned column does not subscribe to the selection.
     const globalSessionId = useSessionUIStore((s) => (pinned ? null : s.currentSessionId));
     const globalSessionDirectory = useSessionUIStore((s) => (pinned ? null : s.currentSessionDirectory));
-    const liveSessionId = pinned ? pinnedSelection?.sessionId ?? null : globalSessionId;
     const pinnedSessionDirectory = usePinnedSessionDirectory(pinned ? pinnedSelection : null);
+    const liveSessionId = pinned ? (pinnedSessionDirectory ? pinnedSelection?.sessionId ?? null : null) : globalSessionId;
     const liveSessionDirectory = pinned ? pinnedSessionDirectory : globalSessionDirectory;
     const materializedDraftSessionId = useSessionUIStore((s) => (pinned ? null : s.materializedDraftSessionId));
     const liveSelection = React.useMemo(
@@ -940,6 +976,15 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
     const stickyUserHeader = useUIStore((state) => state.stickyUserHeader);
     const promptNavigatorEnabled = useUIStore((state) => state.promptNavigatorEnabled);
     const allowPromptingSubagentSessions = useUIStore((state) => state.allowPromptingSubagentSessions);
+    const chatFontSize = useUIStore((state) => state.chatFontSize);
+    // The chat's own text size, on top of the interface size: the semantic
+    // text variables are redefined for this column only (as FilesView does
+    // for its preview), so the sidebar keeps the interface size.
+    // SAFETY: CSS custom properties are valid inline styles; React's type lists only standard ones.
+    const chatTypographyStyle = React.useMemo(() => getScaledTypographyStyle(
+        chatFontSize,
+        isVSCodeRuntime() ? VSCODE_TYPOGRAPHY : SEMANTIC_TYPOGRAPHY,
+    ) as React.CSSProperties | undefined, [chatFontSize]);
     // The timeline dialog of the main chat is app state (a global shortcut
     // opens it); a pinned column keeps its own.
     const globalTimelineDialogOpen = useUIStore((s) => s.isTimelineDialogOpen);
@@ -974,13 +1019,21 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
         ),
     );
     const hasRenderableSessionSnapshot = useSessionRenderable(currentSessionId ?? '', effectiveSessionDirectory);
-    // Messages from sync system.
+    const isPageWaiting = useIsPageWaiting(currentSessionId);
+    // Messages from sync system. Only the live tail overlays a suspended
+    // message's newest parts, so a page held back in its record is lost to
+    // whatever reads the record: an opened Activity builds its rows from it.
+    // Nothing is suspended while a call waits for the user.
+    const suspendedMessageId = isPageWaiting ? null : streamingMessageId;
     const sessionMessageRecords = useSessionMessageRecords(currentSessionId ?? '', effectiveSessionDirectory, {
         enabled: active,
-        suspendPartUpdates: Boolean(streamingMessageId),
-        suspendPartUpdatesForMessageId: streamingMessageId,
+        suspendPartUpdates: Boolean(suspendedMessageId),
+        suspendPartUpdatesForMessageId: suspendedMessageId,
     });
-    const sessionMessages = currentSessionId ? sessionMessageRecords : EMPTY_MESSAGES;
+    const sessionMessages = React.useMemo(() => {
+        if (!currentSessionId) return EMPTY_MESSAGES;
+        return isPageWaiting ? holdPendingSynthetic(sessionMessageRecords) : sessionMessageRecords;
+    }, [currentSessionId, isPageWaiting, sessionMessageRecords]);
     const authSessionExpired = useAuthSessionStore((store) => store.state !== 'ok');
     const wasAuthExpiredRef = React.useRef(false);
     const sessionMessageLoadState = useSessionMessageLoadState(
@@ -1060,6 +1113,8 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
         ready: hasRenderableSessionSnapshot && sessionMessageLoadState.status === 'ready',
         sessionIsActive,
         reply: latestCompletedReply,
+        history: sessionMessages,
+        olderCompletedReplyIds: sessionMessageLoadState.olderCompletedReplyIds,
         enabled: autoReadAloudEnabled && !pinned,
         play: playAutoReadAloud,
     });
@@ -1215,20 +1270,26 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
     }, [openColumnSession, parentSession]);
 
     const returnToParentButton = parentSession && !hideReturnToParent ? (
-        <Button
-            type="button"
-            variant="outline"
-            size="xs"
-            onClick={handleReturnToParentSession}
-            className="absolute inset-s-3 top-3 z-20 !font-normal bg-[var(--surface-background)]/95"
-            aria-label={t('chat.container.returnToParent.aria')}
-            title={parentSession.title?.trim()
-                ? t('chat.container.returnToParent.titleNamed', { title: parentSession.title })
-                : t('chat.container.returnToParent.title')}
-        >
-            <Icon name="arrow-left" className="h-4 w-4" />
-            {t('chat.container.returnToParent.label')}
-        </Button>
+        <Tooltip>
+            <TooltipTrigger asChild>
+                <Button
+                    type="button"
+                    variant="outline"
+                    size="xs"
+                    onClick={handleReturnToParentSession}
+                    className="absolute inset-s-3 top-3 z-20 !font-normal bg-[var(--surface-background)]/95"
+                    aria-label={t('chat.container.returnToParent.aria')}
+                >
+                    <Icon name="arrow-left" className="h-4 w-4" />
+                    {t('chat.container.returnToParent.label')}
+                </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom" sideOffset={6}>
+                {parentSession.title?.trim()
+                    ? t('chat.container.returnToParent.titleNamed', { title: parentSession.title })
+                    : t('chat.container.returnToParent.title')}
+            </TooltipContent>
+        </Tooltip>
     ) : null;
     // A chat of a deleted isolated space is on the Archive page and read-only; the server refuses
     // to run it whatever the screen shows. Its directory is the archive's own, and the list of
@@ -1302,6 +1363,8 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
     // The timeline controller owns history loading and needs this hook's
     // scroll commands, so the hook reaches the loader through a ref.
     const loadHistoryUntilMessageRef = React.useRef<(messageId: string, maxBatches: number) => Promise<boolean>>(async () => false);
+    const currentSessionKeyRef = React.useRef(currentSessionKey);
+    currentSessionKeyRef.current = currentSessionKey;
     const loadHistoryUntilMessage = React.useCallback(
         (messageId: string, maxBatches: number) => loadHistoryUntilMessageRef.current(messageId, maxBatches),
         [],
@@ -1324,6 +1387,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
         scrollRef,
         scrollNode,
         registerList,
+        captureOutgoingPosition,
         onIsAtEndChange,
         onListMetricsChange,
         onManualNavigation,
@@ -1335,7 +1399,6 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
         isFollowingProgrammatically,
         showScrollButton,
         userOwnsScroll,
-        viewportAtEnd,
         nearContentStart,
     } = useChatTimelineScroll({
         currentSessionId,
@@ -1346,6 +1409,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
         checkLinkedMessage,
         onLinkedMessageMissing: handleLinkedMessageMissing,
         sessionIsWorking,
+        pinned,
         revealGate,
         onActiveTurnChange: handleActiveTurnChange,
     });
@@ -1396,10 +1460,11 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
     // A subagent report opens a turn of its own at the end of the chat only for
     // a `subagent: true` command; a call's report finishes that call's row
     // (see `ToolPart`), and a run started before the loaded history stays in
-    // the session's subagent list, so the chat never shifts for either.
+    // the session's subagent list, so the chat never shifts for either. A
+    // command run from a code block of a reply shows in that block.
     const sessionStartTimes = useSessionStartTimes(effectiveSessionDirectory);
     const viewportMessages = React.useMemo(
-        () => keepCommandSubagentReports(sessionMessages, (childSessionID) => sessionStartTimes.get(childSessionID)),
+        () => dropReplyCommandRows(keepCommandSubagentReports(sessionMessages, (childSessionID) => sessionStartTimes.get(childSessionID))),
         [sessionStartTimes, sessionMessages],
     );
 
@@ -1426,7 +1491,8 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
     // the turn's last block, its footer and the turn-end glide land first. A
     // reader away from the end holds the history, so another column showing
     // this session never cuts what they look at.
-    const turnCount = timelineController.turnIds.length;
+    // Prepending older turns must not re-arm the trim timer.
+    const newestTurnId = timelineController.turnIds[timelineController.turnIds.length - 1] ?? null;
     const isPinnedRef = React.useRef(isPinned);
     isPinnedRef.current = isPinned;
     React.useEffect(() => {
@@ -1436,7 +1502,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
             messageLoader.trimHistory({ directory: effectiveSessionDirectory, sessionID: currentSessionId });
         }, HISTORY_TRIM_DELAY_MS);
         return () => window.clearTimeout(timer);
-    }, [active, currentSessionId, effectiveSessionDirectory, messageLoader, sessionIsWorking, turnCount]);
+    }, [active, currentSessionId, effectiveSessionDirectory, messageLoader, sessionIsWorking, newestTurnId]);
     React.useEffect(() => {
         if (isPinned || !currentSessionId || !effectiveSessionDirectory) return;
         return messageLoader.retainSessionHistory({ directory: effectiveSessionDirectory, sessionID: currentSessionId }, 'browsing');
@@ -1475,6 +1541,35 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
     const controllerLoadHistoryUntilMessage = timelineController.loadHistoryUntilMessage;
     loadHistoryUntilMessageRef.current = (messageId, maxBatches) => controllerLoadHistoryUntilMessage(messageId, { maxBatches });
     const chatQuoteHighlights = useChatQuoteHighlightStore();
+    const loadQuoteSource = React.useCallback(async (messageId: string): Promise<boolean> => {
+        return loadQuoteSourceMessage(messageId, {
+            currentSessionKey,
+            currentSessionKeyRef,
+            onManualNavigation,
+            loadHistoryUntilMessage: controllerLoadHistoryUntilMessage,
+            checkLinkedMessage,
+            onLinkedMessageMissing: handleLinkedMessageMissing,
+        });
+    }, [checkLinkedMessage, controllerLoadHistoryUntilMessage, currentSessionKey, handleLinkedMessageMissing, onManualNavigation]);
+    const scrollToTimelineMessage = timelineController.scrollToMessage;
+    const scrollToQuoteSource = React.useCallback(async (
+        messageId: string,
+        options?: { behavior?: ScrollBehavior },
+    ): Promise<boolean> => {
+        return scrollToQuoteSourceMessage(messageId, {
+            currentSessionKey,
+            currentSessionKeyRef,
+            scrollToTimelineMessage,
+            messageListRef,
+            ...options,
+        });
+    }, [currentSessionKey, scrollToTimelineMessage]);
+    const resolveUiPageMessageId = React.useCallback((messageId: string, partId: string) => (
+        messageListRef.current?.resolveUiPageMessageId(messageId, partId) ?? messageId
+    ), []);
+    const scrollToUiPageRow = React.useCallback((messageId: string) => (
+        messageListRef.current?.scrollToUiPageRow(messageId) ?? false
+    ), []);
 
     const navigation = useChatTurnNavigation({
         sessionId: currentSessionId,
@@ -1656,15 +1751,23 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
     // the timeline, and onto the reading elements, not the column: inherited
     // from the column, every new composer line restyled the whole transcript
     // (composerInsetReaders). While the composer is taller than at rest,
-    // `data-composer-grown` on the column hides the recap hint, which rides
-    // the composer's top edge and would otherwise land on the last row.
+    // `data-composer-grown` on the column hides the recap hint, which lies
+    // in the gap under the latest answer the composer then grows into.
     React.useLayoutEffect(() => {
         const slot = composerSlotNode;
         const column = slot?.parentElement;
         if (!floatingComposer || !slot || !column || !globalThis.ResizeObserver) return;
         const update = () => {
             const height = Math.round(slot.getBoundingClientRect().height);
-            const { tailInset, grown } = recordComposerSlotHeight(column, height);
+            // Only the composer itself at its natural height can set the
+            // resting height. What stands in for it (a subagent's read-only
+            // banner, the mobile comment composer: data-composer-transient)
+            // and a slot the pill morph pins for its tween (an inline height,
+            // measured with the keyboard's padding) are shorter, and kept as
+            // the floor they left the composer "grown" (recap hidden) until a
+            // reload.
+            const transient = slot.style.height !== '' || slot.querySelector('[data-composer-transient]') !== null;
+            const { tailInset, grown } = recordComposerSlotHeight(column, height, !transient);
             publishComposerInsets(column, { inset: height, tailInset });
             column.toggleAttribute('data-composer-grown', grown);
         };
@@ -1838,6 +1941,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
             directory={effectiveSessionDirectory}
             scrollRef={scrollRef}
             registerList={registerList}
+            captureOutgoingPosition={captureOutgoingPosition}
             onIsAtEndChange={onIsAtEndChange}
             onListMetricsChange={onListMetricsChange}
             onTimelineDataChange={onTimelineDataChange}
@@ -1875,6 +1979,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
 			data-chat-session-id={pinned ? currentSessionId ?? undefined : undefined}
 			data-chat-working={pinned && sessionIsWorking ? 'true' : undefined}
 			className="flex h-full min-h-0 bg-background"
+			style={chatTypographyStyle}
 		>
 		<ChatColumnSessionContext.Provider value={chatColumnSession}>
 		<ChatColumnActionsContext.Provider value={columnActions}>
@@ -1885,8 +1990,12 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
 		<ChatQuoteHighlightLayer
 			store={chatQuoteHighlights}
 			scrollNode={scrollNode}
-			scrollToMessage={timelineController.scrollToMessage}
+			loadHistoryUntilMessage={loadQuoteSource}
+			scrollToMessage={scrollToQuoteSource}
+			resolveUiPageMessageId={resolveUiPageMessageId}
+			scrollToUiPageRow={scrollToUiPageRow}
 		/>
+		{scrollNode && currentSessionId ? <HoistedUiPageSelection key={currentSessionKey ?? currentSessionId} scrollNode={scrollNode} sessionId={currentSessionId} /> : null}
 		<div
 			ref={chatRootRef}
 			data-composer-bound
@@ -1964,32 +2073,6 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
                                 </div>
                             </div>
                         </div>
-                        {/* The recap hint shares the anchor but keys its fade
-                            on the measured distance to the end, not on the
-                            user-owns-scroll intent flag or the list's at-end
-                            transitions: a session switch or a sideways swipe
-                            that nudges the viewport must not strand it either
-                            way. It stays out of the measured status node — it
-                            lives inside the fixed composer gap, so its arrival
-                            must not move the end. */}
-                        {currentSessionId ? (
-                            <div
-                                ref={registerFloatingPanelClearanceReader}
-                                className={cn(
-                                    'oc-recap-hint pointer-events-none absolute bottom-full inset-x-0 mb-2 transition-opacity duration-300 ease-out',
-                                    !viewportAtEnd && 'opacity-0',
-                                )}
-                                style={{ transform: 'translateY(calc(-1 * var(--chat-floating-panel-clearance, 0px)))' }}
-                            >
-                                <div className="chat-input-column">
-                                    <SessionRecapNote
-                                        sessionId={currentSessionId}
-                                        directory={effectiveSessionDirectory}
-                                        isMobile={isMobile}
-                                    />
-                                </div>
-                            </div>
-                        ) : null}
                     </div>
                 )}
                 {promptReadOnly ? (

@@ -3,11 +3,12 @@ import {
   Dialog,
   DialogContent,
 } from '@/components/ui/dialog';
-import { OpenChamberLogo } from '@/components/ui/OpenChamberLogo';
+import { AboutLogo } from '@/components/ui/AboutLogo';
 import { debugUtils } from '@/lib/debug';
 import { cn } from '@/lib/utils';
 import { toast } from '@/components/ui';
 import { Icon } from "@/components/icon/Icon";
+import { Spinner } from '@/components/ui/spinner';
 import { useI18n } from '@/lib/i18n';
 import { getDesktopAppVersion } from '@/lib/desktopNative';
 import { runtimeFetch } from '@/lib/runtime-fetch';
@@ -155,7 +156,7 @@ export const AboutDialog: React.FC<AboutDialogProps> = ({
     return (
       <p className="flex items-center justify-center">
         <span className="whitespace-pre">{before}</span>
-        <Icon name="loader" className="size-3.5 animate-spin" />
+        <Spinner className="size-3.5" />
         <span className="whitespace-pre">{after}</span>
       </p>
     );
@@ -165,7 +166,7 @@ export const AboutDialog: React.FC<AboutDialogProps> = ({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-xs p-6">
         <div className="flex flex-col items-center text-center space-y-4">
-          <OpenChamberLogo width={64} height={64} />
+          <AboutLogo />
 
           <div className="space-y-1">
             <h2 className="text-lg font-semibold">OpenChamber</h2>

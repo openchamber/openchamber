@@ -454,7 +454,7 @@ const CommandListItem: React.FC<CommandListItemProps> = ({
               /{command.name}
             </span>
             {(command.scope || isCommandBuiltIn(command)) && (
-              <span className="typography-micro text-muted-foreground bg-muted px-1 rounded flex-shrink-0 leading-none pb-px border border-border/50">
+              <span className="typography-micro text-muted-foreground bg-muted px-1 rounded flex-shrink-0 leading-none pb-px border border-edge">
                 {isCommandBuiltIn(command) ? t('settings.agents.sidebar.badge.system') : command.scope}
               </span>
             )}
@@ -471,9 +471,9 @@ const CommandListItem: React.FC<CommandListItemProps> = ({
           <DropdownMenuTrigger asChild>
             <Button size="sm"
               variant="ghost"
-              className="h-6 w-6 px-0 flex-shrink-0 -me-1 opacity-100 transition-opacity md:opacity-0 md:group-hover:opacity-100"
+              className="h-6 w-6 px-0 flex-shrink-0 -me-1 opacity-100 transition-opacity md:opacity-0 md:group-hover:opacity-100 pointer-fine:hidden"
             >
-              <Icon name="more-2" className="h-3.5 w-3.5" />
+              <Icon name="more" className="h-3.5 w-3.5" />
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-fit min-w-20">

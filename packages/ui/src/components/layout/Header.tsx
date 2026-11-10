@@ -1,4 +1,6 @@
 import React, { useEffect } from 'react';
+import { formatShortcutForDisplay, getEffectiveShortcutCombo } from '@/lib/shortcuts';
+import { TooltipLabelWithShortcut } from '@/components/ui/action-toolbar';
 import { useGuestsStore } from '@/lib/guests/store';
 import {
   Tooltip,
@@ -23,7 +25,6 @@ import { useDirectoryStore as useAppDirectoryStore } from '@/stores/useDirectory
 import { isChatDirectoryForHome } from '@/lib/chatDirectories';
 import { useSessionMessageRecordsForExport } from '@/sync/use-sync';
 import { useProjectsStore } from '@/stores/useProjectsStore';
-import { useQuotaAutoRefresh, useQuotaStore } from '@/stores/useQuotaStore';
 import { useGitBranchLabel } from '@/stores/useGitStore';
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { archiveUndoToastOptions, collectSessionMoveDescendants, collectSessionSubtreeIds } from '@/components/session/sidebar/sessions/sessionSubtreeActions';
@@ -44,8 +45,12 @@ import { panelContentDirectory } from '@/lib/spaces/space-creation-requests';
 import { SessionSwitcherDropdown } from '@/components/session/SessionSwitcherDropdown';
 import { SessionTabsStrip, type SessionTabMenuArgs } from './SessionTabsStrip';
 import { SessionMenuItemHint } from '@/components/session/SessionMenuItemHint';
-import { MoveChatToProjectDialog } from '@/components/session/MoveChatToProjectDialog';
+import { MoveSessionDialog } from '@/components/session/MoveSessionDialog';
+import { isSpaceDirectory } from '@/lib/spaces/space-route';
 import { HeaderSessionArchiveMenuItem } from './HeaderSessionArchiveMenuItem';
+import { HeaderSessionMarkDoneMenuItem } from './HeaderSessionMarkDoneMenuItem';
+import { HeaderContextUsage } from './HeaderContextUsage';
+import { HeaderProjectControls } from './HeaderProjectControls';
 import { canUseElectronDesktopIPC, getMiniChatRuntimeArgs, invokeDesktop, isDesktopShell, isVSCodeRuntime, startDesktopWindowDrag } from '@/lib/desktop';
 import { Icon } from "@/components/icon/Icon";
 import { getInlineStartSide, useI18n } from '@/lib/i18n';
@@ -88,7 +93,13 @@ type HeaderSessionSnapshot = {
   created: number | null;
   slug: string | null;
   parentId: string | null;
+  archived: boolean;
 };
+
+// A subsession moves with its parent; a space's sessions stay inside its container.
+const canMoveSessionOutOf = (session: HeaderSessionSnapshot): boolean => (
+  !session.parentId && !session.archived && !isSpaceDirectory(session.directory)
+);
 
 export const Header: React.FC = () => {
   streamPerfCount('ui.header.render');
@@ -115,6 +126,7 @@ export const Header: React.FC = () => {
         created: session.time?.created ?? null,
         slug: record.slug ?? null,
         parentId: session.parentID ?? null,
+        archived: Boolean(session.time?.archived),
       };
     },
     [currentSessionId],
@@ -139,7 +151,6 @@ export const Header: React.FC = () => {
     const pathSegments = activeProject.path.split(/[\\/]/).filter(Boolean);
     return pathSegments[pathSegments.length - 1] ?? null;
   }, [activeProject]);
-  const loadQuotaSettings = useQuotaStore((state) => state.loadSettings);
 
   const { isMobile } = useDeviceInfo();
   const headerRef = React.useRef<HTMLElement | null>(null);
@@ -201,6 +212,8 @@ export const Header: React.FC = () => {
   // and the branch — three paces away in the same window. The meta row under
   // the title yields to it rather than saying the same thing twice, and
   // returns the moment the panel is switched off or squeezed out.
+  const shortcutOverrides = useUIStore((state) => state.shortcutOverrides);
+  const renameShortcut = formatShortcutForDisplay(getEffectiveShortcutCombo('rename_current_session', shortcutOverrides), '');
   const workStatusPanelVisible = useUIStore((state) => state.workStatusPanelVisible);
   const workStatusPanelEnabled = useUIStore((state) => state.workStatusPanelEnabled);
   const setWorkStatusPanelEnabled = useUIStore((state) => state.setWorkStatusPanelEnabled);
@@ -223,11 +236,6 @@ export const Header: React.FC = () => {
     setWorkStatusPanelEnabled(!workStatusPanelEnabled);
   }, [setWorkStatusOverlayOpen, setWorkStatusPanelEnabled, workStatusOverlayOpen, workStatusPanelEnabled, workStatusPanelFits]);
 
-  useQuotaAutoRefresh();
-
-  React.useEffect(() => {
-    void loadQuotaSettings();
-  }, [loadQuotaSettings]);
 
 
   const currentSessionSnapshot = currentSessionId
@@ -408,9 +416,13 @@ export const Header: React.FC = () => {
       activation that a Rename on an inactive tab performs first. */
   const pendingHeaderRenameRef = React.useRef<string | null>(null);
   const [headerSessionTitleDraft, setHeaderSessionTitleDraft] = React.useState('');
-  const [moveChatDialogOpen, setMoveChatDialogOpen] = React.useState(false);
-  const hasProjects = useProjectsStore((state) => state.projects.length > 0);
-  const [pendingHeaderRetentionAction, setPendingHeaderRetentionAction] = React.useState<{ action: 'archive' | 'delete'; sessionId: string } | null>(null);
+  const [moveSessionDialogOpen, setMoveSessionDialogOpen] = React.useState(false);
+  // Archive runs at once with Undo in its toast, as in the sidebar; only a
+  // delete asks first.
+  const [pendingDeleteSessionId, setPendingDeleteSessionId] = React.useState<string | null>(null);
+  const pendingDeleteSessionTitle = useGlobalSessionsStore((state) => (pendingDeleteSessionId
+    ? state.entityById.get(pendingDeleteSessionId)?.title?.trim() || null
+    : null)) ?? t('sessions.sidebar.session.untitled');
   const headerRenameFormRef = React.useRef<HTMLFormElement | null>(null);
 
 
@@ -434,7 +446,7 @@ export const Header: React.FC = () => {
 
   React.useEffect(() => {
     setIsHeaderSessionMenuOpen(false);
-    setPendingHeaderRetentionAction(null);
+    setPendingDeleteSessionId(null);
     if (currentSessionId && pendingHeaderRenameRef.current === currentSessionId) {
       // Rename on an inactive tab activates it first; the switch itself is
       // when the rename can begin (the menu may close before or after it).
@@ -543,26 +555,6 @@ export const Header: React.FC = () => {
     });
   }, [currentSessionId, isCurrentSessionActive, isCurrentSessionMovingToWorktree, sessionDirectory, t]);
 
-  // A chat promoted into a project: the same tree move as "Move to worktree",
-  // with the project's root folder as the destination.
-  const moveCurrentChatToProject = React.useCallback((projectDirectory: string) => {
-    if (!currentSessionId || !sessionDirectory || isCurrentSessionActive || isCurrentSessionMovingToWorktree) return;
-    const sessions = useGlobalSessionsStore.getState().activeSessions;
-    const root = sessions.find((session) => session.id === currentSessionId);
-    if (!root) return;
-    requestSessionTreeMove({
-      kind: 'project',
-      root,
-      descendants: collectSessionMoveDescendants(root, []),
-      sourceDirectory: sessionDirectory,
-      projectDirectory,
-      messages: buildSessionTreeMoveMessages(t, {
-        success: 'sessions.moveChatToProject.success',
-        failure: 'sessions.moveChatToProject.failed',
-      }),
-    });
-  }, [currentSessionId, isCurrentSessionActive, isCurrentSessionMovingToWorktree, sessionDirectory, t]);
-
   const runHeaderRetentionAction = React.useCallback(async (action: 'archive' | 'delete', sessionId: string) => {
     const ids = [sessionId, ...collectSessionSubtreeIds(sessionId, [], action === 'delete')];
     const reopenId = useSessionUIStore.getState().currentSessionId === sessionId ? sessionId : null;
@@ -580,12 +572,11 @@ export const Header: React.FC = () => {
     toast.success(t('sessions.sidebar.session.archive.success'), archiveUndoToastOptions(archivedIds, reopenId, t));
   }, [archiveSessions, deleteSessions, t]);
 
-  const confirmHeaderRetentionAction = React.useCallback(async () => {
-    if (!pendingHeaderRetentionAction) return;
-    const { action, sessionId } = pendingHeaderRetentionAction;
-    setPendingHeaderRetentionAction(null);
-    await runHeaderRetentionAction(action, sessionId);
-  }, [pendingHeaderRetentionAction, runHeaderRetentionAction]);
+  const confirmHeaderDelete = React.useCallback(async () => {
+    if (!pendingDeleteSessionId) return;
+    setPendingDeleteSessionId(null);
+    await runHeaderRetentionAction('delete', pendingDeleteSessionId);
+  }, [pendingDeleteSessionId, runHeaderRetentionAction]);
 
   // Full-page surfaces (Scheduled, Archive, Worktrees, Spaces, run overview) replace the
   // chat area; while one is open the header shows the surface identity
@@ -918,10 +909,6 @@ export const Header: React.FC = () => {
     archive_current_session: () => {
       if (!currentSessionId || isMobile) return false;
       if (useGlobalSessionsStore.getState().entityById.get(currentSessionId)?.time.archived) return false;
-      if (useUIStore.getState().showDeletionDialog) {
-        setPendingHeaderRetentionAction({ action: 'archive', sessionId: currentSessionId });
-        return;
-      }
       void runHeaderRetentionAction('archive', currentSessionId);
     },
   });
@@ -930,12 +917,13 @@ export const Header: React.FC = () => {
   const renderSessionTabMenu = React.useCallback(({ session, open, isActive, select, closeOtherTabs, components }: SessionTabMenuArgs) => {
     const { Item, Separator } = components;
     const canMoveToWorktree = isActive && !isVSCode && !isChatContext && currentSession && !currentSession.parentId;
-    const canMoveToProject = isActive && !isVSCode && isChatContext && currentSession && !currentSession.parentId && hasProjects;
+    const canMoveSession = isActive && !isVSCode && currentSession && canMoveSessionOutOf(currentSession);
     return (
       <>
         <SessionMenuItemHint hint={t('sessions.sidebar.session.menuHint.rename')}>
           <Item onClick={() => { if (!isActive) select(); pendingHeaderRenameRef.current = session.id; }}>
             <Icon name="pencil-ai" className="me-1 size-4" />{t('sessions.sidebar.session.menu.rename')}
+            {isActive && renameShortcut ? <span className="ms-auto ps-3 typography-meta text-muted-foreground">{renameShortcut}</span> : null}
           </Item>
         </SessionMenuItemHint>
         <SessionAiRenameMenuItem sessionID={session.id} directory={session.directory} open={open} Item={Item} />
@@ -976,18 +964,18 @@ export const Header: React.FC = () => {
             </span>
           </SessionMenuItemHint>
         ) : null}
-        {canMoveToProject ? (
+        {canMoveSession ? (
           <SessionMenuItemHint hint={isCurrentSessionActive
             ? t('sessions.sidebar.session.moveToWorktree.tooltipBusy')
-            : t('sessions.moveChatToProject.hint')}>
+            : t('sessions.moveSession.hint')}>
             <span className="block">
               <Item
                 disabled={!sessionDirectory || isCurrentSessionActive || isCurrentSessionMovingToWorktree}
-                onClick={() => setMoveChatDialogOpen(true)}
+                onClick={() => setMoveSessionDialogOpen(true)}
                 className="w-full"
               >
                 <Icon name="folder-shared" className="me-1 size-4" />
-                {t('sessions.moveChatToProject.menu')}
+                {t('sessions.moveSession.menu')}
               </Item>
             </span>
           </SessionMenuItemHint>
@@ -999,19 +987,20 @@ export const Header: React.FC = () => {
           </Item>
         </SessionMenuItemHint>
         <Separator />
+        <HeaderSessionMarkDoneMenuItem session={session} Item={Item} />
         <HeaderSessionArchiveMenuItem
           sessionId={session.id}
           Item={Item}
-          onArchive={() => setPendingHeaderRetentionAction({ action: 'archive', sessionId: session.id })}
+          onArchive={() => void runHeaderRetentionAction('archive', session.id)}
         />
         <SessionMenuItemHint hint={t('sessions.sidebar.session.menuHint.delete')}>
-          <Item className="text-destructive focus:text-destructive" onClick={() => setPendingHeaderRetentionAction({ action: 'delete', sessionId: session.id })}>
+          <Item className="text-destructive focus:text-destructive" onClick={() => setPendingDeleteSessionId(session.id)}>
             <Icon name="delete-bin" className="me-1 size-4" />{t('sessions.sidebar.bulkActions.delete')}
           </Item>
         </SessionMenuItemHint>
       </>
     );
-  }, [copySessionIdFor, currentSession, currentSessionOpenDirectory, exportCurrentSession, hasElectronDesktopIPC, hasProjects, isChatContext, isCurrentSessionActive, isCurrentSessionMovingToWorktree, isVSCode, moveCurrentSessionToWorktree, openSessionInMiniChat, renderGuestSessionActionItems, sessionDirectory, t]);
+  }, [copySessionIdFor, currentSession, currentSessionOpenDirectory, exportCurrentSession, hasElectronDesktopIPC, isChatContext, isCurrentSessionActive, isCurrentSessionMovingToWorktree, isVSCode, moveCurrentSessionToWorktree, openSessionInMiniChat, renderGuestSessionActionItems, renameShortcut, runHeaderRetentionAction, sessionDirectory, t]);
 
   const renderDesktop = () => (
     <div
@@ -1078,7 +1067,9 @@ export const Header: React.FC = () => {
           <div className="app-region-no-drag me-3 flex min-w-0 max-w-full items-center gap-0.5 py-0.5 -my-0.5 text-start">
             {isCurrentSessionAiRenaming ? <Icon name="loader-4" className="me-1 size-3 shrink-0 animate-spin text-primary" aria-label={t('sessions.aiRename.generating')} /> : null}
             {!isSidebarOpen ? (
+              <Tooltip>
               <SessionSwitcherDropdown align="start">
+                <TooltipTrigger asChild>
                 <button
                   type="button"
                   className={desktopHeaderIconButtonClass}
@@ -1086,7 +1077,10 @@ export const Header: React.FC = () => {
                 >
                   <Icon name="history" className="h-4 w-4" />
                 </button>
+                </TooltipTrigger>
               </SessionSwitcherDropdown>
+              <TooltipContent side="bottom"><TooltipLabelWithShortcut label={t('sessions.switcher.openAria')} shortcut={formatShortcutForDisplay(getEffectiveShortcutCombo('open_session_list', shortcutOverrides), '')} /></TooltipContent>
+              </Tooltip>
             ) : null}
             <div className="flex min-w-0 flex-col justify-center px-1">
               {isRenamingHeaderSession ? (
@@ -1139,11 +1133,11 @@ export const Header: React.FC = () => {
                     ? 'typography-ui-label text-[0.875rem] text-foreground'
                     : 'typography-micro text-[0.65625rem] text-muted-foreground',
                 )}>
-                  {activeProjectLabel ? <span className="truncate">{activeProjectLabel}</span> : null}
+                  {activeProjectLabel ? <span dir="auto" className="truncate">{activeProjectLabel}</span> : null}
                   {currentBranchLabel ? (
                     <span className="inline-flex min-w-0 items-center gap-0.5">
                       <Icon name="git-branch" className={cn('flex-shrink-0 text-muted-foreground', isNewSessionDraftOpen ? 'h-3.5 w-3.5' : 'h-3 w-3')} />
-                      <span className={cn('truncate', isNewSessionDraftOpen && 'text-muted-foreground')}>{currentBranchLabel}</span>
+                      <span dir="ltr" className={cn('truncate', isNewSessionDraftOpen && 'text-muted-foreground')}>{currentBranchLabel}</span>
                     </span>
                   ) : null}
                   {!isNewSessionDraftOpen && worktreeBadgeKind ? (
@@ -1181,7 +1175,7 @@ export const Header: React.FC = () => {
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end" className="min-w-[190px]">
-                    <SessionMenuItemHint hint={t('sessions.sidebar.session.menuHint.rename')}><DropdownMenuItem onClick={() => { pendingHeaderRenameRef.current = currentSessionId; }}><Icon name="pencil-ai" className="me-1 size-4" />{t('sessions.sidebar.session.menu.rename')}</DropdownMenuItem></SessionMenuItemHint>
+                    <SessionMenuItemHint hint={t('sessions.sidebar.session.menuHint.rename')}><DropdownMenuItem onClick={() => { pendingHeaderRenameRef.current = currentSessionId; }}><Icon name="pencil-ai" className="me-1 size-4" />{t('sessions.sidebar.session.menu.rename')}{renameShortcut ? <span className="ms-auto ps-3 typography-meta text-muted-foreground">{renameShortcut}</span> : null}</DropdownMenuItem></SessionMenuItemHint>
                     <SessionAiRenameMenuItem sessionID={currentSessionId} directory={sessionDirectory} open={isHeaderSessionMenuOpen} Item={DropdownMenuItem} />
                     <SessionMenuItemHint hint={t('sessions.sidebar.session.menuHint.copyId')}><DropdownMenuItem onClick={() => currentSessionId && copySessionIdFor(currentSessionId)}><Icon name="file-copy" className="me-1 size-4" />{t('sessions.sidebar.session.menu.copyId')}</DropdownMenuItem></SessionMenuItemHint>
                     <DropdownMenuSeparator />
@@ -1210,18 +1204,18 @@ export const Header: React.FC = () => {
                         </span>
                       </SessionMenuItemHint>
                     ) : null}
-                    {!isVSCode && isChatContext && currentSession && !currentSession.parentId && hasProjects ? (
+                    {!isVSCode && currentSession && canMoveSessionOutOf(currentSession) ? (
                       <SessionMenuItemHint hint={isCurrentSessionActive
                         ? t('sessions.sidebar.session.moveToWorktree.tooltipBusy')
-                        : t('sessions.moveChatToProject.hint')}>
+                        : t('sessions.moveSession.hint')}>
                         <span className="block">
                           <DropdownMenuItem
                             disabled={!sessionDirectory || isCurrentSessionActive || isCurrentSessionMovingToWorktree}
-                            onClick={() => setMoveChatDialogOpen(true)}
+                            onClick={() => setMoveSessionDialogOpen(true)}
                             className="w-full"
                           >
                             <Icon name="folder-shared" className="me-1 size-4" />
-                            {t('sessions.moveChatToProject.menu')}
+                            {t('sessions.moveSession.menu')}
                           </DropdownMenuItem>
                         </span>
                       </SessionMenuItemHint>
@@ -1230,9 +1224,9 @@ export const Header: React.FC = () => {
                     <HeaderSessionArchiveMenuItem
                       sessionId={currentSessionId}
                       Item={DropdownMenuItem}
-                      onArchive={() => setPendingHeaderRetentionAction({ action: 'archive', sessionId: currentSessionId })}
+                      onArchive={() => void runHeaderRetentionAction('archive', currentSessionId)}
                     />
-                    <SessionMenuItemHint hint={t('sessions.sidebar.session.menuHint.delete')}><DropdownMenuItem className="text-destructive focus:text-destructive" onClick={() => { if (currentSessionId) setPendingHeaderRetentionAction({ action: 'delete', sessionId: currentSessionId }); }}><Icon name="delete-bin" className="me-1 size-4" />{t('sessions.sidebar.bulkActions.delete')}</DropdownMenuItem></SessionMenuItemHint>
+                    <SessionMenuItemHint hint={t('sessions.sidebar.session.menuHint.delete')}><DropdownMenuItem className="text-destructive focus:text-destructive" onClick={() => { if (currentSessionId) setPendingDeleteSessionId(currentSessionId); }}><Icon name="delete-bin" className="me-1 size-4" />{t('sessions.sidebar.bulkActions.delete')}</DropdownMenuItem></SessionMenuItemHint>
                   </DropdownMenuContent>
                 </DropdownMenu>
               ) : null}
@@ -1304,6 +1298,14 @@ export const Header: React.FC = () => {
         {/* Spacing comes from the gap only, so whichever control ends up last
             sits on the header's own right padding with no trailing margin. */}
         <div className="flex shrink-0 items-center gap-2">
+          {/* What people check or press all through a session sits here in
+              every layout: the side panels come and go, these stay put. */}
+          {!isVSCode && !activeSurfaceHeader ? (
+            <>
+              <HeaderContextUsage buttonClassName={DESKTOP_HEADER_ICON_BUTTON_CLASS} />
+              <HeaderProjectControls buttonClassName={DESKTOP_HEADER_ICON_BUTTON_CLASS} />
+            </>
+          ) : null}
           {showMiniChatHeaderAction ? (
             <Tooltip>
               <TooltipTrigger asChild>
@@ -1317,7 +1319,7 @@ export const Header: React.FC = () => {
                 </button>
               </TooltipTrigger>
               <TooltipContent side="bottom">
-                {isNewSessionDraftOpen ? t('header.actions.newMiniChat') : t('header.actions.openSessionMiniChat')}
+                <TooltipLabelWithShortcut label={isNewSessionDraftOpen ? t('header.actions.newMiniChat') : t('header.actions.openSessionMiniChat')} shortcut={isNewSessionDraftOpen ? formatShortcutForDisplay(getEffectiveShortcutCombo('new_mini_chat', shortcutOverrides), '') : undefined} />
               </TooltipContent>
             </Tooltip>
           ) : null}
@@ -1370,29 +1372,26 @@ export const Header: React.FC = () => {
       >
         {renderDesktop()}
       </header>
-      <MoveChatToProjectDialog
-        open={moveChatDialogOpen}
-        onOpenChange={setMoveChatDialogOpen}
-        onPick={moveCurrentChatToProject}
-      />
-      <Dialog open={pendingHeaderRetentionAction !== null} onOpenChange={(open) => { if (!open) setPendingHeaderRetentionAction(null); }}>
+      {moveSessionDialogOpen && currentSessionId && sessionDirectory ? (
+        <MoveSessionDialog
+          open
+          onOpenChange={setMoveSessionDialogOpen}
+          sessionId={currentSessionId}
+          sourceDirectory={sessionDirectory}
+        />
+      ) : null}
+      <Dialog open={pendingDeleteSessionId !== null} onOpenChange={(open) => { if (!open) setPendingDeleteSessionId(null); }}>
         <DialogContent showCloseButton={false} className="max-w-sm gap-5">
           <DialogHeader>
-            <DialogTitle>{pendingHeaderRetentionAction?.action === 'delete'
-              ? t('sessions.sidebar.dialogs.deleteSession.title')
-              : t('sessions.sidebar.dialogs.archiveSession.title')}</DialogTitle>
-            <DialogDescription>{pendingHeaderRetentionAction?.action === 'delete'
-              ? t('sessions.sidebar.dialogs.deleteSession.single', { sessionTitle: currentSessionTitle })
-              : t('sessions.sidebar.dialogs.archiveSession.single', { sessionTitle: currentSessionTitle })}</DialogDescription>
+            <DialogTitle>{t('sessions.sidebar.dialogs.deleteSession.title')}</DialogTitle>
+            <DialogDescription>{t('sessions.sidebar.dialogs.deleteSession.single', { sessionTitle: pendingDeleteSessionTitle })}</DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button variant="outline" size="sm" onClick={() => setPendingHeaderRetentionAction(null)}>
+            <Button variant="outline" size="sm" onClick={() => setPendingDeleteSessionId(null)}>
               {t('sessions.sidebar.dialogs.cancel')}
             </Button>
-            <Button variant="destructive" size="sm" onClick={() => void confirmHeaderRetentionAction()}>
-              {pendingHeaderRetentionAction?.action === 'delete'
-                ? t('sessions.sidebar.bulkActions.delete')
-                : t('sessions.sidebar.bulkActions.archive')}
+            <Button variant="destructive" size="sm" onClick={() => void confirmHeaderDelete()}>
+              {t('sessions.sidebar.bulkActions.delete')}
             </Button>
           </DialogFooter>
         </DialogContent>
