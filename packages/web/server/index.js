@@ -103,7 +103,9 @@ import { createSessionWarmingRuntime } from './lib/session-warming/runtime.js';
 import { createTrackerRegistry } from './lib/trackers/registry.js';
 import { createTrackerSessionStatus } from './lib/trackers/session-status.js';
 import { sourceControlProviderDescriptors } from './lib/source-control/provider-descriptors.js';
-import { createSessionKnowledgeRuntime } from './lib/session-knowledge/runtime.js';
+import { createSessionKnowledgeRuntime, measureMemoryIndex } from './lib/session-knowledge/runtime.js';
+import { createMemoryDreaming } from './lib/agent-memory/dreaming.js';
+import { isAutoModel } from './lib/routing/defaults.js';
 import { createMessageSearchRuntime } from './lib/message-search/runtime.js';
 import { createScheduledTasksRuntime } from './lib/scheduled-tasks/runtime.js';
 import { resolveSessionDefaults } from './lib/scheduled-tasks/session-defaults.js';
@@ -112,6 +114,7 @@ import { createUnregisteredScheduledWorktreeBridge } from './lib/scheduled-tasks
 import { createServerStartupRuntime } from './lib/opencode/server-startup-runtime.js';
 import { createTunnelWiringRuntime } from './lib/opencode/tunnel-wiring-runtime.js';
 import { createStartupPipelineRuntime } from './lib/opencode/startup-pipeline-runtime.js';
+import { createHiddenSessionRegistry } from './lib/opencode/hidden-sessions.js';
 import { runCliEntryIfMain } from './lib/opencode/cli-entry-runtime.js';
 import { registerNotificationRoutes } from './lib/notifications/routes.js';
 import { createNotificationEmitterRuntime } from './lib/notifications/emitter-runtime.js';
@@ -1269,7 +1272,13 @@ const extensionServiceLifetime = createServiceLifetime({
   persistPath: extensionsPersistPath(OPENCHAMBER_DATA_DIR),
 });
 
+// Sessions marked `metadata.hidden: true`, such as a dreaming pass over the
+// agent memory or a plugin's own: no client and no server-side consumer sees
+// their events or records.
+const hiddenSessions = createHiddenSessionRegistry();
+
 const globalMessageStreamHub = createGlobalMessageStreamHub({
+  isHiddenPayload: hiddenSessions.isHiddenPayload,
   buildOpenCodeUrl,
   getOpenCodeAuthHeaders,
   upstreamStallTimeoutMs: getUpstreamStallTimeoutMs,
@@ -1472,6 +1481,13 @@ globalMessageStreamHub.subscribeStatus((status) => {
     openCodeTrust.followLocations(true);
     // A goal whose idle event fell while the stream was down has no timer.
     void sessionGoalRuntime.recoverActiveGoals();
+    // Hidden sessions that already exist (a pass that outlived its server, a
+    // plugin's) are learned before their next event can reach a client.
+    void hiddenSessions.seed(async (cursor) => {
+      const query = cursor ? `?limit=200&cursor=${encodeURIComponent(cursor)}` : '?limit=200';
+      const response = await fetch(buildOpenCodeUrl(`/api/session${query}`, ''), { headers: getOpenCodeAuthHeaders() });
+      return response.ok ? response.json() : null;
+    }).catch(() => {});
   } else if (status?.type === 'disconnect' || status?.type === 'error') openCodeTrust.followLocations(false);
 });
 
@@ -1595,6 +1611,7 @@ const serverUtilsRuntime = createServerUtilsRuntime({
   // the global SSE stream their events. Called, not captured: the host is made in `main`.
   getMergeSpaceSessionList: () => (spacesHost ? (payload) => spacesHost.mergeSessionList(payload) : null),
   getSpaceEventHub: () => (spacesHost ? globalMessageStreamHub : null),
+  hiddenSessions,
   openCodeTrust,
   mcpOAuthSignIn,
   // The checkout gate loads a folder's saved setup state on its first request,
@@ -2032,6 +2049,22 @@ const emitAgentMemoryChangedEvent = (event) => {
     }
   }
 };
+
+// Dreaming: the agent memory tidies itself in a hidden session, once a day when
+// there is something to tidy and nothing else runs (`lib/agent-memory/dreaming.js`).
+const memoryDreaming = createMemoryDreaming({
+  agentMemoryRuntime,
+  readSettings: () => readSettingsFromDiskMigrated(),
+  resolveProjectId: (directory) => resolveMemoryProjectId(directory),
+  measureIndex: measureMemoryIndex,
+  hiddenSessions,
+  buildOpenCodeUrl,
+  getOpenCodeAuthHeaders,
+  emitMemoryChanged: emitAgentMemoryChangedEvent,
+  isDirectoryTrusted: (directory) => openCodeTrust.isTrusted(directory).catch(() => false),
+  resolveSessionDefaults,
+  isAutoModel,
+});
 // The catalog a scheduled run resolves its model against, read through the
 // same client the rest of the server uses. Every writer that stores a model
 // goes through the service, so one reader keeps one rule.
@@ -2200,6 +2233,7 @@ const serviceHostApi = createServiceHostApi({
 serviceHostApi.register();
 
 const openChamberControlService = createOpenChamberControlService({
+  isHiddenSession: (sessionID, record) => hiddenSessions.has(sessionID, record),
   chatsScope: scheduledChatsScope,
   chatRoots: [path.join(OPENCHAMBER_USER_CONFIG_ROOT, 'chats'), OPENCHAMBER_CHATS_DIR],
   updateSessionMetadata: updateSessionMetadataWith,
@@ -3227,6 +3261,7 @@ async function main(options = {}) {
   } catch (error) {
     console.warn('[ScheduledTasks] Failed to start runtime:', error?.message || error);
   }
+  memoryDreaming.start();
 
   // Only opens a relay control socket when the user opted in (config enabled).
   // Reconcile the relay lifecycle from demand on startup: run it if any relay

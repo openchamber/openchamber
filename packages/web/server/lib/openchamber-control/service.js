@@ -335,6 +335,8 @@ export const createOpenChamberControlService = (dependencies) => {
     loadQuota = null,
     sleep = (duration) => new Promise((resolve) => setTimeout(resolve, duration)),
     now = Date.now,
+    // Sessions OpenChamber runs for itself (`../opencode/hidden-sessions.js`): never listed or counted.
+    isHiddenSession = () => false,
   } = dependencies;
 
   const wait = (duration, signal) => {
@@ -547,7 +549,7 @@ export const createOpenChamberControlService = (dependencies) => {
     if (!statuses || typeof statuses !== 'object' || Array.isArray(statuses)) {
       throw new OpenChamberControlError('Invalid session status response', 500);
     }
-    return statuses;
+    return Object.fromEntries(Object.entries(statuses).filter(([id]) => !isHiddenSession(id)));
   };
 
   // A permission the server answers by itself never reaches the user.
@@ -672,6 +674,7 @@ export const createOpenChamberControlService = (dependencies) => {
       const page = await Promise.all((Array.isArray(response?.data) ? response.data : []).map(withArchiveEntry));
       for (const record of page) {
         const id = asNonEmptyString(record?.id);
+        if (isHiddenSession(id, record)) continue;
         if (id) {
           if (seenSessionIds.has(id)) continue;
           seenSessionIds.add(id);

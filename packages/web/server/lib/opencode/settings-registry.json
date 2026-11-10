@@ -195,6 +195,15 @@
     "agentMemoryToolEnabled": {
       "scope": "instance"
     },
+    "agentMemoryDreamingEnabled": {
+      "scope": "instance"
+    },
+    "agentMemoryDreamingModel": {
+      "scope": "instance"
+    },
+    "agentMemoryDreamingVariant": {
+      "scope": "instance"
+    },
     "agentKnowledgeToolEnabled": {
       "scope": "instance"
     },
