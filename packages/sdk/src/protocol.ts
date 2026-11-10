@@ -89,6 +89,7 @@ const themeTokensSchema = z.object({
   error: z.string().min(1),
   info: z.string().min(1),
   font: z.string().min(1),
+  fontSize: z.string().min(1).optional(),
   mono: z.string().min(1),
   radius: z.string().min(1),
   syntaxKeyword: z.string().min(1).optional(),

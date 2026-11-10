@@ -48,6 +48,7 @@ import {
 import { useGuestBadgeStore } from '@/lib/guests/badge-store';
 import { guestMay, isGuestActive } from '@/lib/guests/capabilities';
 import { guestFileOperation } from '@/lib/guests/files';
+import { useHostTypography } from '@/lib/guests/useHostTypography';
 import { guestGenerate } from '@/lib/guests/generate';
 import { guestGenerateResults, lateGenerateResult, type GenerateOwner } from '@/lib/guests/generate-results';
 import { useConfigStore } from '@/stores/useConfigStore';
@@ -147,8 +148,6 @@ type PluginPaneProps = {
 // Isolation is the unique contentWindow plus event.source on receive.
 const OPAQUE_FRAME_TARGET_ORIGIN = '*';
 
-const HOST_FONT_FALLBACK = '"SF Pro Text", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif';
-const HOST_MONO_FALLBACK = 'ui-monospace, "SFMono-Regular", "Menlo", "Cascadia Mono", "Segoe UI Mono", monospace';
 const HOST_RADIUS_FALLBACK = '0.5625rem';
 
 // Sent to the guest, not shown by the host; the guest decides how to surface it.
@@ -275,6 +274,7 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
   const readableColors = React.useMemo(() => getReadableThemeColors(currentTheme), [currentTheme]);
   // A frame in a docked panel paints the panel's colour, not the chat's.
   const pageColors = usePageColors();
+  const typography = useHostTypography();
   const ready = React.useMemo<HostReadyContext>(() => {
     const features: NonNullable<HostReadyContext['features']> = {};
     if (guest?.storageId && globalThis.indexedDB) features.deviceStorage = true;
@@ -312,8 +312,9 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
         warning: currentTheme.colors.status.warning,
         error: currentTheme.colors.status.error,
         info: currentTheme.colors.status.info,
-        font: readCssVar('--font-sans', HOST_FONT_FALLBACK),
-        mono: readCssVar('--font-mono', HOST_MONO_FALLBACK),
+        font: typography.font,
+        fontSize: typography.fontSize,
+        mono: typography.mono,
         radius: readCssVar('--radius', HOST_RADIUS_FALLBACK),
         syntaxKeyword: currentTheme.colors.syntax.base.keyword,
         syntaxString: currentTheme.colors.syntax.base.string,
@@ -336,7 +337,7 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
     popover: popoverHost?.context ?? popover,
     features,
     };
-  }, [block, connection, currentTheme, pageColors, readableColors, directory, guest?.backgroundEntry, guest?.storageId, headless, item, locale, oauthStatus, onStatusControls, popover, popoverHost, sessionSnapshot, surface]);
+  }, [block, connection, currentTheme, pageColors, readableColors, typography, directory, guest?.backgroundEntry, guest?.storageId, headless, item, locale, oauthStatus, onStatusControls, popover, popoverHost, sessionSnapshot, surface]);
 
   const fileEditorEntry = surface === 'file' && fileEditor
     ? guest?.fileEditors?.find((editor) => editor.id === fileEditor.editorId)?.entry ?? null

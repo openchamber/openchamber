@@ -40,6 +40,12 @@ export type HostThemeTokens = {
   error: string;
   info: string;
   font: string;
+  /**
+   * The app's body text size as a pixel length, `14px` at the default
+   * interface font size and larger when the user raises it. `applyHostTheme`
+   * makes it the frame's `1rem`. Hosts before this token leave it out.
+   */
+  fontSize?: string;
   /** Monospace stack for code and identifiers. */
   mono: string;
   radius: string;

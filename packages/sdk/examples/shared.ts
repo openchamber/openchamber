@@ -2,7 +2,7 @@ import { mountBadge, mountBanner } from '@openchamber/sdk/ui';
 
 // Example presentation, bundled into each extension. It is not an SDK dependency.
 const css = `
-*{box-sizing:border-box}html,body{margin:0;min-height:100%;background:var(--oc-bg);color:var(--oc-fg);font-family:var(--oc-font);font-size:14px;line-height:1.5}body{overflow-wrap:anywhere}button,input,textarea{font:inherit}[hidden]{display:none!important}
+*{box-sizing:border-box}html,body{margin:0;min-height:100%;background:var(--oc-bg);color:var(--oc-fg);font-family:var(--oc-font);font-size:1rem;line-height:1.5}body{overflow-wrap:anywhere}button,input,textarea{font:inherit}[hidden]{display:none!important}
 [data-oc-theme="dark"]{color-scheme:dark}[data-oc-theme="light"]{color-scheme:light}.toolbar:empty{display:none}
 .example{max-width:1160px;margin:auto;padding:20px;display:flex;flex-direction:column;gap:24px;container-type:inline-size}
 .example h1,.example h2,.example h3,.example p{margin:0}.example h1{font-size:clamp(25px,5vw,36px);font-weight:650;letter-spacing:-.04em;line-height:1.12}.example h2{font-size:15px;letter-spacing:-.015em}.example h3{font-size:13px;font-weight:600}

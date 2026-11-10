@@ -92,7 +92,7 @@ Each returns an unsubscribe function. State subscriptions replay the last known 
 | Field          | Type                     | Meaning                                                                                  |
 | -------------- | ------------------------ | ---------------------------------------------------------------------------------------- |
 | `theme.mode`   | `'light'                 | 'dark'`                                                                                  |
-| `theme.tokens` | surfaces, text, interaction states, `primary`, status colors, `font`, `mono`, `radius` | Pass to `applyHostReady` before mounting UI |
+| `theme.tokens` | surfaces, text, interaction states, `primary`, status colors, `font`, `fontSize` (the app's body text in px, follows the interface font size; absent from older hosts), `mono`, `radius` | Pass to `applyHostReady` before mounting UI |
 | `locale`       | `string`                 | Host language tag                                                                        |
 | `directory`    | `string                  | null`                                                                                    |
 | `session`      | snapshot or `null`       | Title falls back to `id`. `busy` is live status. `model` is `providerID/id` when present |
