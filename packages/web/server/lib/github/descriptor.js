@@ -78,9 +78,8 @@ export const githubDescriptor = Object.freeze({
   authMethods: Object.freeze({ device: true, pat: true, cli: Object.freeze({ tool: 'gh' }) }),
   transport: Object.freeze({
     httpsUsername: Object.freeze({ kind: 'fixed', value: 'x-access-token' }),
-    // Managed Git transport reaches github.com only; an enterprise host's
-    // tokens serve API reads and writes but never a clone or push.
-    managedHttpsInstances: 'default-only',
+    // The Git credential resolver pins each account to its own HTTPS origin.
+    managedHttpsInstances: 'any',
     appendDotGitToHttpsClone: false,
   }),
   urls: Object.freeze({

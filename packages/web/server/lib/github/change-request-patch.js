@@ -1,7 +1,5 @@
 import { documentDataUrl } from '../source-control/document-versions.js';
 import assert from 'node:assert/strict';
-import { markGitHubAuthAccountInvalid } from './auth.js';
-import { getOctokitForAccountId, getOctokitForHost } from './octokit.js';
 import { resolveGitHubRepoFromDirectory } from './repo/index.js';
 import { resolveRepoNetwork } from './repo/fork-detection.js';
 import { changeRequestNetworkTarget } from '../source-control/repository-network.js';
@@ -12,7 +10,7 @@ import { changeRequestNetworkTarget } from '../source-control/repository-network
  * the shell's: `session` (`{ instance, accountId }`, the read context's
  * account), `directory` and `remote` (the context's primary remote), the
  * number and an optional `sourceRepo`. The last argument holds dependency
- * overrides for tests and `onAccountUnavailable`.
+ * the session's Octokit and repository lookups.
  */
 
 const sameRepository = (left, right) => left.owner.toLowerCase() === right.owner.toLowerCase()
@@ -23,8 +21,7 @@ const sameRepository = (left, right) => left.owner.toLowerCase() === right.owner
  *
  * The host comes from the local checkout, not the pull request: sourceRepo
  * carries only owner/repo (the upstream for a fork), never the enterprise
- * host. github.com takes the read context's exact account; an enterprise host
- * is served by its own host-pinned token. A named `sourceRepo` is honoured
+ * host. Every instance uses the read context's exact account. A named `sourceRepo` is honoured
  * only inside the bound repository's network, the repository and the
  * upstream it was forked from, which is exactly what the bound pull request
  * list reads with the same account. So every listed pull request can be
@@ -41,34 +38,21 @@ async function resolvePullRequestRepo({ session, directory, remote, number, sour
       code: 'no-github-remote',
     });
   }
-  const hostKey = String(repo.host ?? '').trim().toLowerCase();
-  let account;
-  if (hostKey && hostKey !== 'github.com') {
-    const getHostOctokit = dependencies.getOctokitForHost ?? getOctokitForHost;
-    const octokit = await getHostOctokit(hostKey);
-    account = octokit ? { accountId: null, octokit } : null;
-  } else {
-    const getExactOctokit = dependencies.getOctokitForAccountId ?? getOctokitForAccountId;
-    account = await getExactOctokit(session?.accountId, {
-      onUnauthorized: async (identity, persisted) => {
-        await dependencies.onAccountUnavailable?.(identity);
-        if (persisted) await markGitHubAuthAccountInvalid(identity.accountId, 'unauthorized');
-      },
-    });
-  }
-  if (!account) {
+  const hostKey = String(repo.host ?? session?.instance ?? 'github.com').trim().toLowerCase();
+  const { octokit } = dependencies;
+  if (!octokit || hostKey !== session?.instance || (octokit.openChamberHost && octokit.openChamberHost !== hostKey)) {
     throw Object.assign(new Error('GitHub account is unavailable'), {
       statusCode: 401,
       code: 'github-not-connected',
     });
   }
 
-  if (linked && sourceRepo) return { octokit: account.octokit, repo: { owner: sourceRepo.owner, repo: sourceRepo.repo } };
+  if (linked && sourceRepo) return { octokit, repo: { owner: sourceRepo.owner, repo: sourceRepo.repo } };
 
   let target = repo;
   if (sourceRepo && !sameRepository(sourceRepo, repo)) {
     const resolveNetwork = dependencies.resolveRepoNetwork ?? resolveRepoNetwork;
-    const network = await resolveNetwork(account.octokit, directory, remote, { strictErrors: true });
+    const network = await resolveNetwork(octokit, directory, remote, { strictErrors: true });
     const member = changeRequestNetworkTarget(network, sourceRepo, sameRepository);
     if (!member) {
       throw Object.assign(new Error(`Pull request #${number} belongs to ${sourceRepo.owner}/${sourceRepo.repo}, which is outside this checkout's repository network`), {
@@ -78,7 +62,7 @@ async function resolvePullRequestRepo({ session, directory, remote, number, sour
     }
     target = { owner: member.owner, repo: member.repo };
   }
-  return { octokit: account.octokit, repo: { owner: target.owner, repo: target.repo } };
+  return { octokit, repo: { owner: target.owner, repo: target.repo } };
 }
 
 /**

@@ -1115,9 +1115,13 @@ export function registerProviderRoutes(app, {
       if (upstreamStatus === 401 && !error?.sourceControlAccountUnavailable && error?.sourceControlIdentity?.accountId) {
         const identity = error.sourceControlIdentity;
         statusCaches.get(identity.provider)?.invalidate({ instance: identity.instance, accountId: identity.accountId });
-        await impl.auth.invalidateAccount({
-          instance: identity.instance, accountId: identity.accountId, persisted: Boolean(error.sourceControlPersistedAccount),
-        });
+        // GitHub's CLI lookup already reconciles its non-persisted account
+        // in the Octokit hook. A stored credential is still this shell's to invalidate.
+        if (!(error.sourceControlInvalidated && !error.sourceControlPersistedAccount)) {
+          await impl.auth.invalidateAccount({
+            instance: identity.instance, accountId: identity.accountId, persisted: Boolean(error.sourceControlPersistedAccount),
+          });
+        }
       }
       if (Number.isInteger(upstreamStatus) && upstreamStatus >= 400 && upstreamStatus < 600) error.statusCode = upstreamStatus;
       throw error;

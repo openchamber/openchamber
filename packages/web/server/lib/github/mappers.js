@@ -94,7 +94,7 @@ export function matchesGitHubRepositoryUrl(value, owner, repo, host = '') {
   if (!isProviderString(value) || !value.trim()) return false;
   const expectedPath = `${owner}/${repo}`.toLowerCase();
   const raw = value.trim();
-  const scpMatch = raw.match(/^git@([^/\s:]+):([^/\s]+)\/([^/\s]+?)(?:\.git)?$/i);
+  const scpMatch = raw.match(/^[a-z0-9._-]+@([^/\s:]+):([^/\s]+)\/([^/\s]+?)(?:\.git)?$/i);
   if (scpMatch) return `${scpMatch[2]}/${scpMatch[3]}`.toLowerCase() === expectedPath;
 
   try {
@@ -102,7 +102,7 @@ export function matchesGitHubRepositoryUrl(value, owner, repo, host = '') {
     if (!['https:', 'ssh:'].includes(url.protocol)
       || url.password || url.search || url.hash
       || (url.protocol === 'https:' && url.username)
-      || (url.protocol === 'ssh:' && url.username !== 'git')) {
+      || (url.protocol === 'ssh:' && !/^[a-z0-9._-]+$/i.test(url.username))) {
       return false;
     }
     if (host && url.protocol === 'https:' && url.hostname.toLowerCase() !== host) return false;

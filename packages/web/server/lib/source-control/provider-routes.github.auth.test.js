@@ -1457,7 +1457,7 @@ describe('gh CLI account consent', () => {
   it('reports an active CLI account as connected when the saved current account is invalid', async () => {
     stubGitHubUsers();
     const saved = await auth.setGitHubAuth({ accessToken: 'token-a', user: { id: 7, login: 'saved-user' } });
-    await auth.markGitHubAuthAccountInvalid(saved.accountId);
+    await auth.markGitHubAuthAccountInvalidForHost('github.com', saved.accountId);
     auth.setGhCliActive(true);
 
     const response = await request(makeApp()).get('/api/source-control/github/auth/status').expect(200);

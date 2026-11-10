@@ -24,7 +24,7 @@ GitHub sits on the shared source-control route shell (`../source-control/provide
 - `reference-search.js`: issue, PR and discussion pages for the reference picker, and an item's detail.
 - `checks-summary.js`: the one checks summarizer shared by every PR read.
 - `review-draft.js`: a pull request's review as the diff draws it: the viewer's pending review and the open threads with their lines.
-- `change-request-patch.js`: a pull request's diff and one file's two sides for walkthroughs and the comparison view.
+- `change-request-patch.js`: a pull request's diff and one file's two sides for walkthroughs and the comparison view. It uses the Octokit already resolved for the bound session; the source-control shell handles account invalidation.
 
 ## Public exports
 
@@ -39,7 +39,7 @@ GitHub sits on the shared source-control route shell (`../source-control/provide
 - `setGitHubAuth({ accessToken, scope, tokenType, user, accountId })`: save or update a github.com account; the new account becomes current and gh CLI activation is cleared.
 - `activateGitHubAuth(accountId)`: switch active account; switching to a saved account clears gh CLI activation.
 - `clearGitHubAuth()`: clear current account.
-- `markGitHubAuthAccountInvalid(accountId)`: retain exact account metadata but make its credential unavailable.
+- `markGitHubAuthAccountInvalidForHost(host, accountId)`: retain exact account metadata but make its credential unavailable.
 - `removeGitHubAuthAccount(accountId)`: remove exactly one persisted account.
 - `getGitHubClientId()`: resolve client id.
 - `getGitHubScopes()`: resolve scopes.
@@ -55,7 +55,12 @@ GitHub sits on the shared source-control route shell (`../source-control/provide
 - `getOctokitOrNull(host)`: current Octokit, targeting the given Enterprise host when provided, or `null`. Caches and rate-limit cooldowns key off this host so one instance never leaks data or failures into another. Refuses (returns `null`) a host the server never authenticated with before any token lookup — see "Host trust" below.
 - `getOctokitForAccountId(accountId)`: exact persisted or verified CLI Octokit context with credential revision and provider-user identity. It never falls back to another account. A `github.com#cli:` id resolves only while the user has switched to the gh account (`isGhCliActive()`), and a `<host>#cli:` id only while that enterprise instance's gh login is active; otherwise both resolve to nothing, never to a credential stored for the host, so a canonical mutation answers 401 `SOURCE_CONTROL_ACCOUNT_UNAVAILABLE` instead of running as someone else. The gh token is otherwise read only to list the gh account in Settings.
 - `getGitHubCliCredential(accountId, revision?)`: the same gh account as a credential record shaped like a persisted one (`credentialId`, `credentialRevision: 1`, `providerUserId`, `accessToken`, `status: 'valid'`), under the same consent rule plus a check that gh is still signed in as that user. The server's source-control account resolver falls back to it after `getGitHubAuthByAccountId`, so Git transport (fork PR worktrees, managed clones, the credential helper) accepts the gh account that reads already use.
+- API origins: github.com uses `api.github.com`, an Enterprise Cloud data residency instance `name.ghe.com` uses `api.name.ghe.com`, and Enterprise Server uses its host's `/api/v3`. Octokit derives GraphQL from the selected root. The web host remains the instance identity, and redirects are refused for Enterprise requests.
 - `getGhCliToken(host)` (`gh-cli-credential.js`): the gh token for a host, `GH_HOST` pinned to it. gh's answer is reused per host until gh's `hosts.yml` changes (stat of the file in gh's own config dir), 5 minutes pass for a token or 30 seconds for "no token", or GitHub answers `401` to that token (`createOctokit` calls `forgetGhCliToken`). Concurrent callers share one gh run. A run that gave no answer (gh missing, failed to start, timed out) is never reused; gh exiting non-zero is its answer "no token".
+
+### Why Enterprise Cloud has a separate API origin
+
+GitHub Enterprise Cloud with data residency serves its API on `api.<instance>.ghe.com`. Enterprise Server serves it under `/api/v3` on the instance itself. The instance remains the web host for account and Git credential authority, and each API request stays on the corresponding origin.
 
 ### Repo
 
@@ -135,7 +140,7 @@ GitHub keeps a chain of PRs, each targeting the branch of the one below, as a st
 - Canonical issue lists retain successful sibling repositories and return failed repository selectors in `failedRepos`. They reject if every repository fails.
 - Canonical issue search rejects search endpoint failures. It enriches matched issues through their repository, retains successful enrichments with `failedRepos` for failed repositories, and rejects when every matched enrichment fails.
 - Canonical issue search rejects malformed or out-of-network `repository_url` values instead of assigning those results to another repository in the fork network.
-- Canonical branch, issue, pull-list, and pull-context reads reject malformed provider collections and records, including pull requests, comments, reviews, files, and fork metadata. Head-repository web and clone URLs must resolve to the reported repository on that repository's GitHub host (github.com or an enterprise instance). Pull-list reads may report failed non-primary repositories, but failure of the trusted primary remote fails the read.
+- Canonical branch, issue, pull-list, and pull-context reads reject malformed provider collections and records, including pull requests, comments, reviews, files, and fork metadata. Head-repository URLs must name the reported repository. An SSH URL may carry a user-specific username, as on Enterprise Cloud; worktree transfer uses the separately validated HTTPS clone URL on the bound host. Pull-list reads may report failed non-primary repositories, but failure of the trusted primary remote fails the read.
 - Canonical upstream reads propagate repository metadata, default-branch ref, rate-limit, and network failures. No ambient best-effort upstream route remains.
 - Malformed optional check-run or combined-status collections are never summarized as zero checks. A valid fallback may still supply CI; otherwise CI remains unavailable. Failed or malformed workflow-job detail remains non-authoritative and may leave the check run without job details.
 
@@ -161,7 +166,7 @@ that page, so callers cannot mistake a partial page for a complete one.
 - It expands each repo through `parent` and `source` so PRs in upstream repos can still be found. Parent/source candidates inherit the requesting repo's host.
 - It skips PR lookup when the current branch matches that repo's default branch.
 - It first searches for **open** PRs by likely source owner plus exact head branch.
-- If that fails, it falls back to broader GitHub search for open PRs on the branch name.
+- If that fails with an incomplete list, it searches the branch name and accepts only a target repository and head source from the resolved candidates. A search miss is scoped to the host, account, target repositories, source repositories and branch, so one checkout cannot hide another's PR.
 - An **open PR from any candidate repo always wins** over a closed/merged one, so a merged fork PR can never hide an open upstream PR for the same head.
 - Only when no target has an open PR does it return the branch's newest closed/merged PR, as history. Its head commit must be an ancestor of the checkout's `HEAD`, or have a patch-equivalent commit there after a rebase. Missing old objects cannot prove that association. History is matched by branch name, and names get reused: a fresh worktree cut from the default branch under a name that was merged before must not inherit the old PR.
 - History is looked up only for a non-default branch's own name and the ranked-first remote's fork network: its repository plus its `parent` and `source` targets. This restores merged fork PRs hosted by an upstream repository without querying unrelated contributor remotes, while terminal history never attaches to a target's default branch. A contributor fork PR worktree also asks its ranked-first remote, where that PR merges. The primary network has at most three targets, so history remains bounded instead of fanning out across every configured remote.
@@ -175,7 +180,7 @@ that page, so callers cannot mistake a partial page for a complete one.
 
 - GitHub rate-limit (primary or secondary) surfaces as a thrown `403`/`429`; Octokit is used without the throttling plugin, so the module tracks it explicitly instead.
 - The status read's gate (`isGitHubRateLimited(host)`) short-circuits PR-status work on a host until its cooldown passes; it and a rate limit hit during the read answer as a transient failure, which the shell serves from the last-known status (even stale) or a `503`, so a burst does not pile more failing calls onto an instance.
-- **Cooldowns are keyed per host** (`rate-limit.js`): an enterprise instance exhausting its quota does not pause `github.com` polling, or vice versa. `github.com` and `api.github.com` share one key.
+- **Cooldowns are keyed per host** (`rate-limit.js`): an enterprise instance exhausting its quota does not pause `github.com` polling, or vice versa. A cloud instance and its API host share one key.
 - When the host is not passed explicitly, it is derived from the Octokit error's request URL.
 
 ## Batched live summaries

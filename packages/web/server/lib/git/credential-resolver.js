@@ -425,7 +425,7 @@ export const endpointIsInstanceOrigin = (descriptor, origin, endpoint) => {
 /**
  * A managed HTTPS credential reaches only its own instance: the descriptor's
  * origin, and only the default instances when the provider grants transport
- * nowhere else (GitHub Enterprise tokens never clone or push).
+ * nowhere else.
  */
 const assertHttpsEndpoint = (descriptor, reference, endpoint) => {
   if (!['https', 'http'].includes(endpoint.protocol)) throw new Error('Managed HTTPS credentials require HTTPS');
