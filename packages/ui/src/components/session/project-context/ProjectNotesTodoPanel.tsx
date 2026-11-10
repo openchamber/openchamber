@@ -619,6 +619,7 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
           // width instead of rows stretched edge to edge.
           <div className={cn(wide && 'mx-auto max-w-3xl')}>
             <TodosSection
+              projectPath={projectRef.path}
               todos={todos}
               query={query}
               disabled={isLoading}

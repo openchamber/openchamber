@@ -347,6 +347,8 @@ export const NotesSection: React.FC<{
         placeholder={t('rightSidebar.contextNotesTodo.notes.placeholder')}
         addLabel={t('rightSidebar.contextNotesTodo.notes.addAria')}
         maxLength={PROJECT_NOTE_BODY_MAX_LENGTH}
+        projectPath={projectRef.path}
+        draftKind="note"
         disabled={disabled}
         onSubmit={handleAdd}
       />
