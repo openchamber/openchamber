@@ -2420,6 +2420,7 @@ export const dict: Record<I18nKey, string> = {
   'session.githubIntegration.validation.failed': '検証に失敗しました',
   'chat.fileAttachment.toast.attachFailed': 'ファイルの添付に失敗しました',
   'chat.fileAttachment.toast.tooLarge': '{name} は大きすぎるため添付できません（{size} 超）。プロジェクト内のファイルなら @ でメンションしてください。',
+  'chat.fileAttachment.toast.heicConversionFailed': '{name} を HEIC から JPEG に変換できなかったため、添付されませんでした。写真を JPEG で保存してから、もう一度添付してください。',
   'chat.fileAttachment.toast.overSendLimit': '{name} は大きすぎるため添付できません（{size} 超）。',
   'chat.fileAttachment.toast.someFilesSkipped': '一部のファイルがスキップされました:\n{summary}',
   'chat.fileAttachment.toast.vscodePickFailed': 'VS Codeでのファイル選択に失敗しました',

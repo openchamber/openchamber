@@ -2,8 +2,10 @@ import { afterAll, expect, mock, test } from 'bun:test';
 import { strToU8, zipSync } from 'fflate';
 import { attachmentBasename, attachmentWireName } from '@/lib/attachmentIdentity';
 
+let decodeHeic = async (): Promise<Blob> => new Blob(['jpeg-data'], { type: 'image/jpeg' });
+
 mock.module('heic2any', () => ({
-  default: async () => new Blob(['jpeg-data'], { type: 'image/jpeg' }),
+  default: async () => decodeHeic(),
 }));
 
 /**
@@ -223,3 +225,25 @@ for (const extension of ['heic', 'heif']) {
     if (file) expect(attachmentBasename(attachmentWireName(file))).toBe(file.filename);
   });
 }
+
+test('a HEIC the decoder cannot read still goes as a note naming its path on desktop', async () => {
+  const { useInputStore } = await import('./input-store');
+  useInputStore.getState().clearAttachedFiles();
+  decodeHeic = async () => {
+    throw new Error('ERR_LIBHEIF format not supported');
+  };
+  try {
+    // The documented desktop fallback: a file the client cannot prepare goes
+    // as a note naming its path on the shared disk, so the agent can convert
+    // it with its own tools.
+    expect(
+      await useInputStore.getState().addAttachedFile(new File(['heic-data'], 'IMG_4015.heic', { type: 'image/heic' })),
+    ).toBe(true);
+    const [file] = useInputStore.getState().attachedFiles;
+    expect(file?.mimeType).toBe('text/plain');
+    expect(file?.filename).toBe('IMG_4015.heic');
+    expect(await file?.file?.text()).toContain('/Users/me/Documents/IMG_4015.heic');
+  } finally {
+    decodeHeic = async () => new Blob(['jpeg-data'], { type: 'image/jpeg' });
+  }
+});

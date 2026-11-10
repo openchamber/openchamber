@@ -8,7 +8,7 @@ import type { AttachIssueRequest } from '@openchamber/sdk'
 import type { ContextPartMetadata } from '@/lib/messages/contextParts'
 import type { AttachedFile } from "@/stores/types/sessionTypes"
 import type { InlineCommentDraftTarget } from "@/stores/useInlineCommentDraftStore"
-import { prepareAttachmentFiles } from "./attachment-files"
+import { HeicConversionError, prepareAttachmentFiles } from "./attachment-files"
 import { getChatDraftIdentityKey, subscribeChatDraftDeletion, type ChatDraftIdentity } from "@/lib/chatDraftPersistence"
 import { pathForDroppedFile } from "@/lib/desktop"
 import { attachmentBasename } from "@/lib/attachmentIdentity"
@@ -459,7 +459,18 @@ export const useInputStore = create<InputState>()((set, get) => ({
       let attachedFiles: AttachedFile[] | undefined
       try {
         attachedFiles = await prepareLocalAttachments(file, reservedFilenames)
-      } catch {
+      } catch (error) {
+        if (error instanceof HeicConversionError) {
+          // On desktop the file has a path on the shared disk, and a note
+          // naming it is the documented fallback for a file that cannot be
+          // prepared: the agent converts it with its own tools. Everywhere
+          // else there is no such path, so name the cause — the photo has to
+          // be saved as JPEG — instead of the generic "failed to attach".
+          if (referencePath) return attachReference(referencePath)
+          throw new Error(formatMessage(useI18nStore.getState().dictionary, 'chat.fileAttachment.toast.heicConversionFailed', {
+            name: file.name,
+          }))
+        }
         return false
       }
       if (generation !== attachmentReadGeneration) return false

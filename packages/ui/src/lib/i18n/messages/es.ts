@@ -2392,6 +2392,7 @@ export const dict: Record<I18nKey, string> = {
   "session.githubIntegration.validation.failed": "No se pudo validar",
   "chat.fileAttachment.toast.attachFailed": "No se pudo adjuntar el archivo",
   "chat.fileAttachment.toast.tooLarge": "{name} es demasiado grande para adjuntarlo (más de {size}). Si está en el proyecto, menciónalo con @.",
+  "chat.fileAttachment.toast.heicConversionFailed": "No se pudo convertir {name} de HEIC a JPEG, así que no se adjuntó. Guarda la foto como JPEG y vuelve a adjuntarla.",
   "chat.fileAttachment.toast.overSendLimit": "{name} es demasiado grande para adjuntarlo (más de {size}).",
   "chat.fileAttachment.toast.someFilesSkipped": "Algunos archivos se omitieron:\n{summary}",
   "chat.fileAttachment.toast.vscodePickFailed": "No se pudieron seleccionar archivos en VS Code",
