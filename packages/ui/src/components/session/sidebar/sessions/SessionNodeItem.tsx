@@ -69,7 +69,10 @@ import { SIDEBAR_REF_TOOLTIP_CLOSE_DELAY_MS, SidebarRefLinks } from './SidebarRe
 import { useScrollDismissedTooltip } from './useScrollDismissedTooltip';
 import { refTintStyle } from '@/lib/source-control/prVisualState';
 import { useSessionRefLines } from './useSessionRefLines';
-import { useSessionUnread } from '@/sync/session-unread';
+import { useSessionMarkedUnread, useSessionUnread } from '@/sync/session-unread';
+import { SessionReadMenuItem } from '@/components/session/SessionReadMenuItem';
+import { toggleSessionRead } from '@/components/session/sessionReadActions';
+import { openSessionInSidePanel } from '@/components/session/sessionSidePanel';
 import { useHasSessionTurnDuration } from '@/sync/session-turn-duration';
 import { SessionActivityDuration } from '@/components/session/SessionActivityDuration';
 import { useSessionMultiSelectStore } from '@/stores/useSessionMultiSelectStore';
@@ -98,7 +101,6 @@ import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSessionFoldersStore } from '@/stores/useSessionFoldersStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
-import { resolveEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import type { WorktreeMetadata } from '@/types/worktree';
 import {
   getSessionWorktreeMenuState,
@@ -353,7 +355,6 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
   const getSessionFolderId = useSessionFoldersStore((state) => state.getSessionFolderId);
   const removeSessionFromFolder = useSessionFoldersStore((state) => state.removeSessionFromFolder);
   const addSessionToFolder = useSessionFoldersStore((state) => state.addSessionToFolder);
-  const openContextPanelTab = useUIStore((state) => state.openContextPanelTab);
 
   const isVSCode = React.useMemo(() => isVSCodeRuntime(), []);
   const isElectron = React.useMemo(() => canUseElectronDesktopIPC(), []);
@@ -615,6 +616,7 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
   } = useSessionBlockingRequests(blockingBadgeSessionScopes);
   const isSubtaskSession = Boolean(resolvedSession.parentID);
   const needsAttention = useSessionUnread(session.id);
+  const markedUnread = useSessionMarkedUnread(session.id);
   // The last conversation, as the list orders by: a rename or a metadata
   // write must not make an old session read as just used.
   const sessionTimestamp = getSessionActivityTime(resolvedSession) || Date.now();
@@ -765,17 +767,7 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
 
   const handleOpenInSidePanel = () => {
     if (!sessionDirectory) return;
-    // The tab lives under the main chat's directory, which is the one
-    // the panel reads; the session's own directory rides along so a
-    // chat from another project (or Chat) still resolves itself.
-    const panelDirectory = resolveEffectiveDirectory() ?? sessionDirectory;
-    openContextPanelTab(panelDirectory, {
-      mode: 'chat',
-      dedupeKey: `session:${session.id}`,
-      label: sessionTitle,
-      sessionTitleFallback: sessionTitle,
-      targetDirectory: sessionDirectory,
-    });
+    openSessionInSidePanel(session.id, sessionDirectory, sessionTitle);
   };
 
   // Capture outside-clicks to save edits — immune to focus-race with onBlur.
@@ -926,7 +918,7 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
   }
 
   const pendingFormLabel = t('sessions.sidebar.session.status.questionPending');
-  const showUnreadStatus = !isSessionActionPending && !isStreaming && needsAttention && !isActive;
+  const showUnreadStatus = !isSessionActionPending && !isStreaming && needsAttention && (!isActive || markedUnread);
   const showStatusMarker = isStreaming || showUnreadStatus;
   // Running indicators are static by default; the local appearance preference
   // enables stepped motion without changing the elapsed-turn counter.
@@ -1129,6 +1121,10 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
       handleOpenInSidePanel();
       return;
     }
+    if (event?.altKey) {
+      toggleSessionRead(session.id, needsAttention, t);
+      return;
+    }
     if (event?.currentTarget) holdSessionRowPosition(event.currentTarget);
     handleSessionSelect(session.id, sessionDirectory);
   };
@@ -1258,6 +1254,7 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
         {t('sessions.sidebar.session.menu.copyId')}
       </Item>
       </SessionMenuItemHint>
+      <SessionReadMenuItem sessionId={session.id} Item={Item} className="[&>svg]:me-1" iconClassName="me-1 h-4 w-4" showShortcut={!mobileVariant} />
       <PinToMenu
         slots={{ Item, Separator, Sub, SubTrigger, SubContent }}
         current={isPinnedSession ? getSessionPinList(session) ?? DEFAULT_PIN_LIST : null}

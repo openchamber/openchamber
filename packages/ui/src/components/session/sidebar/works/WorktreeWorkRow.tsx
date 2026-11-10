@@ -28,6 +28,7 @@ import { handleSessionRenameKeyDown } from '@/components/session/sessionRenameKe
 import { useOpenTrackerItem } from '@/components/sourceBoard/openTrackerItem';
 import { useShiftKeyHeld } from '@/hooks/useShiftKeyHeld';
 import { useI18n } from '@/lib/i18n';
+import { SessionReadShortcut } from '@/components/session/SessionReadMenuItem';
 import { sessionEvents } from '@/lib/sessionEvents';
 import { refTintStyle } from '@/lib/source-control/prVisualState';
 import { cn, formatDirectoryName } from '@/lib/utils';
@@ -179,8 +180,13 @@ export function WorktreeWorkRow(props: Props): React.ReactNode {
   const expandable = !empty;
   const expanded = forceExpanded || !collapsed;
 
-  const openWork = (): void => {
-    if (!renaming) work.open();
+  const openWork = (event?: React.MouseEvent): void => {
+    if (renaming) return;
+    if (event?.altKey && work.canMarkUnread) {
+      work.toggleRead();
+      return;
+    }
+    work.open();
   };
   const newChat = (event: React.MouseEvent): void => {
     event.stopPropagation();
@@ -351,6 +357,13 @@ export function WorktreeWorkRow(props: Props): React.ReactNode {
           <span>{t('sessions.sidebar.work.menu.rename')}</span>
         </Slots.Item>
       ) : null}
+      {work.canMarkUnread ? (
+        <Slots.Item onClick={work.toggleRead}>
+          <Icon name={work.hasUnread ? 'chat-check' : 'checkbox-circle'} className="h-4 w-4" />
+          <span>{work.hasUnread ? t('sessions.sidebar.session.menu.markRead') : t('sessions.sidebar.session.menu.markUnread')}</span>
+          {alwaysShowActions ? null : <SessionReadShortcut />}
+        </Slots.Item>
+      ) : null}
       {canPin ? (
         <PinToMenu
           slots={Slots}
@@ -475,7 +488,7 @@ export function WorktreeWorkRow(props: Props): React.ReactNode {
         style={{ paddingInlineStart: detailed ? sessionDetailedRowPaddingLeft(depth) : sessionTreeRowPaddingLeft(depth) }}
         // The whole box opens the work, its second line and paddings too.
         onClick={(event) => {
-          if (isRowBoxClick(event)) openWork();
+          if (isRowBoxClick(event)) openWork(event);
         }}
         className={cn(
           // The same box as a session row in the same place: zone rows are a

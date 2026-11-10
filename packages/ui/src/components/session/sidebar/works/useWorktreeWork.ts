@@ -11,7 +11,8 @@ import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useFirstSessionWithOpenTurn } from '@/sync/global-session-status';
 import { useSessionUIStore } from '@/sync/session-ui-store';
-import { isSessionUnread } from '@/sync/session-unread';
+import { markSessionRead } from '@/sync/notification-store';
+import { canSessionBeUnread, isSessionUnread, markSessionUnread } from '@/sync/session-unread';
 import { useCollapsedSessionActivityState } from '../sessions/collapsedActivityState';
 import { useGroupRefs } from '../projects/useGroupRefs';
 import type { SessionGroup } from '../types';
@@ -210,6 +211,36 @@ export function useWorktreeWork({ group, projectId, collapsed, onNavigate }: Arg
     workSessionIds.find((id) => isSessionUnread(state.entityById.get(id))) ?? null
   ), [workSessionIds]));
 
+  /**
+   * Mark as read clears every unread session of the work. Mark as unread marks
+   * the one whose turn ended last, the session the user would come back to.
+   */
+  const toggleRead = (): void => {
+    const records = useGlobalSessionsStore.getState().entityById;
+    if (unreadSessionId) {
+      for (const id of workSessionIds) {
+        if (isSessionUnread(records.get(id))) markSessionRead(id);
+      }
+      return;
+    }
+    // A session whose turn ended beats any without one, such as a new empty chat.
+    let target: string | null = null;
+    let targetRank: [number, number] = [-1, -1];
+    for (const id of workSessionIds) {
+      const record = records.get(id);
+      if (!canSessionBeUnread(record)) continue;
+      const rank: [number, number] = record.time.idle !== undefined ? [1, record.time.idle] : [0, record.time.updated];
+      if (rank[0] > targetRank[0] || (rank[0] === targetRank[0] && rank[1] > targetRank[1])) {
+        target = id;
+        targetRank = rank;
+      }
+    }
+    if (!target) return;
+    void markSessionUnread(target).then((saved) => {
+      if (!saved) toast.error(t('sessions.sidebar.session.unread.markFailed'));
+    });
+  };
+
   return {
     worktree,
     space,
@@ -237,6 +268,9 @@ export function useWorktreeWork({ group, projectId, collapsed, onNavigate }: Arg
     activityState,
     runningSessionId,
     durationSessionId: runningSessionId ?? unreadSessionId,
+    hasUnread: unreadSessionId !== null,
+    canMarkUnread: workSessionIds.length > 0,
+    toggleRead,
     open,
     newChat,
     saveTitle,

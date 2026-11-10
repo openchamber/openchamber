@@ -2,6 +2,8 @@ import React from 'react';
 import { Icon } from '@/components/icon/Icon';
 import { SessionActivityDuration } from '@/components/session/SessionActivityDuration';
 import { SessionActivityIndicator } from '@/components/session/SessionActivityIndicator';
+import { SessionReadMenuItem } from '@/components/session/SessionReadMenuItem';
+import { ContextMenuItem } from '@/components/ui/context-menu';
 import { useSessionAiRenameAction } from '@/components/session/useSessionAiRenameAction';
 import { resolveTooltipBranchLabel } from '@/components/session/sidebar/sessions/sessionNodeItemUtils';
 import { useSessionRefLines } from '@/components/session/sidebar/sessions/useSessionRefLines';
@@ -22,7 +24,7 @@ import { useUIStore } from '@/stores/useUIStore';
 import { useSessionTurnActivity } from '@/sync/global-session-status';
 import { useHasSessionTurnDuration } from '@/sync/session-turn-duration';
 import { useSessionUIStore } from '@/sync/session-ui-store';
-import { useSessionUnread } from '@/sync/session-unread';
+import { useSessionMarkedUnread, useSessionUnread } from '@/sync/session-unread';
 import { getSessionDirectory } from '../mobileSessionFields';
 import { MobileProjectIcon } from '../MobileProjectIcon';
 import { MobileSessionRenameForm } from '../MobileSessionRenameForm';
@@ -33,6 +35,7 @@ import { usePendingRequests } from '../usePendingRequests';
 import { renameMobileSession, runMobileSubtreeAction, selectMobileSession, toggleMobileSessionPin, toggleMobileSessionWork } from './mobileSessionActions';
 import type { MobileTreeGeometry } from './mobileSidebarGeometry';
 import { useMobileRowSwipe, useMobileSidebarActions, useMobileSidebarRowsStore } from './mobileSidebarState';
+import { MobileRowMenu } from './MobileRowMenu';
 import { MOBILE_ACTIVE_ROW_CLASS, MobileRowChevron, MobileSlotChevron, MobileTwoLineLayout } from './mobileRowParts';
 
 type SessionRowModel = Extract<SessionSidebarRow, { kind: 'session' }>;
@@ -64,9 +67,10 @@ export const MobileSessionRow: React.FC<{
   const runOverviewOpen = useUIStore((state) => state.runOverviewKey !== null);
   const active = isCurrent && !runOverviewOpen;
   const isUnread = useSessionUnread(session.id);
+  const markedUnread = useSessionMarkedUnread(session.id);
   const turnActivity = useSessionTurnActivity(session.id);
   const isStreaming = turnActivity !== null;
-  const showUnread = !isStreaming && isUnread && !active;
+  const showUnread = !isStreaming && isUnread && (!active || markedUnread);
   const hasActivityDuration = useHasSessionTurnDuration(session.id, isStreaming);
   const showActivityDuration = (isStreaming || showUnread) && hasActivityDuration;
   const hasChildren = node.children.length > 0;
@@ -232,7 +236,35 @@ export const MobileSessionRow: React.FC<{
     </>;
   }
 
+  // The long press menu: what the swipe has no room for, then its own actions.
+  const menu = (
+    <>
+      <SessionReadMenuItem sessionId={session.id} Item={ContextMenuItem} showShortcut={false} />
+      <ContextMenuItem onClick={() => useMobileSidebarRowsStore.getState().startRename(row.key)}>
+        <Icon name="edit" className="me-1 size-4" />
+        {t('sessions.sidebar.session.menu.rename')}
+      </ContextMenuItem>
+      {pin ? (
+        <ContextMenuItem onClick={pin.onToggle}>
+          <Icon name={pin.pinned ? 'unpin' : 'pushpin'} className="me-1 size-4" />
+          {pin.pinned ? t('sessions.sidebar.session.menu.unpin') : t('sessions.sidebar.session.menu.pin')}
+        </ContextMenuItem>
+      ) : null}
+      {work ? (
+        <ContextMenuItem onClick={work.onToggle}>
+          <Icon name={work.inWork ? 'check' : 'eye'} className="me-1 size-4" />
+          {work.inWork ? t('sessions.sidebar.session.work.markDone') : t('sessions.sidebar.session.work.track')}
+        </ContextMenuItem>
+      ) : null}
+      <ContextMenuItem onClick={() => { void runMobileSubtreeAction('archive', session, t); }}>
+        <Icon name="archive" className="me-1 size-4" />
+        {t('sessions.sidebar.bulkActions.archive')}
+      </ContextMenuItem>
+    </>
+  );
+
   return (
+    <MobileRowMenu disabled={renaming || revealed} menu={menu}>
     <MobileSwipeActionsRow
       actionsWidth={ROW_ACTIONS_WIDTH + (work ? ROW_ACTION_SLOT_WIDTH : 0) + (pin ? ROW_ACTION_SLOT_WIDTH : 0)}
       revealed={revealed}
@@ -257,5 +289,6 @@ export const MobileSessionRow: React.FC<{
     >
       {content}
     </MobileSwipeActionsRow>
+    </MobileRowMenu>
   );
 };

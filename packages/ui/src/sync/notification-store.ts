@@ -59,9 +59,17 @@ export function markSessionViewed(sessionId: string) {
     .catch(() => { /* the badge resets on the next engagement signal */ })
 }
 
-/** Every unread session the client knows of is marked seen, the same way opening each would. */
+/** The user chose Mark as read: the session's own unread mark clears too, even on the open session. */
+export function markSessionRead(sessionId: string) {
+  markSessionUnreadSeen(sessionId, { explicit: true })
+  clearDesktopSessionNotifications(sessionId)
+  runtimeFetch(`/api/sessions/${encodeURIComponent(sessionId)}/view`, { method: "POST" })
+    .catch(() => { /* the badge resets on the next engagement signal */ })
+}
+
+/** Every unread session the client knows of is marked read, the way Mark as read does for one. */
 export function markAllSessionsViewed() {
-  const marked = markSessionsUnreadSeen(getUnreadSessionIds())
+  const marked = markSessionsUnreadSeen(getUnreadSessionIds(), { explicit: true })
   if (marked.length === 0) return
   for (const sessionId of marked) clearDesktopSessionNotifications(sessionId)
   // The route only resets the push badge, so one call covers them all.

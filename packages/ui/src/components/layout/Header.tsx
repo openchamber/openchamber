@@ -45,6 +45,7 @@ import { panelContentDirectory } from '@/lib/spaces/space-creation-requests';
 import { SessionSwitcherDropdown } from '@/components/session/SessionSwitcherDropdown';
 import { SessionTabsStrip, type SessionTabMenuArgs } from './SessionTabsStrip';
 import { SessionMenuItemHint } from '@/components/session/SessionMenuItemHint';
+import { SessionReadMenuItem } from '@/components/session/SessionReadMenuItem';
 import { MoveSessionDialog } from '@/components/session/MoveSessionDialog';
 import { isSpaceDirectory } from '@/lib/spaces/space-route';
 import { HeaderSessionArchiveMenuItem } from './HeaderSessionArchiveMenuItem';
@@ -932,6 +933,7 @@ export const Header: React.FC = () => {
             <Icon name="file-copy" className="me-1 size-4" />{t('sessions.sidebar.session.menu.copyId')}
           </Item>
         </SessionMenuItemHint>
+        <SessionReadMenuItem sessionId={session.id} Item={Item} />
         <Separator />
         {isActive ? (
           <SessionMenuItemHint hint={t('sessions.sidebar.session.menuHint.exportMarkdown')}>

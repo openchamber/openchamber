@@ -36,12 +36,14 @@ import { getRuntimeKey } from '@/lib/runtime-switch';
 import { sessionTabChatsScope, sessionTabScopeFor, sessionTabSeedFor } from '@/lib/sessionTabScope';
 import { activateSessionTabByIndex, closeSessionTabAndActivateNeighbour } from '@/lib/sessionTabs';
 import { registerCloseTabTarget } from '@/lib/closeTabTarget';
-import { isDesktopShell } from '@/lib/desktop';
+import { isDesktopShell, isVSCodeRuntime } from '@/lib/desktop';
+import { toggleSessionRead } from '@/components/session/sessionReadActions';
+import { openSessionInSidePanel } from '@/components/session/sessionSidePanel';
 import { useGlobalSessionsStore, resolveGlobalSessionDirectory } from '@/stores/useGlobalSessionsStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSessionDraftsStore } from '@/stores/useSessionDraftsStore';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
-import { useSessionUnread } from '@/sync/session-unread';
+import { useSessionMarkedUnread, useSessionUnread } from '@/sync/session-unread';
 import { useIsSessionAiRenamePending } from '@/sync/use-session-ai-rename';
 import { useMultiRunMemberIds } from '@/lib/multirun/useMultiRuns';
 import { SessionProjectIcon } from './SessionProjectIcon';
@@ -134,7 +136,8 @@ const SessionTabItem: React.FC<{
   const turnActivity = useSessionTurnActivity(tab.id);
   const isStreaming = turnActivity !== null;
   const isUnread = useSessionUnread(tab.id);
-  const showUnread = isUnread && !isActive && !isStreaming;
+  const markedUnread = useSessionMarkedUnread(tab.id);
+  const showUnread = isUnread && (!isActive || markedUnread) && !isStreaming;
   const showDot = isStreaming || showUnread;
 
   const menuArgs: SessionTabMenuArgs = {
@@ -170,7 +173,20 @@ const SessionTabItem: React.FC<{
                   role="tab"
                   aria-selected={isActive}
                   tabIndex={isActive ? undefined : 0}
-                  onClick={isActive ? undefined : () => onSelect(tab)}
+                  onClick={(event) => {
+                    // Alt toggles the unread mark, Shift opens the session
+                    // in the side panel, as on a sidebar row.
+                    if (event.altKey) {
+                      toggleSessionRead(tab.id, isUnread, t);
+                      return;
+                    }
+                    const directory = resolveGlobalSessionDirectory(tab.session);
+                    if (event.shiftKey && directory && !isVSCodeRuntime()) {
+                      openSessionInSidePanel(tab.id, directory, title);
+                      return;
+                    }
+                    if (!isActive) onSelect(tab);
+                  }}
                   onDoubleClick={isPreview ? () => onPin(tab.id) : undefined}
                   onKeyDown={isActive ? undefined : (event) => {
                     if (event.key === 'Enter' || event.key === ' ') {

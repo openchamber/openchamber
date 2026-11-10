@@ -185,9 +185,17 @@ no Shift.
   dialog); a run Done or Track, Open overview, Rename and Archive run; a draft
   Discard, without asking; a project Remove (two taps) and Edit; a space work
   Done or Track and its actions sheet, which also says what its state mark
-  stands for. There is no long press: the swipe already
-  holds every action. The rows share their behaviour with the desktop's
-  through `useWorktreeWork`, `useRunWork` and `useSessionDraftRow`.
+  stands for. A long press on a session or worktree work row opens its menu
+  (`mobileSidebar/MobileRowMenu.tsx`, Base UI's context menu): Mark as read
+  or unread, which has no room in the swipe, then the row's own actions
+  without delete, which keeps its two-tap confirmation in the swipe. The
+  click the finger's release sends is dropped, so the press never opens the
+  row. The rows share their behaviour with the desktop's through
+  `useWorktreeWork`, `useRunWork` and `useSessionDraftRow`.
+- Alt+click on a session row, a work row or a header tab toggles its unread
+  mark without opening it; Shift+click on a session row or a header tab opens
+  the session in the side panel (`components/session/sessionSidePanel.ts`).
+  The menu's Mark as unread item shows the Alt+click hint.
 - A tap opens what the row stands for and closes the drawer. The chevron is
   always shown, since there is no hover to reveal it: in the slot of a
   one-line row, over the second line's first icon of a two-line row, in a

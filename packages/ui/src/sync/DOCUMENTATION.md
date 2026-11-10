@@ -971,6 +971,8 @@ Live activity/status indicators must not depend on this cache. They must use the
 
 Marking a session seen (`markSessionViewed` in `notification-store.ts`, which also clears its native notifications) writes the watermark locally at once and sends `POST /api/session/:id/view` with the `idle` it saw; a failed write restores the previous watermark unless a newer record replaced it. OpenCode announces the view as `session.viewed` to every client, so a session seen on one device stops being unread on the others. The global store's change signatures include `idle` and `viewed`, so these updates publish immediately instead of waiting with recency-only updates.
 
+The user can also mark a session unread from its menu (rows, work rows, tabs, the mobile long-press menu) or with Alt+click to come back to it. That mark is `metadata.openchamber.markedUnread: { at }` on the session record, written through the OpenChamber metadata route as a merge patch, so OpenCode persists it and every client, VS Code included, gets it with the record. `isSessionUnread` is true for an unseen turn or a mark; `isSessionMarkedUnread` is the mark alone, and rows show it even on the open session, where an unseen turn never shows. Opening the session clears it like a view does, with one exception: a mark made in this window stays while the user is still on the session it was made from, because the open session is marked seen on every record change and on window focus. `releaseKeptUnreadMarks` ends that when `setCurrentSession` moves to another session, so the mark clears on the next visit. Mark as read and Mark all as read (`markSessionRead`, `markAllSessionsViewed`) clear a kept mark at once. A failed write takes the change back, unless something else replaced the metadata meanwhile. On a work row, Mark as unread marks the session whose turn ended last, and Mark as read clears every unread session of the work.
+
 Archive and delete clear the mark whatever did them (the archive action, retention cleanup, worktree removal): an archived session is never unread and a deleted one has no record. Restoring an archived session marks its last turn seen, so it does not come back unread.
 
 OpenChamber clients recorded no views before they read this state. The server keeps a baseline per data dir (`packages/web/server/lib/openchamber-sessions/unread-baseline.js`; the VS Code extension shares the file) and serves turns that ended before it as seen, so the first run does not light up every old session.
@@ -978,6 +980,10 @@ OpenChamber clients recorded no views before they read this state. The server ke
 ### Why OpenCode's viewed state and not an OpenChamber store
 
 The unread mark used to be a client-side list of turn-complete events. It lived in one window's memory, so a restart lost every unread session and each device kept its own. OpenCode 2.x already persists exactly this state per session and broadcasts views, and its own apps read the same fields, so the record is the single authority and OpenChamber adds only the baseline.
+
+### Why the user's unread mark lives in session metadata
+
+OpenCode keeps `time.viewed` monotone, so marking a session unread cannot lower it, and OpenCode's own apps keep their manual marks in local storage, one device at a time. Session metadata is persisted by OpenCode and broadcast with the record, the way pins and In work travel, so a mark made on the desktop shows on the phone and in VS Code with no OpenChamber store or event of its own. The cost is that each mark and each clear bumps the record's `time.updated`. Session rows order by their last conversation (`getSessionActivityTime`) and stay put; the project order by recent activity reads `time.updated`, so a mark moves its project up, as a pin does.
 
 ### Viewed sessions and surface attention
 
