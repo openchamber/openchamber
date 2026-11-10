@@ -319,6 +319,8 @@ host.onResolve(async ({ command, args }) => {
 
 Wenn der Nutzer `/task ABC-12` ins Chatfeld tippt, bittet OpenChamber deine Erweiterung, das aufzulösen, und hängt das Ergebnis als Chip an, ohne etwas zu öffnen. Gib `null` zurück für "nichts gefunden". Ist dein Panel geschlossen, lädt OpenChamber es für den Aufruf im Hintergrund. Ein Name, den OpenChamber oder OpenCode schon verwendet, wird ignoriert.
 
+Sitzungsaktionen und Slash-Befehle erscheinen auch in der Befehlspalette (⌘P oder Ctrl+P), wenn der Nutzer nach ihrer Bezeichnung, dem Befehl oder dem Namen deiner Erweiterung sucht. Eine Sitzungsaktion läuft dort auf der offenen Sitzung. Ein Befehl kommt an den Anfang des Chatfelds, mit dem bereits Getippten als Argument, und läuft, wenn der Nutzer sendet. Aktionen für Nachrichten, Auswahl, Dateien und Diffs bleiben in ihren eigenen Menüs.
+
 **Badge auf dem Symbol in der Leiste.** `host.setBadge(3)` setzt einen Punkt auf dein Symbol und zeigt die Zahl im Tooltip, zum Beispiel offene Aufgaben; `host.setBadge(null)` entfernt sie. Das Öffnen des Panels entfernt sie ebenfalls.
 
 ## Deine Tools im Chat

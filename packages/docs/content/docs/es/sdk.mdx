@@ -319,6 +319,8 @@ host.onResolve(async ({ command, args }) => {
 
 Cuando el usuario escribe `/task ABC-12` en el cuadro de chat, OpenChamber pide a tu extensión que lo resuelva y adjunta lo que devuelves como un chip, sin abrir nada. Devuelve `null` para "no se encontró nada". Si tu panel está cerrado, OpenChamber lo carga en segundo plano para esa llamada. Un nombre que OpenChamber u OpenCode ya usan se ignora.
 
+Las acciones de sesión y los comandos de barra también aparecen en la paleta de comandos (⌘P o Ctrl+P) cuando el usuario busca su etiqueta, el comando o el nombre de tu extensión. Ahí, una acción de sesión se ejecuta sobre la sesión abierta. Un comando se coloca al inicio del cuadro de chat, con lo que el usuario ya escribió como argumento, y se ejecuta cuando lo envía. Las acciones de mensaje, selección, archivo y diff se quedan en sus propios menús.
+
 **Insignia en el icono de la barra lateral.** `host.setBadge(3)` pone un punto en tu icono y muestra el número en su descripción emergente, por ejemplo tareas abiertas; `host.setBadge(null)` lo quita. Abrir el panel también lo quita.
 
 ## Tus herramientas en el chat

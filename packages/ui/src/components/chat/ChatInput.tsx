@@ -144,7 +144,7 @@ import { openGuestWithItem, useGuestDialogStore } from '@/lib/guests/dialog-stor
 import { runGuestCommand } from '@/lib/guests/run-command';
 import { useGuestsStore } from '@/lib/guests/store';
 import { isGuestActive } from '@/lib/guests/capabilities';
-import { routeGuestSlashCommand } from './composer/submit/guestCommands';
+import { reservedComposerCommandNames, routeGuestSlashCommand } from './composer/submit/guestCommands';
 import { pluginModeFromId } from '@/lib/surfaces/modes';
 import { AgentUnavailableError, opencodeClient, type SkillMentions } from '@/lib/opencode/client';
 import { isLocationNotFoundError } from '@/lib/opencode/location-errors';
@@ -1027,11 +1027,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         ? EMPTY_COMPOSER_SKILLS
         : selectAvailableSkillsForDirectory(s, commandsTarget.directory));
     const knownSlashNames = React.useMemo(() => {
-        const names = new Set<string>([
-            'init', 'review', 'undo', 'redo', 'timeline', 'compact', 'fork', 'btw', 'summary', 'workspace-review', 'plan-feature', 'craft-goal', 'schedule-task', 'catch-up', 'debug', 'weigh', 'explore',
-        ]);
-        if (!isMobile && !isVSCodeRuntime()) names.add('handoff-review');
-        for (const command of availableCommands) names.add(command.name.toLowerCase());
+        const names = reservedComposerCommandNames(availableCommands);
+        if (isMobile || isVSCodeRuntime()) names.delete('handoff-review');
         return names;
     }, [availableCommands, isMobile]);
     const knownSkillNames = React.useMemo(
@@ -1710,7 +1707,16 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     // useComposerDraft: on a draft switch the incoming draft loads first and
     // the pending text lands on top of it.
     const focusComposer = React.useCallback(() => composerRef.current?.focus(), []);
-    usePendingComposerText({ target: mailboxTarget, sessionId: shownSessionId, setMessage, focus: focusComposer });
+    // A command picked in the command palette is no shell command.
+    const leaveShellMode = React.useCallback(() => setInputMode('normal'), []);
+    usePendingComposerText({
+        target: mailboxTarget,
+        sessionId: shownSessionId,
+        setMessage,
+        focus: focusComposer,
+        holdSlashCommand: isBtwActive,
+        onSlashCommand: leaveShellMode,
+    });
 
     const parallel = useParallelComposer({
         enabled: !isMobile && !isBtwActive,

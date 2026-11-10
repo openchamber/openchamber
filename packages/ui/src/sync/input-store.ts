@@ -226,6 +226,12 @@ export type ComposerAddress = {
   attachments: ChatDraftIdentity | null
 }
 
+/**
+ * How pending text meets the draft. `slash-command` text is a command name:
+ * the draft starts with `/name` and the rest of it becomes the argument.
+ */
+export type PendingInputMode = "replace" | "append" | "append-inline" | "slash-command"
+
 export type InputState = {
   pendingComposerRestore: {
     target: ChatDraftIdentity
@@ -234,7 +240,7 @@ export type InputState = {
   } | null
   consumePendingComposerRestore: (target: ChatDraftIdentity | null) => InputState["pendingComposerRestore"]
   pendingInputText: string | null
-  pendingInputMode: "replace" | "append" | "append-inline"
+  pendingInputMode: PendingInputMode
   /**
    * Who the pending text is for. Null is the main chat's composer, which
    * app-wide sources (plugins, git dialogs, file selections) write to; a
@@ -284,8 +290,8 @@ export type InputState = {
   moveAttachedFiles: (from: ChatDraftIdentity | null, to: ChatDraftIdentity | null) => void
   activeEditorFile: VSCodeActiveEditorFile | null
 
-  setPendingInputText: (text: string | null, mode?: "replace" | "append" | "append-inline", target?: string | null) => void
-  consumePendingInputText: (target?: string | null) => { text: string; mode: "replace" | "append" | "append-inline" } | null
+  setPendingInputText: (text: string | null, mode?: PendingInputMode, target?: string | null) => void
+  consumePendingInputText: (target?: string | null) => { text: string; mode: PendingInputMode } | null
   requestPresetSubmit: (text: string, type: "command" | "skill") => void
   consumePendingPresetSubmit: () => { text: string; type: "command" | "skill" } | null
   requestDraftSubmit: (draftId: number, text: string) => void

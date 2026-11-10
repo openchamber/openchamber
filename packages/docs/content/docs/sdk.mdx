@@ -321,6 +321,8 @@ host.onResolve(async ({ command, args }) => {
 
 When the user types `/task ABC-12` in the chat box, OpenChamber asks your extension to resolve it and attaches what you return as a chip, without opening anything. Return `null` for "nothing found". If your panel is closed, OpenChamber loads it in the background for the call. A name that OpenChamber or OpenCode already uses is ignored.
 
+Session actions and slash commands also turn up in the command palette (⌘P or Ctrl+P) when the user searches for the label, the command, or your extension's name. A session action there runs on the open session. A command goes to the start of the chat box, with what the user already typed as its argument, and runs when they send it. Message, selection, file, and diff actions stay in their own menus.
+
 **Badge on the rail icon.** `host.setBadge(3)` puts a dot on your icon and the number in its tooltip, for example open tasks; `host.setBadge(null)` clears it. Opening the panel clears it too.
 
 ## Your tools in the chat

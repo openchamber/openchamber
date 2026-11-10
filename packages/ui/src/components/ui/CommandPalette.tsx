@@ -77,6 +77,19 @@ import { requestReasoningReveal } from '@/components/chat/search/reasoningReveal
 import { useObserveProjectActionRuns, useProjectActions } from '@/components/layout/projectActionsRunnerContext';
 import { resolveProjectActionIconName } from '@/lib/projectActions';
 import { isSessionDirectoryAdmitted } from '@/sync/session-admission-rule';
+import { useGuestActions, useGuestCommands } from '@/hooks/useGuestSurfaces';
+import { useGuestsStore } from '@/lib/guests/store';
+import { guestSessionActions, type GuestActionEntry } from '@/lib/guests/actions';
+import { guestPackageIconSrc, resolveGuestIconName } from '@/lib/guests/icon';
+import { runGuestSessionAction } from '@/lib/guests/session-action';
+import { GuestIcon } from '@/components/layout/GuestRailIcon';
+import { getRuntimeUrlResolver } from '@/lib/runtime-url';
+import { useComposerConfigDirectory } from '@/hooks/useComposerConfigDirectory';
+import { selectCommandsForComposer, useCommandsStore } from '@/stores/useCommandsStore';
+import { reservedComposerCommandNames } from '@/components/chat/composer/submit/guestCommands';
+import { useInputStore } from '@/sync/input-store';
+import { useSessionMessageRecordsForExport } from '@/sync/use-sync';
+import { toast } from './toast';
 
 type CommandEntry = {
   id: string;
@@ -84,6 +97,13 @@ type CommandEntry = {
   icon: React.ReactNode;
   shortcutId?: ShortcutActionId;
   searchText: string;
+  /** Muted text after the title, such as the extension a command comes from. */
+  detail?: string;
+  /**
+   * More words that find the entry (the extension's name, a description),
+   * ranked below entries whose own text matches the query.
+   */
+  keywords?: string;
   /** Search-only command: reachable by typing, hidden from the initial list
       so the first screen stays scroll-free. */
   secondary?: boolean;
@@ -99,12 +119,14 @@ const MESSAGE_PAGE_SIZE = 30;
 
 /**
  * Commands, Settings pages and projects match a query only at word starts, so a short
- * query like "ts" finds "TypeScript" but not the tail of "Agents".
+ * query like "ts" finds "TypeScript" but not the tail of "Agents". The query
+ * splits the way the text does, so "/task" finds the extension command `/task`.
  */
+const WORD_SEPARATOR = /[^\p{L}\p{N}]+/u;
 const matchesWordStarts = (text: string, query: string): boolean => {
-  const words = text.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean);
-  return query.toLowerCase().split(/\s+/).filter(Boolean)
-    .every((token) => words.some((word) => word.startsWith(token)));
+  const words = text.toLowerCase().split(WORD_SEPARATOR).filter(Boolean);
+  const tokens = query.toLowerCase().split(WORD_SEPARATOR).filter(Boolean);
+  return tokens.length > 0 && tokens.every((token) => words.some((word) => word.startsWith(token)));
 };
 
 // Left-to-right marks keep a path's leading "." or trailing "/" in place
@@ -546,6 +568,83 @@ export const CommandPalette: React.FC = () => {
   ]);
 
   // ---------------------------------------------------------------------------
+  // Extensions: session actions on the current session, and slash commands.
+  // Search-only. Message, selection, file and diff actions stay in their own
+  // menus: the palette has no message, selection or lines to give them.
+  // ---------------------------------------------------------------------------
+  const hasCurrentSession = useSessionUIStore((s) => Boolean(s.currentSessionId));
+  const guestActions = useGuestActions();
+  const guestGuests = useGuestsStore((s) => s.guests);
+  // The same reserved names as the composer's slash menu, so the palette never
+  // offers a command the composer would hand to OpenCode instead.
+  const composerCommandsTarget = useComposerConfigDirectory(effectiveDirectory);
+  const composerCommands = useCommandsStore((s) => selectCommandsForComposer(s, composerCommandsTarget));
+  const reservedCommandNames = React.useMemo(() => reservedComposerCommandNames(composerCommands), [composerCommands]);
+  const guestCommands = useGuestCommands(reservedCommandNames);
+  const loadSessionRecords = useSessionMessageRecordsForExport();
+
+  // The current session as the session header menu gives it; read when the action runs.
+  const runCurrentSessionGuestAction = React.useCallback((entry: GuestActionEntry) => {
+    const { currentSessionId: sessionId, currentSessionDirectory } = useSessionUIStore.getState();
+    if (!sessionId) return;
+    const session = useGlobalSessionsStore.getState().entityById.get(sessionId);
+    const directory = (session ? resolveGlobalSessionDirectory(session) : null) ?? currentSessionDirectory;
+    void runGuestSessionAction({
+      entry,
+      t,
+      session: { id: sessionId, title: session?.title, directory },
+      loadRecords: async () => {
+        if (!directory) return null;
+        try {
+          return await loadSessionRecords({ sessionID: sessionId, directory });
+        } catch {
+          return null;
+        }
+      },
+      onLoadFailed: () => toast.error(t('sessions.sidebar.session.export.failedLoadHistory')),
+    });
+  }, [loadSessionRecords, t]);
+
+  const extensionCommands = React.useMemo<CommandEntry[]>(() => {
+    const list: CommandEntry[] = [];
+    if (hasCurrentSession) {
+      for (const entry of guestSessionActions(guestActions)) {
+        list.push({
+          id: `extension-action:${entry.guest.id}:${entry.action.id}`,
+          secondary: true,
+          title: entry.action.label,
+          detail: entry.guest.name,
+          icon: <GuestIcon icon={entry.icon} iconSrc={entry.iconSrc} className="me-2 h-4 w-4" />,
+          searchText: entry.action.label,
+          keywords: entry.guest.name,
+          onSelect: run(() => runCurrentSessionGuestAction(entry)),
+        });
+      }
+    }
+    if (guestCommands.length > 0) {
+      const authenticatedAsset = getRuntimeUrlResolver().authenticatedAsset;
+      const guestsById = new Map(guestGuests.map((guest) => [guest.id, guest]));
+      for (const entry of guestCommands) {
+        const guestIcon = guestsById.get(entry.guestId)?.icon ?? '';
+        const title = `/${entry.command.name}`;
+        list.push({
+          id: `extension-command:${entry.guestId}:${entry.command.name}`,
+          secondary: true,
+          title,
+          detail: entry.guestName,
+          icon: <GuestIcon icon={resolveGuestIconName(guestIcon)} iconSrc={guestPackageIconSrc(entry.guestId, guestIcon, authenticatedAsset)} className="me-2 h-4 w-4" />,
+          searchText: title,
+          keywords: `${entry.guestName} ${entry.command.description ?? ''}`,
+          // Like picking it in the composer's slash menu: the command waits
+          // in the composer for its argument and runs when the user sends.
+          onSelect: run(() => useInputStore.getState().setPendingInputText(entry.command.name, 'slash-command')),
+        });
+      }
+    }
+    return list;
+  }, [guestActions, guestCommands, guestGuests, hasCurrentSession, run, runCurrentSessionGuestAction]);
+
+  // ---------------------------------------------------------------------------
   // Settings sub-pages (only show when there's a query)
   // ---------------------------------------------------------------------------
   const routingAvailable = useUIStore((state) => state.routingFeatureAvailable);
@@ -709,9 +808,18 @@ export const CommandPalette: React.FC = () => {
     if (!hasQuery) {
       return commands.filter((item) => !item.secondary).map((item) => ({ item, score: 0, ranges: NO_RANGES }));
     }
-    const candidates = commands.filter((item) => matchesWordStarts(item.searchText, liveTrimmed));
-    return rankBySubsequence(candidates, liveTrimmed, (c) => c.searchText, { limit: 7 });
-  }, [commands, liveTrimmed, hasQuery]);
+    const all = [...commands, ...extensionCommands];
+    const candidates = all.filter((item) => matchesWordStarts(item.searchText, liveTrimmed));
+    // "task" means the command `/task` before an action found through its
+    // extension's name, Task Board.
+    const byKeywords = all.filter((item) => item.keywords
+      && !matchesWordStarts(item.searchText, liveTrimmed)
+      && matchesWordStarts(`${item.searchText} ${item.keywords}`, liveTrimmed));
+    return [
+      ...rankBySubsequence(candidates, liveTrimmed, (c) => c.searchText),
+      ...rankBySubsequence(byKeywords, liveTrimmed, (c) => `${c.searchText} ${c.keywords}`),
+    ].slice(0, 7);
+  }, [commands, extensionCommands, liveTrimmed, hasQuery]);
 
   const scoredSettings = React.useMemo(() => {
     if (!hasQuery) return [];
@@ -975,6 +1083,9 @@ export const CommandPalette: React.FC = () => {
                       <CommandItem key={cmd.id} value={cmd.id} onSelect={cmd.onSelect}>
                         {cmd.icon}
                         <span className="truncate"><Matched text={cmd.title} ranges={ranges} /></span>
+                        {cmd.detail ? (
+                          <span dir="auto" className="max-w-[180px] shrink-0 truncate text-muted-foreground typography-meta">{cmd.detail}</span>
+                        ) : null}
                         {cmd.shortcutId ? (
                           <CommandShortcut>{shortcut(cmd.shortcutId)}</CommandShortcut>
                         ) : null}

@@ -319,6 +319,8 @@ host.onResolve(async ({ command, args }) => {
 
 Quand l'utilisateur tape `/task ABC-12` dans la zone de chat, OpenChamber demande à votre extension de le résoudre et attache ce que vous renvoyez sous forme de puce, sans rien ouvrir. Renvoyez `null` pour "rien trouvé". Si votre panneau est fermé, OpenChamber le charge en arrière-plan pour cet appel. Un nom déjà utilisé par OpenChamber ou OpenCode est ignoré.
 
+Les actions de session et les commandes slash apparaissent aussi dans la palette de commandes (⌘P ou Ctrl+P) quand l'utilisateur cherche leur libellé, la commande ou le nom de votre extension. Une action de session s'y exécute sur la session ouverte. Une commande se place au début de la zone de chat, avec ce que l'utilisateur a déjà tapé comme argument, et s'exécute quand il l'envoie. Les actions de message, de sélection, de fichier et de diff restent dans leurs propres menus.
+
 **Badge sur l'icône de la barre latérale.** `host.setBadge(3)` place un point sur votre icône et affiche le nombre dans son infobulle, par exemple les tâches ouvertes ; `host.setBadge(null)` l'efface. Ouvrir le panneau l'efface aussi.
 
 ## Vos outils dans le chat

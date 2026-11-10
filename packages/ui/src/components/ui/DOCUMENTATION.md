@@ -13,6 +13,15 @@ This folder owns runtime-independent controls and their Base UI integration, inc
 - Command palette recent sessions and session-name search share the session
   admission filter. Their raw global cache remains complete; registering a
   destination updates the open palette through its project/worktree subscriptions.
+- Command palette extension entries (session actions, slash commands) are
+  search-only and run what the session header menu and the composer run: a
+  session action needs a current session and reads it when picked; a command
+  waits in the main composer for its argument and is sent by the user. The
+  palette and the slash menu drop the same reserved names
+  (`reservedComposerCommandNames`). An entry's `keywords` (the extension's
+  name, a command's description) find it too, ranked below entries the query
+  matches by their own text, so "task" lists the command `/task` before an
+  action of the Task Board extension, and the highlight stays on the title.
 - Icon actions over a document (the Files editor, a plan, a page, image or diagram in the chat, diff headers) use `ToolbarButton` from `action-toolbar.tsx`: 24px, a 14px icon, colour-only hover, the selection fill while a toggle is on, faded while disabled. A toggle keeps one icon and one label naming the option; the fill says whether it is on.
 - `ActionToolbar` takes the actions a document has, which depend on what the document is and never on its mode, so a mode switch moves no button. Its groups sit apart by space; with `fold`, unpinned actions move into "More actions" from the end of the row while it does not fit, after `start` gave up its width.
 - `Textarea` offers emoji on `:` in both modes (`components/emoji/`, placed by `components/inline-picker/`); its forwarded ref is the textarea element itself.
