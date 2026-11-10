@@ -104,7 +104,8 @@ export const ApplyPatchFileButtons = ({
                         <Text
                             variant={animate ? 'generate-effect' : 'static'}
                             className={cn('min-w-0 max-w-full truncate', textClassName)}
-                            style={{ color: 'var(--tools-description)' }}
+                            // An openable name takes the button's colour, which brightens on hover.
+                            style={canOpen ? undefined : { color: 'var(--tools-description)' }}
                             title={canOpen ? undefined : entry.path}
                         >
                             {entry.name}
@@ -124,7 +125,11 @@ export const ApplyPatchFileButtons = ({
                         <Button
                             variant="ghost"
                             size="xs"
-                            className={cn('min-w-0 max-w-full gap-1 normal-case font-normal tracking-normal', textClassName)}
+                            className={cn(
+                                'min-w-0 max-w-full gap-1 normal-case font-normal tracking-normal',
+                                'text-[var(--tools-description)] hover:bg-transparent hover:text-foreground focus-visible:text-foreground',
+                                textClassName,
+                            )}
                             aria-label={actionLabel}
                             onClick={(event) => onFileClick(entry.file, event)}
                         >

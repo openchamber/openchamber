@@ -114,7 +114,7 @@ import { OpenChamberToolOutput } from './OpenChamberToolOutput';
 import { OpencodeToolOutput } from './OpencodeToolOutput';
 import { opencodeCallSucceeded, opencodeToolVerb, parseOpencodeToolResult } from './opencodeToolResult';
 import { hasOpenChamberView, openChamberVerbKey, parseOpenChamberEnvelope, secretRowView } from './openChamberToolEnvelope';
-import { Field } from './ToolResultParts';
+import { Field, QuietAction } from './ToolResultParts';
 import { openApplyPatchFileInEditor } from './applyPatchEditorAction';
 import { WebSearchResults } from './WebSearchResults';
 import { toBackgroundShellPart, type BackgroundShellPhase } from './backgroundShellPart';
@@ -1021,7 +1021,7 @@ const OpenSubtaskButton: React.FC<{
                 onPointerDown={(event) => event.stopPropagation()}
                 onClick={handleOpen}
                 className={cn(
-                    'flex-shrink-0 inline-flex h-4 w-4 items-center justify-center rounded transition-opacity hover:bg-interactive-hover',
+                    'flex-shrink-0 inline-flex h-4 w-4 items-center justify-center rounded transition-opacity',
                     'opacity-60 hover:opacity-100 focus-visible:opacity-100',
                 )}
                 style={{ color: 'var(--tools-icon)' }}
@@ -1148,19 +1148,7 @@ const DiffPreview: React.FC<{ diff: string; diffViewMode: DiffViewMode }> = ({ d
 
 /** Switches an OpenChamber tool's row between its own view and the plain answer. */
 const RawAnswerToggle: React.FC<{ label: string; onToggle: () => void }> = ({ label, onToggle }) => (
-    <Button
-        variant="ghost"
-        size="xs"
-        className="text-muted-foreground hover:text-foreground"
-        onPointerDown={(event) => event.stopPropagation()}
-        onClick={(event) => {
-            event.stopPropagation();
-            onToggle();
-        }}
-    >
-        <Icon name="code-box" className="size-3.5" />
-        {label}
-    </Button>
+    <QuietAction icon="code-box" label={label} onClick={onToggle} />
 );
 
 interface ToolExpandedContentProps {
@@ -1552,9 +1540,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
                         : secret.file
                             ? <Field label={t('chat.toolPart.openchamber.field.file')}>{secret.file}</Field>
                             : ran ? <div className="typography-meta text-muted-foreground">{t('chat.toolPart.noOutputProduced')}</div> : null}
-                    <div className="-ms-2">
-                        <RawAnswerToggle label={t('chat.toolPart.openchamber.raw.show')} onToggle={() => setShowRawToolAnswer(true)} />
-                    </div>
+                    <RawAnswerToggle label={t('chat.toolPart.openchamber.raw.show')} onToggle={() => setShowRawToolAnswer(true)} />
                 </div>,
                 { maxHeightClass: ran ? 'max-h-[46vh]' : 'max-h-60' },
             );
@@ -1570,7 +1556,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
                         <div className="typography-meta whitespace-pre-wrap break-words" style={{ color: 'var(--status-error)' }}>
                             {openChamberEnvelope.errorMessage}
                         </div>
-                        <div className="-ms-2">{showRaw}</div>
+                        {showRaw}
                     </div>
                 );
             }
@@ -1597,9 +1583,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
             return renderScrollableBlock(
                 (openChamberEnvelope || opencodeResult) && showRawToolAnswer ? (
                     <div className="space-y-2">
-                        <div className="-ms-2">
-                            <RawAnswerToggle label={t('chat.toolPart.openchamber.raw.hide')} onToggle={() => setShowRawToolAnswer(false)} />
-                        </div>
+                        <RawAnswerToggle label={t('chat.toolPart.openchamber.raw.hide')} onToggle={() => setShowRawToolAnswer(false)} />
                         {output}
                     </div>
                 ) : output,
@@ -2183,7 +2167,7 @@ const ToolPartContent: React.FC<ToolPartProps & { header?: ToolRowHeader; subage
                                             type="button"
                                             onClick={handleQuickOpen}
                                             className={cn(
-                                                'flex-shrink-0 inline-flex h-4 w-4 items-center justify-center rounded transition-opacity hover:bg-interactive-hover',
+                                                'flex-shrink-0 inline-flex h-4 w-4 items-center justify-center rounded transition-opacity',
                                                 'opacity-60 hover:opacity-100 focus-visible:opacity-100',
                                             )}
                                             style={{ color: 'var(--tools-icon)' }}
@@ -2320,9 +2304,7 @@ const ToolPartContent: React.FC<ToolPartProps & { header?: ToolRowHeader; subage
                         ) : (
                             <div className="typography-meta flex items-center gap-2 text-muted-foreground">
                                 <span>{t('chat.toolPart.content.loadFailed')}</span>
-                                <Button variant="ghost" size="xs" onClick={contentCompletion.retry}>
-                                    {t('chat.toolPart.content.retry')}
-                                </Button>
+                                <QuietAction label={t('chat.toolPart.content.retry')} onClick={contentCompletion.retry} />
                             </div>
                         )}
                     </BlockBody>
