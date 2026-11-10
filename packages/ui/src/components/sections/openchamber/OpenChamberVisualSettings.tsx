@@ -1,7 +1,7 @@
 import React from 'react';
 import { ThemeAppearancePicker } from './ThemeAppearancePicker';
 
-import { useUIStore } from '@/stores/useUIStore';
+import { DEFAULT_EDITOR_FONT_SIZE, useUIStore } from '@/stores/useUIStore';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { Button } from '@/components/ui/button';
 import { NumberInput } from '@/components/ui/number-input';
@@ -854,8 +854,8 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                             <Button size="sm"
                                                 type="button"
                                                 variant="ghost"
-                                                onClick={() => setEditorFontSize(13)}
-                                                disabled={editorFontSize === 13}
+                                                onClick={() => setEditorFontSize(DEFAULT_EDITOR_FONT_SIZE)}
+                                                disabled={editorFontSize === DEFAULT_EDITOR_FONT_SIZE}
                                                 className={SETTINGS_ICON_BUTTON_CLASS}
                                                 aria-label={t('settings.openchamber.visual.actions.resetEditorFontSizeAria')}
                                                 title={t('settings.common.actions.reset')}

@@ -49,6 +49,8 @@ import { codeHighlightExtension } from '@/lib/codemirror/codeHighlight';
 import { syncVimMappings } from '@/lib/codemirror/vimModeExtension';
 import { ensurePierreThemeRegistered, getCodeTokenTheme, getThemeRenderName } from '@/lib/shiki/appThemeRegistry';
 import { File as PierreFile, VirtualizerContext, WorkerPoolContext } from '@pierre/diffs/react';
+import { DEFAULT_VIRTUAL_FILE_METRICS } from '@pierre/diffs';
+import { useEditorCodeMetrics } from '@/lib/editorCodeMetrics';
 import { useWorkerPool } from '@/contexts/DiffWorkerProvider';
 import { useFileViewVirtualizer, type FileViewVirtualizer } from './useFileViewVirtualizer';
 import { useFilePreviewScrollPosition } from './useFilePreviewScrollPosition';
@@ -3586,13 +3588,16 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
 
   const editorFontSize = useUIStore((state) => state.editorFontSize);
   // The rendered preview follows the editor's font size, so zoom and the
-  // Editor Font Size setting resize both modes. At the default 13 px it
-  // renders at the old 14 px body and 12 px code.
+  // Editor Font Size setting resize both modes. At the default 12 px it
+  // renders at 14 px body and 12 px code.
   // SAFETY: CSS custom properties are valid inline styles; React's type lists only standard ones.
   const previewFontStyle = React.useMemo(() => ({
-    '--text-markdown': `${editorFontSize + 1}px`,
-    '--text-code': `${editorFontSize - 1}px`,
+    '--text-markdown': `${editorFontSize + 2}px`,
+    '--text-code': `${editorFontSize}px`,
   } as React.CSSProperties), [editorFontSize]);
+  // The code preview is code at the editor's size and rows, so switching
+  // between edit and view keeps the text in place.
+  const editorCode = useEditorCodeMetrics();
 
   // Git change markers compare the open file with its HEAD version. The
   // server answers an empty original both for a new file and for one git does
@@ -4293,27 +4298,31 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
         }}
         className={isLargeFile ? 'block w-full' : 'block h-full w-full'}
         style={isLargeFile ? undefined : { height: '100%' }}
+        // The virtualizer lays out unmeasured rows at this height, so it must
+        // equal the CSS row height. Pierre reads it once, at mount.
+        metrics={editorCode ? { ...DEFAULT_VIRTUAL_FILE_METRICS, lineHeight: editorCode.lineHeight } : undefined}
       />
     );
 
     if (!isLargeFile) {
-      return <div className="h-full">{pierreFile(file.path)}</div>;
+      return <div className="h-full" style={editorCode?.style}>{pierreFile(file.path)}</div>;
     }
 
     // Large files render through pierre's Virtualizer (viewport-only DOM) and
     // the shared diff worker pool. The pool is created lazily: until it is
     // ready the key carries a 'pending' suffix so the file remounts with the
     // worker-backed highlighter instead of silently staying on the main thread.
+    // The row height is in the key so a font size change remounts with it.
     return (
-      <div className="h-full">
+      <div className="h-full" style={editorCode?.style}>
         <VirtualizerContext.Provider value={virtualizer.virtualizer}>
           <WorkerPoolContext.Provider value={shikiWorkerPool}>
-            {pierreFile(`${file.path}:${shikiWorkerPool ? 'pool' : 'pending'}`)}
+            {pierreFile(`${file.path}:${shikiWorkerPool ? 'pool' : 'pending'}:${editorCode?.lineHeight ?? 'default'}`)}
           </WorkerPoolContext.Provider>
         </VirtualizerContext.Provider>
       </div>
     );
-  }, [currentTheme.metadata.variant, isLargeFile, largeFileCacheKey, pierreTheme, shikiWorkerPool, wrapLines]);
+  }, [currentTheme.metadata.variant, editorCode, isLargeFile, largeFileCacheKey, pierreTheme, shikiWorkerPool, wrapLines]);
 
   const renderFileToolbar = ({
     exitFullscreenOnly = false,
