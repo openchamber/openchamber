@@ -142,7 +142,9 @@ const GenericFormCard: React.FC<FormCardProps> = ({ form, recovered }) => {
                 toast.error(t('chat.chatInput.toast.agentUnavailable', { agent: unavailableAgent }));
                 return;
             }
-            toast.error(t('chat.formCard.submitFailed'), { description: t('chat.formCard.tryAgain') });
+            toast.error(t('chat.formCard.submitFailed'), {
+                description: error instanceof Error && error.message ? error.message : t('chat.formCard.tryAgain'),
+            });
         } finally {
             respondingRef.current = false;
             setIsResponding(false);

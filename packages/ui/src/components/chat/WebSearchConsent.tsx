@@ -55,7 +55,9 @@ function useConsentReply(form: FormRequest, consent: WebSearchConsent) {
                 toast.error(t('chat.chatInput.toast.agentUnavailable', { agent: unavailableAgent }));
                 return;
             }
-            toast.error(t('chat.formCard.submitFailed'), { description: t('chat.formCard.tryAgain') });
+            toast.error(t('chat.formCard.submitFailed'), {
+                description: error instanceof Error && error.message ? error.message : t('chat.formCard.tryAgain'),
+            });
         } finally {
             pendingRef.current = false;
             setPending(false);
