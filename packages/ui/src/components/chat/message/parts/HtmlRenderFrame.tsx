@@ -50,6 +50,7 @@ import { saveFile } from './saveFile';
 import { useHtmlRenderTheme } from './useHtmlRenderTheme';
 import { DeclinePageButton } from './DeclinePageButton';
 import { usePageDecline } from './usePageDecline';
+import { usePageAsk } from './usePageAsk';
 import { PageAskStatus } from './PageAskStatus';
 import { UiPageFrame } from './UiPageFrame';
 
@@ -376,9 +377,10 @@ export function ShownPage({ part }: { part: ToolPart }) {
     // its answer state again on every render.
     const { t } = useI18n();
     const page = React.useMemo(() => renderedPage(part.tool, part.state), [part.tool, part.state]);
-    if (!page) return null;
-    if (page.ui) return <UiPageFrame part={part} source={page.ui} ask={page.ask} />;
-    return <HtmlRenderFrame part={part} html={page.html} title={page.title || t('chat.htmlRender.untitled')} ask={page.ask} />;
+    const ask = usePageAsk(part, page?.ask);
+    if (!page || !ask) return null;
+    if (page.ui) return <UiPageFrame part={part} source={page.ui} ask={ask} />;
+    return <HtmlRenderFrame part={part} html={page.html} title={page.title || t('chat.htmlRender.untitled')} ask={ask} />;
 }
 
 interface HtmlRenderFrameProps {

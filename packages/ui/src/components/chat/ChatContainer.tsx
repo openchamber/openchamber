@@ -100,6 +100,7 @@ import {
     useSyncDirectory,
     useSessionRenderable,
     useSessionStatus,
+    useSessionStatusSnapshotReady,
     useScopedBlockingPermissions,
     useScopedBlockingForms,
     useParentSession,
@@ -1052,6 +1053,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
 
     // Session status from sync system
     const sessionStatusForCurrent = useSessionStatus(currentSessionId ?? '', effectiveSessionDirectory) ?? IDLE_SESSION_STATUS;
+    const statusSnapshotReady = useSessionStatusSnapshotReady(effectiveSessionDirectory, currentSessionId ?? '');
 
     // Scoped blocking requests — only subscribe to permissions/forms for
     // the current session + descendant subagent sessions, not all sessions in
@@ -1089,10 +1091,16 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
             return true;
         }
 
+        // No status once the directory's snapshot has landed is idle, as in
+        // `useSessionActivity`: a turn OpenCode was stopped under stays incomplete.
+        if (sessionStatusForCurrent === IDLE_SESSION_STATUS && statusSnapshotReady) {
+            return false;
+        }
+
         // The last record can be a synthetic/skill/shell/switch message; the
         // turn is still running only per the last conversation message.
         return isIncompleteAssistantTurn(getLastConversationRecord(sessionMessages)?.info);
-    }, [currentSessionId, sessionMessages, sessionPermissions.length, sessionForms.length, sessionStatusForCurrent.type]);
+    }, [currentSessionId, sessionMessages, sessionPermissions.length, sessionForms.length, sessionStatusForCurrent, statusSnapshotReady]);
 
     const latestCompletedReply = React.useMemo(
         () => findLatestCompletedReply(sessionMessages),
