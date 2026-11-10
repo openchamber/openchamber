@@ -30,8 +30,8 @@
         "@heroui/theme": "^2.4.23",
         "@lezer/highlight": "^1.2.3",
         "@octokit/rest": "^22.0.1",
-        "@opencode/client": "2.2.6",
-        "@opencode/schema": "2.2.6",
+        "@opencode/client": "2.2.7",
+        "@opencode/schema": "2.2.7",
         "@radix-ui/react-collapsible": "^1.1.12",
         "@radix-ui/react-dialog": "^1.1.15",
         "@radix-ui/react-dropdown-menu": "^2.1.16",
@@ -286,8 +286,8 @@
         "@legendapp/list": "3.7.1",
         "@lezer/highlight": "^1.2.3",
         "@openchamber/sdk": "workspace:*",
-        "@opencode/client": "2.2.6",
-        "@opencode/schema": "2.2.6",
+        "@opencode/client": "2.2.7",
+        "@opencode/schema": "2.2.7",
         "@openuidev/lang-core": "1.0.2",
         "@pierre/diffs": "1.6.2",
         "@pierre/highlights": "0.2.0",
@@ -366,7 +366,7 @@
       "version": "2.7.0",
       "dependencies": {
         "@openchamber/ui": "workspace:*",
-        "@opencode/client": "2.2.6",
+        "@opencode/client": "2.2.7",
         "adm-zip": "^0.6.0",
         "jsonc-parser": "^3.3.1",
         "react": "^19.1.1",
@@ -396,8 +396,8 @@
         "@gitbeaker/rest": "43.8.0",
         "@octokit/rest": "^22.0.1",
         "@openchamber/sdk": "workspace:*",
-        "@opencode/client": "2.2.6",
-        "@opencode/schema": "2.2.6",
+        "@opencode/client": "2.2.7",
+        "@opencode/schema": "2.2.7",
         "@simplewebauthn/server": "13.3.3",
         "@vscode/ripgrep": "^1.18.0",
         "bun-pty": "0.6.0",
@@ -1197,11 +1197,11 @@
 
     "@openchamber/web": ["@openchamber/web@workspace:packages/web"],
 
-    "@opencode/client": ["@opencode/client@2.2.6", "", { "dependencies": { "@opencode/protocol": "2.2.6", "@opencode/schema": "2.2.6" }, "peerDependencies": { "effect": "4.1.0", "solid-js": ">=1.9.0" }, "optionalPeers": ["effect", "solid-js"] }, "sha512-o90b8Z6tk62U3MiRK1g6r7WmNWLzHzIHme75/MCWa9/XmOREMzY4W1N01wAuHwU3J6UH/PlUDNKvLkeX5qCyeA=="],
+    "@opencode/client": ["@opencode/client@2.2.7", "", { "dependencies": { "@opencode/protocol": "2.2.7", "@opencode/schema": "2.2.7" }, "peerDependencies": { "effect": "4.1.0", "solid-js": ">=1.9.0" }, "optionalPeers": ["effect", "solid-js"] }, "sha512-L1nqJqEBEHyg+OwJaMYA5jX8OA4nZ1Jxehp8xTw5u4kzKEgqLes2re7yWzXJSZmybZ5Kv4rX24gJjYHeegwf7g=="],
 
-    "@opencode/protocol": ["@opencode/protocol@2.2.6", "", { "dependencies": { "@opencode/schema": "2.2.6", "effect": "4.1.0" } }, "sha512-XBAgz2qnhFS/EI4P3pgC9A6HJTHnFiaQXkqux3liXwE7hZh5wEzRZ551nQZD95rkrH00EnryUSaKI2y/O2Bt6w=="],
+    "@opencode/protocol": ["@opencode/protocol@2.2.7", "", { "dependencies": { "@opencode/schema": "2.2.7", "effect": "4.1.0" } }, "sha512-J86R/rNrFC0KRJd4G5i2yT5FG7FB4M9Yh418NS3PcTHoWP1jwWKLV85L5JvGYPwb7sKtahyxPeN88Q/Mw+pZvQ=="],
 
-    "@opencode/schema": ["@opencode/schema@2.2.6", "", { "dependencies": { "@standard-schema/spec": "1.1.0", "effect": "4.1.0" } }, "sha512-TaLr30ktFFVsuReorFNbqYvybTVxV/4M44qm5XzRjUqq6deR0jH4h4Wt1gB0NTkXDFL0LMH+Ul1oVBnp5w9TRg=="],
+    "@opencode/schema": ["@opencode/schema@2.2.7", "", { "dependencies": { "@standard-schema/spec": "1.1.0", "effect": "4.1.0" } }, "sha512-A+aUfvpcPm8mN0ptFl2GUHwDFjyrCuLdig3jjQCRoOghF+un1+vVKek1IwIph935vMNqAwRDnwtvZDtHFiGokA=="],
 
     "@openuidev/lang-core": ["@openuidev/lang-core@1.0.2", "", { "dependencies": { "ci-info": "^4.4.0" }, "peerDependencies": { "@modelcontextprotocol/sdk": ">=1.0.0", "zod": "^3.25.0 || ^4.0.0" }, "optionalPeers": ["@modelcontextprotocol/sdk"], "hasInstallScript": true }, "sha512-mxrWXgSmGx9N8ZHFiRgvqCmCH8j3x0PTHJVRvtRPlucxDAihthgMR4W6RXJN5KnCl/5fk1SzcT9JHrvGTKcBFw=="],
 

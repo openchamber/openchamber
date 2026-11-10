@@ -335,7 +335,7 @@ describe("translateWireEvent", () => {
       [{ ...base, type: "command.updated", data: {} }, "command"],
       [{ ...base, type: "skill.updated", data: {} }, "skill"],
       [{ ...base, type: "plugin.updated", data: {} }, "plugin"],
-      [{ ...base, type: "credential.updated", data: {} }, "credential"],
+      [{ ...base, type: "credential.updated", data: { integrationID: "openai", credentialID: "cred_1" } }, "credential"],
       [{ ...base, type: "credential.switched", data: { integrationID: "openai", credentialID: null } }, "credential"],
       [
         { ...base, type: "project.updated", data: { id: "proj", canonical: "/repo", time: { created: 1, updated: 1, active: 1 }, sandboxes: [] } },

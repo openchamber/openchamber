@@ -91,9 +91,9 @@ it drops". Behaviour that may be intended goes up as "bug or intended?", not
 as a fix.
 
 Open asks upstream (OpenCode Slack): declaring 500 bodies on session
-mutations; `provider.list` and `agent.list` waiting for plugin activation the
-way `model.list` does since 2.0.27 (done in 2.2.0; the cold-catalog
-recovery in `useConfigStore` can go); built-in provider plugins setting
+mutations; `agent.list` waiting for plugin activation the way `model.list`
+and `provider.list` do (done in 2.2.0, dropped again in 2.2.7 by #62796, so
+the cold-catalog recovery in `useConfigStore` stays); built-in provider plugins setting
 attribution headers only when the client has not set its own, so a client can
 name itself to a provider (today some plugins overwrite provider-level
 headers). Dropped: an import route for missing 1.x
@@ -106,10 +106,11 @@ Watched upstream issues, checked on every new tag (status with
   #44773, so each call starts a second copy of every local MCP server. Until
   it is fixed, Jev stays off OpenCode's `generate/decisions`; once it is,
   Jev calls can move to that route (`routing/DOCUMENTATION.md`).
-- **#59606**: `PredicateQuestion` has no `criteria`, so the Jev features that
-  ask yes/no questions with true/false criteria (`session-work/questions.js`,
-  `session-goal/audit.js`) cannot move to `generate/decisions` without
-  re-measured wording.
+- **#59606**: `PredicateQuestion` had no `criteria`. 2.2.7 adds an optional
+  `criteria: { true?, false? }` (#62819) while the issue stays open, so the Jev
+  features that ask yes/no questions with true/false criteria
+  (`session-work/questions.js`, `session-goal/audit.js`) can move once #59605
+  is fixed, after re-measuring their wording against OpenCode's prompt.
 
 ## Settled: ours stays, rejected
 
@@ -136,9 +137,10 @@ gap.
   one without plugin providers, and the full list about two seconds later,
   announced by `provider.updated` / `model.updated` with that
   `location.directory`. Recovery rides on those events (`markConfigCatalogStale`).
-  Since 2.0.27 `model.list` and `model.default` wait up to 5 seconds for the
-  location's plugins; `provider.list` and `agent.list` still answer early, so
-  the recovery stays.
+  `model.list`, `model.default` and, since 2.2.0, `provider.list` wait up to
+  5 seconds for the location's plugins. `agent.list` waited in 2.2.0 to 2.2.6
+  and answers early again since 2.2.7: the first read of a cold location is an
+  empty list, then `agent.updated` follows within a second. The recovery stays.
 - **Plugin providers exist only in the running OpenCode.** Nothing about them
   reaches `opencode.json` or `auth.json`; `/api/provider` is the only view, and
   it strips `options.fetch`, so nothing tells a directly callable provider from
