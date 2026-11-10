@@ -339,6 +339,44 @@ describe('startBtwSession', () => {
     });
   });
 
+  describe('a running turn that fills the loaded window', () => {
+    const toolStep = (id: string) => assistantMessage(id, 20, 'tool-calls');
+    const recordFork = () => {
+      const boundaries: Array<string | undefined> = [];
+      forkSessionImpl = (_sessionId, options) => {
+        boundaries.push(options?.before);
+        return Promise.resolve(makeSession('fork-1', '/project'));
+      };
+      return boundaries;
+    };
+
+    beforeEach(() => {
+      parentSyncMessages.splice(0, parentSyncMessages.length, toolStep('msg-4'), toolStep('msg-5'), assistantMessage('msg-6'));
+    });
+
+    test('forks after the finished answer the server holds, before the running prompt', async () => {
+      const server = [assistantMessage('msg-1', 10), userMessage('msg-2'), toolStep('msg-4')];
+      getSessionMessagesImpl = (id) => Promise.resolve(id === 'parent-1'
+        ? page([...server].reverse().map((info) => ({ info, parts: [] })))
+        : page([record('msg-boundary')]));
+      const boundaries = recordFork();
+
+      expect((await startBtwSession(startInput)).id).toBe('fork-1');
+      expect(boundaries).toEqual(['msg-2']);
+    });
+
+    test('fails without forking when the server holds no finished answer either', async () => {
+      getSessionMessagesImpl = (id) => Promise.resolve(id === 'parent-1'
+        ? page([toolStep('msg-4'), userMessage('msg-2')].map((info) => ({ info, parts: [] })))
+        : page([record('msg-boundary')]));
+      const boundaries = recordFork();
+
+      await expect(startBtwSession(startInput)).rejects.toThrow('No completed turn to fork from');
+      expect(boundaries).toEqual([]);
+      expect(useBtwStore.getState().byParent['parent-1']?.creating).toBe(false);
+    });
+  });
+
   test('does not copy an unfinished first turn', async () => {
     parentSyncMessages.splice(0, parentSyncMessages.length, userMessage('msg-1'), assistantMessage('msg-2'));
     let attempts = 0;

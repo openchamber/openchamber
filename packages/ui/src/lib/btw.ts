@@ -126,6 +126,11 @@ export const buildBtwSyntheticTexts = (state: {
 const btwBoundaryParts = (): Array<{ text: string; synthetic: true }> =>
   [{ text: BTW_BOUNDARY_INSTRUCTION, synthetic: true }];
 
+// A v2 turn is several steps, each completed on its own; only the step that
+// ended with `stop` closes a turn.
+const isTurnClosingAnswer = (message: Message): boolean =>
+  message.role === 'assistant' && message.time.completed !== undefined && message.finish === 'stop';
+
 /**
  * The parent's last assistant turn that actually finished.
  *
@@ -141,10 +146,7 @@ const btwBoundaryParts = (): Array<{ text: string; synthetic: true }> =>
 export const findLastCompletedAssistantMessageID = (messages: readonly Message[]): string | null => {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index];
-    if (message?.role !== 'assistant') continue;
-    // A v2 turn is several steps, each completed on its own; only the step
-    // that ended with `stop` closes a turn.
-    if (message.time.completed !== undefined && message.finish === 'stop') return message.id;
+    if (message && isTurnClosingAnswer(message)) return message.id;
   }
   return null;
 };
@@ -174,26 +176,56 @@ function insertForkIntoDirectoryStore(session: Session, directory: string): void
   }
 }
 
+/** The finished answer a fork keeps, and the `before` cut that drops what follows it. */
+type ForkCut = { answerID: string; before: string | undefined };
+
 /**
- * The cut after `answerID` as the server sees it, for a parent that looks idle
- * here. The server can already hold a turn this window has not received, and
- * an omitted `before` would copy it. `undefined` means the answer's turn is
- * still the newest thing on the server, so the whole transcript is the answer's.
- * An answer the server does not list cannot bound the fork, so it fails.
+ * The cut after the newest record `isAnswer` accepts, as the server sees it,
+ * for a parent whose answer this window cannot vouch for. The server can
+ * already hold a turn this window has not received, and an omitted `before`
+ * would copy it. `before: undefined` means the answer's turn is still the
+ * newest thing on the server, so the whole transcript is the answer's. `null`
+ * means the server does not list such an answer.
  */
 async function serverCutAfterAnswer(
   sessionID: string,
-  answerID: string,
+  isAnswer: (message: Message) => boolean,
   directory: string,
-): Promise<string | undefined> {
+): Promise<ForkCut | null> {
   const newestFirst: Message[] = [];
   const answer = await findMessagePageItem(sessionID, ({ info }) => {
-    if (info.id === answerID) return true;
+    if (isAnswer(info)) return true;
     newestFirst.push(info);
     return false;
   }, { limit: SERVER_TAIL_PAGE_SIZE }, directory);
-  if (!answer) throw new Error('No safe transcript boundary to fork from');
-  return transcriptCutAfterMessage([answer.info, ...newestFirst.reverse()], answerID);
+  if (!answer) return null;
+  return {
+    answerID: answer.info.id,
+    before: transcriptCutAfterMessage([answer.info, ...newestFirst.reverse()], answer.info.id),
+  };
+}
+
+/**
+ * Where a fork of the parent cuts: after its last finished answer.
+ *
+ * This window holds only the newest records. A long running turn fills it with
+ * its own steps, none of which closes a turn, while the answer before that turn
+ * sits on the server. That is the usual moment for `/btw`, so the server is
+ * asked before giving up.
+ */
+async function btwForkCut(sessionID: string, directory: string): Promise<ForkCut> {
+  const messages = getSyncMessages(sessionID, directory);
+  const answerID = findLastCompletedAssistantMessageID(messages);
+  if (answerID) {
+    const local = transcriptCutAfterMessage(messages, answerID);
+    if (local) return { answerID, before: local };
+    const server = await serverCutAfterAnswer(sessionID, (message) => message.id === answerID, directory);
+    if (!server) throw new Error('No safe transcript boundary to fork from');
+    return server;
+  }
+  const server = await serverCutAfterAnswer(sessionID, isTurnClosingAnswer, directory);
+  if (!server) throw new Error('No completed turn to fork from');
+  return server;
 }
 
 /** Preparation can be discarded until the server-side fork starts. */
@@ -237,11 +269,7 @@ export async function startBtwSession(input: StartBtwInput): Promise<Session> {
     if (getRuntimeKey() !== expectedRuntimeKey) throw new Error('runtime changed');
     // Fork after the parent's last completed assistant turn rather than at
     // HEAD, so a `/btw` typed mid-turn does not inherit a half-finished one.
-    const parentMessages = getSyncMessages(input.parentSessionId, input.directory);
-    const forkPointMessageID = findLastCompletedAssistantMessageID(parentMessages);
-    if (!forkPointMessageID) throw new Error('No completed turn to fork from');
-    const before = transcriptCutAfterMessage(parentMessages, forkPointMessageID)
-      ?? await serverCutAfterAnswer(input.parentSessionId, forkPointMessageID, input.directory);
+    const { answerID: forkPointMessageID, before } = await btwForkCut(input.parentSessionId, input.directory);
     const forked = await forkAtTranscriptCut(input.parentSessionId, before, input.directory, expectedRuntimeKey);
 
     // The server may canonicalize the worktree path; the prompt must use the
