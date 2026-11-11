@@ -158,13 +158,18 @@ export const WorkStatusContextSection: React.FC<Props> = ({ sessionId, directory
     void loadProjectContext({ id: draftProject.id, path: draftProject.path });
   }, [draftProject, isDraft, loadProjectContext]);
 
+  // An agent's pin reaches the client as a patch of the session's OpenChamber
+  // metadata, so that is what re-reads the summary. The whole record changes
+  // on every step of a running turn (`time.updated`), which the summary does
+  // not show: keyed on it, the panel asked the server again at each step.
+  const openchamberMetadataKey = JSON.stringify(session?.metadata?.openchamber ?? null);
   React.useEffect(() => {
     let cancelled = false;
     void fetchSessionKnowledgeSummary(directory, sessionId).then((summary) => {
       if (!cancelled) setKnowledge(summary);
     });
     return () => { cancelled = true; };
-  }, [directory, sessionId, session, contextEntries, memoryProject, memoryGlobal]);
+  }, [directory, sessionId, openchamberMetadataKey, contextEntries, memoryProject, memoryGlobal]);
 
   const visibleKnowledge = React.useMemo<SessionKnowledgeSummary>(() => {
     if (!isDraft) return knowledge;
