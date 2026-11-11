@@ -1246,7 +1246,11 @@ one app-wide composer state is split per column:
   chat. A pinned composer sends with `usePinnedComposerSelection`: what was
   picked in it, saved for its session in the selection store the way the BTW
   composer saves its picks, otherwise the session record's model, variant and
-  agent. Its picker is `ModelControls` in controlled mode, where the agent
+  agent. A variant `"default"` is how OpenCode stores no effort, so the
+  pinned composer shows it as Default, as the main chat does: from the record
+  it is no effort, and saved as a pick (older pickers copied it there) it is
+  an explicit Default that still wins over the record. Its picker is
+  `ModelControls` in controlled mode, where the agent
   pick is saved for the picker's own session and never changes the main
   chat's agent. As in BTW, the pick carries the effort the composer shows to
   the new agent when the session has none saved for that agent and model, so
