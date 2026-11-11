@@ -4422,7 +4422,13 @@ const fetchQuotaForProviderUncoalesced = async (providerId: string): Promise<Pro
         const credential = openCodeZenCredential(auth);
         if (!credential) return buildResult({ providerId, providerName: 'OpenCode Zen', ok: false, configured: false, error: 'Not configured' });
         const usage = await fetchOpenCodeZenUsage(credential);
-        return buildResult({ providerId, providerName: 'OpenCode Zen', ok: true, configured: true, usage });
+        return buildResult({
+          providerId,
+          providerName: 'OpenCode Zen',
+          ok: true,
+          configured: true,
+          usage: { ...usage, models: Object.keys(usage.models).length ? usage.models : undefined },
+        });
       } catch (error) {
         return buildResult({ providerId, providerName: 'OpenCode Zen', ok: false, configured: true, error: error instanceof Error ? error.message : 'Request failed' });
       }
