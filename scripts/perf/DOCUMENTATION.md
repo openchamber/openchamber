@@ -396,18 +396,22 @@ node scripts/perf/seed-long-session.mjs --port 4599 --dir <project directory> --
 
 A seeded session opens with only its last ten turns in memory, the
 cold-navigation window, so streaming into it measures a short history however
-long the session is. Someone working in one chat holds every turn since they
-opened it. `--grow <turns>` reproduces that: before recording it sends that
-many turns with the page showing the session (`--grow-model`, by default
-`agent-20tools-20000cps`, and the `agent-*-20000cps` models grow agentic
-history in about three seconds a turn), scrolling to the end after each one as
-a reader who follows the chat. The summary reports the message records held
-before and after (`historyRecordsBefore`/`After`). What scales with history is
-small on a fast machine: one agentic turn cost 4.9% of the main thread with 10
-turns held and 6.2% with 100. `--cpu-throttle <rate>` slows the page's CPU
-(`Emulation.setCPUThrottlingRate`) to approximate a slower machine; at 4 the
-same turns cost 14% and 26%, with 28 long tasks instead of 5. The `grow` and
-`grow-short` scenarios of `profile:compare` are those two, throttled.
+long the session is. `--grow <turns>` reproduces a chat someone has worked in
+for a long time: before recording it sends that many turns with the page
+showing the session (`--grow-model`, by default `agent-20tools-20000cps`, and
+the `agent-*-20000cps` models grow agentic history in about three seconds a
+turn), scrolling to the end after each one as a reader who follows the chat.
+The summary reports the message records held before and after
+(`historyRecordsBefore`/`After`). The page keeps a window of the history: after
+10 and after 100 grown `agent-20reads` turns it held about 240 records either
+way. `--cpu-throttle <rate>` slows the page's CPU
+(`Emulation.setCPUThrottlingRate`) to approximate a slower machine. Measured
+at 4 with `--timing` (2026-11-11, one run each, the `grow-short` and `grow`
+arguments below), a streamed agentic turn kept the main thread 9.2% busy with
+10 turns grown and 13.2% with 100, with 1 and 6 long tasks, the longest 64 and
+68 ms. OpenCode's own CPU while it streamed rose from 7% to 25% of a core
+between the two. The `grow` and `grow-short` scenarios of `profile:compare`
+are those two runs.
 
 Run-to-run spread on an unchanged build is one to two points of renderer CPU,
 so a smaller difference is noise.
