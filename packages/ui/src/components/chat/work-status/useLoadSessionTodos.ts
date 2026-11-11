@@ -1,5 +1,6 @@
 import React from 'react';
 
+import { isVSCodeRuntime } from '@/lib/desktop';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { useSessionTodosStore } from '@/stores/useSessionTodosStore';
 
@@ -15,7 +16,9 @@ export const useLoadSessionTodos = (sessionId: string | null, directory: string 
   // -1 while the session has no entry yet.
   const failures = useSessionTodosStore((state) => (sessionId ? state.entries[sessionId]?.failures ?? -1 : 0));
   React.useEffect(() => {
-    if (!sessionId || !directory || failures === 0) return;
+    // VS Code has no session-todos route: a read there only fails and retries
+    // forever, and Tasks stays unlisted without an answer.
+    if (!sessionId || !directory || failures === 0 || isVSCodeRuntime()) return;
     const runtimeKey = getRuntimeKey();
     const load = () => {
       void useSessionTodosStore.getState()
