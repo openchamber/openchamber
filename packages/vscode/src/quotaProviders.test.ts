@@ -149,10 +149,6 @@ describe('OpenCode Go quota provider (VS Code parity)', () => {
       configureOpenCodeCredentials({ list: async () => [key('opencode')] });
     });
 
-    afterEach(() => {
-      configureOpenCodeCredentials({ list: async () => baseCredentialList() });
-    });
-
     test('reads the usage with that key', async () => {
       let request: RequestInit | undefined;
       stubFetchReturning(async (_url, init) => {
@@ -341,6 +337,20 @@ describe('OpenCode Go quota provider — Console OAuth (VS Code parity)', () => 
     assert.equal(result.usage!.windows.weekly!.usedPercent, 25);
   });
 
+  test('supports Go Teams', async () => {
+    globalThis.fetch = async () => Response.json({
+      product: 'go-teams',
+      access: { meters: {
+        month: { resetsAt: '2026-09-01T00:00:00.000Z', limitMicroCents: '1000', usedMicroCents: '250' },
+      } },
+    });
+
+    const result = await fetchQuotaForProvider('opencode-go');
+
+    assert.equal(result.ok, true);
+    assert.equal(result.usage!.windows.monthly!.usedPercent, 25);
+  });
+
   test('distinguishes an absent subscription from a temporary failure', async () => {
     globalThis.fetch = (async () => mockResponse({ product: 'free', access: { meters: {} } })) as typeof fetch;
     const absent = await fetchQuotaForProvider('opencode-go');
@@ -368,6 +378,25 @@ describe('OpenCode Go quota provider — Console OAuth (VS Code parity)', () => 
     const usage = await fetchQuotaForProvider('opencode-go');
     assert.equal(usage.ok, true);
     assert.equal(usage.usage!.windows['5h']!.resetAt, 1_786_000_000_000);
+  });
+
+  test('reads a Go product without access as an absent subscription, not an unreadable response', async () => {
+    // A Console Go subscription that ended keeps the Go product and sends
+    // `access: null` (#6779); the web provider reports it as an absent
+    // subscription and the extension has to answer the same way.
+    stubFetchReturning(async () => mockResponse({
+      product: 'go',
+      cancelAtPeriodEnd: true,
+      renewalStopReason: 'cancelled_by_user',
+      access: null,
+    }));
+    const ended = await fetchQuotaForProvider('opencode-go');
+    assert.equal(ended.configured, true);
+    assert.equal(ended.error, 'No active OpenCode Go subscription on the selected Console account');
+
+    stubFetchReturning(async () => mockResponse({ product: 'go', access: { meters: {} } }));
+    const emptyMeters = await fetchQuotaForProvider('opencode-go');
+    assert.equal(emptyMeters.error, 'OpenCode Go usage data could not be parsed');
   });
 
   test('falls back to the API key when the sign-in is not a Console sign-in', async () => {
@@ -468,10 +497,6 @@ describe('OpenCode Zen quota provider (VS Code parity)', () => {
   describe('with an API key on the Console integration', () => {
     beforeEach(() => {
       configureOpenCodeCredentials({ list: async () => [key('opencode')] });
-    });
-
-    afterEach(() => {
-      configureOpenCodeCredentials({ list: async () => baseCredentialList() });
     });
 
     test('reports the request counters, the spend and the models', async () => {
@@ -616,10 +641,6 @@ describe('OpenCode Zen quota provider (VS Code parity)', () => {
   describe('with a Console sign-in', () => {
     beforeEach(() => {
       configureOpenCodeCredentials({ list: async () => [consoleOAuth()] });
-    });
-
-    afterEach(() => {
-      configureOpenCodeCredentials({ list: async () => baseCredentialList() });
     });
 
     test('uses the Console token and organization', async () => {
@@ -1052,6 +1073,20 @@ describe('ClinePass quota provider (VS Code parity)', () => {
 });
 
 describe('Codex quota provider (VS Code parity)', () => {
+  // The refused path reads the Codex CLI's sign-in; point it at an empty folder so
+  // no test hands the developer's real `~/.codex/auth.json` token to a stub.
+  let codexHome: string;
+
+  beforeEach(() => {
+    codexHome = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-home-'));
+    process.env.CODEX_HOME = codexHome;
+  });
+
+  afterEach(() => {
+    delete process.env.CODEX_HOME;
+    fs.rmSync(codexHome, { recursive: true, force: true });
+  });
+
   for (const { balance, unlimited, expected } of [
     { balance: 62500, unlimited: false, expected: '62500' },
     { balance: '62500.00', unlimited: false, expected: '62500' },
@@ -1087,6 +1122,51 @@ describe('Codex quota provider (VS Code parity)', () => {
     globalThis.fetch = async () => new Response('unauthorized', { status: 401 });
     const expired = await fetchQuotaForProvider('codex');
     assert.equal(expired.error, 'Session expired \u2014 please re-authenticate with OpenAI');
+  });
+
+  describe('through the Codex CLI sign-in', () => {
+    const REFUSED = { error: { type: 'rejected_by_access_enforcement', code: 'no_matching_rule' } };
+    const CLI_USAGE = { email: 'cli@example.com', rate_limit: { primary_window: { used_percent: 42, limit_window_seconds: 18000 } } };
+
+    const signInCli = () => fs.writeFileSync(
+      path.join(codexHome, 'auth.json'),
+      JSON.stringify({ auth_mode: 'chatgpt', tokens: { access_token: 'cli-token', refresh_token: 'cli-refresh', account_id: 'acct_cli' } }),
+    );
+
+    // The usage endpoint refuses OpenCode's token and accepts the CLI's.
+    const stubUsageEndpoint = () => {
+      const authorizations: string[] = [];
+      stubFetchReturning(async (_url, init) => {
+        const headers = new Headers(init?.headers);
+        authorizations.push(headers.get('authorization') ?? '');
+        if (headers.get('authorization') !== 'Bearer cli-token') return Response.json(REFUSED, { status: 401 });
+        assert.equal(headers.get('chatgpt-account-id'), 'acct_cli');
+        return Response.json(CLI_USAGE);
+      });
+      return authorizations;
+    };
+
+    test('reads the numbers with the CLI sign-in and names its account', async () => {
+      signInCli();
+      const authorizations = stubUsageEndpoint();
+
+      const result = await fetchQuotaForProvider('codex');
+
+      assert.equal(result.ok, true);
+      assert.equal(result.usage?.windows['5h'].usedPercent, 42);
+      assert.equal(result.accountLabel, 'cli@example.com');
+      assert.deepEqual(authorizations, ['Bearer test-token', 'Bearer cli-token']);
+    });
+
+    test('keeps the usage-page message without a CLI sign-in', async () => {
+      const authorizations = stubUsageEndpoint();
+
+      const result = await fetchQuotaForProvider('codex');
+
+      assert.equal(result.ok, false);
+      assert.equal(result.error, 'OpenAI shows usage for Sign in with ChatGPT only at chatgpt.com/settings/usage. The legacy Codex sign-ins show it here.');
+      assert.deepEqual(authorizations, ['Bearer test-token']);
+    });
   });
 
   test('omits the balance window when credits are absent', async () => {
@@ -1442,6 +1522,21 @@ describe('Claude quota provider (VS Code parity)', () => {
     }
   });
 
+  test('tells a token without usage access apart from an expired session', async () => {
+    configureOpenCodeCredentials({
+      list: async () => [{ ...oauth('anthropic'), value: { type: 'oauth', methodID: 'test', access: 'no-profile-scope', refresh: 'no-profile-refresh', expires: 0 } }],
+    });
+    stubFetchReturning(async () => new Response('{"type":"error","error":{"type":"permission_error"}}', { status: 403 }));
+    try {
+      const result = await fetchQuotaForProvider('claude');
+      assert.equal(result.ok, false);
+      assert.equal(result.error?.includes('expired'), false);
+      assert.equal(result.error?.includes('claude setup-token'), true);
+    } finally {
+      configureOpenCodeCredentials({ list: async () => baseCredentialList() });
+    }
+  });
+
   test('keeps serving the last good values while Anthropic rate limits', async () => {
     const responses = [
       mockResponse({ five_hour: { utilization: 12, resets_at: '2026-08-20T12:00:00Z' } }),
@@ -1468,6 +1563,34 @@ describe('Claude quota provider (VS Code parity)', () => {
     assert.equal(duringCooldown.ok, true);
     assert.equal(duringCooldown.usage?.windows['5h']?.usedPercent, 12);
     assert.equal(requestCount, 2);
+  });
+
+  test('asks Anthropic again on the next refresh after Retry-After: 0', async () => {
+    configureOpenCodeCredentials({
+      list: async () => [{ ...oauth('anthropic'), value: { type: 'oauth', methodID: 'test', access: 'zero-wait-token', refresh: 'zero-wait-refresh', expires: Date.now() + 3_600_000 } }],
+    });
+    const responses = [
+      mockResponse({ five_hour: { utilization: 12, resets_at: '2026-08-20T12:00:00Z' } }),
+      new Response(null, { status: 429, headers: { 'retry-after': '0' } }),
+      mockResponse({ five_hour: { utilization: 40, resets_at: '2026-08-20T12:00:00Z' } }),
+    ];
+    let requestCount = 0;
+    stubFetchReturning(async () => {
+      const response = responses[requestCount];
+      requestCount += 1;
+      return response;
+    });
+    try {
+      await fetchQuotaForProvider('claude');
+      const rateLimited = await fetchQuotaForProvider('claude');
+      const next = await fetchQuotaForProvider('claude');
+
+      assert.equal(rateLimited.usage?.windows['5h']?.usedPercent, 12);
+      assert.equal(requestCount, 3);
+      assert.equal(next.usage?.windows['5h']?.usedPercent, 40);
+    } finally {
+      configureOpenCodeCredentials({ list: async () => baseCredentialList() });
+    }
   });
 });
 
@@ -1554,7 +1677,7 @@ describe('Z.ai quota provider (VS Code parity)', () => {
             { recordId: 111111, expireTime: '2020-01-01 00:00:00', available: true },
             { recordId: 666002, expireTime: 'not-a-date', available: true },
             { recordId: 462029, expireTime: '2099-09-11 06:01:35', available: true },
-            { recordId: 555501, expireTime: '2099-06-15 12:30:00', available: true },
+            { recordId: 555501, expireTime: '2099-06-15 12:30:00', available: true, grantType: 'GLOBAL' },
           ],
           weekResets: [
             { recordId: 777003, expireTime: '2099-03-01 08:00:00', available: true },
@@ -1576,6 +1699,7 @@ describe('Z.ai quota provider (VS Code parity)', () => {
     assert.deepEqual(windows['5h']!.giftReset, {
       recordId: 555501,
       expireAt: Date.parse('2099-06-15T12:30:00+08:00'),
+      grantType: 'GLOBAL',
     });
     assert.deepEqual(windows.weekly!.giftReset, {
       recordId: 777003,
@@ -1699,6 +1823,7 @@ describe('Z.ai gift reset activation (VS Code parity)', () => {
       return mockResponse({ code: 200, msg: 'success', data: 462029, success: true });
     });
 
+    // No grantType on the input: the provider falls back to GLOBAL.
     await activateQuotaGiftReset('zai-coding-plan', { recordId: 462029, resetType: 'FIVE_HOUR' });
 
     assert.equal(fetchCalls.length, 1);
@@ -1714,11 +1839,45 @@ describe('Z.ai gift reset activation (VS Code parity)', () => {
       resetType?: unknown;
       recordId?: unknown;
       requestId?: unknown;
+      grantType?: unknown;
     };
     assert.equal(body.targetType, 'PERSONAL');
     assert.equal(body.resetType, 'FIVE_HOUR');
     assert.equal(body.recordId, 462029);
+    assert.equal(body.grantType, 'GLOBAL');
     assert.match(String(body.requestId), /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+  });
+
+  test('threads the record grantType into the activation request unchanged', async () => {
+    const fetchCalls: Array<[string, RequestInit | undefined]> = [];
+    stubFetchReturning(async (url: string, init?: RequestInit) => {
+      fetchCalls.push([url, init]);
+      return mockResponse({ code: 200, msg: 'success', data: 1, success: true });
+    });
+
+    await activateQuotaGiftReset('zai-coding-plan', { recordId: 462029, resetType: 'WEEK', grantType: 'ACTIVITY' });
+
+    // SAFETY: body is the JSON stringified by activateQuotaGiftReset itself;
+    // only grantType is read back.
+    const body = JSON.parse(String(fetchCalls[0]?.[1]?.body)) as { grantType?: unknown };
+    assert.equal(body.grantType, 'ACTIVITY');
+  });
+
+  test('rejects an explicitly invalid grantType before any request', async () => {
+    const fetchCalls: unknown[] = [];
+    stubFetchReturning(async (url: string) => {
+      fetchCalls.push(url);
+      return mockResponse({ code: 200, msg: 'success', data: 1, success: true });
+    });
+
+    for (const grantType of ['', '   ', null, 7]) {
+      await assert.rejects(
+        // SAFETY: bridge payloads are untrusted JSON, so the provider sees values its type rules out.
+        activateQuotaGiftReset('zai-coding-plan', { recordId: 1, resetType: 'WEEK', grantType: grantType as string }),
+        /Invalid gift reset request/,
+      );
+    }
+    assert.equal(fetchCalls.length, 0);
   });
 
   test('throws the API message when activation is rejected', async () => {

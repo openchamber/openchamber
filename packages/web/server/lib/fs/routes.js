@@ -623,6 +623,9 @@ export const registerFsRoutes = (app, dependencies) => {
     managedChatsRoot,
     cloneRepository,
     environmentRuntime = null,
+    // The realpath settings store projects under (Node's JS `fs.realpath`): the
+    // native one also resolves Windows `subst` and mapped drives, which settings keep.
+    projectRealpath = fsPromises.realpath.bind(fsPromises),
   } = dependencies;
   // Chat worktrees may live outside every project workspace; both managed
   // roots stay valid filesystem targets.
@@ -1174,7 +1177,12 @@ export const registerFsRoutes = (app, dependencies) => {
         if (!stats.isDirectory()) {
           return { path: directoryPath, isDirectory: false, reason: 'not-directory' };
         }
-        return { path: directoryPath, isDirectory: true };
+        // The path settings store a project under, so a link to an added
+        // project can be recognised before adding it again.
+        const realPath = await projectRealpath(resolvedPath).catch(() => null);
+        const result = { path: directoryPath, isDirectory: true };
+        if (realPath) result.realPath = realPath;
+        return result;
       } catch (error) {
         if (error.code === 'ENOENT' || error.code === 'ENOTDIR') {
           return { path: directoryPath, isDirectory: false, reason: error.code === 'ENOENT' ? 'not-found' : 'not-directory' };
@@ -1600,7 +1608,11 @@ export const registerFsRoutes = (app, dependencies) => {
     const declaredSize = Number(req.headers?.['content-length']);
     if (Number.isFinite(declaredSize) && declaredSize > maxUploadBytes) {
       req.resume?.();
-      return res.status(413).json({ error: `File exceeds maximum size of ${maxUploadBytes} bytes` });
+      return res.status(413).json({
+        error: `File exceeds maximum size of ${maxUploadBytes} bytes`,
+        reason: 'too-large',
+        maxBytes: maxUploadBytes,
+      });
     }
 
     try {
@@ -1623,7 +1635,7 @@ export const registerFsRoutes = (app, dependencies) => {
       const requestedParent = path.dirname(resolved.resolved);
       const canonicalParent = await fsPromises.realpath(requestedParent);
       if (!isPathWithinRoot(canonicalParent, canonicalBase, path, os)) {
-        return res.status(403).json({ error: 'Access denied' });
+        return res.status(403).json({ error: 'Access denied', reason: 'outside-workspace' });
       }
 
       const existingPath = await fsPromises.realpath(resolved.resolved).catch((error) => {
@@ -1634,7 +1646,7 @@ export const registerFsRoutes = (app, dependencies) => {
       });
       const writePath = existingPath || path.join(canonicalParent, path.basename(resolved.resolved));
       if (!isPathWithinRoot(writePath, canonicalBase, path, os)) {
-        return res.status(403).json({ error: 'Access denied' });
+        return res.status(403).json({ error: 'Access denied', reason: 'outside-workspace' });
       }
 
       if (existingPath) {
@@ -1693,7 +1705,11 @@ export const registerFsRoutes = (app, dependencies) => {
         return res.status(404).json({ error: 'Destination directory not found', reason: 'not-found' });
       }
       if (err && typeof err === 'object' && err.uploadTooLarge) {
-        return res.status(413).json({ error: `File exceeds maximum size of ${maxUploadBytes} bytes` });
+        return res.status(413).json({
+          error: `File exceeds maximum size of ${maxUploadBytes} bytes`,
+          reason: 'too-large',
+          maxBytes: maxUploadBytes,
+        });
       }
       if (err && typeof err === 'object' && (err.code === 'EISDIR' || err.code === 'ENOTDIR')) {
         return res.status(400).json({ error: 'Specified path is a directory' });

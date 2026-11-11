@@ -7,7 +7,7 @@ const realFetch = globalThis.fetch;
 globalThis.fetch = async () => new Response('[]', { status: 200, headers: { 'content-type': 'application/json' } });
 const browser = new Window({ url: 'http://localhost/' });
 browser.document.write('<!doctype html><html><head></head><body></body></html>');
-Object.assign(globalThis, { window: browser, document: browser.document, navigator: browser.navigator,
+Object.assign(globalThis, { window: browser, document: browser.document, Event: browser.Event, CustomEvent: browser.CustomEvent, navigator: browser.navigator,
   localStorage: browser.localStorage, sessionStorage: browser.sessionStorage, HTMLElement: browser.HTMLElement,
   Element: browser.Element, Node: browser.Node, Text: browser.Text, SVGElement: browser.SVGElement,
   customElements: browser.customElements, MutationObserver: browser.MutationObserver, DOMParser: browser.DOMParser,
@@ -139,6 +139,14 @@ describe('a note on a frame that answers', () => {
     expect(sent[0].data.note).toBe('none of these');
   }));
 
+  test('stays under the block while it is written on a form that ends with Tabs', () => answering(async () => {
+    const source = 'root = Stack([tabs])\ntabs = Tabs([Tab("Chart", [chart]), Tab("Why", [Input("why", "Why?")])])\nchart = DeskChart("Sales")';
+    await draw({ kind: 'page', answered: null, submit: async () => {} }, source);
+    await writeNote('none of these');
+    expect(container.querySelector('.oc-box textarea')).toBeNull();
+    expect(container.querySelector('textarea')?.value).toBe('none of these');
+  }));
+
   test('a reloaded reply shows the note it sent', () => answering(async () => {
     await draw({ kind: 'reply', answered: { picks: [{ value: 'DeskChart', note: 'kept' }], values: {}, skipped: [] }, submit: async () => {} });
     expect(container.querySelector('textarea')?.value).toBe('kept');
@@ -172,6 +180,18 @@ describe('an answer from an extension frame', () => {
     await act(async () => { await expect(answer('Yes')).rejects.toThrow('did not reach'); });
     await act(async () => { await answer('Yes'); });
     expect(attempts).toBe(2);
+  });
+
+  test('a failed answer says so while the frame can answer again', async () => {
+    chart.answers = true;
+    const fail = async () => { throw new Error('offline'); };
+    await draw({ kind: 'reply', answered: null, submit: fail });
+    await act(async () => { await expect(answer('Yes')).rejects.toThrow('did not reach'); });
+    expect(container.textContent).toContain('Not sent. Try again.');
+    await draw({ kind: 'reply', answered: null, submit: fail }, 'root = Stack([chart, field])\nchart = DeskChart("Sales")\nfield = Input("name", "Name")');
+    await act(async () => { await expect(answer('Yes')).rejects.toThrow('did not reach'); });
+    expect(container.textContent).toContain('Not sent. Try again.');
+    chart.answers = false;
   });
 
   test('in a reply it answers for the whole block, and a card nobody answered stays skipped', async () => {

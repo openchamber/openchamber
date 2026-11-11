@@ -77,6 +77,7 @@ import { SourceControlInstanceOtherProviderError } from '@openchamber/ui/lib/api
 import { runtimeFetch } from '@openchamber/ui/lib/runtime-fetch';
 import type { RuntimeFetchOptions } from '@openchamber/ui/lib/runtime-fetch';
 import { isSafeRepositoryEndpoint, parseBindingResponse, resolveBindingReadiness } from '../../server/lib/source-control/binding-contract.js';
+import { isExtensionProviderId, isProviderUserId } from '../../server/lib/source-control/provider-id.js';
 import type { SourceControlProviderDescriptor } from '@openchamber/ui/lib/source-control/providers/descriptor';
 import { fetchChangeRequestListStatuses, fetchChangeRequestReviewState, fetchRepositoryReferenceDetail, fetchRepositoryReferences, fetchRepositoryReferencesAcross } from './repository-references';
 import { BUILT_IN_SOURCE_CONTROL_PROVIDERS, fetchSourceControlProviders, providerPath } from './source-control-providers';
@@ -534,12 +535,6 @@ const mutationTargetMatches = (
   && (context.target.base === undefined || target.base === context.target.base)
   && (context.target.headSha === undefined || target.headSha === context.target.headSha);
 
-/** A provider user is `<instance>#<numeric user id>` on every provider, host and origin instances alike. */
-const providerAccountMatches = (identity: SourceControlIdentity, providerAccountId: string): boolean => (
-  providerAccountId.startsWith(`${identity.instance}#`)
-    && /^\d+$/.test(providerAccountId.slice(identity.instance.length + 1))
-);
-
 const parseMutationReceipt = <TResult>(
   payload: MutationReceiptDTO,
   context: SourceControlMutationContext,
@@ -553,7 +548,7 @@ const parseMutationReceipt = <TResult>(
     || payload.status !== 'succeeded' || !isBooleanValue(payload.replayed)
     || !actor || !hasExactKeys(actor, ['provider', 'instance', 'providerAccountId'])
     || actor.provider !== identity.provider || actor.instance !== identity.instance
-    || !isNonEmptyString(actor.providerAccountId) || !providerAccountMatches(identity, actor.providerAccountId)
+    || !isNonEmptyString(actor.providerAccountId) || !isProviderUserId(identity.provider, identity.instance, actor.providerAccountId)
     || !target || !hasExactKeys(target, [
       'repositoryId', 'bindingRevision', 'primaryRemote', 'project',
       ...(['number', 'head', 'base', 'headSha'] as const).filter((key) => target[key] !== undefined),
@@ -678,7 +673,10 @@ const parseReadyMutationResult = (result: MutationResultDTO): SourceControlReady
 
 const parseSourceUser = (user: SourceUserDTO, identity: SourceControlIdentity): SourceControlUser => {
   const username = user?.username || user?.login;
-  if (!user || !isValidId(user.id) || !isNonEmptyString(username)
+  const validId = isExtensionProviderId(identity.provider)
+    ? typeof user?.id === 'string' && user.id.length > 0 && user.id.length <= 256 || isPositiveSafeInteger(user?.id)
+    : user && isValidId(user.id);
+  if (!user || !validId || !isNonEmptyString(username)
     || !hasCompatibleIdentity(user, identity)
     || (user.avatarUrl !== undefined && !isHttpUrl(user.avatarUrl))
     || (user.name !== undefined && !isStringValue(user.name))

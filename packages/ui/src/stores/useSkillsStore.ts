@@ -178,7 +178,7 @@ interface SkillsStore {
   /** Every directory loaded so far, including the ambient one. Holds switched-off skills too. */
   skillsByDirectory: Record<string, DiscoveredSkill[]>;
   /**
-   * The `integration.use` statements OpenCode applies per directory, which
+   * The `skill.use` and `mcp.use` statements OpenCode applies per directory, which
    * decide the skills agents can use (`skillSwitch.ts`). A failed read keeps
    * the last ones known; a directory never read has no entry.
    */

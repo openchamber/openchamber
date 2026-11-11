@@ -13,6 +13,8 @@ import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } 
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 import { Icon } from '@/components/icon/Icon';
 import { cn, getRevealLabelKey } from '@/lib/utils';
+import { copyTextToClipboard } from '@/lib/clipboard';
+import { toast } from '@/components/ui';
 import { PROJECT_ICON_MAP, resolveProjectColor, ProjectIconImage } from '@/lib/projectMeta';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { useI18n } from '@/lib/i18n';
@@ -207,6 +209,19 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
     setOpenSidebarMenuKey(open ? menuInstanceKey : null);
   }, [menuInstanceKey, setOpenSidebarMenuKey]);
 
+  const handleCopyPath = React.useCallback(() => {
+    if (!projectDirectory) return;
+    void copyTextToClipboard(projectDirectory)
+      .then((result) => {
+        if (result.ok) {
+          toast.success(t('sessions.sidebar.project.copyPath.success'));
+          return;
+        }
+        toast.error(t('sessions.sidebar.project.copyPath.error'));
+      })
+      .catch(() => toast.error(t('sessions.sidebar.project.copyPath.error')));
+  }, [projectDirectory, t]);
+
   const renderProjectMenuItems = (Item: React.ElementType) => (
     <>
       {showCreateButtons && !isRepo && !hideDirectoryControls && onNewSession && (
@@ -243,6 +258,12 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
         <Item onClick={onOpenFolder}>
           <Icon name="folder-received" className="me-1.5 h-4 w-4" />
           {t(getRevealLabelKey())}
+        </Item>
+      )}
+      {projectDirectory && (
+        <Item onClick={handleCopyPath}>
+          <Icon name="link" className="me-1.5 h-4 w-4" />
+          {t('sessions.sidebar.project.actions.copyPath')}
         </Item>
       )}
       <Item onClick={onRenameStart}>
@@ -288,7 +309,12 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
   // 2px from the edge, then the worktree and menu buttons (24px, 4px apart)
   // from 28px.
   const showWorktreeAction = showCreateButtons && isRepo && !hideDirectoryControls && Boolean(onNewWorktreeSession);
-  const groupedHeaderActionCount = (showWorktreeAction ? 1 : 0) + (hideDirectoryControls ? 0 : 1);
+  // With a mouse the project's menu is its right-click menu (Shift+F10 from
+  // the keyboard); the ⋯ button shows on touch only: always in touch layouts,
+  // on hover for a touch screen elsewhere. Hover reserves count it only where
+  // it always shows.
+  const showMenuButton = !hideDirectoryControls && alwaysShowActions;
+  const groupedHeaderActionCount = (showWorktreeAction ? 1 : 0) + (showMenuButton ? 1 : 0);
   const headerActionsReserveClass = groupedHeaderActionCount === 2
     ? '[--oc-actions-reserve:4.125rem]'
     : groupedHeaderActionCount === 1 && showCreateButtons
@@ -296,12 +322,13 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
       : showCreateButtons || groupedHeaderActionCount === 1
         ? '[--oc-actions-reserve:0.75rem]'
         : undefined;
-  const headerLabelMaskClass = alwaysShowActions
+  // A header with no hover actions covers nothing.
+  const headerLabelMaskClass = alwaysShowActions || !headerActionsReserveClass
     ? undefined
     : isMenuOpen
       ? 'oc-actions-mask'
       : 'group-hover/project:oc-actions-mask group-has-[:focus-visible]/project:oc-actions-mask';
-  const headerCoveredFadeClass = alwaysShowActions
+  const headerCoveredFadeClass = alwaysShowActions || !headerActionsReserveClass
     ? undefined
     : isMenuOpen
       ? 'opacity-0'
@@ -442,7 +469,7 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
                         )}
                         aria-label={t('sessions.sidebar.project.actions.newWorktree')}
                       >
-                        <Icon name="git-branch" className="h-3.5 w-3.5" />
+                        <Icon name="worktree" className="h-3.5 w-3.5" />
                       </button>
                     </TooltipTrigger>
                     <TooltipContent side="bottom" sideOffset={4}>
@@ -461,6 +488,7 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
                         type="button"
                         className={cn(
                           'inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring hover:text-foreground',
+                          !showMenuButton && 'pointer-fine:hidden',
                           isMenuOpen
                             ? 'opacity-100 pointer-events-auto'
                             : alwaysShowActions

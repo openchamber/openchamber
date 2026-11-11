@@ -17,6 +17,16 @@ describe('parseGuestCatalogJson', () => {
     expect(readGuests(JSON.stringify({ guests: [guest] }))?.[0]?.blocks?.[0]?.answers).toBe(true);
   });
 
+  test('a row keeps its provider logos, and logos it cannot read cost only themselves', () => {
+    const guest = { id: 'hello', name: 'Hello', icon: 'window', capabilities: { requested: [], granted: [] }, source: 'path' };
+    expect(readGuests(JSON.stringify({ guests: [{ ...guest, providerLogos: { acme: 'logos/acme.svg' } }] }))?.[0]?.providerLogos)
+      .toEqual({ acme: 'logos/acme.svg' });
+
+    const unreadable = readGuests(JSON.stringify({ guests: [{ ...guest, providerLogos: { acme: '../acme.svg' } }] }))?.[0];
+    expect(unreadable?.id).toBe('hello');
+    expect(unreadable?.providerLogos).toBeUndefined();
+  });
+
   test('one row it cannot read keeps the others and is listed by name', () => {
     const valid = {
       id: 'hello',
@@ -36,6 +46,7 @@ describe('parseGuestCatalogJson', () => {
         { id: null, name: null, builtIn: true },
         { id: null, name: null, builtIn: false },
       ],
+      opencodePlugins: null,
     });
   });
 
@@ -297,7 +308,20 @@ describe('parseGuestCatalogJson', () => {
     expect(parseGuestCatalogJson('{"guests":[{"id":"Nope"}]}')).toEqual({
       guests: [],
       unreadable: [{ id: null, name: null, builtIn: false }],
+      opencodePlugins: null,
     });
+  });
+
+  test('reads how OpenCode plugins reach OpenCode, and drops a delivery state this build does not know', () => {
+    type Envelope = { delivery: string; globalConfigPath: string | null; inGlobalConfig: string[] };
+    const listing = (opencodePlugins?: Envelope) => parseGuestCatalogJson(JSON.stringify({ guests: [], opencodePlugins }))?.opencodePlugins;
+    expect(listing({ delivery: 'restart', globalConfigPath: '/home/me/.config/opencode/opencode.json', inGlobalConfig: ['teapot-tools'] }))
+      .toEqual({ delivery: 'restart', globalConfigPath: '/home/me/.config/opencode/opencode.json', inGlobalConfig: ['teapot-tools'] });
+    // No package ships a plugin, or the global config could not be read: no path, no ids.
+    expect(listing({ delivery: 'file', globalConfigPath: null, inGlobalConfig: [] })).toEqual({ delivery: 'file', globalConfigPath: null, inGlobalConfig: [] });
+    // A newer server's state would draw a button for a case this build cannot describe.
+    expect(listing({ delivery: 'teleport', globalConfigPath: null, inGlobalConfig: [] })).toBeNull();
+    expect(listing(undefined)).toBeNull();
   });
 });
 
@@ -400,5 +424,51 @@ describe('notification channels on a catalog row', () => {
     expect(guest?.notifications).toEqual(slice);
     expect(malformed?.id).toBe('other');
     expect(malformed?.notifications).toBeUndefined();
+  });
+});
+
+test('reads an OpenCode service role and its approval capability from the catalog', () => {
+  const row = {
+    id: 'api-provider', name: 'API provider', icon: 'plug',
+    service: { runtime: 'host', provides: ['opencode'], granted: false },
+    capabilities: { requested: ['service', 'opencode'], granted: ['service'] },
+  };
+  expect(parseGuestCatalogJson(JSON.stringify({ guests: [row] }))).toEqual({
+    guests: [row],
+    opencodePlugins: null,
+    unreadable: [],
+  });
+});
+
+describe('links on a catalog row', () => {
+  const links = {
+    action: 'open',
+    keys: ['DEMO'],
+    urls: {
+      origin: 'https://tasks.example.com',
+      identifierPattern: '^[A-Za-z][A-Za-z0-9_]{0,31}-\\d{1,16}$',
+      patterns: [{ path: '^/tasks/([A-Za-z][A-Za-z0-9_]{0,31}-\\d{1,16})(?:/|$)' }],
+      itemTemplate: '/tasks/{id}',
+    },
+  };
+  type LinksJson = Omit<typeof links, 'urls'> & { urls: typeof links.urls | null };
+  const row = (value: LinksJson) => ({ guest: { id: 'tasks', name: 'Tasks', icon: 'task', capabilities: { requested: ['links'], granted: ['links'] }, links: value } });
+
+  test('reads the compiled links the server serves', () => {
+    expect(parseInstalledGuestJson(JSON.stringify(row(links)))?.links).toEqual({ ...links, action: 'open' });
+  });
+
+  test('a links value this build cannot read drops the links, never the row', () => {
+    for (const broken of [
+      { ...links, keys: ['proj'] },
+      { ...links, action: 'jump' },
+      { ...links, urls: { ...links.urls, origin: 'http://tasks.example.com' } },
+      { ...links, urls: { ...links.urls, itemTemplate: '/{segment}/{id}' } },
+      { ...links, keys: [], urls: null },
+    ]) {
+      const parsed = parseInstalledGuestJson(JSON.stringify(row(broken)));
+      expect(parsed?.id).toBe('tasks');
+      expect(parsed?.links).toBeUndefined();
+    }
   });
 });

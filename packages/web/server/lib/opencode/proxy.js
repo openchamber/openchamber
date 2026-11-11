@@ -6,6 +6,7 @@ import { createProxyMiddleware } from 'http-proxy-middleware';
 
 import {
   applyForwardProxyResponseHeaders,
+  BROWSER_FETCH_METADATA_HEADERS,
   collectForwardProxyHeaders,
   shouldForwardProxyResponseHeader,
 } from '../../proxy-headers.js';
@@ -213,7 +214,7 @@ const directoriesAsOpenCodeReadsThem = (req, url) => {
       try {
         directory = decodeURIComponent(header);
       } catch {
-        // OpenCode rejects a malformed value; nothing to match.
+        // OpenCode falls back to the raw header if decoding fails.
       }
     }
     directories.push(directory);
@@ -232,9 +233,16 @@ export const normalizeForwardedDirectoryHeaders = (headers) => {
   }
 
   try {
-    headers['x-opencode-directory'] = decodeURIComponent(rawDirectory);
+    const decodedDirectory = decodeURIComponent(rawDirectory);
+    try {
+      http.validateHeaderValue('x-opencode-directory', decodedDirectory);
+    } catch {
+      // OpenCode can decode this value, but Node cannot carry it as a raw header.
+      return headers;
+    }
+    headers['x-opencode-directory'] = decodedDirectory;
   } catch {
-    // Leave malformed values untouched; upstream will reject invalid paths.
+    // OpenCode falls back to the raw value when URI decoding fails.
   }
   delete headers['x-opencode-directory-encoding'];
   return headers;
@@ -411,9 +419,13 @@ export const registerOpenCodeProxy = (app, deps) => {
     // the host's own answers go out exactly as before spaces.
     mergeSpaceSessionList = null,
     spaceEventHub = null,
+    // Sessions OpenChamber runs for itself (`hidden-sessions.js`): left out of every list.
+    hiddenSessions = null,
     // The folder trust check (`../opencode-trust`): requests for a folder
     // whose configuration runs code wait for the user's trust.
     openCodeTrust = null,
+    // MCP OAuth from a browser on another machine (`mcp-oauth.js`).
+    mcpOAuthSignIn = null,
   } = deps;
 
   /**
@@ -527,6 +539,10 @@ export const registerOpenCodeProxy = (app, deps) => {
     console.log('Setting up OpenCode API gate (OpenCode not started yet)');
   }
   app.set('opencodeProxyConfigured', true);
+
+  // The provider's redirect carries no session and names no folder, so it goes
+  // ahead of the gates below; the attempt it belongs to already passed them.
+  mcpOAuthSignIn?.registerCallbackRoute(app);
 
   // Registered ahead of the readiness hold: the trust answer is OpenChamber's
   // own and needs no running OpenCode.
@@ -967,7 +983,8 @@ export const registerOpenCodeProxy = (app, deps) => {
       }
 
       res.setHeader('content-type', result.contentType);
-      const hostList = await overlayOwnedStateOnList(sanitizeSessionListPayload(result.payload));
+      const visible = hiddenSessions ? hiddenSessions.filterSessionList(result.payload) : result.payload;
+      const hostList = await overlayOwnedStateOnList(sanitizeSessionListPayload(visible));
       // The first page of the global list carries every space's sessions after the host's; a
       // later page, and a list scoped to one directory, are the host's alone.
       const listQuery = new URL(upstreamPath, 'http://localhost').searchParams;
@@ -1112,9 +1129,7 @@ export const registerOpenCodeProxy = (app, deps) => {
    * cannot be read.
    */
   const checkoutGateFolders = async (req, res, url) => {
-    const folders = [];
-    const named = url.searchParams.get('directory') || req.get('x-opencode-directory');
-    if (named) folders.push(named);
+    const folders = directoriesAsOpenCodeReadsThem(req, url).filter(Boolean);
     const movedSessionID = sessionMoveOf(req.method, new URL(req.originalUrl || req.url, 'http://localhost').pathname);
     if (!movedSessionID) return { folders };
     let source;
@@ -1190,6 +1205,26 @@ export const registerOpenCodeProxy = (app, deps) => {
   // V2 lists sessions across directories on every platform and owns pagination.
   app.get('/api/session', (req, res, next) => {
     return forwardSanitizedSessionListRequest(req, res, next);
+  });
+
+  // The running sessions, without the ones OpenChamber runs for itself: a
+  // hidden dreaming pass must not read as work in a badge or the tray.
+  app.get('/api/session/active', async (req, res, next) => {
+    if (!hiddenSessions) return next();
+    try {
+      const result = await fetchSessionListPayload(await getRequestUpstreamPath(req), { req });
+      res.status(result.upstream.status);
+      res.setHeader('content-type', result.contentType);
+      if (!result.isJson || result.parseError || !result.upstream.ok) {
+        res.end(result.bodyText);
+        return;
+      }
+      res.json(hiddenSessions.filterActive(result.payload));
+    } catch (error) {
+      const status = sessionRouteErrorStatus(error);
+      if (status === null) return;
+      if (!res.headersSent) res.status(status).json({ error: 'OpenCode service unavailable' });
+    }
   });
 
   // One session: the same overlay, so a detail read agrees with the list it
@@ -1325,21 +1360,13 @@ export const registerOpenCodeProxy = (app, deps) => {
           proxyReq.setHeader('Authorization', authHeaders.Authorization);
         }
 
-        if (req.headers?.['x-opencode-directory-encoding'] === 'uri') {
-          const rawDirectory = req.headers['x-opencode-directory'];
-          if (typeof rawDirectory === 'string') {
-            try {
-              proxyReq.setHeader('x-opencode-directory', decodeURIComponent(rawDirectory));
-            } catch {
-              proxyReq.setHeader('x-opencode-directory', rawDirectory);
-            }
-          }
-          proxyReq.removeHeader?.('x-opencode-directory-encoding');
-        }
-
         // Defensive: request identity encoding from upstream OpenCode.
         // This avoids compressed-body/header mismatches in multi-proxy setups.
         proxyReq.setHeader('accept-encoding', 'identity');
+
+        // Same reason as collectForwardProxyHeaders: OpenCode refuses requests
+        // a packaged client's browser marks cross-site.
+        for (const name of BROWSER_FETCH_METADATA_HEADERS) proxyReq.removeHeader(name);
 
         replayParsedBody(proxyReq, req);
       },
@@ -1388,6 +1415,7 @@ export const registerOpenCodeProxy = (app, deps) => {
   });
 
   app.use('/api', applyProxyResponseDeadline);
+  mcpOAuthSignIn?.registerStartRoutes(app, { readBody });
   // v1's interactive provider/MCP OAuth callbacks are gone: v2 runs provider
   // connection through `/api/integration/*`, which answers immediately and
   // needs no special deadline.

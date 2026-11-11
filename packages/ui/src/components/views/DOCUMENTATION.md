@@ -286,6 +286,40 @@ Markdown plan previews use the file preview's local-asset handling. Relative
 images resolve from the plan file's directory, including personal plans stored
 under the OpenChamber data directory and repository plans in a custom folder.
 
+## Code size in files and diffs
+
+The editor, the Files view's code preview and every `PierreDiffViewer` (Changes,
+walkthrough, history) render code at the Editor font size with rows of
+`editorCodeLineHeight(size)` (`lib/editorCodeMetrics.ts`), so the same line
+sits the same way in each. A virtualized diff's `lineHeight` metric must equal
+the CSS row height (`--oc-code-line-height` on `diffs-container` in index.css),
+or long diffs jump while scrolling. On phones and tablets Pierre views keep the
+code size mobile.css pins and their default rows: `useEditorCodeMetrics()`
+returns null there. The CodeMirror editor follows the Editor font size on every
+device, rows included.
+
+### Why 12px code with 1.7 rows and not 13px with 1.5
+
+At 13/20 code in the side panel read large and cramped next to the old Changes
+look (12/24). The default is 12px with 20px rows. The store's v28 migration
+moves a persisted 13, the old default, to 12; a 13 the user chose comes back
+from the synced settings. The Markdown preview is sized at +2/+0 from the
+setting, so at the default it keeps its 14px body and 12px code.
+
+### Why the CodeMirror line height sits on `.cm-scroller`
+
+CodeMirror's base theme sets `line-height: 1.4` on the scroller, which beats a
+value set on the editor root. The theme's row height was on the root once and
+never applied.
+
+### Why a font size change calls `setMetrics` and not a new diff instance
+
+A new instance replaces the `diffs-container` host, and the effects that set
+its attributes and observers (expand-on-demand separators, find marks) run
+only on their own dependencies, so a rebuilt diff lost them until the file
+changed. `VirtualizedFileDiff.setMetrics` updates the row height on the same
+host.
+
 ## JSON tree previews
 
 `FilesView` selects `JsonTreeView`'s JSONC format for `.jsonc` files. That format
@@ -341,7 +375,11 @@ file, read afresh, expanded. A repository the picker drops again ends the
 attempt on the repository left on screen. Picking Last turn by hand asks
 nothing and stays there, empty or not. The phone's Changes surface
 (`apps/MobileChangesSurface.tsx`) answers the same way and opens the file's own
-diff screen, since it has no expanded list to scroll.
+diff screen, since it has no expanded list to scroll. VS Code has no Diff view
+panel: the chip reads the turn's diff once and opens the file's patch in the
+editor's own diff (`editor.openDiff` with `patch`; a file the turn deleted shows
+its old content against an empty side). A file the list does not hold opens as
+it is, and a failed read shows an error toast.
 
 ### Why the click is a one-shot request and not derived from the tab
 

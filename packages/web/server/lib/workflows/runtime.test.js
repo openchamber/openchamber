@@ -45,12 +45,15 @@ const fakeAgentSessions = ({ answer = (prompt) => `done: ${prompt}`, hang = [], 
       const sessionId = `ses_agent${nextSession}`;
       fake.started.push(text);
       fake.allowed.push(allowTools);
-      onSession(sessionId);
+      await onSession(sessionId);
       running += 1;
       fake.maxRunning = Math.max(fake.maxRunning, running);
       try {
         await duringTurn(sessionId, text);
         if (hang.some((prompt) => text.startsWith(prompt))) {
+          // Like the real session: a run stopped while the session was being
+          // made ends the agent before its turn, since no abort event follows.
+          if (signal.aborted) throw new WorkflowAgentStopped();
           await new Promise((_, reject) => signal.addEventListener('abort', () => reject(new WorkflowAgentStopped()), { once: true }));
         }
         await new Promise((resolve) => setTimeout(resolve, 5));
@@ -77,9 +80,10 @@ const fakeAgentSessions = ({ answer = (prompt) => `done: ${prompt}`, hang = [], 
 };
 
 const setup = async (agentSessions, options = {}) => {
+  const { storeFs = fs, ...runtimeOptions } = options;
   const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'openchamber-workflows-'));
   directories.push(dataDir);
-  const store = createWorkflowRunStore({ fsPromises: fs, path, dataDir });
+  const store = createWorkflowRunStore({ fsPromises: storeFs, path, dataDir });
   const events = [];
   const runtime = createWorkflowRuntime({
     store,
@@ -91,7 +95,7 @@ const setup = async (agentSessions, options = {}) => {
     fsPromises: fs,
     path,
     sleep: async () => {},
-    ...options,
+    ...runtimeOptions,
   });
   const scope = { sessionId: 'ses_parent', directory: dataDir };
   const act = (action, input = {}) => runtime.executeAction(action, input, scope);
@@ -103,6 +107,433 @@ const setup = async (agentSessions, options = {}) => {
 };
 
 const script = (body, phases = "['Work']") => `export const meta = { name: 'test-flow', description: 'A test', phases: ${phases} }\n${body}`;
+
+// Exercise the real store and atomic rename, with only the failure boundary injected.
+const diskFault = () => {
+  const disk = {
+    writes: [],
+    beforeRename: async () => {},
+    fs: {
+      ...fs,
+      rename: async (source, target) => {
+        if (source.endsWith('.tmp')) {
+          const snapshot = JSON.parse(await fs.readFile(source, 'utf8'));
+          disk.writes.push(snapshot);
+          await disk.beforeRename(snapshot);
+        }
+        await fs.rename(source, target);
+      },
+    },
+  };
+  return disk;
+};
+
+const reload = (dataDir) => createWorkflowRunStore({ fsPromises: fs, path, dataDir });
+const deferred = () => {
+  let resolve;
+  const promise = new Promise((done) => { resolve = done; });
+  return { promise, resolve };
+};
+
+describe('workflow durability checkpoints', () => {
+  it('rejects a failed proposal without publishing a phantom run', async () => {
+    const disk = diskFault();
+    disk.beforeRename = async () => { throw new Error('disk unavailable'); };
+    const agents = fakeAgentSessions();
+    const { act, store, events } = await setup(agents, { storeFs: disk.fs });
+    await expect(act('workflow.run', { script: script('return 1') })).rejects.toThrow('Could not save workflow run');
+    expect(await store.list()).toEqual([]);
+    expect(events).toEqual([]);
+    expect(agents.started).toEqual([]);
+  });
+
+  it.each(['approve', 'resume'])('rolls back a failed %s with references and nested history intact, then admits once', async (action) => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const disk = diskFault();
+    const agents = fakeAgentSessions({ answer: (prompt, attempt) => prompt === 'two' && attempt === 1 ? null : `done: ${prompt}` });
+    const { runtime, act, store, finished, events, dataDir } = await setup(agents, { storeFs: disk.fs });
+    const { runId } = await act('workflow.run', { script: script("const a = await agent('one'); const b = await agent('two'); if (b === null) throw new Error('two failed'); return [a, b]") });
+    if (action === 'resume') {
+      await runtime.approve({ runId });
+      await finished(runId);
+      await waitFor(async () => (await store.get(runId)).report.delivered);
+      await store.flush();
+    }
+    const run = await store.get(runId);
+    // A full log catches rollback that only truncates after log() evicts its head.
+    run.logs = Array.from({ length: 200 }, (_, index) => ({ at: index, message: `retained ${index}` }));
+    await store.save(run);
+    const before = JSON.stringify(run);
+    const refs = { agents: run.agents, report: run.report, logs: run.logs };
+    const started = agents.started.length;
+    disk.beforeRename = async (snapshot) => {
+      if (snapshot.state === 'running') throw new Error('EACCES /private/workflow-runs');
+    };
+    await expect(runtime[action]({ runId })).rejects.toThrow('Could not save workflow run');
+    expect(await store.get(runId)).toBe(run);
+    expect(JSON.stringify(run)).toBe(before);
+    expect(run.agents).toBe(refs.agents);
+    expect(run.report).toBe(refs.report);
+    expect(run.logs).toBe(refs.logs);
+    expect(await reload(dataDir).get(runId)).toEqual(JSON.parse(before));
+    expect(agents.started).toHaveLength(started);
+    expect(events.at(-1).properties.run.state).toBe(action === 'approve' ? 'awaiting-approval' : 'failed');
+    if (action === 'resume') await expect(runtime.stop({ runId })).rejects.toThrow('not running');
+    disk.beforeRename = async () => {};
+    await runtime[action]({ runId });
+    await waitFor(() => agents.reports.length === (action === 'approve' ? 1 : 2));
+    expect(agents.started).toEqual(action === 'approve' ? ['one', 'two'] : ['one', 'two', 'two']);
+  });
+
+  it.each(['approve', 'resume', 'saved'])('awaits a slow %s checkpoint and rejects an overlapping admission', async (action) => {
+    const disk = diskFault();
+    const agents = fakeAgentSessions();
+    const { runtime, act, store, dataDir } = await setup(agents, { storeFs: disk.fs });
+    const source = script(action === 'resume' ? "await agent('one'); throw new Error('retry')" : "return agent('one')");
+    let runId;
+    if (action === 'saved') await act('workflow.save', { script: source });
+    else {
+      ({ runId } = await act('workflow.run', { script: source }));
+      if (action === 'resume') {
+        await runtime.approve({ runId });
+        await waitFor(() => agents.reports.length === 1);
+        await store.flush();
+      }
+    }
+    const gate = deferred();
+    const entered = deferred();
+    disk.beforeRename = async (snapshot) => {
+      if (snapshot.state === 'running') { entered.resolve(snapshot.id); await gate.promise; }
+    };
+    let acknowledged = false;
+    const admission = (action === 'saved'
+      ? runtime.startSaved({ directory: dataDir, name: 'test-flow', sessionId: 'ses_parent' })
+      : runtime[action]({ runId })).then((value) => { acknowledged = true; return value; });
+    runId = await entered.promise;
+    try {
+      expect(acknowledged).toBe(false);
+      expect(agents.started).toHaveLength(action === 'resume' ? 1 : 0);
+      await expect(runtime[action === 'saved' ? 'approve' : action]({ runId })).rejects.toMatchObject({ statusCode: 409 });
+    } finally {
+      gate.resolve();
+    }
+    await admission;
+    await waitFor(() => agents.reports.length === (action === 'resume' ? 2 : 1));
+    expect((await store.get(runId)).attempt).toBe(action === 'resume' ? 2 : 1);
+    expect(agents.started).toEqual(['one']);
+  });
+
+  it('leaves a saved workflow waiting and its new parent session intact after failed approval', async () => {
+    const disk = diskFault();
+    const agents = fakeAgentSessions();
+    const parents = [];
+    agents.createSession = async () => { parents.push('ses_empty_parent'); return 'ses_empty_parent'; };
+    const { runtime, act, store, dataDir } = await setup(agents, { storeFs: disk.fs });
+    await act('workflow.save', { script: script("return agent('one')") });
+    disk.beforeRename = async (snapshot) => { if (snapshot.state === 'running') throw new Error('disk unavailable'); };
+    await expect(runtime.startSaved({ directory: dataDir, name: 'test-flow' })).rejects.toThrow('Could not save workflow run');
+    expect(parents).toEqual(['ses_empty_parent']);
+    expect(await store.list()).toMatchObject([{ parentSessionId: 'ses_empty_parent', state: 'awaiting-approval', attempt: 0 }]);
+    expect(agents.started).toEqual([]);
+    disk.beforeRename = async () => {};
+    await runtime.approve({ runId: (await store.list())[0].id });
+    await waitFor(() => agents.reports.length === 1);
+  });
+
+  it('rolls back a failed decline and withholds a pending decline report until its checkpoint commits', async () => {
+    const disk = diskFault();
+    const agents = fakeAgentSessions();
+    const { runtime, act, store } = await setup(agents, { storeFs: disk.fs });
+    const { runId } = await act('workflow.run', { script: script('return 1') });
+    const before = JSON.stringify(await store.get(runId));
+    const gate = deferred();
+    const entered = deferred();
+    disk.beforeRename = async (snapshot) => {
+      if (snapshot.state === 'declined') { entered.resolve(); await gate.promise; throw new Error('disk unavailable'); }
+    };
+    const decline = runtime.decline({ runId }).then(() => null, (error) => error);
+    await entered.promise;
+    const delivering = runtime.deliverPending();
+    await new Promise((resolve) => setImmediate(resolve));
+    const prematureReports = [...agents.reports];
+    gate.resolve();
+    await delivering;
+    expect((await decline)?.message).toBe('Could not save workflow run');
+    expect(prematureReports).toEqual([]);
+    expect(agents.reports).toEqual([]);
+    expect(JSON.stringify(await store.get(runId))).toBe(before);
+    disk.beforeRename = async () => {};
+    await runtime.decline({ runId });
+    expect(agents.reports).toHaveLength(1);
+  });
+
+  it.each(['agent-start', 'child-id'])('fails %s before any prompt and clears session/answer resources', async (boundary) => {
+    const disk = diskFault();
+    const agents = fakeAgentSessions();
+    const children = [];
+    const prompts = [];
+    agents.start = async ({ onSession, text }) => {
+      children.push('ses_empty_child');
+      await onSession('ses_empty_child');
+      prompts.push(text);
+      return { sessionId: 'ses_empty_child', outcome: { state: 'completed', text: 'paid work' } };
+    };
+    const { runtime, act, store } = await setup(agents, { storeFs: disk.fs });
+    disk.beforeRename = async (snapshot) => {
+      const agent = snapshot.agents[0];
+      if (snapshot.state === 'running' && agent?.state === 'running' && (boundary === 'agent-start' || agent.sessionId)) throw new Error('disk unavailable');
+    };
+    const { runId } = await act('workflow.run', { script: script("return agent('work', { schema: { type: 'string' } })") });
+    await runtime.approve({ runId });
+    await waitFor(() => agents.reports.length === 1);
+    const run = await store.get(runId);
+    expect(run).toMatchObject({ state: 'completed', result: null, agents: [{ state: 'failed' }] });
+    expect(children).toEqual(boundary === 'agent-start' ? [] : ['ses_empty_child']);
+    expect(prompts).toEqual([]);
+    expect(agents.interrupted).toEqual([]);
+    if (boundary === 'agent-start') expect(run.agentsStarted).toBe(0);
+    else expect(run.agents[0].sessionId).toBe('ses_empty_child');
+    await expect(runtime.executeAction('workflow.answer', { answer: 'x' }, { sessionId: 'ses_empty_child' })).rejects.toMatchObject({ statusCode: 403 });
+    await expect(runtime.stop({ runId })).rejects.toThrow('not running');
+  });
+
+  it('keeps the truthful ended state after terminal failure, withholds every report, and restarts from disk without rerunning', async () => {
+    const disk = diskFault();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const agents = fakeAgentSessions();
+    const { runtime, act, store, dataDir } = await setup(agents, { storeFs: disk.fs });
+    disk.beforeRename = async (snapshot) => { if (snapshot.state === 'completed') throw new Error('terminal checkpoint failed'); };
+    const { runId } = await act('workflow.run', { script: script("return agent('work')") });
+    await runtime.approve({ runId });
+    await waitFor(() => warn.mock.calls.some((call) => call.join(' ').includes('completion report withheld')), 1_000);
+    expect(await store.get(runId)).toMatchObject({ state: 'completed', result: 'done: work' });
+    const file = path.join(dataDir, 'workflow-runs', `${runId}.json`);
+    const durableSnapshot = await fs.readFile(file, 'utf8');
+    await expect(runtime.stop({ runId })).rejects.toThrow('not running');
+    await runtime.deliverPending();
+    expect(agents.reports).toEqual([]);
+    expect(await fs.readFile(file, 'utf8')).toBe(durableSnapshot);
+    const restartedStore = reload(dataDir);
+    expect(await restartedStore.get(runId)).toMatchObject({ state: 'running' });
+    const restarted = createWorkflowRuntime({ store: restartedStore, agentSessions: agents, postSynthetic: async (_, body) => agents.reports.push(body), fsPromises: fs, path });
+    await restarted.start();
+    await restarted.deliverPending();
+    expect(agents.started).toEqual(['work']);
+    expect(agents.reports).toMatchObject([{ metadata: { state: 'stopped', runId } }]);
+  });
+
+  it('protects the last durable running snapshot from retention after a failed terminal checkpoint at capacity', async () => {
+    const disk = diskFault();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const agents = fakeAgentSessions();
+    const { runtime, act, store, dataDir } = await setup(agents, { storeFs: disk.fs });
+    const { runId } = await act('workflow.run', { script: script("return agent('work')") });
+    // Only this run will end. The other 99 are open, so none can be pruned.
+    for (let index = 0; index < 99; index += 1) {
+      await act('workflow.run', { script: script('return 1') });
+    }
+    expect(await store.list()).toHaveLength(100);
+    const file = path.join(dataDir, 'workflow-runs', `${runId}.json`);
+    let durableSnapshot;
+    let terminalReport;
+    disk.beforeRename = async (snapshot) => {
+      if (snapshot.id === runId && snapshot.state === 'completed') {
+        durableSnapshot = await fs.readFile(file, 'utf8');
+        terminalReport = (await store.get(runId)).report;
+        throw new Error('terminal checkpoint failed');
+      }
+    };
+    await runtime.approve({ runId });
+    await waitFor(() => warn.mock.calls.some((call) => call.join(' ').includes('completion report withheld')), 1_000);
+    expect(JSON.parse(durableSnapshot)).toMatchObject({ state: 'running' });
+    await runtime.deliverPending();
+    expect(agents.reports).toEqual([]);
+
+    // This successful queued write crosses the retention boundary after failure.
+    const next = await act('workflow.run', { script: script('return 2') });
+    expect(await fs.readFile(file, 'utf8')).toBe(durableSnapshot);
+    await expect(runtime.detail({ runId })).resolves.toMatchObject({ result: 'done: work' });
+    expect(await store.get(next.runId)).toMatchObject({ state: 'awaiting-approval' });
+    expect((await store.get(runId)).report).toBe(terminalReport);
+    expect(terminalReport).toMatchObject({ delivered: false });
+    await runtime.deliverPending();
+    await runtime.deliverPending();
+    expect((await store.get(runId)).report).toBe(terminalReport);
+    expect(agents.reports).toEqual([]);
+    expect(agents.started).toEqual(['work']);
+    expect(await fs.readFile(file, 'utf8')).toBe(durableSnapshot);
+
+    const restartedStore = reload(dataDir);
+    expect(await restartedStore.get(runId)).toMatchObject({ state: 'running' });
+    const recoveredReports = [];
+    const restarted = createWorkflowRuntime({
+      store: restartedStore, agentSessions: agents,
+      postSynthetic: async (_, body) => recoveredReports.push(body), fsPromises: fs, path,
+    });
+    await restarted.start();
+    await restarted.deliverPending();
+    await restarted.deliverPending();
+    expect(agents.started).toEqual(['work']);
+    expect(recoveredReports).toHaveLength(1);
+    expect(recoveredReports[0].metadata).toMatchObject({ state: 'stopped', runId });
+    expect(await reload(dataDir).get(runId)).toMatchObject({ state: 'stopped', report: { delivered: true } });
+    expect(await restartedStore.get(next.runId)).toMatchObject({ state: 'awaiting-approval' });
+  });
+
+  it('retains a posted report id after marker failure and reconciles 409 on reload without more agents', async () => {
+    const disk = diskFault();
+    const agents = fakeAgentSessions();
+    const { runtime, act, store, dataDir } = await setup(agents, { storeFs: disk.fs });
+    disk.beforeRename = async (snapshot) => { if (snapshot.report?.delivered) throw new Error('marker failed'); };
+    const { runId } = await act('workflow.run', { script: script("return agent('work')") });
+    await runtime.approve({ runId });
+    await waitFor(() => agents.reports.length === 1);
+    await store.flush();
+    const report = (await store.get(runId)).report;
+    const messageId = agents.reports[0].body.id;
+    expect(report).toMatchObject({ messageId, delivered: true });
+    await runtime.deliverPending();
+    expect(agents.reports).toHaveLength(1);
+    const restartedStore = reload(dataDir);
+    expect((await restartedStore.get(runId)).report).toEqual({ messageId, delivered: false, resume: true });
+    const posted = [];
+    const restarted = createWorkflowRuntime({ store: restartedStore, agentSessions: agents, postSynthetic: async (_, body) => { posted.push(body.id); throw Object.assign(new Error('already admitted'), { status: 409 }); }, fsPromises: fs, path });
+    await restarted.start();
+    await restarted.deliverPending();
+    await restarted.deliverPending();
+    expect(posted).toEqual([messageId]);
+    expect((await reload(dataDir).get(runId)).report).toEqual({ messageId, delivered: true, resume: true });
+    expect(agents.started).toEqual(['work']);
+  });
+
+  it('keeps a completed agent answer when its final save fails, and handles the ignored cleanup promise', async () => {
+    const disk = diskFault();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const agents = fakeAgentSessions();
+    const { runtime, act, store } = await setup(agents, { storeFs: disk.fs });
+    disk.beforeRename = async (snapshot) => {
+      if (snapshot.state === 'running' && snapshot.agents[0]?.state === 'completed') throw new Error('agent final save failed');
+    };
+    const { runId } = await act('workflow.run', { script: script("return await agent('work')") });
+    await runtime.approve({ runId });
+    await waitFor(() => agents.reports.length === 1);
+    await store.flush();
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(await store.get(runId)).toMatchObject({ state: 'completed', result: 'done: work', agents: [{ result: 'done: work', state: 'completed' }] });
+    expect(warn.mock.calls.some((call) => call.join(' ').includes('ended but could not be saved'))).toBe(true);
+    expect(agents.started).toEqual(['work']);
+  });
+
+  it('acknowledges a durable decline even when its delivered-marker save fails', async () => {
+    const disk = diskFault();
+    const agents = fakeAgentSessions();
+    const { runtime, act, store } = await setup(agents, { storeFs: disk.fs });
+    const { runId } = await act('workflow.run', { script: script('return 1') });
+    disk.beforeRename = async (snapshot) => { if (snapshot.report?.delivered) throw new Error('marker failed'); };
+    await expect(runtime.decline({ runId })).resolves.toEqual({ runId, state: 'declined' });
+    await runtime.deliverPending();
+    expect((await store.get(runId)).report).toMatchObject({ messageId: agents.reports[0].body.id, delivered: true });
+    expect(agents.reports).toHaveLength(1);
+  });
+
+  it('keeps deletion final while an earlier terminal checkpoint is pending', async () => {
+    const disk = diskFault();
+    const agents = fakeAgentSessions();
+    const { runtime, act, store, dataDir } = await setup(agents, { storeFs: disk.fs });
+    const gate = deferred();
+    const entered = deferred();
+    disk.beforeRename = async (snapshot) => {
+      if (snapshot.state === 'completed') { entered.resolve(); await gate.promise; }
+    };
+    const { runId } = await act('workflow.run', { script: script("return agent('work')") });
+    await runtime.approve({ runId });
+    await entered.promise;
+    const removal = runtime.remove({ runId });
+    gate.resolve();
+    await removal;
+    await store.flush();
+    await runtime.deliverPending();
+    expect(await store.get(runId)).toBeNull();
+    expect(await reload(dataDir).get(runId)).toBeNull();
+    expect(agents.reports).toEqual([]);
+  });
+
+  it('preserves the same report reference after a failed deletion', async () => {
+    let fail = false;
+    const agents = fakeAgentSessions();
+    const { runtime, act, store } = await setup(agents, { storeFs: { ...fs, rm: async (...args) => {
+      if (fail) throw new Error('removal failed');
+      return fs.rm(...args);
+    } } });
+    const { runId } = await act('workflow.run', { script: script('return 1') });
+    await runtime.decline({ runId });
+    const report = (await store.get(runId)).report;
+    fail = true;
+    await expect(runtime.remove({ runId })).rejects.toThrow('removal failed');
+    expect((await store.get(runId)).report).toBe(report);
+    fail = false;
+    await runtime.remove({ runId });
+    expect(await store.get(runId)).toBeNull();
+  });
+
+  it('returns null for sustained agent save failures without unhandled rejection, retries or stranded capacity', async () => {
+    const disk = diskFault();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const unhandled = [];
+    const onUnhandled = (error) => unhandled.push(error);
+    process.on('unhandledRejection', onUnhandled);
+    const agents = fakeAgentSessions();
+    const { runtime, act, store } = await setup(agents, { storeFs: disk.fs, maxConcurrentAgents: 1 });
+    const { runId } = await act('workflow.run', { script: script("return parallel([1, 2, 3, 4, 5, 6].map(n => () => agent('work ' + n)))") });
+    // Let the admission commit, then fail every checkpoint for all six calls and the terminal save.
+    disk.beforeRename = async (snapshot) => { if (snapshot.agents.length) throw new Error('disk unavailable'); };
+    try {
+      await runtime.approve({ runId });
+      await waitFor(() => warn.mock.calls.some((call) => call.join(' ').includes('completion report withheld')), 1_000);
+      await store.flush();
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(await store.get(runId)).toMatchObject({ state: 'completed', result: [null, null, null, null, null, null], agentsStarted: 0 });
+      expect(agents.started).toEqual([]);
+      expect(agents.interrupted).toEqual([]);
+      expect(agents.reports).toEqual([]);
+      expect(unhandled).toEqual([]);
+      expect(disk.writes).toHaveLength(15);
+      await expect(runtime.stop({ runId })).rejects.toThrow('not running');
+      await runtime.deliverPending();
+      expect(disk.writes).toHaveLength(15);
+      disk.beforeRename = async () => {};
+      const next = await act('workflow.run', { script: script("return agent('later')") });
+      await runtime.approve({ runId: next.runId });
+      await waitFor(() => agents.reports.length === 1);
+      expect(agents.started).toEqual(['later']);
+    } finally {
+      process.off('unhandledRejection', onUnhandled);
+    }
+  });
+
+  it('isolates failed recovery of one stale run and delivers the other durable recovery', async () => {
+    const disk = diskFault();
+    const agents = fakeAgentSessions();
+    const { act, store, dataDir } = await setup(agents, { storeFs: disk.fs });
+    const first = await act('workflow.run', { script: script('return 1') });
+    const second = await act('workflow.run', { script: script('return 2') });
+    for (const { runId } of [first, second]) {
+      const run = await store.get(runId);
+      run.state = 'running';
+      await store.save(run);
+    }
+    const recoveringStore = createWorkflowRunStore({ fsPromises: disk.fs, path, dataDir });
+    disk.beforeRename = async (snapshot) => { if (snapshot.id === first.runId) throw new Error('one broken file'); };
+    const posted = [];
+    const runtime = createWorkflowRuntime({ store: recoveringStore, agentSessions: agents, postSynthetic: async (_, body) => posted.push(body.metadata.runId), fsPromises: fs, path });
+    await expect(runtime.start()).resolves.toBeUndefined();
+    await runtime.deliverPending();
+    expect(posted).toEqual([second.runId]);
+    expect(await reload(dataDir).get(first.runId)).toMatchObject({ state: 'running' });
+    expect(await reload(dataDir).get(second.runId)).toMatchObject({ state: 'stopped', report: { delivered: true } });
+    expect(agents.started).toEqual([]);
+  });
+});
 
 describe('workflow runtime', () => {
   it('waits for approval, runs the agents and reports into the session', async () => {
@@ -517,11 +948,14 @@ describe('workflow runtime', () => {
   });
 
   it('marks a run that was going when the server stopped, and reports it once OpenCode answers', async () => {
-    const agents = fakeAgentSessions({ hang: ['slow'] });
+    const inTurn = deferred();
+    const agents = fakeAgentSessions({ hang: ['slow'], duringTurn: async () => inTurn.resolve() });
     const first = await setup(agents);
     const { runId } = await first.act('workflow.run', { script: script("return agent('slow')") });
     await first.runtime.approve({ runId });
-    await waitFor(async () => (await first.act('workflow.status', { runId })).agents.length === 1);
+    // Its saves end once the agent is in its turn. Both stores live in one
+    // process and share a temp file name, so a later save would collide.
+    await inTurn.promise;
     await first.store.flush();
 
     // A second runtime over the same directory: the first one's worker is gone.

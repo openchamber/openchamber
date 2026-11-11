@@ -1,12 +1,16 @@
+import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { GUEST_BLOCK_RESERVED_NAMES, isGuestApproved, parseOpenChamberVersion, requestedGuestCapabilities } from '@openchamber/sdk';
 
+import { resolveOpenCodePluginFolder } from './opencode-plugin.js';
+
 /**
  * What extensions add to agents: the text and block components a session is
- * told about, and the skill folders OpenCode loads. Only an active extension
- * counts, read from the catalog at each use, so a pause takes it all away.
+ * told about, and the skill and plugin folders OpenCode loads. Only an active
+ * extension counts, read from the catalog at each use, so a pause takes it
+ * all away.
  */
 
 const AUTHORING_SKILL_NAME = 'openchamber-extensions';
@@ -47,9 +51,10 @@ export const describeExtensionBlocks = (guests) => {
  * @param {{
  *   listGuests: () => Promise<object[]>,
  *   instructions: { forDirectory: (directory: string | null, guestIds: Set<string>) => Promise<Array<{ guestId: string, text: string }>> },
+ *   fsPromises?: Pick<typeof import('node:fs/promises'), 'realpath' | 'stat' | 'readFile'>,
  * }} deps
  */
-export const createGuestAgentContext = ({ listGuests, instructions }) => {
+export const createGuestAgentContext = ({ listGuests, instructions, fsPromises = fs }) => {
   /** The session's extension entry, or `null` when the catalog cannot be read, which keeps what it holds. */
   const instructionText = async (directory) => {
     let guests;
@@ -76,7 +81,24 @@ export const createGuestAgentContext = ({ listGuests, instructions }) => {
       .map((guest) => path.resolve(guest.packageRoot, guest.skills));
   };
 
-  return { instructionText, skillDirectories };
+  /**
+   * Plugin folders of active extensions holding the `opencodePlugin` grant,
+   * as real paths inside their package. A folder that no longer resolves is
+   * left out, so OpenCode is never told to load what is not there. A catalog
+   * that cannot be read gives none.
+   */
+  const pluginDirectories = async () => {
+    const guests = await listGuests().catch(() => []);
+    const directories = [];
+    for (const guest of guests) {
+      if (!isActive(guest) || !guest.opencodePlugin || !guest.capabilityGrants?.includes('opencodePlugin')) continue;
+      const directory = await resolveOpenCodePluginFolder(fsPromises, guest.packageRoot, guest.opencodePlugin);
+      if (directory) directories.push(directory);
+    }
+    return directories;
+  };
+
+  return { instructionText, skillDirectories, pluginDirectories };
 };
 
 /**

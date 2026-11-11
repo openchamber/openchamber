@@ -67,6 +67,8 @@ writes when the dialog closes, while a new file is only created on confirm.
 
 ## Providers
 
+Source-control cards whose descriptor carries `auth.login` show its service-owned sign-in hint when that instance has no account. With no PAT method, the instance renders its signed-in user without token, add-account or CLI-switch controls. The service owns sign-in outside the app. Opening that card rechecks status; a failed read keeps the auth store's prior account metadata and reports an error, while only a successful empty result removes the displayed login. The same card is used by the web, desktop and mobile Integrations pages.
+
 `providers/` is not an autosave page. Connecting a provider is an action, not a
 setting: an API key is submitted, an OAuth flow is completed, a credential is
 removed. OpenCode owns the credential store and announces every change
@@ -155,7 +157,29 @@ Custom-provider icons are OpenChamber profile preferences, keyed by provider
 ID. They are not written into OpenCode config because OpenCode has no provider
 icon field. "Default" stores nothing, so the provider's own logo (or the
 generic fallback) still shows; `ProviderLogo` reads a chosen icon before trying
-provider logos, so Settings and every model picker agree.
+provider logos, so Settings, every model picker, the agent status chip, and
+the message footer agree. The status chip and footer used to draw the logo
+URL themselves, which skipped a chosen icon.
+
+Any provider can also carry an uploaded logo image (`lib/customProviderLogos.ts`,
+routes in `packages/web/server/lib/opencode/provider-logo-routes.js`).
+`ProviderLogo` draws it first, then a chosen icon, an active extension's logo
+(`contributes.providerLogos`, `lib/guests/provider-logos.ts`), the bundled logo,
+the models.dev logo and the generic fallback. An upload or an extension's logo
+keeps its colours, so it gets no `dark:invert`. While one loads the slot stays
+empty at its size, except that a bundled logo stays on screen until an
+extension's replaces it, and a failed load or draw falls through to the next
+mark. VS Code and mobile keep the guest catalog empty, so extension logos do not
+reach them. A custom provider sets the image in its edit form, beside the icon
+picker, and Save applies what the user did there after the provider itself is
+saved: a picked file is uploaded, Remove deletes the stored image, and an
+untouched field keeps whatever is stored (a logo kept from when the provider
+was last configured, or one another client just uploaded). A failed image write
+is its own toast and does not reopen the form, whose next Save would store the
+key again. Every other provider, and a custom one while
+enterprise mode hides its form, sets it in a Logo section on its page, applied
+at once. The chosen icon stays the fallback. VS Code runs no OpenChamber server,
+so it neither offers the upload nor draws an uploaded logo; it shows the icon.
 
 The "Connect provider" page lists `GET /api/integration` minus the
 integrations that already have a connection, MCP OAuth registrations
@@ -208,6 +232,16 @@ per Location) and mounts the shared `providers/ProviderOAuthMethods.tsx`
 with that directory. While the server reports `needs_auth`, the status card
 shows its sign-in row; once the credential is stored, the page connects the
 server again, which is what moves it out of `needs_auth` or `failed`.
+
+A started sign-in keeps its row until it completes or fails, whatever the
+status says (`onActiveChange`). A failed one stays only while the status
+itself offers a sign-in, so its error never lingers on a connected server.
+A sign-in from another machine writes the server's redirect first
+(`packages/web/server/lib/opencode/mcp-oauth.js`), OpenCode reconnects the
+server and reports `pending` for about a second, and
+unmounting the row then cancelled the attempt: the first Connect did nothing
+visible and only the second one opened the consent page. The Integrations
+catalog keeps its sign-in row the same way.
 
 The detail page looks up the integration for a failed server or a configured
 remote server with `oauth !== false`. An absent `oauth` field is included:
@@ -266,12 +300,15 @@ shows the `claude auth login` command, which works in both cases.
 
 ### Policy-blocked MCP servers and skills
 
-OpenCode drops an MCP server or skill an `integration.use` deny names
-(`mcp:<name>`, `skill:<id>`, wildcards allowed) from its own lists, while the
+OpenCode drops an MCP server or skill an `mcp.use` or `skill.use` deny names
+(the server name or skill id, wildcards allowed) from its own lists, while the
 MCP and Skills pages list what the config files and the disk hold.
 `shared/useIntegrationPolicyBlock.ts` reads the statements from
 `/api/config` (`readIntegrationPolicies`, decided like OpenCode: documents
-reversed, last match wins) and the MCP page marks such a row "Blocked by
+reversed, last match wins) as `mcp:<name>` and `skill:<id>` resources. It also
+takes the legacy `integration.use` statement with that prefix, which OpenCode
+decodes into the new actions (since 2.2.3 `/api/config` serves only those), and
+no other `integration.use`, which decides providers and accounts. The MCP page marks such a row "Blocked by
 policy" and disables Connect and Test. Statements from a connected OpenCode
 Console workspace are not in `/api/config`, so a server blocked only there is
 not marked.
@@ -280,10 +317,11 @@ The Skills page reads the same statements from the skills store. One choice,
 "Agents use it" (`skills/SkillUseField.tsx`), answers when agents get a skill:
 Automatically, When called (the skill file's `disable-model-invocation` flag)
 or Off. A skill's id is its `SKILL.md` folder name, not its display name. Off
-writes an exact `skill:<id>` deny where the skill lives (project config for a
+writes an exact `skill.use` deny for the id where the skill lives (project config for a
 project skill, global config otherwise) and leaves the file's flag alone;
-leaving Off removes the exact deny from every config file OpenCode reads for
-the directory, hand-written ones included. A skill an exact deny turns off
+leaving Off removes the exact deny, in either spelling (`skill.use` `<id>` or
+the legacy `integration.use` `skill:<id>` an older OpenChamber wrote), from
+every config file OpenCode reads for the directory, hand-written ones included. A skill an exact deny turns off
 reads "Off" in the sidebar. A wildcard deny is someone else's rule: the choice
 is locked, the row reads "Blocked", and the page names the rule and its file.
 An allow that decides the skill is named the same way.
@@ -301,6 +339,58 @@ A scope picker would make every user learn how OpenCode orders global and
 project policies (global wins) before turning a skill off. Writing where the
 skill lives covers the common case with one control, and turning it back on
 clears the skill's exact deny wherever it is, so no file keeps a stale rule.
+
+### Switching a plugin off
+
+The Plugins list is the only place a plugin is switched on or off; the detail
+page carries no control. The switch records the entry's `plugin:` resource in
+OpenChamber's own store, and the config layer of the OpenCode OpenChamber starts
+denies it there. The user's OpenCode config is not written, so the TUI and any
+external server keep loading the plugin. A switched-off plugin reports what
+OpenCode reports for any plugin that does not load: `Not loaded` on the card's
+status pill. The pill keeps that wording, and the card never adds a "Disabled"
+pill, because the switch beside it already says who turned it off.
+
+The switch belongs to OpenChamber and covers every project of the OpenCode it
+starts, while web and VS Code each keep their own. The page description says
+that plainly, because a project-scope card suggests otherwise.
+
+When a deny the user wrote themselves blocks the entry, the switch is disabled
+and the detail page says under the status banner that a rule in the config
+blocks it. The switch also stays disabled until the policy read succeeds, and
+while it is failing, because a denied plugin and an enabled one look the same
+before the config is read. A runtime OpenChamber did not start, or a store it
+cannot read, reports `unavailable`: the switch stays disabled and says the switch
+applies only to the OpenCode OpenChamber starts. VS Code renders the same switch
+through its bridge; an external OpenCode server (`openchamber.apiUrl`) reports
+every row as unavailable because the extension applies a switch only to the
+OpenCode it starts.
+
+An allow that OpenCode ranks above the denial makes the denial do nothing, so the
+row shows the plugin as on, with the switch disabled and the reason beside it.
+The server reports this as `overridden` from the config files it reads and
+refuses the change. The grid also treats a stored off as overridden when a real
+allow statement decides the plugin in `/api/config`, which is the only view of
+system and Console policies. The absence of a deny proves nothing there: OpenCode
+applies a rewritten managed file a moment after the write, and the
+`OPENCODE_CONFIG_CONTENT` path only at the next launch.
+
+The same delay keeps OpenChamber's own deny in `/api/config` after a plugin is
+switched back on. A row switched on ignores an exact deny from that layer
+(`opencode.managed.json`, or the pathless `OPENCODE_CONFIG_CONTENT` document),
+so the page never tells the user to remove a rule that is ours. `config.updated`
+and `plugin.updated` re-read the policies with the plugin list, which also
+carries a switch flipped in another client.
+
+Every disabled reason sits in a `SettingsInfoHint` beside the switch. A disabled
+switch takes no tap and a native title never shows on touch.
+
+### Why the switch layer is told apart by its document
+
+The page could remember which plugins it just switched on, but that memory is
+gone after a reload, and the `OPENCODE_CONFIG_CONTENT` deny lasts until the next
+launch. The document a statement came from is in every read. The cost is that a
+user's exact deny written into `OPENCODE_CONFIG_CONTENT` by hand reads as ours.
 
 ## Skills catalog list
 
@@ -630,3 +720,38 @@ Project colours are six-digit hex from the same presets as agents
 (`iconBackgroundForProjectColor`). Projects saved by older builds may carry a
 theme key; `resolveProjectColor` in `lib/projectMeta.ts` still paints those,
 and the colour field shows them as a selected swatch until the user picks again.
+
+## Appearance: color mode and theme list
+
+`openchamber/ThemeAppearancePicker.tsx` owns the color mode cards and the
+theme list; `openchamber/ThemeSchematic.tsx` draws the app on the cards.
+
+- The schematic paints each part with the token the real component uses, with
+  `cssGenerator`'s fallback chain and the opacity the component puts on top
+  (message text at 90%, the selected session row at 70%, the effort label at
+  75%, inline code and its background). A component that changes its token or
+  opacity changes the schematic in the same change, or the cards stop showing
+  what the theme looks like.
+- Colours come from the `Theme` object, never from CSS variables: the cards
+  show themes that are not active.
+- The drawing follows the device: the phone layout under `isMobile`, the
+  desktop layout elsewhere.
+- Hovering a theme previews it on the cards and applies nothing. Touch has no
+  hover, so a tap selects at once.
+- The list keeps the chosen theme in view when it opens, when the tab changes
+  and when its column count changes; a scroll that reaches its end goes on to
+  the page.
+- Imported themes show their delete action in the list at rest, so it is
+  clear which themes are imported.
+
+### Why one variant at a time and not both swatches per row
+
+Each row once held a light and a dark swatch with four status dots each; at
+thirty themes the list became a wall of dots. A Light / Dark switch shows one
+column of choices, the cards above carry the preview, and each row needs only
+the theme's canvas and accent.
+
+### Why the list scrolls on its own
+
+Imported themes add up quickly (the catalog, a themes folder). Without a cap
+the page below the list moves further down with every import.

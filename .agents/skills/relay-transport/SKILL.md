@@ -54,6 +54,16 @@ For indefinite SSE/WebSocket reconnect loops:
 
 Blind short retries on hidden, offline, unauthorized, or stale-path clients waste battery and flood server logs.
 
+## Measuring Relay Cost
+
+The relay service is a Cloudflare Worker with one Durable Object per server (`apps/relay` in the `openchamber-website` repo). Billed duration comes from objects that stay awake, not from message count: hibernatable messages cost almost no duration, so a chatty idle client costs requests, while an object that stops hibernating costs duration.
+
+- **Read activity per object** with the Cloudflare GraphQL dataset `durableObjectsPeriodicGroups` (`activeTime`, filtered by object name `relay-v1:<serverId>`). Data lands 10 to 20 minutes late, and per-minute figures are unreliable for small objects; compare hourly sums.
+- **Measure a close or disconnect path in a lab.** Copy the relay's `src`, `wrangler deploy` it under another name (no D1 needed), and drive it with a Node host built on `host-client.js`. Simulate a peer that is gone by black-holing the socket's local port with `pf`, then read `activeTime` for that object. A `close()` from the object to a gone peer keeps it awake for minutes; a retire frame costs nothing.
+- **See what a phone sends over the relay.** On a debuggable Android build, `adb forward tcp:9333 localabstract:webview_devtools_remote_<pid>` exposes the WebView over CDP. Frame stacks are useless because sends go through a batcher; patch `TextEncoder.prototype.encode` in the page instead, since tunnel request heads are JSON carrying `path`.
+- **A test host beside the desktop app**: run a server with a scratch `OPENCHAMBER_DATA_DIR` and `OPENCHAMBER_RELAY_HOST=on`, with every inherited `OPENCHAMBER_*` unset (otherwise pairing answers "UI authentication required"). Create a relay-only pairing with `POST /api/client-auth/pairing/sessions` and body `{"includeRelay":true,"includeDirect":false}`, and render its payload as a QR (`connectionPayload.ts` plus `qrcode`).
+- The host client logs every control and data socket close with its code and lifetime at info level (`[Relay] ... socket closed`, `~/Library/Logs/OpenChamber/main.log` on desktop): a run of short lifetimes is a reconnect loop.
+
 ## Verification
 
 - Exercise the real auth and origin gates. An end-to-end test whose stub server accepts any WS upgrade will pass while the real server rejects it. When writing a relay integration test, mirror the real gates (`ensureSessionToken` via `oc_url_token`, `isRequestOriginAllowed`) or run against the real server pieces.

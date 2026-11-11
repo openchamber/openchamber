@@ -81,7 +81,7 @@ export const BulkActionBar: React.FC<Props> = ({
               ) : (
                 scopeFolders.map((folder) => (
                   <DropdownMenuItem key={folder.id} onClick={() => onMoveToFolder(folder.id)}>
-                    <span className="flex-1 truncate">{folder.name}</span>
+                    <span dir="auto" className="oc-ui-start-align flex-1 truncate">{folder.name}</span>
                   </DropdownMenuItem>
                 ))
               )}

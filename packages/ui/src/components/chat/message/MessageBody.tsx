@@ -42,6 +42,7 @@ import { assistantTextSegments, flattenAssistantTextParts, suggestPlanTitleFromT
 import { MULTIRUN_EXECUTION_FORK_PROMPT_META_TEXT } from '@/lib/messages/executionMeta';
 import { useMessageTTS } from '@/hooks/useMessageTTS';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
+import { MobileSheetRow } from '@/components/ui/MobileSheetList';
 import { useFactsFit } from './useFactsFit';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
@@ -49,6 +50,8 @@ import { TextSelectionMenu } from './TextSelectionMenu';
 import { useChatSurfaceMode } from '@/components/chat/useChatSurfaceMode';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
+import { opencodeClient } from '@/lib/opencode/client';
+import { openTurnFileDiffInEditor } from './openTurnFileDiffInEditor';
 import { toast } from '@/components/ui';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Icon } from "@/components/icon/Icon";
@@ -58,6 +61,7 @@ import { isExpandableTool } from './parts/toolRenderUtils';
 import { ShownPartCard, ShownToolCard } from './parts/ShownToolCard';
 import { isShownInPlace } from '@/lib/opencode/tools';
 import { LiveActivityCollapse } from '../components/LiveActivityCollapse';
+import { dispatchRowExpand } from '../lib/scroll/timelineScrollIntent';
 import { ActivityRowSkipContext, isActivityRowPart, isToolRowShown } from '../lib/turns/activityRows';
 import { LiveFinalActivityContext, LiveTurnHoistedPagesContext } from '../components/liveActivityContext';
 import { MessageSliceContext } from './messageSliceContext';
@@ -73,7 +77,7 @@ import {
     sendImplementationResponseToReviewer,
     sendReviewFeedbackToOriginal,
 } from '@/lib/reviewFlow';
-import { useProviderLogo } from '@/hooks/useProviderLogo';
+import { ProviderLogo } from '@/components/ui/ProviderLogo';
 import { useAgentColors } from '@/hooks/useAgentColors';
 import { isCapacitorMobileApp } from '@/apps/mobileNativeChrome';
 import { shareFileFromNativeApp } from '@/lib/nativeFileShare';
@@ -152,14 +156,26 @@ const StaticTurnChangedFilePills = React.memo(({ files }: { files: TurnChangedFi
 ));
 
 const InteractiveTurnChangedFilePills = React.memo(({ files }: { files: TurnChangedFile[] }) => {
+    const { t } = useI18n();
     const effectiveDirectory = useEffectiveDirectory();
     const isMobile = useUIStore((state) => state.isMobile);
     const navigateToDiff = useUIStore((state) => state.navigateToDiff);
     const openContextDiff = useUIStore((state) => state.openContextDiff);
     const setPendingTurnDiffFile = useUIStore((state) => state.setPendingTurnDiffFile);
     const mobileActions = useMobileAppActions();
+    const runtime = useRuntimeAPIs();
 
     const openLastTurnDiff = React.useCallback((file: string) => {
+        const editor = runtime.editor;
+        if (runtime.runtime.isVSCode && editor && effectiveDirectory) {
+            const sessionId = useSessionUIStore.getState().currentSessionId;
+            if (!sessionId) return;
+            void opencodeClient.getSessionTurnDiff(sessionId, { directory: effectiveDirectory })
+                .then((turnDiff) => openTurnFileDiffInEditor({ directory: effectiveDirectory, editor, file, turnDiff }))
+                .catch(() => toast.error(t('diffView.state.failedToLoadDiff')));
+            return;
+        }
+
         if (mobileActions) {
             mobileActions.openChanges({ diffPath: file, scope: 'turn' });
             return;
@@ -172,7 +188,7 @@ const InteractiveTurnChangedFilePills = React.memo(({ files }: { files: TurnChan
         }
 
         navigateToDiff(file, false, 'turn');
-    }, [effectiveDirectory, isMobile, mobileActions, navigateToDiff, openContextDiff, setPendingTurnDiffFile]);
+    }, [effectiveDirectory, isMobile, mobileActions, navigateToDiff, openContextDiff, runtime, setPendingTurnDiffFile, t]);
 
     return (
         <>
@@ -302,7 +318,6 @@ interface MessageBodyProps {
     footerModelName?: string;
     footerAgentName?: string;
     footerVariant?: string;
-    isDarkTheme?: boolean;
     /** Actions installed extensions contribute for this message's role; rendered after the built-ins. */
     extraActions?: MessageExtraAction[];
     /** The session whose agent sent this user message, linked at the foot of the bubble. */
@@ -419,11 +434,21 @@ const UserMessageBody = React.memo(({ parts, messageCreatedAt, isMobile, alwaysS
     const collapsibleUserMessages = useUIStore((state) => state.collapsibleUserMessages);
     const [messageExpanded, setMessageExpanded] = React.useState(false);
     const [truncatedPartIndexes, setTruncatedPartIndexes] = React.useState<ReadonlySet<number>>(() => new Set());
-    const expandMessage = React.useCallback(() => setMessageExpanded(true), []);
+    // Opening the message lets go of the end, as opening a tool row does:
+    // held on the end, the text grew upward and carried its start off the top.
+    // A prompt stuck on top in the sticky header opens in place over its turn,
+    // so the reply below keeps being followed.
+    const bubbleRef = React.useRef<HTMLDivElement>(null);
+    const expandMessage = React.useCallback(() => {
+        const bubble = bubbleRef.current;
+        if (!messageExpanded && !isInStuckTurnHeader(bubble)) dispatchRowExpand(bubble);
+        setMessageExpanded(true);
+    }, [messageExpanded]);
     const toggleMessageExpanded = React.useCallback((event: React.MouseEvent) => {
         event.stopPropagation();
-        setMessageExpanded((value) => !value);
-    }, []);
+        if (messageExpanded) setMessageExpanded(false);
+        else expandMessage();
+    }, [expandMessage, messageExpanded]);
     const handlePartTruncationChange = React.useCallback((partIndex: number, truncated: boolean) => {
         setTruncatedPartIndexes((current) => {
             if (current.has(partIndex) === truncated) return current;
@@ -640,30 +665,25 @@ const UserMessageBody = React.memo(({ parts, messageCreatedAt, isMobile, alwaysS
                             onClose={() => setUserActionSheetOpen(false)}
                             title={t('chat.messageBody.actions.moreActions')}
                         >
-                            <div className="flex flex-col">
-                                {timestamp ? (
-                                    <div className="mb-1 flex items-center gap-3 border-b border-edge px-3 pb-2 text-muted-foreground">
-                                        <Icon name="time" className="h-4 w-4" />
-                                        <span className="typography-ui-label">{timestamp}</span>
-                                    </div>
-                                ) : null}
-                                {userSheetActions.map((action) => (
-                                    <button
-                                        key={action.id}
-                                        type="button"
-                                        disabled={action.disabled}
-                                        className="flex min-h-11 w-full items-center gap-3 rounded-lg px-3 text-start text-foreground transition-colors active:bg-interactive-active disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
-                                        onClick={() => {
-                                            setUserActionSheetOpen(false);
-                                            action.onSelect();
-                                        }}
-                                        style={{ touchAction: 'manipulation' }}
-                                    >
-                                        <span className="text-muted-foreground">{action.icon}</span>
-                                        <span className="typography-ui-label">{action.label}</span>
-                                    </button>
-                                ))}
-                            </div>
+                            {timestamp ? (
+                                <div className="mb-1 flex items-center gap-2.5 border-b border-edge-muted px-2 pb-2 typography-meta text-muted-foreground">
+                                    <Icon name="time" className="size-4" />
+                                    <span>{timestamp}</span>
+                                </div>
+                            ) : null}
+                            {userSheetActions.map((action) => (
+                                <MobileSheetRow
+                                    key={action.id}
+                                    disabled={action.disabled}
+                                    leading={<span className="flex size-4 flex-shrink-0 items-center justify-center text-muted-foreground [&>svg]:size-4">{action.icon}</span>}
+                                    onClick={() => {
+                                        setUserActionSheetOpen(false);
+                                        action.onSelect();
+                                    }}
+                                >
+                                    {action.label}
+                                </MobileSheetRow>
+                            ))}
                         </MobileOverlayPanel>
                     </>
                 ) : (
@@ -767,6 +787,7 @@ const UserMessageBody = React.memo(({ parts, messageCreatedAt, isMobile, alwaysS
 
     return (
         <div
+            ref={bubbleRef}
             className="relative w-full group/message"
             style={CONTAIN_LAYOUT_STYLE}
             onTouchStart={isTouchContext && canCopyMessage && hasCopyableText ? revealCopyHint : undefined}
@@ -840,6 +861,15 @@ const UserMessageBody = React.memo(({ parts, messageCreatedAt, isMobile, alwaysS
         </div>
     );
 });
+
+// The list keeps a sticky header's row on the chat's top edge while its turn
+// scrolls under it.
+const isInStuckTurnHeader = (element: HTMLElement | null): boolean => {
+    const header = element?.closest<HTMLElement>('[data-turn-sticky-header]');
+    const chat = header?.closest<HTMLElement>('[data-scrollbar="chat"]');
+    if (!header || !chat) return false;
+    return Math.abs(header.getBoundingClientRect().top - chat.getBoundingClientRect().top) < 1;
+};
 
 const USER_BUBBLE_TEXT_LINK_CLASS = 'py-0.5 underline-offset-2 transition-colors hover:text-foreground hover:underline focus-visible:underline focus-visible:outline-none focus-visible:text-foreground';
 const INLINE_TEXT_LINK_STYLE = { minHeight: 0, minWidth: 0 };
@@ -1239,7 +1269,6 @@ const AssistantMessageBody = React.memo(({
     footerModelName,
     footerAgentName,
     footerVariant,
-    isDarkTheme = false,
     extraActions,
 }: Omit<MessageBodyProps, 'isUser'>) => {
     const { t, locale } = useI18n();
@@ -1250,7 +1279,6 @@ const AssistantMessageBody = React.memo(({
     const messageTextContentRef = React.useRef<HTMLDivElement>(null);
     const isTouchContext = Boolean(hasTouchInput ?? isMobile);
     const alwaysShowMessageActions = Boolean(alwaysShowActions ?? isMobile);
-    const { src: footerLogoSrc, onError: handleFooterLogoError, hasLogo: footerHasLogo } = useProviderLogo(footerProviderID ?? null);
     const awaitingMessageCompletion = !isMessageCompleted;
 
     const visibleParts = React.useMemo(() => {
@@ -2311,15 +2339,12 @@ const AssistantMessageBody = React.memo(({
                                 <Tooltip>
                                     <TooltipTrigger asChild>
                                         <span className="flex min-w-0 shrink items-center gap-1.5">
-                                            {footerHasLogo && footerLogoSrc ? (
-                                                <img
-                                                    src={footerLogoSrc}
+                                            {footerProviderID ? (
+                                                <ProviderLogo
+                                                    providerId={footerProviderID}
                                                     alt=""
+                                                    fallback={<AgentModelIcon agentName={footerAgentName} />}
                                                     className="h-[13px] w-[13px] flex-shrink-0"
-                                                    style={{
-                                                        filter: isDarkTheme ? 'brightness(0.9) contrast(1.1) invert(1)' : 'brightness(0.9) contrast(1.1)',
-                                                    }}
-                                                    onError={handleFooterLogoError}
                                                 />
                                             ) : (
                                                 <AgentModelIcon agentName={footerAgentName} />
@@ -2392,32 +2417,27 @@ const AssistantMessageBody = React.memo(({
                             onClose={() => setActionSheetOpen(false)}
                             title={t('chat.messageBody.actions.moreActions')}
                         >
-                            <div className="flex flex-col">
-                                {/* The row drops the timestamp first on a narrow screen,
-                                    so the sheet is where it is always readable. */}
-                                {footerTimestamp ? (
-                                    <div className="mb-1 flex items-center gap-3 border-b border-edge px-3 pb-2 text-muted-foreground">
-                                        <Icon name="time" className="h-4 w-4" />
-                                        <span className="typography-ui-label">{footerTimestamp}</span>
-                                    </div>
-                                ) : null}
-                                {footerSheetActions.map((action) => (
-                                    <button
-                                        key={action.id}
-                                        type="button"
-                                        disabled={action.disabled}
-                                        className="flex min-h-11 w-full items-center gap-3 rounded-lg px-3 text-start text-foreground transition-colors active:bg-interactive-active disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
-                                        onClick={() => {
-                                            setActionSheetOpen(false);
-                                            action.onSelect();
-                                        }}
-                                        style={{ touchAction: 'manipulation' }}
-                                    >
-                                        <span className="text-muted-foreground">{action.icon}</span>
-                                        <span className="typography-ui-label">{action.label}</span>
-                                    </button>
-                                ))}
-                            </div>
+                            {/* The row drops the timestamp first on a narrow screen,
+                                so the sheet is where it is always readable. */}
+                            {footerTimestamp ? (
+                                <div className="mb-1 flex items-center gap-2.5 border-b border-edge-muted px-2 pb-2 typography-meta text-muted-foreground">
+                                    <Icon name="time" className="size-4" />
+                                    <span>{footerTimestamp}</span>
+                                </div>
+                            ) : null}
+                            {footerSheetActions.map((action) => (
+                                <MobileSheetRow
+                                    key={action.id}
+                                    disabled={action.disabled}
+                                    leading={<span className="flex size-4 flex-shrink-0 items-center justify-center text-muted-foreground [&>svg]:size-4">{action.icon}</span>}
+                                    onClick={() => {
+                                        setActionSheetOpen(false);
+                                        action.onSelect();
+                                    }}
+                                >
+                                    {action.label}
+                                </MobileSheetRow>
+                            ))}
                         </MobileOverlayPanel>
                     </div>
                 )}

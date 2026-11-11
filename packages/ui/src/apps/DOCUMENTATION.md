@@ -6,7 +6,7 @@
 
 `MobileShell` in `MobileApp` owns the phone and tablet surfaces, Settings among them.
 
-`mobileConnections` owns saved mobile instances and their connect, password and reconnect flows. The welcome screen and Instances form share its controller. Runtime HTTP authentication remains in `lib/runtime-auth` and `lib/runtime-fetch`.
+`mobileConnections` owns saved mobile instances and their connect, password and reconnect flows. The welcome screen and Instances are one view (`MobileConnectionsView`) over its controller. Runtime HTTP authentication remains in `lib/runtime-auth` and `lib/runtime-fetch`.
 
 ## Invariants
 
@@ -22,7 +22,16 @@
 - The Settings root supplies no selected directory to the shared sync provider. It does not start global session polling, selected-directory session bootstrap or background queue delivery/cleanup, and seeing it never marks a chat as viewed. Settings pages resolve their own project through `useSettingsDirectory`; catalog updates still use the shared sync context.
 - Its runtime shortcut hook registers Settings actions only and requires no chat sync context. Chat, model and session shortcuts remain with chat roots, so a key pressed in Settings cannot create an unseen draft or change a session selection there. Escape reaches an input or menu before the tab's close handler.
 - On mobile, a request for the Settings dialog opens the fullscreen Settings surface and clears the dialog flag (`mobileSettingsNavigation.ts`). It lands on the requested page when the phone shows that page, otherwise on the page list. Entry points keep calling `setSettingsDialogOpen` and need no mobile branch.
+- Mobile Settings exposes Projects in navigation, search and shared Settings links. Project chat defaults use the shared Projects page and its project-scoped save path; the main-window worktrees shortcut remains unavailable on mobile. `MobileSessionsSheet` receives shared Add project requests so its directory picker can open above Settings.
+- On mobile web, Back runs the same close ladder as the Android back button, one step per press, and the app is left only when nothing is open. Forward and traversals between routes never run the ladder. Layers closed through the UI leave no empty Back presses (`useMobileWebBackButton`, `lib/router/backGuard.ts`).
+- Every route entry written while a layer is open goes through `pushRouteEntry` or `updateBrowserURL`, so it lands under the back guard. A direct `pushState` would bury the guard between two routes. A replacement keeps the guard and changes its URL; the route under it normalizes to the same place when Back reaches it.
+- Inside the mobile shell the Settings stages write no history. A `SettingsView` given `registerBackHandler` steps through its stages in state only.
 - Settings uses the existing persistence and broadcast protocol. Moving its host changes no stored format, registry key or runtime availability.
+- The tablet shell's side panels follow the size class from `useTabletLayout` (`lib/device.ts`), never the device model. Where both fit (`roomyForPanels`, 1000 px wide and landscape) the sessions sidebar and the workspace panel can be open together. Where one fits (`roomyForOnePanel`, from 900 px: an unfolded iPhone Duo, a 13-inch iPad in portrait) both are side panels, but opening one puts the other away and closing it brings the displaced one back. In both classes the sidebar stays open after a session or page is picked. Narrower tablets keep the sidebar as a guest that closes after a pick, and the workspace as a full-cover drawer.
+- The tablet composer stays expanded except in the one-panel class, which keeps the phone's pill; a hardware keyboard expands it everywhere.
+- The keyboard hold in `readTabletLayout` needs a focused text field. A keyboard class left on the root without one (a foldable switching screens can take the keyboard without the hide event) holds no layout, and a WebView resize with no field focused runs the hide (`mobileNativeChrome.ts`).
+- Side safe-area insets (a landscape notch, the status bar column on the right of iPhone Duo) are cleared by `.oc-side-safe-area` on the shell and on every surface that covers the screen from outside it, and by the side paddings of sheets, dialogs and toasts. The Capacitor WebView does not match `display-mode: standalone`, so the PWA's `.main-content-safe-area` padding never applies there.
+- iOS reports no inset for a screen's rounded corners. Where a screen gives neither a top nor a left inset (the inner screen of iPhone Duo), `mobile.css` sets `--oc-corner-clearance` (12 px) and `--oc-safe-area-top` takes it, so the top row clears the top-left curve; the iPad-style sidebar footer steps in from the bottom-left one. Elsewhere the clearance is 0.
 - Notification commands and initial session tabs in VS Code use the shared session opener, so a `/btw` fork opens its parent and expands the panel mounted in the shared composer. Notification commands also reveal the chat view.
 
 ## Decisions
@@ -39,6 +48,18 @@ The secure store and localStorage cannot commit together. A new reference lets a
 
 Each webview owns its own stores. A small parsed request preserves the originating Settings directory, page links, provider-connect action and new-snippet action without transferring chat state or overwriting the tab's independently edited settings.
 
+### Why mobile web holds one back guard and not one history entry per layer
+
+Popups, overlay sheets and the Settings stages open and close without passing through the shell, so entries per layer would drift from what is on screen, and each layer closed through the UI would leave an empty Back press. One entry on top of the stack needs only one fact, whether anything can be closed, and `popstate` from it can only be Back, which is how Forward stays out of the ladder. The cost is the browser's own rule for `pushState`: arming the guard drops any Forward entries, so opening a layer after going Back ends the way back to the later route.
+
+### Why one panel at a time and not a full-cover workspace drawer on an unfolded foldable
+
+An unfolded iPhone Duo is 951 px wide: one 320 to 380 px panel leaves a readable chat, two do not. The full-cover drawer hid the chat and the sidebar on a screen that has room for one of them beside it, so the panels swap instead, and the displaced one returns when the other closes. Tablets under 900 px (an iPad mini, Air or 11-inch Pro in portrait) would leave the chat under ~510 px with a panel open, so they keep the drawer.
+
 ### Why mobile listens for the dialog flag and not a mobile branch at every entry point
 
 About twenty shared entry points open Settings through `setSettingsDialogOpen`. The phone renders no dialog, so each one did nothing there and left the flag set, which blocks chat shortcuts. One bridge in the shell covers every entry point, the same way the VS Code bridge does.
+
+### Why mobile uses the Projects page and not a separate defaults form
+
+The shared page already supports project selection through mobile split-page navigation. Reusing it keeps the defaults controls, search anchors and persistence in one place.

@@ -28,7 +28,6 @@ mock.module('./hooks/useSessionActions', () => ({
       args.setEditingId(id);
       args.setEditTitle(title);
     },
-    handleCopySessionId: () => undefined,
     handleDeleteSession: () => undefined,
     handleRestoreSession: () => undefined,
   }),

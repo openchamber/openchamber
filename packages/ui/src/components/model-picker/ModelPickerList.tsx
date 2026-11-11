@@ -18,6 +18,7 @@ import { defaultRangeExtractor, observeElementRect, useVirtualizer, type Range, 
 import { Icon } from '@/components/icon/Icon';
 import type { IconName } from '@/components/icon/icons';
 import { Input } from '@/components/ui/input';
+import { PICKER_SEARCH_INPUT_CLASS } from '@/components/ui/MobileSheetList';
 import { matchesRankQuery } from '@/lib/search/fuzzySearch';
 import { ProviderLogo } from '@/components/ui/ProviderLogo';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
@@ -1317,7 +1318,7 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
             aria-expanded
             aria-controls={listboxId}
             aria-autocomplete="list"
-            className="h-7 rounded-none bg-transparent ps-8 pe-0 typography-meta ring-0 hover:[&:not(:focus)]:bg-transparent hover:[&:not(:focus)]:[background-image:none] focus:ring-0 focus-visible:ring-0"
+            className={PICKER_SEARCH_INPUT_CLASS}
             autoFocus={autoFocus}
           />
         </div>

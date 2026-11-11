@@ -59,6 +59,12 @@
     min-width: 36px;
   }
 
+  /* List rows ask for a full finger's height; the minimum above must not cut it. */
+  :root.mobile-pointer:not(.desktop-runtime) button.min-h-11,
+  :root.mobile-pointer:not(.desktop-runtime) [role="button"].min-h-11 {
+    min-height: 44px !important;
+  }
+
   /* Toast titles and icons line up with their buttons, which the rule above
      makes at least 36px tall (sonner.tsx). */
   :root.mobile-pointer:not(.desktop-runtime) [data-sonner-toast] {
@@ -409,7 +415,7 @@
   }
 
   .pwa-overlay-panel .pwa-overlay-scroll {
-    padding-bottom: calc(var(--oc-safe-area-bottom-visual, 0px) + 12px);
+    padding-bottom: calc(var(--oc-safe-area-bottom-visual, 0px) + 1rem);
   }
 }
 
@@ -472,6 +478,35 @@
    so any native surface can consume it; the chat shell does so below. */
 :root.oc-capacitor-app {
   --oc-app-bottom-safe: max(16px, calc(var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)) * 0.5));
+}
+
+/* Side insets for the mobile shell and the surfaces that cover the screen from
+   outside it (drawers, pushed pages, the panels under the header). The PWA's
+   .main-content-safe-area padding is gated behind display-mode: standalone,
+   which the Capacitor WebView does not match, so the native app ran content
+   under whatever the system puts on a side: the notch of a phone in landscape,
+   or the status bar column on the right of iPhone Duo. The tokens are 0
+   wherever the screen has no side insets. */
+.oc-side-safe-area {
+  padding-left: var(--oc-safe-area-left, 0px);
+  padding-right: var(--oc-safe-area-right, 0px);
+}
+
+/* Phone toasts between their two side offsets. Sonner's narrow-screen CSS sizes
+   the toast as the viewport minus twice the left offset, so it cannot keep
+   clear of an inset on one side only, such as the status bar column of
+   iPhone Duo (MobileToaster passes the insets in its offsets). With equal
+   offsets this is the geometry sonner already drew, in both directions. */
+@media (max-width: 600px) {
+  [data-sonner-toaster][data-x-position='center'] {
+    left: var(--mobile-offset-left) !important;
+    right: var(--mobile-offset-right) !important;
+    width: auto !important;
+  }
+
+  [data-sonner-toaster][data-x-position='center'] [data-sonner-toast] {
+    width: 100% !important;
+  }
 }
 
 /* Android native safe areas. Every --oc-safe-area-* definition above is gated
@@ -600,6 +635,26 @@
   padding-bottom: max(0px, calc(var(--oc-app-bottom-safe, 0px) - var(--oc-kb-layout, 0px)));
 }
 
+/* A screen that gives no top and no left inset still has rounded corners: the
+   inner screen of iPhone Duo puts its status bar on the right, so a button in
+   the top row sat in the top-left curve (radius ~55pt). Such a screen gets
+   12px over the top row, enough to clear the curve. A top inset (a phone in
+   portrait, an iPad) or a left one (a phone in landscape) already clears it,
+   and the min() then goes negative and the max() keeps the real inset. */
+:root.oc-capacitor-app:not(.oc-platform-android) {
+  --oc-corner-clearance: max(0px, min(12px, calc(12px - (env(safe-area-inset-top, 0px) + env(safe-area-inset-left, 0px)) * 1000)));
+  --oc-safe-area-top: max(env(safe-area-inset-top, 0px), var(--oc-corner-clearance));
+}
+
+/* The iPad sidebar sits in that shell, so its footer has the bottom room
+   already; clearing the inset again put it far above the composer beside it.
+   Its buttons end where the composer does, and on a screen with bare corners
+   (above) the first one steps in from the bottom-left curve. */
+:root.oc-capacitor-app .oc-ipad-sidebar .oc-sessions-footer {
+  padding-bottom: 0 !important;
+  padding-left: calc(0.75rem + var(--oc-corner-clearance, 0px) * 0.7);
+}
+
 /* Portal surfaces (drawers, dialogs, overlay panels, the comment bar) render
    at <body> level, outside the app shell, so they take the keyboard into their
    own layout: their bottom edge rises by the keyboard height. Like the shell,
@@ -686,6 +741,22 @@
 :root.oc-capacitor-app .oc-keyboard-fill-screen {
   height: calc(100dvh - var(--oc-keyboard-inset, 0px));
   min-height: 0;
+}
+
+/* Android WebViews before Chromium 108 have no dvh, so both rules above and the
+   shell's h-[100dvh] are dropped: the shell shrinks to its header and the chat and
+   composer collapse to zero height (#6356). The native app has no collapsing
+   browser bar, so vh is the same height there. A vh line placed before the dvh
+   one would not help: with var() inside, the dvh line still wins the cascade and
+   only fails later, computing to auto. */
+@supports not (height: 100dvh) {
+  :root.oc-capacitor-app .oc-mobile-app-shell {
+    height: calc(100vh - var(--oc-kb-layout, 0px));
+  }
+
+  :root.oc-capacitor-app .oc-keyboard-fill-screen {
+    height: calc(100vh - var(--oc-keyboard-inset, 0px));
+  }
 }
 
 /* Keyboard slide choreography: the composer (and the draft title, see
@@ -886,4 +957,105 @@
 /* The glass layer is the background, so it is exempt from the fade. */
 .oc-composer-morph-content-fade > :not([data-dictation-glass]) {
   animation: oc-composer-morph-fade 0.18s ease-out 0.26s both;
+}
+
+/* On a phone every dialog is a bottom sheet, like MobileOverlayPanel: dozens of
+   dialogs share one window, so the shape lives here and callers stay as they
+   are. dialog.tsx marks the layer, leaving tablets and a window held to the top
+   (the command palette) where they are. */
+[data-slot="dialog-layer"][data-sheet] {
+  align-items: flex-end;
+  /* Sides clear the screen's insets: a landscape notch, the status bar column
+     of iPhone Duo. */
+  padding: max(0.75rem, env(safe-area-inset-top)) var(--oc-safe-area-right, 0px) 0 var(--oc-safe-area-left, 0px);
+}
+
+[data-slot="dialog-layer"][data-sheet] > [data-slot="dialog-content"] {
+  width: 100%;
+  max-width: 32rem;
+  padding: 1rem 1rem calc(1rem + var(--oc-safe-area-bottom-visual, 0px));
+  border-end-start-radius: 0;
+  border-end-end-radius: 0;
+  transform-origin: bottom;
+  transition: transform 200ms cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+[data-slot="dialog-layer"][data-sheet] > [data-slot="dialog-content"][data-starting-style],
+[data-slot="dialog-layer"][data-sheet] > [data-slot="dialog-content"][data-ending-style] {
+  opacity: 1;
+  scale: 1;
+  transform: translateY(100%);
+}
+
+[data-slot="dialog-layer"][data-sheet] [data-slot="dialog-header"] {
+  text-align: start;
+  padding-inline-end: 2rem;
+}
+
+[data-slot="dialog-layer"][data-sheet] [data-slot="dialog-title"] {
+  font-size: var(--text-ui-label);
+}
+
+/* Buttons hug their labels here too, at the end of the row. */
+[data-slot="dialog-layer"][data-sheet] [data-slot="dialog-footer"] {
+  flex-flow: row wrap;
+  justify-content: flex-end;
+  padding-bottom: 0 !important;
+}
+
+/* Over the raised keyboard the sheet floats, as MobileOverlayPanel's does. */
+:root.oc-capacitor-app.oc-keyboard-open [data-slot="dialog-layer"][data-sheet] > [data-slot="dialog-content"] {
+  border-end-start-radius: var(--radius-xl, 0.75rem);
+  border-end-end-radius: var(--radius-xl, 0.75rem);
+}
+
+/* Settings pack small actions beside their fields; under a finger the smallest
+   button takes the size of the sidebar's New chat. */
+:root.device-mobile:not(.desktop-runtime) [data-settings-view] [data-slot="button"][data-size="xs"] {
+  height: 1.75rem;
+  gap: 0.375rem;
+  padding-inline: 0.625rem;
+  border-radius: var(--radius-md, 0.375rem);
+  font-size: var(--text-ui-label);
+}
+
+/* A phone finds in a file with one row, like the Markdown preview's bar:
+   query, count, previous, next, close. Replace and the match options are
+   keyboard-and-pointer work; the panel stays CodeMirror's, so its behaviour is
+   the same. FilesView sets the class. */
+.oc-compact-search .cm-panels .cm-panel.cm-search {
+  width: 100%;
+  min-width: 0;
+  max-width: none;
+}
+
+.oc-compact-search .cm-panels .cm-search {
+  flex-wrap: nowrap;
+  gap: 2px;
+}
+
+.oc-compact-search .cm-panels .cm-search label,
+.oc-compact-search .cm-panels .cm-search .cm-textfield[name="replace"],
+.oc-compact-search .cm-panels .cm-search button[name="select"],
+.oc-compact-search .cm-panels .cm-search button[name="replace"],
+.oc-compact-search .cm-panels .cm-search button[name="replaceAll"] {
+  display: none;
+}
+
+.oc-compact-search .cm-panels .cm-search .cm-textfield[name="search"] {
+  flex: 1 1 0;
+  min-width: 0;
+  max-width: none;
+  height: 36px;
+}
+
+.oc-compact-search .cm-panels .cm-search button[name="prev"] { order: 10; }
+.oc-compact-search .cm-panels .cm-search button[name="next"] { order: 11; }
+.oc-compact-search .cm-panels .cm-search button[name="close"] { order: 12; position: static; }
+
+/* The commit bar ends the screen: on iOS its text would sit in the rounded
+   corners. Android's surface already pads the inset, and the keyboard takes the
+   room over. */
+:root.oc-capacitor-app:not(.oc-platform-android) .oc-mobile-commit-bar {
+  padding-bottom: calc(0.75rem + max(0px, calc(var(--oc-app-bottom-safe, 0px) - var(--oc-kb-layout, 0px))));
 }

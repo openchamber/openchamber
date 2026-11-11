@@ -73,6 +73,15 @@ afterEach(() => {
 });
 
 describe('createWebSourceControlAPI', () => {
+  it('keeps extension user IDs as strings in auth and accepts their exact mutation actor', async () => {
+    const api = createWebSourceControlAPI({ fetch: runtimeFetchMock });
+    const extension = { provider: 'ext-forge', instance: 'https://forge.example' };
+    runtimeFetchMock.mockResolvedValueOnce(Response.json({ connected: true, user: { id: ' ', login: 'mona' }, accounts: [] }));
+    expect(await api.authStatus(extension)).toMatchObject({ user: { id: ' ', username: 'mona' } });
+    const receipt = { ...mutationReceipt(), actor: { ...extension, providerAccountId: `${extension.instance}#member:mona` } };
+    runtimeFetchMock.mockResolvedValueOnce(Response.json(receipt));
+    expect(await api.issueComment({ ...mutationContext, ...extension, body: 'Synthetic comment' })).toEqual(receipt);
+  });
   it('posts across-search contexts and parses items with their directory and folder outcomes', async () => {
     const api = createWebSourceControlAPI({ fetch: runtimeFetchMock });
     const payload = { items: [{ kind: 'issue', number: 1, title: 'Issue', url: 'https://github.com/acme/app/issues/1',

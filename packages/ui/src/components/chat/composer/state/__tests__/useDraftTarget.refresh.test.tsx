@@ -12,7 +12,7 @@ describe('useDraftTarget refresh', () => {
     dom = new Window({ url: 'http://localhost/' });
     Object.assign(globalThis, {
       window: dom,
-      document: dom.document,
+      document: dom.document, Event: dom.Event, CustomEvent: dom.CustomEvent,
       navigator: dom.navigator,
       localStorage: dom.localStorage,
       IS_REACT_ACT_ENVIRONMENT: true,
@@ -55,6 +55,7 @@ describe('useDraftTarget refresh', () => {
     useGitStore.setState({
       directories: new Map([[PROJECT.path, {
         isGitRepo: true,
+        repoUnreadable: null,
         status: null,
         branches: { all: ['main'], current: 'main', branches: {} },
         log: null,
@@ -151,6 +152,7 @@ describe('useDraftTarget refresh', () => {
     useGitStore.setState({
       directories: new Map([[PROJECT.path, {
         isGitRepo: true,
+        repoUnreadable: null,
         status: null,
         branches: { all: ['main'], current: 'main', branches: {} },
         log: null,

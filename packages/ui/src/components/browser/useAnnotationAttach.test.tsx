@@ -32,7 +32,7 @@ test('a saved annotation callback captures both current destinations and keeps t
     savedAttach ??= attach;
     return null;
   }
-  useInlineCommentDraftStore.setState({ drafts: {}, touchedAt: {} });
+  useInlineCommentDraftStore.setState({ drafts: {} });
   useInputStore.setState({
     composerAddress: fork,
     attachedFiles: [], attachmentDraftKey: null, attachmentDrafts: new Map(),
@@ -69,7 +69,49 @@ test('a saved annotation callback captures both current destinations and keeps t
   } finally {
     await act(async () => root.unmount());
     useInputStore.setState({ addAttachedFile: originalAdd, composerAddress: null, attachedFiles: [], attachmentDraftKey: null, attachmentDrafts: new Map() });
-    useInlineCommentDraftStore.setState({ drafts: {}, touchedAt: {} });
+    useInlineCommentDraftStore.setState({ drafts: {} });
+    if (frameDescriptor) Object.defineProperty(globalThis, 'requestAnimationFrame', frameDescriptor);
+    else Reflect.deleteProperty(globalThis, 'requestAnimationFrame');
+    dom.restore();
+  }
+});
+
+test('an annotation keeps its comment when the shared session limit is full', async () => {
+  const dom = installHookTestDom();
+  const root = createRoot(dom.container);
+  const frameDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'requestAnimationFrame');
+  Object.defineProperty(globalThis, 'requestAnimationFrame', { configurable: true, value: () => 0 });
+  let attach: ReturnType<typeof useAnnotationAttach> | undefined;
+  function Probe() {
+    attach = useAnnotationAttach(directory);
+    return null;
+  }
+  useInlineCommentDraftStore.setState({ drafts: {} });
+  for (let index = 0; index < 50; index += 1) {
+    useInlineCommentDraftStore.getState().addDraft({ directory, sessionKey: `ses_${index}` }, {
+      source: 'file', fileLabel: 'a.ts', startLine: 1, endLine: 1, code: 'code', language: 'ts', text: 'kept',
+    });
+  }
+  useInputStore.setState({ composerAddress: address('ses_new') });
+  try {
+    await act(async () => root.render(<I18nProvider><Probe /></I18nProvider>));
+    await act(async () => {
+      await attach?.({
+        screenshot: null,
+        payload: {
+          id: 'annotation-2', pageUrl: 'https://example.test', pageTitle: 'Example',
+          viewport: { width: 800, height: 600 }, devicePixelRatio: 1,
+          comment: 'Change this', elements: [], regions: [], strokes: [],
+        },
+      });
+    });
+    const drafts = useInlineCommentDraftStore.getState();
+    expect(drafts.getDrafts({ directory, sessionKey: 'ses_new' })[0]?.code).toContain('Comment: Change this');
+    expect(drafts.getDrafts({ directory, sessionKey: 'ses_0' })).toHaveLength(1);
+  } finally {
+    await act(async () => root.unmount());
+    useInputStore.setState({ composerAddress: null });
+    useInlineCommentDraftStore.setState({ drafts: {} });
     if (frameDescriptor) Object.defineProperty(globalThis, 'requestAnimationFrame', frameDescriptor);
     else Reflect.deleteProperty(globalThis, 'requestAnimationFrame');
     dom.restore();

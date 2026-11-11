@@ -16,6 +16,8 @@ import {
   useBackgroundShellsStore,
   type TrackedShell,
 } from '@/sync/background-shells';
+import { backgroundImagesOfSessions, useBackgroundImagesStore } from '@/sync/background-images';
+import type { RunningImageJob } from '@/lib/opencode/background-image';
 
 interface BackgroundShellsStripProps {
   sessionId: string | null;
@@ -25,20 +27,33 @@ interface BackgroundShellsStripProps {
 const COMMAND_TOOLTIP_DELAY_MS = 500;
 
 /**
- * Commands of this session and of its subagents. The tree is resolved only
- * for sessions that run something, and the result is compared as a string, so
- * the session list changing during a stream re-renders nothing here.
+ * Which sessions with background work belong to this session's tree. The tree
+ * is resolved only for sessions that run something, and the result is
+ * compared as a string, so the session list changing during a stream
+ * re-renders nothing here.
  */
-const useSessionTreeShells = (sessionId: string): TrackedShell[] => {
-  const shellSessionIds = useBackgroundShellsStore((state) => state.sessionIds);
+const useTreeIds = (sessionId: string, workingSessionIds: ReadonlySet<string>): ReadonlySet<string> => {
   const treeKey = useGlobalSessionsStore(React.useCallback((state) => (
-    shellSessionIds.size === 0
+    workingSessionIds.size === 0
       ? ''
-      : sessionsInTree(shellSessionIds, sessionId, (id) => state.entityById.get(id)?.parentID ?? undefined).join('\n')
-  ), [sessionId, shellSessionIds]));
-  const treeIds = React.useMemo(() => new Set(treeKey ? treeKey.split('\n') : []), [treeKey]);
+      : sessionsInTree(workingSessionIds, sessionId, (id) => state.entityById.get(id)?.parentID ?? undefined).join('\n')
+  ), [sessionId, workingSessionIds]));
+  return React.useMemo(() => new Set(treeKey ? treeKey.split('\n') : []), [treeKey]);
+};
+
+/** Commands of this session and of its subagents. */
+const useSessionTreeShells = (sessionId: string): TrackedShell[] => {
+  const treeIds = useTreeIds(sessionId, useBackgroundShellsStore((state) => state.sessionIds));
   return useBackgroundShellsStore(useShallow(React.useCallback((state) => (
     treeIds.size === 0 ? [] : backgroundShellsOfSessions(state.byId, treeIds)
+  ), [treeIds])));
+};
+
+/** Images this session and its subagents are generating. */
+const useSessionTreeImages = (sessionId: string): RunningImageJob[] => {
+  const treeIds = useTreeIds(sessionId, useBackgroundImagesStore((state) => state.sessionIds));
+  return useBackgroundImagesStore(useShallow(React.useCallback((state) => (
+    treeIds.size === 0 ? [] : backgroundImagesOfSessions(state.byId, treeIds)
   ), [treeIds])));
 };
 
@@ -154,36 +169,76 @@ const ShellRow: React.FC<{
   );
 };
 
+/** The name an image gets, without its folder; the path has no extension yet. */
+const imageName = (path: string): string => path.split(/[\\/]/).filter(Boolean).at(-1) ?? path;
+
+/**
+ * An image being generated. OpenCode has no route that cancels an image job,
+ * so the row has no Stop.
+ */
+const ImageRow: React.FC<{ job: RunningImageJob; fromSubagent: boolean }> = ({ job, fromSubagent }) => {
+  const { t } = useI18n();
+
+  return (
+    <div className="flex oc-composer-row items-center gap-2 ps-3 pe-3">
+      <Icon name="image" className="size-3.5 shrink-0 text-muted-foreground" />
+      <span className="shrink-0 typography-ui-label text-foreground">{t('chat.backgroundImages.generating')}</span>
+      <Tooltip delayDuration={COMMAND_TOOLTIP_DELAY_MS}>
+        <TooltipTrigger asChild>
+          <span className="min-w-0 flex-1 truncate font-mono typography-code text-muted-foreground">
+            {imageName(job.path)}
+          </span>
+        </TooltipTrigger>
+        <TooltipContent side="top" sideOffset={6} className="max-w-[min(36rem,90vw)] break-words">
+          <div className="font-mono typography-code">{job.path}</div>
+          <div className="typography-meta text-muted-foreground">{job.model}</div>
+        </TooltipContent>
+      </Tooltip>
+      {fromSubagent ? (
+        <span className="shrink-0 typography-meta text-muted-foreground">{t('chat.backgroundShells.subagent')}</span>
+      ) : null}
+      <ShellElapsed startedAt={job.startedAt} />
+    </div>
+  );
+};
+
 /**
  * Commands the agent left running in the background (dev servers, watchers,
- * test pages), as a top row of the composer next to the "looks done" hint.
- * One command is its own row; several collapse into a count that expands in
- * place, so the composer grows by one row unless the user asks for the list.
+ * test pages) and images it is generating, as a top row of the composer next
+ * to the "looks done" hint. One item is its own row; several collapse into a
+ * count that expands in place, so the composer grows by one row unless the
+ * user asks for the list.
  */
 export const BackgroundShellsStrip: React.FC<BackgroundShellsStripProps> = React.memo(({ sessionId, directory }) => {
   const { t } = useI18n();
   const shells = useSessionTreeShells(sessionId ?? '');
+  const images = useSessionTreeImages(sessionId ?? '');
   const [expanded, setExpanded] = React.useState(false);
   const listId = React.useId();
   const { stoppingIds, stop } = useStopShells(sessionId ?? '', directory);
   const stopOne = React.useCallback((shell: TrackedShell) => stop([shell]), [stop]);
 
-  if (!sessionId || shells.length === 0) return null;
+  const count = shells.length + images.length;
+  if (!sessionId || count === 0) return null;
 
-  const row = (shell: TrackedShell) => (
-    <ShellRow
-      key={shell.id}
-      shell={shell}
-      fromSubagent={shell.sessionID !== sessionId}
-      stopping={stoppingIds.has(shell.id)}
-      onStop={stopOne}
-    />
-  );
+  const ariaLabel = images.length === 0 ? t('chat.backgroundShells.aria') : t('chat.backgroundWork.aria');
+  const rows = [
+    ...shells.map((shell) => (
+      <ShellRow
+        key={shell.id}
+        shell={shell}
+        fromSubagent={shell.sessionID !== sessionId}
+        stopping={stoppingIds.has(shell.id)}
+        onStop={stopOne}
+      />
+    )),
+    ...images.map((job) => <ImageRow key={job.id} job={job} fromSubagent={job.sessionID !== sessionId} />),
+  ];
 
-  if (shells.length === 1) {
+  if (count === 1) {
     return (
-      <div role="group" className="border-b border-edge" aria-label={t('chat.backgroundShells.aria')}>
-        {row(shells[0])}
+      <div role="group" className="border-b border-edge" aria-label={ariaLabel}>
+        {rows}
       </div>
     );
   }
@@ -191,7 +246,7 @@ export const BackgroundShellsStrip: React.FC<BackgroundShellsStripProps> = React
   // The header toggles the list, as the queue header does, and stops every
   // command in it at once.
   return (
-    <div role="group" className="border-b border-edge" aria-label={t('chat.backgroundShells.aria')}>
+    <div role="group" className="border-b border-edge" aria-label={ariaLabel}>
       <div className="flex oc-composer-row items-center gap-2 ps-3 pe-1.5">
         <Tooltip>
           <TooltipTrigger asChild>
@@ -205,37 +260,42 @@ export const BackgroundShellsStrip: React.FC<BackgroundShellsStripProps> = React
               aria-controls={expanded ? listId : undefined}
               className="min-w-0 flex-1 shrink justify-start gap-2 px-0 text-sm font-normal normal-case text-muted-foreground hover:!bg-transparent hover:text-foreground has-[>svg]:px-0"
             >
-              <Icon name="terminal-box" className="size-3.5 shrink-0" aria-hidden="true" />
+              <Icon name={shells.length === 0 ? 'image' : 'terminal-box'} className="size-3.5 shrink-0" aria-hidden="true" />
               <span className="min-w-0 flex-1 truncate text-start">
-                {t('chat.backgroundShells.count', { count: shells.length })}
+                {images.length === 0
+                  ? t('chat.backgroundShells.count', { count })
+                  : t('chat.backgroundWork.count', { count })}
               </span>
               <Icon name={expanded ? 'arrow-up-s' : 'arrow-down-s'} className="size-4 shrink-0" aria-hidden="true" />
             </Button>
           </TooltipTrigger>
           <TooltipContent side="top" sideOffset={6}>{t(expanded ? 'contextTooltips.chat.shellsHide' : 'contextTooltips.chat.shellsShow')}</TooltipContent>
         </Tooltip>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <span className="inline-flex shrink-0">
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                disabled={shells.every((shell) => stoppingIds.has(shell.id))}
-                onClick={() => stop(shells)}
-                onMouseDown={(event) => event.preventDefault()}
-                className={STOP_BUTTON_CLASS}
-              >
-                {t('chat.backgroundShells.stopAll')}
-              </Button>
-            </span>
-          </TooltipTrigger>
-          <TooltipContent side="top" sideOffset={6}>{t('contextTooltips.chat.shellStopAll')}</TooltipContent>
-        </Tooltip>
+        {/* Stops the commands only: an image job cannot be cancelled. */}
+        {shells.length > 0 ? (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span className="inline-flex shrink-0">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  disabled={shells.every((shell) => stoppingIds.has(shell.id))}
+                  onClick={() => stop(shells)}
+                  onMouseDown={(event) => event.preventDefault()}
+                  className={STOP_BUTTON_CLASS}
+                >
+                  {t('chat.backgroundShells.stopAll')}
+                </Button>
+              </span>
+            </TooltipTrigger>
+            <TooltipContent side="top" sideOffset={6}>{t('contextTooltips.chat.shellStopAll')}</TooltipContent>
+          </Tooltip>
+        ) : null}
       </div>
       {expanded ? (
         <div id={listId}>
-          {shells.map(row)}
+          {rows}
         </div>
       ) : null}
     </div>

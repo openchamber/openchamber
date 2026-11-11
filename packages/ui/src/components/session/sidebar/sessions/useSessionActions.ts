@@ -1,7 +1,6 @@
 import React from 'react';
 import type { Session } from '@/lib/opencode/model';
 import { toast } from '@/components/ui';
-import { copyTextToClipboard } from '@/lib/clipboard';
 import { useI18n } from '@/lib/i18n';
 import { useUIStore } from '@/stores/useUIStore';
 import { streamPerfMark } from '@/stores/utils/streamDebug';
@@ -133,18 +132,6 @@ export const useSessionActions = (args: Args) => {
     setEditTitle('');
   }, [setEditTitle, setEditingId, setEditingRowKey]);
 
-  const handleCopySessionId = React.useCallback((sessionId: string) => {
-    void copyTextToClipboard(sessionId)
-      .then((result) => {
-        if (result.ok) {
-          toast.success(t('sessions.sidebar.session.copyId.success'));
-          return;
-        }
-        toast.error(t('sessions.sidebar.session.copyId.error'));
-      })
-      .catch(() => toast.error(t('sessions.sidebar.session.copyId.error')));
-  }, [t]);
-
   const executeDeleteSession = React.useCallback(
     async (
       session: Session,
@@ -211,11 +198,10 @@ export const useSessionActions = (args: Args) => {
     handleSessionDoubleClick,
     handleSaveEdit,
     handleCancelEdit,
-    handleCopySessionId,
     handleDeleteSession,
     handleRestoreSession,
     confirmDeleteSession,
-  }), [handleCancelEdit, handleCopySessionId, handleDeleteSession,
+  }), [handleCancelEdit, handleDeleteSession,
     handleRestoreSession, handleSaveEdit, handleSessionDoubleClick, handleSessionSelect,
     confirmDeleteSession]);
 };

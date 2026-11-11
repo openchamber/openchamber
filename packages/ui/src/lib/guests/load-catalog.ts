@@ -74,7 +74,7 @@ const loadGuestCatalogOnce = async (runtimeKey: string): Promise<void> => {
       store.markFailed(runtimeKey, { method: 'GET', path: '/api/guests', kind: 'invalid-response', status: response.status });
       return;
     }
-    useGuestsStore.getState().replaceCatalog(catalog.guests, runtimeKey, catalog.unreadable);
+    useGuestsStore.getState().replaceCatalog(catalog.guests, runtimeKey, catalog.unreadable, catalog.opencodePlugins);
   } catch {
     useGuestsStore.getState().markFailed(runtimeKey, { method: 'GET', path: '/api/guests', kind: 'network' });
   }

@@ -48,7 +48,9 @@ Where the check runs:
 - A request that names a folder (`x-opencode-directory`, `?directory=`,
   `location[directory]`) or acts on a session reaches OpenCode only when that
   folder's configuration runs nothing or its current fingerprint is trusted.
-  Routes that start no location (session list and detail, message pages, the
+  A header is read the way OpenCode reads it: percent-decoded, or as it
+  arrived when decoding fails, so a folder named `1%72epo%ZZ` is checked under
+  that literal name. Routes that start no location (session list and detail, message pages, the
   event stream, credentials, deleting or viewing a session, unloading a
   location) pass, so a paused folder still lists and shows its sessions. Any
   other route, including ones OpenCode adds later, is checked.

@@ -12,11 +12,10 @@ OpenChamber se ejecuta sobre un servidor de OpenCode. De forma predeterminada in
 Cuando OpenChamber arranca, busca un servidor en este orden:
 
 1. reutilizar un servidor que ya inició
-2. conectarse a uno externo si se lo indicaste (ver más abajo)
-3. detectar automáticamente un servidor en el puerto predeterminado (`4096`)
-4. de lo contrario, iniciar y gestionar el suyo propio
+2. conectarse a un servidor externo si configuraste uno
+3. de lo contrario, iniciar y gestionar su propio servidor
 
-Si no hay nada configurado, el paso 4 ocurre automáticamente y ya tienes todo en marcha.
+De forma predeterminada, OpenChamber gestiona su propio servidor en un puerto asignado. El puerto puede cambiar después de reiniciar. OpenChamber no se conecta automáticamente a otro servidor de OpenCode en el puerto `4096`.
 
 ## Conéctate a un servidor que ya ejecutas
 

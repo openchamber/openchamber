@@ -7,6 +7,7 @@ const createManager = (): OpenCodeManager => ({
   start: async () => {},
   stop: async () => {},
   restart: async () => {},
+  refreshPluginSwitches: async () => ({ updated: true, requiresManualRestart: false }),
   upgradeCli: async () => {},
   installV2: async () => {},
   getCompatibility: async () => ({ state: 'compatible', version: '2.0.15', installation: 'managed', binary: null, minimumVersion: '2.0.15', canInstall: false }),

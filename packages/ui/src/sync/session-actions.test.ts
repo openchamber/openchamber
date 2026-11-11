@@ -10,6 +10,10 @@ const transportErrors = await import("@/lib/relay/transport-error")
 const replyCalls: Array<{ method: string; params: Record<string, unknown> }> = []
 const registeredSessionDirectories: Array<{ sessionID: string; directory: string }> = []
 let formReplyError: unknown | null = null
+let selectionApplyError: unknown | null = null
+let selectionApplyGate: (() => Promise<void>) | null = null
+let formReplyGate: (() => void) | null = null
+let agentUnavailableForSelection = false
 let formCancelError: unknown | null = null
 let permissionReplyError: unknown | null = null
 const sessionMessageRecords = new Map<string, Array<{ info: Message; parts: Part[] }>>()
@@ -18,6 +22,7 @@ const sessionMessageRecords = new Map<string, Array<{ info: Message; parts: Part
 let cursorMessagePages: Array<{ items: Array<{ info: Message; parts: Part[] }>; cursor: { next?: string } }> | null = null
 const sessionRecords = new Map<string, Session>()
 const failingRevertSessionIds = new Set<string>()
+let commitRevertError: Error | null = null
 let sessionDeleteError: unknown | null = null
 let sessionForkResult: Session | null = null
 let sessionForkError: Error | null = null
@@ -57,6 +62,7 @@ const deletedCleanupIdentities: Array<{ runtimeKey: string; directory: string; s
 const movedSessionDirectories: Array<{ sessionID: string; directory: string }> = []
 const globalArchivedSessions: Session[] = []
 let runtimeKey = "default-runtime"
+let runtimeGeneration = 0
 const permissionPolicy = new Map<string, boolean>()
 let permissionPolicyRevision = 0
 const goalObjectives = new Map<string, string>()
@@ -129,6 +135,7 @@ mock.module("@/lib/opencode/client", () => ({
       sessionRecords.set(sessionId, { ...(record ?? sessionFixture(sessionId)), revert: { messageID: messageId } })
       return { messageID: messageId }
     }),
+    commitRevert: mock(async () => { if (commitRevertError) throw commitRevertError }),
     forkSession: mock(async (
       sessionId: string,
       options?: { before?: string; directory?: string | null },
@@ -162,8 +169,24 @@ mock.module("@/lib/opencode/client", () => ({
       directory?: string | null,
     ) => {
       replyCalls.push({ method: "form.reply", params: { sessionID: sessionId, formID: formId, answer, directory } })
+      formReplyGate?.()
       if (formReplyError) throw formReplyError
       return true
+    }),
+    applySendSelection: mock(async (
+      sessionId: string,
+      selection: { model?: { providerID: string; id: string; variant?: string | null }; agent?: string },
+      directory?: string | null,
+      _runtimeKey?: string,
+    ) => {
+      // The real entry checks the agent against the folder's list before it
+      // switches anything; mirror that so the unavailable-agent case behaves.
+      if (selection.agent && agentUnavailableForSelection) throw new AgentUnavailableError(selection.agent, directory ?? undefined)
+      if (selectionApplyError) throw selectionApplyError
+      await selectionApplyGate?.()
+      if (selection.model || selection.agent) {
+        replyCalls.push({ method: "selection.apply", params: { sessionID: sessionId, selection, directory } })
+      }
     }),
     cancelForm: mock(async (sessionId: string, formId: string, directory?: string | null) => {
       replyCalls.push({ method: "form.cancel", params: { sessionID: sessionId, formID: formId, directory } })
@@ -175,15 +198,37 @@ mock.module("@/lib/opencode/client", () => ({
 
 let idCounter = 0
 
-// Mock useConfigStore
+// Mock useConfigStore. The composer selection fields are configurable per
+// test: the form reply applies whatever the composer now shows (#6053).
+type ComposerSelectionState = {
+  currentProviderId: string
+  currentModelId: string
+  currentVariant?: string
+  variantOverride?: string | null
+  currentAgentName?: string
+}
+let configState: ComposerSelectionState = { currentProviderId: "", currentModelId: "" }
+// Agents listed in the folder catalog for the current test; empty by default
+// (nothing listed) so the unchanged-agent-not-in-catalog case passes through.
+let listedAgents: string[] = []
 mock.module("@/stores/useConfigStore", () => ({
   useConfigStore: {
     getState: () => ({
       isConnected: true,
       hasEverConnected: true,
+      currentProviderId: configState.currentProviderId,
+      currentModelId: configState.currentModelId,
+      currentVariant: configState.currentVariant,
+      currentVariantSelection: { override: configState.variantOverride },
+      currentAgentName: configState.currentAgentName,
     }),
   },
+  selectConfigAgentsForDirectory: () => listedAgents.map((id) => ({ id })),
+  selectCatalogLoadedForDirectory: () => true,
 }))
+
+// The session the main chat shows; the composer in the config store is its own.
+let mainSessionId: string | null = null
 
 // Mock useSessionUIStore
 type RecordedSend = {
@@ -206,7 +251,7 @@ mock.module("./session-ui-store", () => ({
         if (sessionId === "session-b") return "/other/project"
         return null
       },
-      currentSessionId: null,
+      currentSessionId: mainSessionId,
       setCurrentSession: (sessionId: string | null, directoryHint?: string | null) => {
         selectedSessions.push({ sessionId, directoryHint })
       },
@@ -234,12 +279,29 @@ mock.module("./session-ui-store", () => ({
   },
 }))
 
-// Mock useSelectionStore (the model fallback for a recovered answer)
+// Mock useSelectionStore (the model fallback for a recovered answer, and a
+// session's own picks for a form reply)
+const settledModelPicks: string[] = []
+const selectionPicks = {
+  models: new Map<string, { providerId: string; modelId: string }>(),
+  agents: new Map<string, string>(),
+  efforts: new Map<string, string | null>(),
+  switched: false,
+  settled: settledModelPicks,
+}
 mock.module("./selection-store", () => ({
   useSelectionStore: {
     getState: () => ({
       getSessionModelSelection: () => null,
       getSessionAgentSelection: () => null,
+      getSessionModelPick: (sessionId: string) => selectionPicks.models.get(sessionId) ?? null,
+      getSessionAgentPick: (sessionId: string) => selectionPicks.agents.get(sessionId) ?? null,
+      getAgentModelVariantForSession: (sessionId: string, agent: string, providerId: string, modelId: string) =>
+        selectionPicks.efforts.get(`${sessionId}/${agent}/${providerId}/${modelId}`),
+      isSessionModelSwitched: () => selectionPicks.switched,
+      captureSessionModelPickSettlement: (sessionId: string, providerId: string, modelId: string) => () => {
+        selectionPicks.settled.push(`${sessionId}:${providerId}/${modelId}`)
+      },
     }),
   },
 }))
@@ -387,9 +449,11 @@ mock.module("../lib/runtime-switch", () => ({
   getRuntimeKey: () => runtimeKey,
   captureRuntimeInstance: () => {
     const captured = runtimeKey
-    return () => captured === runtimeKey
+    const generation = runtimeGeneration
+    return () => captured === runtimeKey && generation === runtimeGeneration
   },
   switchRuntimeEndpoint: ({ runtimeKey: nextRuntimeKey }: { runtimeKey: string }) => {
+    if (nextRuntimeKey !== runtimeKey) runtimeGeneration += 1
     runtimeKey = nextRuntimeKey
   },
   subscribeRuntimeEndpointWillChange: () => () => {},
@@ -454,9 +518,11 @@ mock.module("./session-deletion-cleanup", () => ({
   },
 }))
 
+// Lets a test place a session record where resolveSendSelection reads it.
+let directoryStateOverride: ((directory?: string) => State | undefined) | null = null
 mock.module("./sync-refs", () => ({
   getAllSyncSessionMap: () => sessionRecords,
-  getDirectoryState: () => undefined,
+  getDirectoryState: (directory?: string) => (directoryStateOverride ? directoryStateOverride(directory) : undefined),
   getSyncSessionDirectory: () => null,
   getAllSyncSessions: () => [],
   registerSessionDirectory: (sessionID: string, directory: string) => {
@@ -464,7 +530,11 @@ mock.module("./sync-refs", () => ({
   },
 }))
 
+import { AgentUnavailableError } from "@/lib/opencode/agent-unavailable-error"
+import { getRuntimeApiBaseUrl, getRuntimeKey, switchRuntimeEndpoint } from "@/lib/runtime-switch"
+import { agentUnavailableFrom } from "./form-request-error"
 import { INITIAL_STATE } from "./types"
+import type { State } from "./types"
 import type { DirectoryStore } from "./child-store"
 import type { Message, Part, Session, SessionStatus } from "@/lib/opencode/model"
 import type { LinkedIssue } from "@/lib/linkedIssues"
@@ -1625,6 +1695,7 @@ describe("updateSessionTitle live state", () => {
 describe("optimisticSend target directory", () => {
   beforeEach(() => {
     replyCalls.length = 0
+    commitRevertError = null
   })
 
   test("passes the prompt directory to optimistic state during session switch races", async () => {
@@ -1740,7 +1811,13 @@ describe("optimisticSend target directory", () => {
     expect(optimisticShadow.has((optimisticMessage as unknown as Message).id)).toBe(true)
   })
 
-  test("restores the reverted branch when sending fails", async () => {
+  // A failed send puts the revert back only while the server still has it staged.
+  for (const { outcome, commit, serverStaged, restored } of [
+    { outcome: "before the commit", commit: "none", serverStaged: true, restored: true },
+    { outcome: "after the server committed the revert", commit: "answered", serverStaged: false, restored: false },
+    { outcome: "after a lost commit response the server applied", commit: "lost", serverStaged: false, restored: false },
+    { outcome: "after a lost commit response the server did not apply", commit: "lost", serverStaged: true, restored: true },
+  ] as const) test(`${restored ? "restores" : "keeps dropped"} the reverted branch when sending fails ${outcome}`, async () => {
     const retainedMessage = { id: "msg_ffffffffffffRetained", role: "user", sessionID: "session-reverted", time: { created: 1 } } as Message
     const revertedMessage = { id: "msg_000000000000Reverted", role: "user", sessionID: "session-reverted", time: { created: 2 } } as Message
     const revertedPart = { id: "part_2", type: "text", text: "old branch" } as Part
@@ -1750,6 +1827,8 @@ describe("optimisticSend target directory", () => {
       part: { [revertedMessage.id]: [revertedPart] },
     })
     const childStores = createChildStores([["/target/project", targetStore]])
+    sessionRecords.set("session-reverted", serverStaged ? { ...sessionFixture("session-reverted"), revert: { messageID: revertedMessage.id } } : sessionFixture("session-reverted"))
+    if (commit === "lost") commitRevertError = Object.assign(new Error("gateway timeout"), { status: 504 })
 
     const { optimisticSend, setActionRefs, setOptimisticRefs } = await import("./session-actions")
     setActionRefs(childStores, () => "/target/project")
@@ -1768,12 +1847,15 @@ describe("optimisticSend target directory", () => {
       sessionId: "session-reverted",
       directory: "/target/project",
       content: "new branch",
-      send: async () => { throw new Error("rejected") },
-    })).rejects.toThrow("rejected")
+      send: async (_messageID, _context, commitRevert) => {
+        if (commit !== "none") await commitRevert?.()
+        throw new Error("rejected")
+      },
+    })).rejects.toThrow()
 
-    expect(targetStore.getState().session[0].revert?.messageID).toBe(revertedMessage.id)
-    expect(targetStore.getState().message["session-reverted"]).toEqual([retainedMessage, revertedMessage])
-    expect(targetStore.getState().part[revertedMessage.id]).toEqual([revertedPart])
+    expect(targetStore.getState().session[0].revert).toEqual(restored ? { messageID: revertedMessage.id } : undefined)
+    expect(targetStore.getState().message["session-reverted"]).toEqual(restored ? [retainedMessage, revertedMessage] : [retainedMessage])
+    expect(targetStore.getState().part[revertedMessage.id]).toEqual(restored ? [revertedPart] : undefined)
   })
 
   test("runs appendSubmissions before revert cleanup and optimistic insertion", async () => {
@@ -3245,6 +3327,266 @@ describe("cancelForm passes directory", () => {
   })
 })
 
+describe("replyToForm applies the composer selection", () => {
+  const OTHER_MODEL = { providerID: "openai", id: "gpt-6" }
+  const SESSION_MODEL = { providerID: "anthropic", id: "claude-3" }
+  const seedSession = (id: string, overrides: Partial<Session> = {}) => {
+    const record: Session = { ...sessionFixture(id), model: SESSION_MODEL, agent: "build", ...overrides }
+    sessionRecords.set(id, record)
+    // SAFETY: the selection helpers read only the session slice of the state.
+    directoryStateOverride = () => ({ session: [record] }) as State
+    return record
+  }
+  const replyInMainChat = async (sessionId = "session-a", answer: Record<string, boolean> = { choice: true }) => {
+    const { setActionRefs, replyToForm } = await import("./session-actions")
+    setActionRefs(createChildStores([]), () => "/test/project")
+    return replyToForm(sessionId, "q-1", answer)
+  }
+  const replyMethods = () => replyCalls.map((call) => call.method).filter((method) => method !== "session.get")
+  const reset = () => {
+    replyCalls.length = 0
+    formReplyError = null
+    selectionApplyError = null
+    agentUnavailableForSelection = false
+    selectionApplyGate = null
+    directoryStateOverride = null
+    configState = { currentProviderId: "", currentModelId: "" }
+    listedAgents = []
+    mainSessionId = null
+    selectionPicks.models.clear()
+    selectionPicks.agents.clear()
+    selectionPicks.efforts.clear()
+    selectionPicks.switched = false
+    selectionPicks.settled.length = 0
+    sessionRecords.clear()
+  }
+
+  beforeEach(reset)
+  afterEach(reset)
+
+  test("switches the main chat's session to the composer's selection before the answer", async () => {
+    mainSessionId = "session-a"
+    seedSession("session-a")
+    selectionPicks.agents.set("session-a", "plan")
+    configState = { currentProviderId: "openai", currentModelId: "gpt-6", currentVariant: "high", currentAgentName: "build" }
+
+    await replyInMainChat()
+
+    expect(replyMethods()).toEqual(["selection.apply", "form.reply"])
+    expect(replyCalls.find((call) => call.method === "selection.apply")?.params.selection).toEqual({
+      model: { ...OTHER_MODEL, variant: "high" },
+      agent: "plan",
+    })
+    expect(selectionPicks.settled).toEqual(["session-a:openai/gpt-6"])
+  })
+
+  test("an explicit Default takes the session off its effort", async () => {
+    mainSessionId = "session-a"
+    seedSession("session-a", { model: { ...SESSION_MODEL, variant: "high" } })
+    configState = { currentProviderId: "anthropic", currentModelId: "claude-3", currentVariant: "high", variantOverride: null, currentAgentName: "build" }
+    listedAgents = ["build"]
+
+    await replyInMainChat()
+
+    expect(replyMethods()).toEqual(["selection.apply", "form.reply"])
+    expect(replyCalls.find((call) => call.method === "selection.apply")?.params.selection).toEqual({ model: SESSION_MODEL })
+  })
+
+  test("a failed switch leaves the answer unsent and the pick in place", async () => {
+    mainSessionId = "session-a"
+    configState = { currentProviderId: "openai", currentModelId: "gpt-6" }
+    selectionApplyError = new Error("model switch failed")
+
+    await expect(replyInMainChat()).rejects.toThrow("model switch failed")
+
+    expect(replyMethods()).toEqual([])
+    expect(selectionPicks.settled).toEqual([])
+  })
+
+  test("a changed agent the folder lacks leaves the form pending, and the error names it", async () => {
+    mainSessionId = "session-a"
+    seedSession("session-a", { agent: "plan" })
+    configState = { currentProviderId: "anthropic", currentModelId: "claude-3", currentAgentName: "build" }
+    agentUnavailableForSelection = true
+
+    const error = await replyInMainChat().then(() => null, (caught: Error) => caught)
+
+    expect(agentUnavailableFrom(error)).toBe("build")
+    expect(replyMethods()).toEqual([])
+  })
+
+  test("an unchanged agent the folder's catalog lacks is still checked", async () => {
+    mainSessionId = "session-a"
+    seedSession("session-a")
+    configState = { currentProviderId: "anthropic", currentModelId: "claude-3", currentAgentName: "build" }
+    agentUnavailableForSelection = true
+
+    const error = await replyInMainChat().then(() => null, (caught: Error) => caught)
+
+    expect(agentUnavailableFrom(error)).toBe("build")
+    expect(replyMethods()).toEqual([])
+  })
+
+  test("an unchanged selection switches nothing", async () => {
+    mainSessionId = "session-a"
+    seedSession("session-a")
+    listedAgents = ["build"]
+    configState = { currentProviderId: "anthropic", currentModelId: "claude-3", currentAgentName: "build" }
+
+    await replyInMainChat()
+
+    expect(replyMethods()).toEqual(["form.reply"])
+  })
+
+  test("a composer whose catalog has not loaded switches nothing", async () => {
+    mainSessionId = "session-a"
+
+    await replyInMainChat()
+
+    expect(replyMethods()).toEqual(["form.reply"])
+  })
+
+  test("Auto reaches the session as the sentinel before the answer", async () => {
+    // The sentinel marks the session; the server then routes the reply to the
+    // concrete model before forwarding it (routing/routes.http.test.js).
+    mainSessionId = "session-a"
+    seedSession("session-a")
+    listedAgents = ["build"]
+    configState = { currentProviderId: "openchamber", currentModelId: "auto", currentAgentName: "build" }
+
+    await replyInMainChat()
+
+    expect(replyMethods()).toEqual(["selection.apply", "form.reply"])
+    expect(replyCalls.find((call) => call.method === "selection.apply")?.params.selection).toEqual({
+      model: { providerID: "openchamber", id: "auto" },
+    })
+  })
+
+  for (const surface of ["a pinned chat", "a /btw fork"]) {
+    test(`${surface} replies with its own picks, never the main chat's`, async () => {
+      mainSessionId = "session-main"
+      configState = { currentProviderId: "google", currentModelId: "gemini", currentVariant: "max", currentAgentName: "review" }
+      seedSession("session-a")
+      selectionPicks.models.set("session-a", { providerId: "openai", modelId: "gpt-6" })
+      selectionPicks.agents.set("session-a", "plan")
+      selectionPicks.efforts.set("session-a/plan/openai/gpt-6", "low")
+
+      await replyInMainChat()
+
+      expect(replyCalls.find((call) => call.method === "selection.apply")?.params.selection).toEqual({
+        model: { ...OTHER_MODEL, variant: "low" },
+        agent: "plan",
+      })
+    })
+  }
+
+  test("an effort-only change in a pinned chat keeps the session's model and agent", async () => {
+    mainSessionId = "session-main"
+    configState = { currentProviderId: "google", currentModelId: "gemini", currentAgentName: "review" }
+    seedSession("session-a", { model: { ...SESSION_MODEL, variant: "low" } })
+    selectionPicks.efforts.set("session-a/build/anthropic/claude-3", "high")
+
+    await replyInMainChat()
+
+    expect(replyMethods()).toEqual(["selection.apply", "form.reply"])
+    expect(replyCalls.find((call) => call.method === "selection.apply")?.params.selection).toEqual({
+      model: { ...SESSION_MODEL, variant: "high" },
+    })
+  })
+
+  test("a child session answered from its parent keeps what it is bound to", async () => {
+    mainSessionId = "session-parent"
+    configState = { currentProviderId: "google", currentModelId: "gemini", currentVariant: "max", currentAgentName: "review" }
+    seedSession("session-a", { model: { ...SESSION_MODEL, variant: "low" }, agent: "workflow" })
+
+    await replyInMainChat()
+
+    expect(replyCalls.map((call) => call.method)).toEqual(["form.reply"])
+  })
+
+  test("an effort saved before a switch made elsewhere does not undo that switch", async () => {
+    mainSessionId = "session-parent"
+    seedSession("session-a", { model: { ...SESSION_MODEL, variant: "low" } })
+    selectionPicks.efforts.set("session-a/build/anthropic/claude-3", "high")
+    selectionPicks.switched = true
+
+    await replyInMainChat()
+
+    expect(replyCalls.map((call) => call.method)).toEqual(["form.reply"])
+  })
+
+  test("a location-scoped form is answered with no switch, on its owning directory", async () => {
+    const form = buildForm("q-1", "global")
+    const store = createStore({}, { form: { global: [form] } })
+    mainSessionId = "global"
+    configState = { currentProviderId: "openai", currentModelId: "gpt-6", currentAgentName: "build" }
+
+    const { setActionRefs, replyToForm } = await import("./session-actions")
+    setActionRefs(createChildStores([["/test/project", store]]), () => "/somewhere/else")
+    await replyToForm("global", "q-1", { choice: true })
+
+    expect(replyCalls.map((call) => call.method)).toEqual(["form.reply"])
+    expect(replyCalls[0]?.params.directory).toBe("/test/project")
+  })
+
+  for (const roundTrip of [false, true]) {
+    test(`a runtime change during the switch stops the reply, return to original: ${roundTrip}`, async () => {
+      const original = { apiBaseUrl: getRuntimeApiBaseUrl(), runtimeKey: getRuntimeKey() }
+      const home = { apiBaseUrl: "http://form-home.test", runtimeKey: "form-home" }
+      switchRuntimeEndpoint(home)
+      mainSessionId = "session-a"
+      configState = { currentProviderId: "openai", currentModelId: "gpt-6" }
+      const form = buildForm("q-1", "session-a")
+      const store = createStore({}, { form: { "session-a": [form] } })
+      let release = () => {}
+      let started = () => {}
+      const reachedSwitch = new Promise<void>((resolve) => { started = resolve })
+      selectionApplyGate = () => {
+        started()
+        return new Promise<void>((resolve) => { release = resolve })
+      }
+
+      const { setActionRefs, replyToForm } = await import("./session-actions")
+      setActionRefs(createChildStores([["/test/project", store]]), () => "/test/project")
+      const reply = replyToForm("session-a", "q-1", { choice: true })
+      await reachedSwitch
+
+      try {
+        switchRuntimeEndpoint({ apiBaseUrl: "http://form-other.test", runtimeKey: "form-other" })
+        if (roundTrip) switchRuntimeEndpoint(home)
+        release()
+        await expect(reply).rejects.toThrow("runtime changed")
+      } finally {
+        switchRuntimeEndpoint(original)
+      }
+
+      expect(replyMethods()).not.toContain("form.reply")
+      expect(store.getState().form["session-a"]).toEqual([form])
+      expect(selectionPicks.settled).toEqual([])
+    })
+  }
+
+  test("a not-found answer from an old runtime cleans nothing up", async () => {
+    const original = { apiBaseUrl: getRuntimeApiBaseUrl(), runtimeKey: getRuntimeKey() }
+    switchRuntimeEndpoint({ apiBaseUrl: "http://form-home.test", runtimeKey: "form-home" })
+    const form = buildForm("q-1", "session-a")
+    const store = createStore({}, { form: { "session-a": [form] } })
+    formReplyError = Object.assign(new Error("FormNotFoundError"), { status: 404 })
+    formReplyGate = () => switchRuntimeEndpoint({ apiBaseUrl: "http://form-other.test", runtimeKey: "form-other" })
+
+    const { setActionRefs, replyToForm } = await import("./session-actions")
+    setActionRefs(createChildStores([["/test/project", store]]), () => "/test/project")
+    try {
+      await expect(replyToForm("session-a", "q-1", { choice: true })).rejects.toThrow("FormNotFoundError")
+    } finally {
+      formReplyGate = null
+      switchRuntimeEndpoint(original)
+    }
+
+    expect(store.getState().form["session-a"]).toEqual([form])
+  })
+})
+
 function archivedFixture(id: string): Session {
   return { ...sessionFixture(id), time: { created: 1, updated: 1, archived: 5 } }
 }
@@ -3352,6 +3694,11 @@ describe("blocking request reply routing and stale recovery (issue OPE-236)", ()
     formReplyError = null
     formCancelError = null
     materializationCalls.length = 0
+    // replyToForm reads the composer selection; an empty one keeps this suite
+    // about routing rather than model switching.
+    directoryStateOverride = null
+    configState = { currentProviderId: "", currentModelId: "" }
+    listedAgents = []
   })
 
   test("routes the form reply by the request's own session directory, not the containing store key", async () => {

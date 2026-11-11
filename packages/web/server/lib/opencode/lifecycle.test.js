@@ -1475,10 +1475,13 @@ describe('OpenCode lifecycle', () => {
     });
     globalThis.fetch = vi.fn(async () => ({ ok: false }));
 
-    const runtime = createRuntime({ topUpV1SessionMigration });
+    const getUserEnvironment = vi.fn(() => ({ XDG_DATA_HOME: '/custom/data' }));
+    const runtime = createRuntime({ topUpV1SessionMigration, getUserEnvironment });
     await runtime.startOpenCode();
 
     expect(topUpV1SessionMigration).toHaveBeenCalledTimes(1);
+    expect(topUpV1SessionMigration.mock.calls[0][0].env.XDG_DATA_HOME).toBe('/custom/data');
+    expect(spawnMock.mock.calls[0][2].env.XDG_DATA_HOME).toBe('/custom/data');
     expect(calls).toEqual(['top-up', 'spawn']);
   });
 

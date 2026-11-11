@@ -49,6 +49,7 @@ import {
   unstageGitFiles,
 } from './gitApiHttp';
 import { gitIdentitySummarySchema } from './api/git-identity';
+import { GitRepositoryUnreadableError } from './gitRepositoryUnreadable';
 import {
   GitNetworkOperationRequestError,
   type GitNetworkOperation,
@@ -1898,6 +1899,32 @@ describe('batched project reads', () => {
       releaseStatus();
       await prefetch;
       expect(bodies).toHaveLength(2);
+    } finally {
+      restoreMocks();
+    }
+  });
+
+  test("rejects with Git's message when Git could not read the directory, and never caches it", async () => {
+    installWindowMock();
+    const directory = '/batch/unreadable-repo';
+    const message = "fatal: detected dubious ownership in repository at '/batch/unreadable-repo'";
+    let requests = 0;
+    // SAFETY: this is a fetch test double; the cast restores the `fetch` signature the test assigns.
+    globalThis.fetch = (async (input) => {
+      requests += 1;
+      if (String(input).includes('/api/git/status')) {
+        return Response.json({ error: message, code: 'GIT_REPOSITORY_UNREADABLE' }, { status: 500 });
+      }
+      return Response.json({ projects: [{ directory, error: message, code: 'GIT_REPOSITORY_UNREADABLE' }] });
+    }) as typeof fetch;
+    try {
+      await expect(checkIsGitRepository(directory)).rejects.toBeInstanceOf(GitRepositoryUnreadableError);
+      // The next check asks again: a failure is not an answer to keep.
+      await checkIsGitRepository(directory).catch(() => undefined);
+      expect(requests).toBe(2);
+
+      await expect(getGitStatus(directory)).rejects.toBeInstanceOf(GitRepositoryUnreadableError);
+      await expect(getGitStatus(directory)).rejects.toThrow(message);
     } finally {
       restoreMocks();
     }

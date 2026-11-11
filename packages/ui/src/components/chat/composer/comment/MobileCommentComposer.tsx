@@ -106,12 +106,20 @@ export function MobileCommentComposer({ draft, theme: currentTheme, handlers }: 
     // The opening tap flushes the controller update through React before it
     // returns, so this focus still runs inside the gesture's call stack — the
     // only focus iOS raises the soft keyboard for.
+    // An edit opens with the comment's text; the caret goes after it.
     React.useLayoutEffect(() => {
         editorRef.current?.focus();
+        if (draft.text) editorRef.current?.setSelection(draft.text.length);
+        // Mount only: the shell is keyed per open.
+        // oxlint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
     // Let the available row width clip long quotes, with a fade before Close.
     const quotePreview = mobileCommentQuotePreview(draft.quote.plainText);
+    // Editing an attached comment: the primary action saves it, Close cancels.
+    const editing = Boolean(draft.draftId);
+    const closeLabel = editing ? t('chat.chatInput.contextPreview.cancelEdit') : t('mobile.surface.closeAria');
+    const primaryLabel = editing ? t('chat.textSelection.comment.save') : t('chat.textSelection.comment.attach');
 
     return (
         <div
@@ -135,8 +143,8 @@ export function MobileCommentComposer({ draft, theme: currentTheme, handlers }: 
                     size="icon"
                     className="ms-auto size-8 shrink-0 text-muted-foreground"
                     onClick={handlers.onCancel}
-                    title={t('mobile.surface.closeAria')}
-                    aria-label={t('mobile.surface.closeAria')}
+                    title={closeLabel}
+                    aria-label={closeLabel}
                 >
                     <Icon name="close" className={cn(ICON_SIZE_CLASS, 'text-current')} />
                 </Button>
@@ -186,10 +194,10 @@ export function MobileCommentComposer({ draft, theme: currentTheme, handlers }: 
                     className="mb-1 shrink-0 rounded-full border-0 [corner-shape:round] transition-opacity hover:opacity-90 active:opacity-80"
                     style={{ backgroundColor: 'var(--primary-base)', color: 'var(--primary-foreground)' }}
                     onClick={handlers.onAttach}
-                    title={t('chat.textSelection.comment.attach')}
-                    aria-label={t('chat.textSelection.comment.attach')}
+                    title={primaryLabel}
+                    aria-label={primaryLabel}
                 >
-                    <Icon name="attachment-2" className="h-4 w-4" />
+                    <Icon name={editing ? 'check' : 'attachment-2'} className="h-4 w-4" />
                 </Button>
             </div>
         </div>

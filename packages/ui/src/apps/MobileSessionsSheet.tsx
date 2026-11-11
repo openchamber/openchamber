@@ -39,6 +39,7 @@ import {
 import { isChatDirectoryPath } from '@/lib/chatDirectories';
 import { useI18n, type I18nKey } from '@/lib/i18n';
 import { updateDesktopSettings } from '@/lib/persistence';
+import { sessionEvents } from '@/lib/sessionEvents';
 import { cn } from '@/lib/utils';
 import { refreshGlobalSessions, useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
@@ -63,6 +64,7 @@ import { MobileSessionList } from './mobileSidebar/MobileSessionList';
 import { MobileSidebarActionsProvider, useMobileSidebarRowsStore, type MobileSidebarActions } from './mobileSidebar/mobileSidebarState';
 import { useEdgeSwipe } from './useEdgeSwipe';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
+import { MOBILE_HEADER_BUTTON_CLASS, MOBILE_HEADER_CLASS } from '@/components/ui/mobileHeader';
 
 type MobileSessionsSheetProps = {
   open: boolean;
@@ -187,6 +189,8 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
   const setShowPinnedSection = useSessionDisplayStore((state) => state.setShowPinnedSection);
   const keepWorkInPlace = useSessionDisplayStore((state) => state.keepWorkInPlace);
   const setKeepWorkInPlace = useSessionDisplayStore((state) => state.setKeepWorkInPlace);
+  const keepPinnedInPlace = useSessionDisplayStore((state) => state.keepPinnedInPlace);
+  const setKeepPinnedInPlace = useSessionDisplayStore((state) => state.setKeepPinnedInPlace);
   const detailedZoneRows = useSessionDisplayStore((state) => state.detailedZoneRows);
   const setDetailedZoneRows = useSessionDisplayStore((state) => state.setDetailedZoneRows);
   const worktreeNameByBranch = useSessionDisplayStore((state) => state.worktreeNameByBranch);
@@ -219,6 +223,11 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
   React.useEffect(() => {
     if (searchOpen && variant === 'sidebar') searchInputRef.current?.focus();
   }, [searchOpen, variant]);
+
+  React.useEffect(
+    () => sessionEvents.onDirectoryRequest(() => setDirectoryDialogOpen(true)),
+    [],
+  );
 
   React.useEffect(() => {
     if (!listActive) {
@@ -358,7 +367,10 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
             {!hiddenSections.includes(section.id) ? <Icon name="check" className="size-4 text-primary" /> : null}
           </DropdownMenuItem>
         ))}
-        {/* A work in In work leaves its project unless asked. */}
+        {/* A pinned work stays in its project unless asked; one in In work leaves it unless asked. */}
+        {showPinnedSection ? renderMenuChoice('pinned-in-place', 'sessions.sidebar.header.displayMode.keepPinnedInPlace', keepPinnedInPlace, toggleSetting(keepPinnedInPlace, setKeepPinnedInPlace, (next) => {
+          void updateDesktopSettings({ sidebarKeepPinnedInPlace: next });
+        })) : null}
         {sessionWorkEnabled && showWorkSection ? renderMenuChoice('in-place', 'sessions.sidebar.header.displayMode.keepWorkInPlace', keepWorkInPlace, toggleSetting(keepWorkInPlace, setKeepWorkInPlace, (next) => {
           void updateDesktopSettings({ sidebarKeepWorkInPlace: next });
         })) : null}
@@ -485,7 +497,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
         {/* The list scrolls under the search field: the list is virtualized
             in its own scroller, which the field cannot join. */}
         {!editingOrder && !empty && searchShown ? (
-          <div className={cn('shrink-0 px-3 pb-2', variant === 'sidebar' ? 'pt-2' : 'pt-1')}>
+          <div className={cn('shrink-0 px-2 pb-1', variant === 'sidebar' ? 'pt-2' : 'pt-1')}>
             <SessionSearchInput
               inputRef={searchInputRef}
               value={query}
@@ -547,7 +559,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
             // iPad's sidebar keeps its height under the raised keyboard
             // (mobile.css), so its footer stays where it is.
             data-keyboard-rider={variant === 'drawer' ? '' : undefined}
-            className="flex shrink-0 items-center justify-between gap-2 border-t border-edge bg-background px-3 pt-1.5"
+            className="oc-sessions-footer flex shrink-0 items-center justify-between gap-2 border-t border-edge bg-background px-3 pt-1.5"
             style={{ paddingBottom: 'calc(0.375rem + var(--oc-safe-area-bottom, 0px))' }}
           >
             <div className="flex min-w-0 items-center">
@@ -640,7 +652,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
       <div className="flex h-full min-h-0 flex-col">
         {/* No title: the list below says what this is, and the actions need
             the width. Search opens from the leading button, as on the desktop. */}
-        <div className="flex h-[var(--oc-header-height,56px)] shrink-0 items-center gap-2 border-b border-edge px-3">
+        <div className={cn(MOBILE_HEADER_CLASS, 'border-b border-edge')}>
           {!editingOrder && !empty ? (
             <Button
               type="button"
@@ -679,10 +691,10 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
       }}
       ariaLabel={t('mobile.sessions.sheet.title')}
     >
-      <div className="flex h-[var(--oc-header-height,56px)] shrink-0 items-center gap-2 px-3">
+      <div className={MOBILE_HEADER_CLASS}>
         <button
           type="button"
-          className="flex size-10 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-interactive-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className={MOBILE_HEADER_BUTTON_CLASS}
           aria-label={t('mobile.surface.closeAria')}
           onClick={close}
           style={{ touchAction: 'manipulation' }}
@@ -820,7 +832,7 @@ const MobileSessionsDrawerContainer: React.FC<{
       aria-modal="true"
       aria-label={ariaLabel}
       aria-hidden={!open}
-      className="oc-keyboard-inset-surface fixed inset-0 z-50 flex flex-col bg-background text-foreground"
+      className="oc-keyboard-inset-surface oc-side-safe-area fixed inset-0 z-50 flex flex-col bg-background text-foreground"
       style={{
         paddingTop: 'var(--oc-safe-area-top, 0px)',
         // Settled state drops the transform entirely so the drawer isn't kept

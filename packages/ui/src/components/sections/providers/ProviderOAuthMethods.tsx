@@ -47,6 +47,11 @@ interface ProviderOAuthMethodsProps {
   connectLabel?: string;
   /** Off when the caller starts the sign-in from its own button; only the attempt's progress and errors show. */
   showStartButton?: boolean;
+  /**
+   * Told `true` when a sign-in starts and `false` when it ends, fails or this unmounts,
+   * so a caller that mounts this only in some states can keep it until then.
+   */
+  onActiveChange?: (active: boolean) => void;
 }
 
 type Flow =
@@ -89,6 +94,7 @@ export const ProviderOAuthMethods: React.FC<ProviderOAuthMethodsProps> = ({
   showMethodLabels = true,
   connectLabel,
   showStartButton = true,
+  onActiveChange,
 }) => {
   const { t } = useI18n();
   // Picked once per directory prop: OpenCode keeps an OAuth attempt in the
@@ -102,6 +108,12 @@ export const ProviderOAuthMethods: React.FC<ProviderOAuthMethodsProps> = ({
   const [flow, setFlow] = React.useState<Flow>(IDLE);
   const [fieldValues, setFieldValues] = React.useState<Record<string, FormValue>>({});
   const [codeInput, setCodeInput] = React.useState('');
+  /** The address pasted into a waiting `paste` attempt, and how handing it over went. */
+  const [redirectInput, setRedirectInput] = React.useState('');
+  const [redirectSubmit, setRedirectSubmit] = React.useState<{ submitting: boolean; error: string | null }>({
+    submitting: false,
+    error: null,
+  });
   /** Set while a poll loop is live; clearing it stops the loop at its next tick. */
   const activeAttemptRef = React.useRef<string | null>(null);
 
@@ -124,6 +136,13 @@ export const ProviderOAuthMethods: React.FC<ProviderOAuthMethodsProps> = ({
   }, [cancelAttempt]);
 
   const activeMethodID = flow.phase === 'idle' ? null : flow.methodID;
+
+  const signInActive = flow.phase !== 'idle' && flow.phase !== 'failed';
+  React.useEffect(() => {
+    if (!signInActive || !onActiveChange) return undefined;
+    onActiveChange(true);
+    return () => onActiveChange(false);
+  }, [signInActive, onActiveChange]);
   const busy = flow.phase === 'connecting'
     || flow.phase === 'waiting'
     || (flow.phase === 'awaitingCode' && flow.submitting);
@@ -212,7 +231,13 @@ export const ProviderOAuthMethods: React.FC<ProviderOAuthMethodsProps> = ({
         methodID: method.id,
         ...(Object.keys(answer).length > 0 ? { answer } : {}),
       });
-      attempt = { attemptID: data.attemptID, mode: data.mode, url: data.url, instructions: data.instructions };
+      attempt = {
+        attemptID: data.attemptID,
+        mode: data.mode,
+        url: data.url,
+        instructions: data.instructions,
+        paste: data.paste === true,
+      };
     } catch (error) {
       fail(method.id, error, 'settings.providers.page.toast.oauthStartFailed');
       return;
@@ -237,6 +262,8 @@ export const ProviderOAuthMethods: React.FC<ProviderOAuthMethodsProps> = ({
       return;
     }
 
+    setRedirectInput('');
+    setRedirectSubmit({ submitting: false, error: null });
     setFlow({ phase: 'waiting', methodID: method.id, attempt });
     await pollAttempt(method.id, attempt.attemptID);
   };
@@ -294,6 +321,29 @@ export const ProviderOAuthMethods: React.FC<ProviderOAuthMethodsProps> = ({
       await succeed();
     } catch (error) {
       fail(methodID, error, 'settings.providers.page.toast.oauthCompleteFailed');
+    }
+  };
+
+  /**
+   * Hands a waiting attempt the address the browser landed on. OpenCode settles
+   * the attempt through its status, which the poll loop already watches; a
+   * rejected address leaves the attempt waiting, so the user can paste again.
+   */
+  const submitRedirect = async () => {
+    if (flow.phase !== 'waiting') return;
+    const address = redirectInput.trim();
+    if (!address) return;
+    const { attemptID } = flow.attempt;
+    setRedirectSubmit({ submitting: true, error: null });
+    // Accepted, it stays submitting until the poll loop reads the result.
+    try {
+      await sdk().integration.oauth.complete({ integrationID: integrationId, attemptID, code: address });
+    } catch (error) {
+      if (activeAttemptRef.current !== attemptID) return;
+      setRedirectSubmit({
+        submitting: false,
+        error: describeOAuthError(error, t, 'settings.providers.page.toast.oauthCompleteFailed'),
+      });
     }
   };
 
@@ -404,7 +454,7 @@ export const ProviderOAuthMethods: React.FC<ProviderOAuthMethodsProps> = ({
                   onChange={(key, value) => setFieldValues((prev) => ({ ...prev, [key]: value }))}
                 />
                 {flow.error && (
-                  <p className="typography-meta text-[var(--status-error)]">{flow.error}</p>
+                  <p dir="auto" className="typography-meta text-[var(--status-error)]">{flow.error}</p>
                 )}
                 <div className="flex items-center gap-2">
                   <Button size="xs" className="!font-normal" onClick={() => submitFields(method)}>
@@ -441,6 +491,38 @@ export const ProviderOAuthMethods: React.FC<ProviderOAuthMethodsProps> = ({
                 <p className="typography-meta text-muted-foreground">
                   {t('settings.providers.page.auth.oauth.waitingHint')}
                 </p>
+                {flow.attempt.paste && (
+                  <div className="space-y-2">
+                    <p className="typography-meta text-muted-foreground">
+                      {t('settings.providers.page.auth.oauth.pasteRedirectHint')}
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <Input
+                        value={redirectInput}
+                        onChange={(event) => setRedirectInput(event.target.value)}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Enter') void submitRedirect();
+                        }}
+                        placeholder={t('settings.providers.page.auth.oauth.pasteRedirectPlaceholder')}
+                        aria-label={t('settings.providers.page.auth.oauth.pasteRedirectPlaceholder')}
+                        className="font-mono text-xs"
+                        disabled={redirectSubmit.submitting}
+                      />
+                      <Button
+                        size="xs"
+                        className="!font-normal shrink-0"
+                        onClick={() => void submitRedirect()}
+                        disabled={redirectSubmit.submitting || redirectInput.trim().length === 0}
+                      >
+                        {t('settings.providers.page.actions.complete')}
+                      </Button>
+                    </div>
+                    {/* Reserved, so an error does not push what follows. */}
+                    <p className="typography-meta min-h-[1lh] text-[var(--status-error)]">
+                      {redirectSubmit.error}
+                    </p>
+                  </div>
+                )}
               </div>
             )}
 
@@ -483,7 +565,7 @@ export const ProviderOAuthMethods: React.FC<ProviderOAuthMethodsProps> = ({
 
             {isActive && flow.phase === 'failed' && (
               <div className="space-y-2">
-                <p className="typography-meta text-[var(--status-error)]">{flow.message}</p>
+                <p dir="auto" className="typography-meta text-[var(--status-error)]">{flow.message}</p>
                 {showStartButton ? (
                   <Button
                     variant="outline"

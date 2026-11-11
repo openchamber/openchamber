@@ -15,7 +15,14 @@ const row = (overrides = {}) => ({
 });
 
 const harness = (guest = row(), overrides = {}) => {
-  const control = { resolveSessionDirectory: vi.fn(async () => '/repo'), execute: vi.fn(async () => ({ sessionId: 'ses_1', directory: '/repo', messages: [{ text: 'last' }], sessionStatus: { type: 'busy' } })) };
+  const control = {
+    resolveSessionDirectory: vi.fn(async () => '/repo'),
+    execute: vi.fn(async () => ({ sessionId: 'ses_1', directory: '/repo', messages: [{ text: 'last' }], sessionStatus: { type: 'busy' } })),
+    stopSession: vi.fn(async () => true),
+    answerPermission: vi.fn(async () => {}),
+    answerForm: vi.fn(async () => {}),
+    dismissOpenForms: vi.fn(async () => {}),
+  };
   const instructions = { set: vi.fn(async () => {}) };
   const emitToFrames = vi.fn();
   const setConfigurationNote = vi.fn();
@@ -123,7 +130,7 @@ describe('service host calls', () => {
   });
 
   test('a session failure tells the service only what the control service meant for callers', async () => {
-    const control = { execute: vi.fn(async () => { throw Object.assign(new Error('secret path /x'), { status: 500 }); }) };
+    const control = { dismissOpenForms: async () => {}, execute: vi.fn(async () => { throw Object.assign(new Error('secret path /x'), { status: 500 }); }) };
     const { call } = harness(row(), { control });
     const answer = await call('sessions.send', { sessionId: 'ses_1', prompt: 'hi' });
     expect(answer.status).toBe(500);
@@ -168,6 +175,62 @@ describe('service host calls', () => {
     expect(await call('settings.read', {})).toEqual({ status: 200, body: { result: { settings: { key: 'secret' } } } });
     await call('status.set', { needsConfiguration: 'Connect a workspace' });
     expect(setConfigurationNote).toHaveBeenCalledWith('desk', 'Connect a workspace');
+  });
+});
+
+describe('acting for the user', () => {
+  const answering = (overrides = {}) => row({
+    sessionControl: { content: true, answers: true },
+    capabilityGrants: ['service', 'transcript', 'sessionControl', 'sessionAnswers', 'instructions'],
+    ...overrides,
+  });
+
+  test('a stop needs session control only', async () => {
+    const { call, control } = harness();
+    expect(await call('sessions.stop', { sessionId: 'ses_1' })).toEqual({ status: 200, body: { result: { stopped: true } } });
+    expect(control.stopSession).toHaveBeenCalledWith('ses_1');
+  });
+
+  test('a message dismisses the open form before it goes, so it does not wait behind it', async () => {
+    const { call, control } = harness();
+    await call('sessions.send', { sessionId: 'ses_1', prompt: 'use the second one' });
+    expect(control.dismissOpenForms).toHaveBeenCalledWith('ses_1');
+    expect(control.dismissOpenForms.mock.invocationCallOrder[0]).toBeLessThan(control.execute.mock.invocationCallOrder[0]);
+  });
+
+  test('answers are refused without sessionControl.answers, whatever the grant says', async () => {
+    const { call, control } = harness(row({ capabilityGrants: ['service', 'transcript', 'sessionControl', 'sessionAnswers', 'instructions'] }));
+    expect(await call('sessions.answerPermission', { sessionId: 'ses_1', requestId: 'per_1', decision: 'allow' }))
+      .toMatchObject({ status: 403, body: { error: { code: 'NOT_GRANTED' } } });
+    expect(await call('sessions.answerForm', { sessionId: 'ses_1', formId: 'frm_1', values: { pick: 'a' } }))
+      .toMatchObject({ status: 403, body: { error: { code: 'NOT_GRANTED' } } });
+    expect(control.answerPermission).not.toHaveBeenCalled();
+    expect(control.answerForm).not.toHaveBeenCalled();
+  });
+
+  test('an allow lets the agent do it once, and only a refusal carries a note', async () => {
+    const { call, control } = harness(answering());
+    await call('sessions.answerPermission', { sessionId: 'ses_1', requestId: 'per_1', decision: 'allow', message: 'ignored' });
+    expect(control.answerPermission).toHaveBeenLastCalledWith({ sessionID: 'ses_1', requestID: 'per_1', decision: 'once', message: undefined });
+    await call('sessions.answerPermission', { sessionId: 'ses_1', requestId: 'per_2', decision: 'deny', message: 'Not on main' });
+    expect(control.answerPermission).toHaveBeenLastCalledWith({ sessionID: 'ses_1', requestID: 'per_2', decision: 'reject', message: 'Not on main' });
+    expect(await call('sessions.answerPermission', { sessionId: 'ses_1', requestId: 'per_3', decision: 'always' })).toMatchObject({ status: 400 });
+  });
+
+  test('a form takes values or is dismissed with null', async () => {
+    const { call, control } = harness(answering());
+    expect(await call('sessions.answerForm', { sessionId: 'ses_1', formId: 'frm_1', values: { pick: 'a', tags: ['x'] } }))
+      .toEqual({ status: 200, body: { result: { answered: true } } });
+    expect(control.answerForm).toHaveBeenLastCalledWith({ sessionID: 'ses_1', formID: 'frm_1', answer: { pick: 'a', tags: ['x'] }, message: undefined });
+    await call('sessions.answerForm', { sessionId: 'ses_1', formId: 'frm_2', values: null, message: 'Answered in Telegram' });
+    expect(control.answerForm).toHaveBeenLastCalledWith({ sessionID: 'ses_1', formID: 'frm_2', answer: null, message: 'Answered in Telegram' });
+  });
+
+  test('an answer to a request that already settled says so', async () => {
+    const { call, control } = harness(answering());
+    control.answerPermission.mockRejectedValueOnce(new OpenChamberControlError('This request is no longer waiting for an answer', 404));
+    expect(await call('sessions.answerPermission', { sessionId: 'ses_1', requestId: 'per_1', decision: 'allow' }))
+      .toMatchObject({ status: 404, body: { error: { message: 'This request is no longer waiting for an answer' } } });
   });
 });
 

@@ -18,6 +18,8 @@ interface MobileOverlayPanelProps {
   className?: string;
   contentMaxHeightClassName?: string;
   renderHeader?: (closeButton: React.ReactNode) => React.ReactNode;
+  /** Stays above the scrolling content: a sheet's search field. */
+  subheader?: React.ReactNode;
   /**
    * False for content that scrolls on its own (a virtual list): the panel only
    * bounds its height, so the two never scroll one inside the other.
@@ -50,6 +52,7 @@ export const MobileOverlayPanel: React.FC<MobileOverlayPanelProps> = ({
   className,
   contentMaxHeightClassName,
   renderHeader,
+  subheader,
   scrollContent = true,
 }) => {
   const { t } = useI18n();
@@ -190,10 +193,11 @@ export const MobileOverlayPanel: React.FC<MobileOverlayPanelProps> = ({
       // the shell keeps a persistent sessions sidebar, and a sheet centered on
       // the window reads as belonging to nothing. The shell publishes the
       // column's insets; on phones they are 0 and this is a no-op. The scrim
-      // deliberately still covers everything.
+      // deliberately still covers everything. The screen's own side insets
+      // (a landscape notch, the status bar column of iPhone Duo) come on top.
       style={{
-        paddingLeft: chatInsets.left,
-        paddingRight: chatInsets.right,
+        paddingLeft: `calc(${chatInsets.left}px + var(--oc-safe-area-left, 0px))`,
+        paddingRight: `calc(${chatInsets.right}px + var(--oc-safe-area-right, 0px))`,
       }}
     >
         <div
@@ -226,12 +230,13 @@ export const MobileOverlayPanel: React.FC<MobileOverlayPanelProps> = ({
           }
 
           return (
-            <div className="flex items-center justify-between px-3 py-2 border-b border-edge-muted">
-              <h2 className="typography-ui-label font-semibold text-foreground">{title}</h2>
+            <div className="flex items-center justify-between ps-4 pe-3 py-2 border-b border-edge-muted">
+              <h2 dir="auto" className="typography-ui-label font-semibold text-foreground">{title}</h2>
               {closeButton}
             </div>
           );
         })()}
+        {subheader ? <div className="shrink-0 px-2 pt-2">{subheader}</div> : null}
         {scrollContent ? <ScrollableOverlay
           useScrollShadow
           disableHorizontal
@@ -240,11 +245,11 @@ export const MobileOverlayPanel: React.FC<MobileOverlayPanelProps> = ({
           // as a weird content bounce while scrolling the overlay.
           preventOverscroll
           outerClassName={cn('min-h-0 flex-1', contentMaxHeight)}
-          className="px-2 py-2 pwa-overlay-scroll"
+          className={cn('px-2 pt-2 pwa-overlay-scroll', footer ? 'pb-2' : 'pb-4')}
         >
           {children}
         </ScrollableOverlay> : (
-          <div className={cn('flex min-h-0 flex-1 flex-col px-2 py-2', contentMaxHeight)}>
+          <div className={cn('flex min-h-0 flex-1 flex-col px-2 pt-2', footer ? 'pb-2' : 'pb-4', contentMaxHeight)}>
             {children}
           </div>
         )}

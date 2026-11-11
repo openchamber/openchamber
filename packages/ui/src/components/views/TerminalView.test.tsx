@@ -106,7 +106,11 @@ mock.module('@/contexts/useThemeSystem', () => ({
   }),
 }));
 mock.module('@/hooks/useFontPreferences', () => ({ useFontPreferences: () => ({ monoFont: 'geist-mono' }) }));
-mock.module('@/lib/device', () => ({ useDeviceInfo: () => deviceInfo }));
+mock.module('@/lib/device', () => ({
+  useDeviceInfo: () => deviceInfo,
+  // Dialogs ask whether to lay out as a tablet; these tests run on a phone or a desktop.
+  useTabletLayout: () => ({ enabled: false, roomyForPanels: false }),
+}));
 mock.module('@/stores/useUIStore', () => ({ useUIStore: useUiStoreMock }));
 mock.module('@/stores/useInlineCommentDraftStore', () => ({ useInlineCommentDraftStore: () => ({ addDraft: () => undefined }) }));
 mock.module('@/components/terminal/TerminalViewport', () => ({

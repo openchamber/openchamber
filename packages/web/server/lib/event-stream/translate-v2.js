@@ -140,8 +140,13 @@ export function translateWireEvent(payload) {
       if (!sessionID) return [];
       return [event('session.deleted', { sessionID, info: { id: sessionID } })];
 
-    // Its own event, never a `session.updated`: the consumers of that one
-    // (goal mode, lineage, notifications) would take a restore for an edit.
+    // Their own events, never a `session.updated`: the consumers of that one
+    // (goal mode, lineage, notifications) would take an archive or a restore
+    // for an edit.
+    case 'session.archived':
+      if (!sessionID) return [];
+      return [event('session.archived', { sessionID })];
+
     case 'session.unarchived':
       if (!sessionID) return [];
       return [event('session.unarchived', { sessionID })];

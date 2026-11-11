@@ -15,7 +15,7 @@ export type ChatQuoteMark = {
     messageId: string;
     anchor: ChatQuoteAnchor;
     comment: string;
-    updateComment: (text: string) => void;
+    updateComment: (text: string) => boolean;
     remove: () => void;
 };
 

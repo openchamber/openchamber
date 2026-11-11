@@ -87,11 +87,27 @@ export async function filterMissingInlineAttachments(
         return { sendable: [...attachments], skippedNames: [] };
     }
 
-    const byDirectory = new Map<string, InlineServerAttachment[]>();
-    for (const attachment of inline) {
-        const directory = parentDirectoryOf(attachment.serverPath);
+    const missingPaths = await findMissingPaths(inline.map((attachment) => attachment.serverPath), lister);
+    if (missingPaths.size === 0) {
+        return { sendable: [...attachments], skippedNames: [] };
+    }
+    const missing = new Set<AttachedFile>(inline.filter((attachment) => missingPaths.has(attachment.serverPath)));
+    return {
+        sendable: attachments.filter((attachment) => !missing.has(attachment)),
+        skippedNames: [...missing].map((attachment) => attachment.filename),
+    };
+}
+
+/** The given paths known not to exist. One the check could not reach is left out. */
+export async function findMissingPaths(
+    paths: readonly string[],
+    lister: DirectoryLister,
+): Promise<Set<string>> {
+    const byDirectory = new Map<string, string[]>();
+    for (const path of paths) {
+        const directory = parentDirectoryOf(path);
         const group = byDirectory.get(directory) ?? [];
-        group.push(attachment);
+        group.push(path);
         byDirectory.set(directory, group);
     }
 
@@ -103,34 +119,28 @@ export async function filterMissingInlineAttachments(
         } catch (error) {
             // A parent directory that does not exist (`@types/node`,
             // `@acme.io/careers`) cannot hold the file. Any other failure
-            // keeps that directory's attachments: the check could not run.
+            // keeps that directory's paths: the check could not run.
             const parentMissing = error instanceof FilesystemError
                 && (error.reason === 'not-found' || error.reason === 'not-directory');
             return { files, entries: parentMissing ? [] : null };
         }
     }));
 
-    const missing = new Set<AttachedFile>();
+    const missing = new Set<string>();
     for (const { files, entries } of results) {
         if (entries === null) continue;
         const present = new Set(entries.map((entry) => normalizePath(entry.path)));
         // Case-insensitive fallback: macOS and Windows resolve `readme.md` to
         // `README.md`, and VS Code reports a lowercase Windows drive letter.
-        // On a case-sensitive disk this keeps the attachment, which is the
+        // On a case-sensitive disk this keeps the path, which is the
         // pre-check behaviour rather than a wrong drop.
         const presentFolded = new Set([...present].map((path) => path.toLowerCase()));
         for (const file of files) {
-            const target = normalizePath(file.serverPath);
+            const target = normalizePath(file);
             if (!present.has(target) && !presentFolded.has(target.toLowerCase())) {
                 missing.add(file);
             }
         }
     }
-    if (missing.size === 0) {
-        return { sendable: [...attachments], skippedNames: [] };
-    }
-    return {
-        sendable: attachments.filter((attachment) => !missing.has(attachment)),
-        skippedNames: [...missing].map((attachment) => attachment.filename),
-    };
+    return missing;
 }

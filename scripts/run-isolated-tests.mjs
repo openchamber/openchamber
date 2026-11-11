@@ -14,7 +14,6 @@
 //   list that then rots.
 //
 // Usage: node scripts/run-isolated-tests.mjs <root> [...roots]
-// OPENCHAMBER_TEST_WORKERS=1 overrides the default of 4; accepts integers 1 to 32.
 
 import { spawn } from 'node:child_process';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
@@ -24,13 +23,7 @@ import { resolveBunExecutable } from './lib/bun-executable.mjs';
 
 const TEST_FILE = /\.(test|spec)\.(js|cjs|mjs|jsx|ts|tsx)$/;
 const SKIP_DIRS = new Set(['node_modules', 'dist', 'dist-bundle', 'build', 'out', '.git', 'ios', 'android']);
-const requestedWorkers = process.env.OPENCHAMBER_TEST_WORKERS;
-// Bound opt-in fan-out so an accidental value cannot launch unbounded processes.
-if (requestedWorkers !== undefined && (!/^[1-9]\d*$/.test(requestedWorkers) || Number(requestedWorkers) > 32)) {
-  console.error('run-isolated-tests: OPENCHAMBER_TEST_WORKERS must be an integer from 1 to 32');
-  process.exit(1);
-}
-const MAX_PARALLEL = requestedWorkers === undefined ? 4 : Number(requestedWorkers);
+const MAX_PARALLEL = 4;
 const bunExecutable = resolveBunExecutable();
 
 const collect = (root, found = []) => {

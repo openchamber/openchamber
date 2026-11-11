@@ -1,3 +1,7 @@
+import { execFileSync } from 'node:child_process';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createNotificationTemplateRuntime } from './template-runtime.js';
@@ -140,6 +144,22 @@ describe('notification template project of the session', () => {
     expect(variables.worktree).toBe('/work/opencode-claude');
   });
 
+  it('reads the session\'s project through the host source runtime.js passes', async () => {
+    globalThis.fetch = vi.fn(async () => Response.json({ id: 'ses_1', title: 'Fix login', location: { directory: '/work/opencode-claude' } }));
+    const runtime = createRuntime(settings);
+    // runtime.js builds its own source for the host; it is not this runtime's internal one.
+    const source = {
+      buildOpenCodeUrl: (path) => path,
+      getOpenCodeAuthHeaders: () => ({}),
+      fetchImpl: (...args) => globalThis.fetch(...args),
+    };
+
+    const variables = await runtime.buildTemplateVariables(turnEnded, 'ses_1', source);
+
+    expect(variables.project_name).toBe('opencode-claude');
+    expect(variables.worktree).toBe('/work/opencode-claude');
+  });
+
   it('takes the directory the event names without reading the session', async () => {
     globalThis.fetch = vi.fn();
     const runtime = createRuntime(settings);
@@ -169,6 +189,29 @@ describe('notification template project of the session', () => {
     expect(resolvePrimaryWorktreeRoot).toHaveBeenCalledWith('/data/worktrees/fix-login');
     expect(variables.project_name).toBe('opencode-claude');
     expect(variables.worktree).toBe('/data/worktrees/fix-login');
+  });
+
+  it.skipIf(process.platform === 'win32')('reads {branch} through a Git override whose path has a space', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-template-git-'));
+    try {
+      const repository = path.join(root, 'repo');
+      fs.mkdirSync(repository);
+      execFileSync('git', ['init', '-q', '-b', 'feature/x'], { cwd: repository });
+      execFileSync('git', ['-c', 'user.name=Test', '-c', 'user.email=test@example.com', 'commit', '-q', '--allow-empty', '-m', 'init'], { cwd: repository });
+      const wrapper = path.join(root, 'Git App', 'git');
+      fs.mkdirSync(path.dirname(wrapper));
+      fs.writeFileSync(wrapper, '#!/bin/sh\nexec git "$@"\n', { mode: 0o755 });
+      const runtime = createRuntimeWith({
+        resolveGitBinaryForSpawn: () => wrapper,
+        resolvePrimaryWorktreeRoot: async (directory) => ({ root: directory }),
+      });
+
+      const variables = await runtime.buildTemplateVariables(turnEndedIn(repository), 'ses_1');
+
+      expect(variables.branch).toBe('feature/x');
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it('names a directory registered as a project by that project without asking git', async () => {
@@ -210,6 +253,7 @@ describe('notification template session info for a chat of an isolated space', (
     buildOpenCodeUrl: (path) => `http://space${path}`,
     getOpenCodeAuthHeaders: () => ({}),
     fetchImpl: vi.fn(async () => Response.json({ data: { id: 'ses_1', title } })),
+    isSpace: true,
   });
   const renamed = (title) => ({ type: 'session.updated', properties: { info: { id: 'ses_1', title } } });
 

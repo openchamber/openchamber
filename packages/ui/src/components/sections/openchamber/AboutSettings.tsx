@@ -20,7 +20,9 @@ import { reloadOpenCodeConfiguration } from '@/stores/useAgentsStore';
 import { fetchOpenCodeUpgradeStatus, runOpenCodeUpgrade, type OpenCodeUpgradeStatus } from '@/components/update/openCodeUpgrade';
 import { useDesktopRemoteHostActive } from '@/hooks/useDesktopRemoteHostActive';
 import { getDesktopAppVersion } from '@/lib/desktopNative';
+import { getUpdateCheckErrorMessage } from '@/lib/updateCheckError';
 import { InstanceServiceUrls } from './InstanceServiceUrls';
+import { AboutReleaseNotes } from './AboutReleaseNotes';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import {
   SettingsChipGroup,
@@ -76,7 +78,7 @@ function useConnectedServerUpdate(enabled: boolean) {
         info: null,
         checking: false,
         available: false,
-        error: error instanceof Error ? error.message : String(error),
+        error: error instanceof Error ? getUpdateCheckErrorMessage(error) : String(error),
       });
     }
   }, [enabled]);
@@ -249,6 +251,21 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
   const appVersion = describeVersion(desktopAppVersion || updateStore.info?.currentVersion || 'unknown', offeredVersion);
   const remoteHostVersion = openChamberVersion || remoteHostUpdate?.info?.currentVersion || 'unknown';
 
+  // Release notes follow the first version row: the notes of the installed
+  // version, or of the releases its offered update brings. Stable offered to
+  // a Canary build is one release, not a run of them since the build.
+  const installedVersion = isDesktopRemote
+    ? desktopAppVersion || updateStore.info?.currentVersion
+    : openChamberVersion || update.info?.currentVersion;
+  const leavesCanary = Boolean(offeredVersion && parseCanaryVersion(installedVersion) && !parseCanaryVersion(offeredVersion));
+  const releaseNotes = installedVersion ? (
+    <AboutReleaseNotes
+      version={offeredVersion || installedVersion}
+      since={offeredVersion && !leavesCanary ? installedVersion : null}
+      describeVersion={describeVersion}
+    />
+  ) : null;
+
   // The update channel of the desktop app, or of the server installed from npm
   // that this browser page belongs to (a browser on a desktop app's server
   // gets the app's updates, which this page does not switch). Picking Canary
@@ -290,9 +307,11 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
       ? t('settings.openchamber.about.actions.updateAppToVersion', { version })
       : t('settings.openchamber.about.actions.updateOpenChamberToVersion', { version });
   })();
-  const isInstallBlocked = (info: UpdateInfo | null) => Boolean(info?.installBlocked);
+  // An update that needs a newer OpenCode keeps its button, disabled, with
+  // the reason under it; the other blocks replace the button with steps.
+  const needsNewerOpenCode = (info: UpdateInfo | null) => info?.installBlocked === 'opencode-version';
+  const isInstallBlocked = (info: UpdateInfo | null) => Boolean(info?.installBlocked) && !needsNewerOpenCode(info);
   const installBlocked = update.available && isInstallBlocked(update.info);
-  const remoteHostInstallBlocked = Boolean(remoteHostUpdate?.available && isInstallBlocked(remoteHostUpdate.info));
 
   const chooseUpdateChannel = async (channel: UpdateChannel) => {
     if (channel === updateChannel) return;
@@ -347,10 +366,26 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
         mode: 'projects',
         scopes: ['all'],
       });
+    }).then(() => {
+      // An OpenChamber update held back for an older OpenCode may be
+      // installable now.
+      void update.checkForUpdates();
+      if (remoteHostUpdate) void remoteHostUpdate.check();
     });
   };
 
   const renderManualUpdateNotice = (info: UpdateInfo | null) => {
+    if (info?.installBlocked === 'opencode-version') {
+      return (
+        <p className="typography-meta text-[var(--status-warning)]">
+          {t('updateDialog.openCodeTooOld', {
+            version: describeVersion(info.version || ''),
+            required: info.requiredOpenCodeVersion || '',
+            current: info.openCodeVersion || '',
+          })}
+        </p>
+      );
+    }
     if (info?.installBlocked === 'desktop-host') {
       return (
         <p className="typography-meta text-muted-foreground">
@@ -387,18 +422,24 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
       </div>
     );
   };
-  const manualUpdateNotice = installBlocked ? renderManualUpdateNotice(update.info) : null;
+  const manualUpdateNotice = update.available && update.info?.installBlocked ? renderManualUpdateNotice(update.info) : null;
 
-  const remoteHostUpdateControls = (() => {
-    if (!remoteHostUpdate?.available || remoteHostUpdate.checking) return null;
-    if (remoteHostInstallBlocked) return renderManualUpdateNotice(remoteHostUpdate.info);
-    return (
-      <Button type="button" size="sm" variant="outline" onClick={() => setServerUpdateDialogOpen(true)}>
-        <Icon name="download" className="size-4" />
-        {serverUpdateLabel(remoteHostUpdate.info)}
-      </Button>
-    );
-  })();
+  const remoteHostOffered = Boolean(remoteHostUpdate?.available && !remoteHostUpdate.checking);
+  const remoteHostUpdateNotice = remoteHostOffered && remoteHostUpdate?.info?.installBlocked
+    ? renderManualUpdateNotice(remoteHostUpdate.info)
+    : null;
+  const remoteHostUpdateButton = remoteHostOffered && !isInstallBlocked(remoteHostUpdate?.info ?? null) ? (
+    <Button
+      type="button"
+      size="sm"
+      variant="outline"
+      onClick={() => setServerUpdateDialogOpen(true)}
+      disabled={needsNewerOpenCode(remoteHostUpdate?.info ?? null)}
+    >
+      <Icon name="download" className="size-4" />
+      {serverUpdateLabel(remoteHostUpdate?.info ?? null)}
+    </Button>
+  ) : null;
   const remoteHostUpdateDialog = remoteHostUpdate ? (
     <UpdateDialog
       open={serverUpdateDialogOpen}
@@ -583,6 +624,7 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
               variant="default"
               size="sm"
               onClick={() => setUpdateDialogOpen(true)}
+              disabled={needsNewerOpenCode(update.info)}
               className="w-auto justify-center gap-2"
             >
               <Icon name="download" className="size-4" />
@@ -593,8 +635,11 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
 
         {manualUpdateNotice}
 
-        {remoteHostUpdateControls && (
-          <div className="flex justify-center text-center">{remoteHostUpdateControls}</div>
+        {(remoteHostUpdateButton || remoteHostUpdateNotice) && (
+          <div className="flex flex-col items-center gap-2 text-center">
+            {remoteHostUpdateButton}
+            {remoteHostUpdateNotice}
+          </div>
         )}
 
         {openCodeUpdateControls && (
@@ -645,6 +690,8 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
           {t('aboutDialog.footerNote')}
         </p>
 
+        {releaseNotes}
+
         <UpdateDialog
           open={updateDialogOpen}
           onOpenChange={setUpdateDialogOpen}
@@ -678,7 +725,7 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
       </span>
     </>
   ) : update.available && !installBlocked ? (
-    <Button size="sm" variant="default" onClick={() => setUpdateDialogOpen(true)}>
+    <Button size="sm" variant="default" onClick={() => setUpdateDialogOpen(true)} disabled={needsNewerOpenCode(update.info)}>
       <Icon name="download" className="size-4" />
       {openChamberUpdateLabel}
     </Button>
@@ -696,7 +743,7 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
   const valueRow = 'min-h-8 flex-wrap @xl:flex-initial';
   const notes = [
     manualUpdateNotice,
-    remoteHostInstallBlocked ? remoteHostUpdateControls : null,
+    remoteHostUpdateNotice,
     openCodeUpdate?.note ?? null,
     ...[update.error, remoteHostUpdate?.error].filter(Boolean).map((error) => (
       <p key={error} className="rounded-lg bg-[var(--status-error-background)] px-3 py-2 typography-meta text-[var(--status-error)]">
@@ -744,7 +791,7 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
               </SettingsFieldRow>
               <SettingsFieldRow label={t('settings.openchamber.about.field.serverVersion')} controlClassName={valueRow}>
                 {versionValue(remoteHostVersion)}
-                {remoteHostInstallBlocked ? null : remoteHostUpdateControls}
+                {remoteHostUpdateButton}
               </SettingsFieldRow>
             </>
           ) : (
@@ -771,6 +818,8 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
         </div>
         {notes.length > 0 && <div className="space-y-3">{notes}</div>}
       </SettingsSection>
+
+      {releaseNotes}
 
       <UpdateDialog
         open={updateDialogOpen}

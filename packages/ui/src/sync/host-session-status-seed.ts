@@ -6,6 +6,7 @@ import { resolveGlobalSessionDirectory, useGlobalSessionsStore } from '@/stores/
 import { applyGlobalSessionStatusEvents, hasBackgroundWork, useGlobalSessionStatusStore } from './global-session-status';
 import { readHostBlockingRequestsSnapshot } from './global-blocking-requests';
 import { applyHostTurnStarts, needsHostTurnStarts } from './session-activity-timing';
+import { seedSessionContextFromHost, sessionContextRevision } from './session-live-work';
 
 // Seeds the cross-directory status index from the host's own map.
 //
@@ -91,6 +92,7 @@ export const seedGlobalSessionStatusFromHost = (): Promise<void> => {
   if (inFlight) return inFlight;
   const runtimeKey = getRuntimeKey();
   const requestedAt = Date.now();
+  const contextSince = sessionContextRevision();
   inFlight = (async () => {
     const snapshot = await readHostBlockingRequestsSnapshot(async () => {
       const response = await opencodeClient.getHostSessionStatusSnapshot();
@@ -120,6 +122,7 @@ export const seedGlobalSessionStatusFromHost = (): Promise<void> => {
     const { activeSessionIds } = useGlobalSessionStatusStore.getState();
     const held = new Set(Object.keys(snapshot.sessions).filter((sessionId) => isHeldHere(sessionId, activeSessionIds)));
     applyHostTurnStarts(buildHostTurnStarts(snapshot, (sessionId) => held.has(sessionId)), held, { requestedAt, answeredAt });
+    if (snapshot.context) seedSessionContextFromHost(new Map(Object.entries(snapshot.context)), contextSince);
   })().finally(() => {
     inFlight = null;
   });

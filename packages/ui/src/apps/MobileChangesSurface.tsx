@@ -2,7 +2,6 @@ import { isCompleteIdentity } from '@/lib/api/git-identity';
 import React from 'react';
 import { Icon } from '@/components/icon/Icon';
 import { useIsContributorWorktree } from '@/hooks/useIsContributorWorktree';
-import { WhitespaceToggleIcon } from '@/components/views/WhitespaceToggleIcon';
 import { statusToGitCode } from '@/components/views/turnSnapshotDiff';
 
 import { toast } from '@/components/ui';
@@ -11,6 +10,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuRadioGroup, DropdownMenu
 import { dropdownTriggerVariants } from '@/components/ui/dropdown-trigger';
 import { ChangesPanel, type ChangesGroupConfig } from '@/components/views/git/ChangesPanel';
 import { BranchSelector } from '@/components/views/git/BranchSelector';
+import { ChangeStats } from '@/components/views/git/ChangeRow';
 import { ChangedPathLabel } from '@/components/views/git/ChangedPathLabel';
 import type { WalkthroughTarget } from '@/lib/walkthrough/types';
 import { MobileWalkthroughScreen } from './MobileWalkthroughScreen';
@@ -22,6 +22,7 @@ import { CommitSection } from '@/components/views/git/CommitSection';
 import { ConflictDialog } from '@/components/views/git/ConflictDialog';
 import { DirtyBranchSwitchDialog } from '@/components/views/git/DirtyBranchSwitchDialog';
 import { SyncActions } from '@/components/views/git/SyncActions';
+import { gitRequestErrorMessage } from '@/components/views/git/gitRequestErrorMessage';
 import { ContributorDestinationDialog } from '@/components/views/git/ContributorDestinationDialog';
 import { useContributorDestinationChooser } from '@/components/views/git/contributorDestination';
 import { RepositoryConfigurationDialog } from '@/components/sections/openchamber/SourceControlBindingSettings';
@@ -58,7 +59,6 @@ import { ChangeRequestDiffUnavailable } from '@/components/views/git/ChangeReque
 import { useGitComparison, type GitComparisonSource } from '@/hooks/useGitComparison';
 import { useGitBaseBranchStore } from '@/stores/useGitBaseBranchStore';
 import { usePullRequestSelectionStore } from '@/stores/usePullRequestSelectionStore';
-import { useUIStore } from '@/stores/useUIStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useLastTurnDiff } from '@/components/views/useLastTurnDiff';
 import { ReviewFlowDialog } from '@/components/session/ReviewFlowDialog';
@@ -89,6 +89,7 @@ import {
   useGitLoadingStatus,
 } from '@/stores/useGitStore';
 import { NestedRepoResolutionStates } from '@/components/views/git/NestedRepoResolutionStates';
+import { GitRepositoryUnreadableState } from '@/components/views/git/GitRepositoryUnreadableState';
 import { NestedRepoPicker } from '@/components/views/git/NestedRepoPicker';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { BoundGitNetworkOperationError, GitOperationResultError, runBoundGitNetworkOperation, describeGitSyncOutcome, type GitSyncOutcome } from '@/lib/boundGitNetworkOperation';
@@ -105,6 +106,7 @@ import { normalizePath } from '@/lib/pathNormalization';
 import { findFileRepository } from '@/lib/nestedRepositories';
 import { isSameRepoFile, toAbsoluteFilePath } from '@/lib/path-utils';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
+import { MOBILE_HEADER_BUTTON_CLASS, MOBILE_HEADER_CLASS, MOBILE_HEADER_TITLE_CLASS } from '@/components/ui/mobileHeader';
 
 type SyncAction = 'fetch' | 'pull' | 'sync' | 'publish' | null;
 type CommitAction = 'commit' | 'commitAndPush' | null;
@@ -878,7 +880,7 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
           : error.code === 'contributor-publish-cancelled'
             ? t('gitView.toast.contributorPublishCancelled')
             : t('gitView.toast.syncActionFailed', { action: actionLabel })
-        : error instanceof Error ? error.message : t('gitView.toast.syncActionFailed', { action: actionLabel }));
+        : error instanceof Error ? gitRequestErrorMessage(error, t) : t('gitView.toast.syncActionFailed', { action: actionLabel }));
     } finally {
       recovery.finish();
       if (recovery.isCurrent()) setSyncAction(null);
@@ -1041,7 +1043,7 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
           : error.code === 'contributor-publish-cancelled'
             ? t('gitView.toast.contributorPublishCancelled')
             : t('gitView.toast.syncActionFailed', { action: t('gitView.sync.syncChanges') })
-        : error instanceof Error ? error.message : t('gitView.toast.createCommitFailed'));
+        : error instanceof Error ? gitRequestErrorMessage(error, t) : t('gitView.toast.createCommitFailed'));
     } finally {
       recovery?.finish();
       setCommitAction(null);
@@ -1174,11 +1176,11 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
   const renderListState = (state: React.ReactNode) => (
     <div className="flex h-full flex-col overflow-hidden bg-background text-foreground">
       {networkDialogs}
-      <header className="flex h-[var(--oc-header-height,56px)] shrink-0 items-center gap-2 px-3 text-foreground">
+      <header className={cn(MOBILE_HEADER_CLASS, 'text-foreground')}>
         {onClose ? (
           <button
             type="button"
-            className="-ms-1 flex size-10 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-interactive-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className={MOBILE_HEADER_BUTTON_CLASS}
             aria-label={t('mobile.surface.closeAria')}
             onClick={onClose}
             style={{ touchAction: 'manipulation' }}
@@ -1187,7 +1189,7 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
           </button>
         ) : null}
         <div className="min-w-0 flex-1 px-1">
-          <h2 className="typography-ui-label text-foreground">{t('mobile.nav.changes')}</h2>
+          <h2 className={MOBILE_HEADER_TITLE_CLASS}>{t('mobile.nav.changes')}</h2>
           <p className="truncate typography-micro text-muted-foreground">
             {status?.current || currentDirectory || ''}
           </p>
@@ -1200,6 +1202,12 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
 
   if (!currentDirectory) {
     return renderListState(<MobileChangesState message={t('gitView.empty.selectSessionOrDirectory')} />);
+  }
+
+  if (repository.unreadable) {
+    return renderListState(
+      <GitRepositoryUnreadableState directory={repository.unreadable.directory} message={repository.unreadable.message} />,
+    );
   }
 
   // Non-repo root: surface nested-repository resolution while the operating
@@ -1295,12 +1303,10 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
 
   const renderComparison = () => {
     if (mode === 'pr' && prComparison.diffUnavailable) return <ChangeRequestDiffUnavailable provider={prComparison.provider} className="h-full" />;
-    if (mode === 'pr' && !selectedPr) return <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
-      <MobileChangesState loading={prComparison.loading} message={prComparison.error ?? (prComparison.loading
-        ? t(changeRequestCopy('session.githubPrPicker.loading.pullRequests', prChangeRequestTerm))
-        : t(changeRequestCopy('pullRequestComparison.select', prChangeRequestTerm)))} />
-      {!prComparison.loading && <PullRequestComparisonSelector mobile comparison={prComparison} />}
-    </div>;
+    // The header above already holds the picker.
+    if (mode === 'pr' && !selectedPr) return <MobileChangesState loading={prComparison.loading} message={prComparison.error ?? (prComparison.loading
+      ? t(changeRequestCopy('session.githubPrPicker.loading.pullRequests', prChangeRequestTerm))
+      : t(changeRequestCopy('pullRequestComparison.select', prChangeRequestTerm)))} />;
     if (mode === 'branch' && !branchComparison.base) {
       return <MobileChangesState
         loading={!branchComparison.resolved}
@@ -1356,7 +1362,7 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
         {onClose ? (
           <button
             type="button"
-            className="-ms-1 flex size-10 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-interactive-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className={MOBILE_HEADER_BUTTON_CLASS}
             aria-label={t('mobile.surface.closeAria')}
             onClick={onClose}
             style={{ touchAction: 'manipulation' }}
@@ -1367,7 +1373,8 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
         <DropdownMenu open={modeMenuOpen} onOpenChange={setModeMenuOpen}>
           <DropdownMenuTrigger asChild>
             <Button variant="ghost" className={dropdownTriggerVariants({ size: 'mobile' })} data-mobile-comparison-trigger aria-label={t('diffView.scope.selectorAria')}>
-              <span>{modeLabel}</span>
+              {/* The acronym leaves the header room for the review; the menu keeps the full name. */}
+              <span>{mode === 'pr' && prChangeRequestTerm === 'pullRequest' ? 'PR' : mode === 'pr' && prChangeRequestTerm === 'mergeRequest' ? 'MR' : modeLabel}</span>
               <Icon name="arrow-down-s" className="size-4" />
             </Button>
           </DropdownMenuTrigger>
@@ -1401,7 +1408,6 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
           <PullRequestComparisonSelector mobile key={JSON.stringify([ownerKey, currentBranch])} comparison={prComparison} />
           {selectedPr && <Button variant="ghost" size="sm" disabled={comparison.loading} aria-label={t('session.githubIssuePicker.actions.refresh')}
             onClick={() => void comparison.refresh()}><Icon name="refresh" className="size-4" /></Button>}
-          {changeRequestReview && reviewProvider ? <ReviewSubmitButton review={changeRequestReview} provider={reviewProvider} className="h-8" /> : null}
         </>}
         {walkthroughTarget && (
           <Button
@@ -1416,11 +1422,14 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
             <Icon name="route" className="size-5" />
           </Button>
         )}
+        {visible && mode === 'pr' && changeRequestReview && reviewProvider ? (
+          <ReviewSubmitButton review={changeRequestReview} provider={reviewProvider} className={walkthroughTarget ? undefined : 'ms-auto'} />
+        ) : null}
         {/* The desktop diff toolbar's review, for the working tree: it reviews
             what the current session changed. */}
         {mode === 'working' && currentSessionId && (status?.files?.length ?? 0) > 0 ? (
           <Button
-            variant="default"
+            variant="outline"
             className={cn('shrink-0', !walkthroughTarget && 'ms-auto')}
             disabled={reviewFlow.submitting}
             onClick={() => setReviewDialogOpen(true)}
@@ -1428,7 +1437,7 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
             style={{ touchAction: 'manipulation' }}
           >
             <Icon name={reviewFlow.submitting ? 'loader-4' : 'search-eye'} className={cn('size-4', reviewFlow.submitting && 'animate-spin')} />
-            {t('diffView.actions.review')}
+            {t('chat.work.reviewHint.aiReview')}
           </Button>
         ) : null}
       </header>
@@ -1459,6 +1468,7 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
               and is the way into what it does not carry. */}
           <IdentityDropdown
             activeProfile={activeIdentityProfile}
+            quiet
             identities={availableIdentities}
             attention={identityAttention}
             // On a phone the branch, the identity and the sync action cannot all
@@ -1519,7 +1529,7 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
       ) : changeEntries.length > 0 ? (
         <div className="flex min-h-0 flex-1 flex-col">
           {/* File list scrolls inside ChangesPanel; the commit footer stays pinned. */}
-          <div className="min-h-0 flex-1 overflow-hidden px-4 pt-4">
+          <div className="min-h-0 flex-1 overflow-hidden px-2 pt-1">
             <ChangesPanel
               groups={changeGroups}
               diffStats={status?.diffStats}
@@ -1531,7 +1541,7 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
             />
           </div>
           {/* Held at the bottom of the panel: it rides the keyboard over the list. */}
-          <div data-keyboard-rider="" className="shrink-0 border-t border-edge bg-background px-4 pb-4 pt-3">
+          <div data-keyboard-rider="" className="oc-mobile-commit-bar shrink-0 border-t border-edge-muted bg-background px-4 py-3">
             <CommitSection
               stagedCount={stagedChangeEntries.length}
               commitMessage={commitMessage}
@@ -1647,43 +1657,37 @@ const MobileDiffDetail: React.FC<{
 }> = ({ path, subtitle, diff, staged = false, fileExists, unavailableReason = null, error = null, onBack, onRetry, onExpandContextRequest, pendingContextExpansion, contextLoading, commentOrigin }) => {
   const { t } = useI18n();
   const language = React.useMemo(() => getLanguageFromExtension(path) || 'text', [path]);
-  const hideWhitespace = useUIStore((state) => state.diffHideWhitespace);
-  const setHideWhitespace = useUIStore((state) => state.setDiffHideWhitespace);
-  const whitespaceState = hideWhitespace ? t('diffView.whitespace.hidden') : t('diffView.whitespace.shown');
   const wholeFileComment = useWholeFileComment({ fileLabel: path, origin: commentOrigin });
+  // A nested repository's path ends in a slash.
+  const trimmedPath = path.replace(/\/$/, '');
+  const lastSlash = trimmedPath.lastIndexOf('/');
+  const fileName = trimmedPath.slice(lastSlash + 1);
+  const folder = lastSlash > 0 ? trimmedPath.slice(0, lastSlash) : null;
 
   return (
     <div className="flex h-full flex-col overflow-hidden bg-background text-foreground">
-      <header className="flex h-[var(--oc-header-height,56px)] shrink-0 items-center gap-3 border-b border-edge px-3 text-foreground">
+      <header className={cn(MOBILE_HEADER_CLASS, 'border-b border-edge text-foreground')}>
         <button
           type="button"
-          className="flex size-9 shrink-0 items-center justify-center rounded-lg text-muted-foreground hover:bg-interactive-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className={MOBILE_HEADER_BUTTON_CLASS}
           aria-label={t('header.actions.backAria')}
           onClick={onBack}
         >
           <Icon name="arrow-left" className="size-5" />
         </button>
-        <div className="min-w-0 flex-1 px-2">
-          <h2 className="typography-ui-header"><ChangedPathLabel path={path} /></h2>
-          {subtitle && <p className="truncate typography-meta text-muted-foreground">{subtitle}</p>}
+        {/* The file reads first and whole; where it lives and what it is compared in follow. */}
+        <div className="min-w-0 flex-1 px-1" title={path}>
+          <h2 dir="ltr" className={cn('oc-ui-start-align truncate', MOBILE_HEADER_TITLE_CLASS)}>{fileName}</h2>
+          <p className="flex min-w-0 items-baseline gap-1.5 typography-micro text-muted-foreground">
+            {folder ? <span dir="ltr" className="oc-ui-start-align min-w-0 truncate">{folder}</span> : null}
+            {folder && subtitle ? <span aria-hidden className="shrink-0 opacity-60">·</span> : null}
+            {subtitle ? <span className="min-w-0 max-w-full shrink-0 truncate">{subtitle}</span> : null}
+          </p>
         </div>
         <button
           type="button"
           className={cn(
-            'flex size-9 shrink-0 items-center justify-center rounded-lg hover:bg-interactive-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-            hideWhitespace ? 'text-foreground' : 'text-muted-foreground',
-          )}
-          aria-label={t('diffView.actions.hideWhitespace')}
-          aria-pressed={hideWhitespace}
-          title={whitespaceState}
-          onClick={() => setHideWhitespace(!hideWhitespace)}
-        >
-          <WhitespaceToggleIcon hidden={hideWhitespace} className="size-5" />
-        </button>
-        <button
-          type="button"
-          className={cn(
-            'flex size-9 shrink-0 items-center justify-center rounded-lg hover:bg-interactive-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+            MOBILE_HEADER_BUTTON_CLASS,
             wholeFileComment.isOpen ? 'text-foreground' : 'text-muted-foreground',
           )}
           aria-label={t('inlineComment.actions.commentOnFile')}
@@ -1732,7 +1736,6 @@ const MobileDiffDetail: React.FC<{
                   commentOrigin={commentOrigin}
                   renderSideBySide={false}
                   wrapLines={true}
-                  hideWhitespace={hideWhitespace}
                   layout="inline"
                 />
               )}
@@ -1758,7 +1761,6 @@ const MobileDiffDetail: React.FC<{
               commentOrigin={commentOrigin}
               renderSideBySide={false}
               wrapLines={true}
-              hideWhitespace={hideWhitespace}
               layout="inline"
               onExpandContextRequest={onExpandContextRequest}
               pendingContextExpansion={pendingContextExpansion}
@@ -1776,8 +1778,8 @@ type ComparisonFileListItem = { path: string; status: string; insertions: number
 const MobileComparisonFileList: React.FC<{ files: ComparisonFileListItem[]; onSelect: (path: string) => void }> = ({ files, onSelect }) => {
   const { t } = useI18n();
   return (
-    <ScrollableOverlay outerClassName="h-full" className="px-3 py-2" useScrollShadow disableHorizontal>
-      <ul aria-label={t('gitView.changes.changedFilesAria')} className="flex flex-col gap-1">
+    <ScrollableOverlay outerClassName="h-full" className="px-2 py-1" useScrollShadow disableHorizontal>
+      <ul aria-label={t('gitView.changes.changedFilesAria')} className="flex flex-col">
         {files.map((file) => {
           const statusLabel = file.status === 'A' ? t('diffView.change.new')
             : file.status === 'D' ? t('diffView.change.deleted')
@@ -1786,13 +1788,16 @@ const MobileComparisonFileList: React.FC<{ files: ComparisonFileListItem[]; onSe
           const statusColor = file.status === 'A' ? 'var(--status-success)' : file.status === 'D' ? 'var(--status-error)'
             : file.status === 'R' || file.status === 'C' ? 'var(--status-info)' : 'var(--status-warning)';
           return <li key={file.path}>
-            <Button variant="ghost" size="lg" className="w-full justify-start gap-2.5 text-start normal-case" onClick={() => onSelect(file.path)}>
-              <span className="w-4 shrink-0 text-center typography-meta font-semibold uppercase" style={{ color: statusColor }} aria-label={statusLabel}>{file.status}</span>
-              <FileTypeIcon filePath={file.path} className="size-4 shrink-0" />
-              <ChangedPathLabel path={file.path} className="flex-1 typography-ui-label" />
-              {(file.insertions > 0 || file.deletions > 0) && <span className="shrink-0 typography-meta text-muted-foreground">+{file.insertions} -{file.deletions}</span>}
-              <Icon name="arrow-right-s" className="size-4 shrink-0 text-muted-foreground" />
-            </Button>
+            <button
+              type="button"
+              className="flex min-h-11 w-full items-center gap-2 rounded-md px-2 text-start touch-manipulation focus:outline-none active:bg-interactive-hover"
+              onClick={() => onSelect(file.path)}
+            >
+              <span className="w-4 shrink-0 text-center typography-micro font-semibold uppercase" style={{ color: statusColor }} aria-label={statusLabel}>{file.status}</span>
+              <FileTypeIcon filePath={file.path} className="size-3.5 shrink-0" />
+              <ChangedPathLabel path={file.path} nameFirst className="flex-1 typography-ui-label" />
+              {(file.insertions > 0 || file.deletions > 0) && <ChangeStats insertions={file.insertions} deletions={file.deletions} hideZero />}
+            </button>
           </li>;
         })}
       </ul>

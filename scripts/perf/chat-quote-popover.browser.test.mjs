@@ -30,7 +30,7 @@ async function createQuotePopoverFixture() {
       const [editing, setEditing] = React.useState(false);
       return <I18nContext.Provider value={i18n}><ChatQuoteMarkPopover
         anchorRect={new DOMRect(left, 250, 16, 20)} comment={comment} editing={editing}
-        onEditingChange={setEditing} onSave={setComment} onRemove={() => {}}
+        onEditingChange={setEditing} onSave={(text) => { setComment(text); return true; }} onRemove={() => {}}
       /></I18nContext.Provider>;
     }
     let revision = 0;

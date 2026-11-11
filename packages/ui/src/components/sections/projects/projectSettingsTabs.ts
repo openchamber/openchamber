@@ -31,3 +31,7 @@ const SEARCH_TARGET_TABS = new Map<string, ProjectSettingsTab>([
 ]);
 
 export const projectSettingsTabForSearchTarget = (id: string): ProjectSettingsTab | null => SEARCH_TARGET_TABS.get(id) ?? null;
+
+/** The search targets one tab holds, for the tab's "new" badge. */
+export const projectSettingsTabAnchors = (tab: ProjectSettingsTab): string[] =>
+  [...SEARCH_TARGET_TABS].filter(([, owner]) => owner === tab).map(([id]) => id);

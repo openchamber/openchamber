@@ -73,6 +73,7 @@ import { TimelineDialog } from './TimelineDialog';
 import { useChatTurnNavigation } from './hooks/useChatTurnNavigation';
 import { ChatQuoteHighlightContext, useChatQuoteHighlightStore } from './hooks/chatQuoteHighlightStore';
 import { ChatQuoteHighlightLayer } from './message/ChatQuoteHighlightLayer';
+import { TextSelectionMenu } from './message/TextSelectionMenu';
 import { loadQuoteSource as loadQuoteSourceMessage, scrollToQuoteSource as scrollToQuoteSourceMessage } from './quoteNavigation';
 import { useChatSurfaceMode } from './useChatSurfaceMode';
 import { useMessageTTS } from '@/hooks/useMessageTTS';
@@ -99,6 +100,7 @@ import {
     useSyncDirectory,
     useSessionRenderable,
     useSessionStatus,
+    useSessionStatusSnapshotReady,
     useScopedBlockingPermissions,
     useScopedBlockingForms,
     useParentSession,
@@ -110,6 +112,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { useI18n } from '@/lib/i18n';
 import { useDraftHeading } from './useDraftHeading';
 import { isVSCodeRuntime } from '@/lib/desktop';
+import { SEMANTIC_TYPOGRAPHY, VSCODE_TYPOGRAPHY, getScaledTypographyStyle } from '@/lib/typography';
 import { eventMatchesShortcut, getEffectiveShortcutCombo } from '@/lib/shortcuts';
 import { ChatSearchBar } from './search/ChatSearchBar';
 import { WorkStatusPanel } from './work-status/WorkStatusPanel';
@@ -128,6 +131,14 @@ import { getRuntimeKey } from '@/lib/runtime-switch';
 import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
 import { createFirstVisibleSessionPerformanceTracker } from '@/sync/session-load-performance';
 import { isChatDirectoryPath } from '@/lib/chatDirectories';
+
+function HoistedUiPageSelection({ scrollNode, sessionId }: { scrollNode: HTMLElement; sessionId: string }) {
+    const containerRef = React.useMemo(() => ({ current: scrollNode }), [scrollNode]);
+    const surface = useChatSurfaceMode();
+    const showTTS = useConfigStore((state) => state.showMessageTTSButtons);
+    return <TextSelectionMenu containerRef={containerRef} readingKey={sessionId} uiRenderSelection
+        canReadAloud={surface !== 'mini-chat' && showTTS} />;
+}
 
 const EMPTY_MESSAGES: Array<{ info: Message; parts: Part[] }> = [];
 const IDLE_SESSION_STATUS = { type: 'idle' as const };
@@ -966,6 +977,15 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
     const stickyUserHeader = useUIStore((state) => state.stickyUserHeader);
     const promptNavigatorEnabled = useUIStore((state) => state.promptNavigatorEnabled);
     const allowPromptingSubagentSessions = useUIStore((state) => state.allowPromptingSubagentSessions);
+    const chatFontSize = useUIStore((state) => state.chatFontSize);
+    // The chat's own text size, on top of the interface size: the semantic
+    // text variables are redefined for this column only (as FilesView does
+    // for its preview), so the sidebar keeps the interface size.
+    // SAFETY: CSS custom properties are valid inline styles; React's type lists only standard ones.
+    const chatTypographyStyle = React.useMemo(() => getScaledTypographyStyle(
+        chatFontSize,
+        isVSCodeRuntime() ? VSCODE_TYPOGRAPHY : SEMANTIC_TYPOGRAPHY,
+    ) as React.CSSProperties | undefined, [chatFontSize]);
     // The timeline dialog of the main chat is app state (a global shortcut
     // opens it); a pinned column keeps its own.
     const globalTimelineDialogOpen = useUIStore((s) => s.isTimelineDialogOpen);
@@ -1033,6 +1053,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
 
     // Session status from sync system
     const sessionStatusForCurrent = useSessionStatus(currentSessionId ?? '', effectiveSessionDirectory) ?? IDLE_SESSION_STATUS;
+    const statusSnapshotReady = useSessionStatusSnapshotReady(effectiveSessionDirectory, currentSessionId ?? '');
 
     // Scoped blocking requests — only subscribe to permissions/forms for
     // the current session + descendant subagent sessions, not all sessions in
@@ -1070,10 +1091,16 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
             return true;
         }
 
+        // No status once the directory's snapshot has landed is idle, as in
+        // `useSessionActivity`: a turn OpenCode was stopped under stays incomplete.
+        if (sessionStatusForCurrent === IDLE_SESSION_STATUS && statusSnapshotReady) {
+            return false;
+        }
+
         // The last record can be a synthetic/skill/shell/switch message; the
         // turn is still running only per the last conversation message.
         return isIncompleteAssistantTurn(getLastConversationRecord(sessionMessages)?.info);
-    }, [currentSessionId, sessionMessages, sessionPermissions.length, sessionForms.length, sessionStatusForCurrent.type]);
+    }, [currentSessionId, sessionMessages, sessionPermissions.length, sessionForms.length, sessionStatusForCurrent, statusSnapshotReady]);
 
     const latestCompletedReply = React.useMemo(
         () => findLatestCompletedReply(sessionMessages),
@@ -1545,6 +1572,12 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
             ...options,
         });
     }, [currentSessionKey, scrollToTimelineMessage]);
+    const resolveUiPageMessageId = React.useCallback((messageId: string, partId: string) => (
+        messageListRef.current?.resolveUiPageMessageId(messageId, partId) ?? messageId
+    ), []);
+    const scrollToUiPageRow = React.useCallback((messageId: string) => (
+        messageListRef.current?.scrollToUiPageRow(messageId) ?? false
+    ), []);
 
     const navigation = useChatTurnNavigation({
         sessionId: currentSessionId,
@@ -1954,6 +1987,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
 			data-chat-session-id={pinned ? currentSessionId ?? undefined : undefined}
 			data-chat-working={pinned && sessionIsWorking ? 'true' : undefined}
 			className="flex h-full min-h-0 bg-background"
+			style={chatTypographyStyle}
 		>
 		<ChatColumnSessionContext.Provider value={chatColumnSession}>
 		<ChatColumnActionsContext.Provider value={columnActions}>
@@ -1966,7 +2000,10 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
 			scrollNode={scrollNode}
 			loadHistoryUntilMessage={loadQuoteSource}
 			scrollToMessage={scrollToQuoteSource}
+			resolveUiPageMessageId={resolveUiPageMessageId}
+			scrollToUiPageRow={scrollToUiPageRow}
 		/>
+		{scrollNode && currentSessionId ? <HoistedUiPageSelection key={currentSessionKey ?? currentSessionId} scrollNode={scrollNode} sessionId={currentSessionId} /> : null}
 		<div
 			ref={chatRootRef}
 			data-composer-bound

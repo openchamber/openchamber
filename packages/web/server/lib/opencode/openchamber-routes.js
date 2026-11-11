@@ -1,5 +1,6 @@
 import { publicEnterprisePolicy } from '../enterprise-mode.js';
 import { withUserEnv } from '../injected-env.js';
+import { isOpenCodeOlderThan } from './compatibility.js';
 
 const SYSTEMD_SERVICE_UNIT_PATTERN = /^[A-Za-z0-9:_.@-]+\.service$/;
 
@@ -75,9 +76,26 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
     fetchFreeZenModels,
     getCachedZenModels,
     desktopUpdater,
+    getOpenCodeCompatibility,
   } = dependencies;
 
   let desktopRestartError = null;
+
+  /**
+   * The offered release needs a newer OpenCode than this server runs: after
+   * the install the new build would refuse to start against it, and an
+   * external OpenCode cannot be updated from the app. Null when the release
+   * does not say what it needs or the OpenCode version cannot be read.
+   */
+  const readOpenCodeShortfall = async (version) => {
+    const { fetchRequiredOpenCodeVersion } = await import('../package-manager.js');
+    const requiredOpenCodeVersion = await fetchRequiredOpenCodeVersion(version);
+    if (!requiredOpenCodeVersion) return null;
+    const openCodeVersion = (await getOpenCodeCompatibility().catch(() => null))?.version ?? null;
+    return openCodeVersion && isOpenCodeOlderThan(openCodeVersion, requiredOpenCodeVersion)
+      ? { requiredOpenCodeVersion, openCodeVersion }
+      : null;
+  };
 
   /**
    * How this server was launched, read from its instance file. A foreground
@@ -171,7 +189,10 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
         // Tell clients up front that the install route will refuse, so they
         // show manual steps instead of an Update button that fails.
         if (updateInfo?.available && updateRequest.appType === 'web') {
-          if (isUnmanagedInstall()) {
+          const openCodeShortfall = await readOpenCodeShortfall(updateInfo.version);
+          if (openCodeShortfall) {
+            updateInfo = { ...updateInfo, installBlocked: 'opencode-version', ...openCodeShortfall };
+          } else if (isUnmanagedInstall()) {
             updateInfo = { ...updateInfo, installBlocked: 'manual-install' };
           } else {
             const { isForegroundService, systemdServiceUnit, isLaunchdService } = await readLaunchState();
@@ -189,6 +210,26 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
         error: error instanceof Error ? error.message : 'Failed to check for updates',
       });
     }
+  });
+
+  // Release notes for Settings > About: `version` alone, or what an update
+  // from `since` to `version` brings. 502 when GitHub could not be read, so
+  // the page never mistakes an outage for a release without notes.
+  app.get('/api/openchamber/release-notes', async (req, res) => {
+    const { fetchReleaseNotes, VERSION_PATTERN, CANARY_VERSION_PATTERN } = await import('../changelog/update-notes.js');
+    // Query values can be arrays; only the string form is checked and used.
+    const isVersion = (value) => VERSION_PATTERN.test(value) || CANARY_VERSION_PATTERN.test(value);
+    const version = String(req.query.version ?? '');
+    const since = req.query.since === undefined ? undefined : String(req.query.since);
+    if (!isVersion(version) || (since !== undefined && !isVersion(since))) {
+      return res.status(400).json({ error: 'version and since must be OpenChamber versions' });
+    }
+    const { compareVersions } = await import('../version-order.js');
+    const releases = await fetchReleaseNotes(version, since, compareVersions);
+    if (!releases) {
+      return res.status(502).json({ error: 'Release notes are unavailable' });
+    }
+    res.json({ releases });
   });
 
   app.post('/api/openchamber/update-install', async (_req, res) => {
@@ -245,6 +286,15 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
       const updateInfo = await checkForUpdates();
       if (!updateInfo.available) {
         return res.status(400).json({ error: 'No update available' });
+      }
+
+      const openCodeShortfall = await readOpenCodeShortfall(updateInfo.version);
+      if (openCodeShortfall) {
+        return res.status(409).json({
+          code: 'OPENCODE_TOO_OLD',
+          error: `OpenChamber ${updateInfo.version} needs OpenCode ${openCodeShortfall.requiredOpenCodeVersion}. This server has ${openCodeShortfall.openCodeVersion}. Update OpenCode first.`,
+          ...openCodeShortfall,
+        });
       }
 
       // A global install would add a second copy and leave this one as it is.

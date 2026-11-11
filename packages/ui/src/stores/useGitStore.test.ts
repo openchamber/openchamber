@@ -4,6 +4,7 @@ import { useGitStore } from './useGitStore';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { getDeferredSafeStorage } from '@/stores/utils/safeStorage';
 import { notifyGitStatusInvalidated } from '@/lib/gitStatusInvalidation';
+import { GitRepositoryUnreadableError } from '@/lib/gitRepositoryUnreadable';
 import { clearWorktreeBootstrapState, markWorktreeBootstrapPending } from '@/lib/worktrees/worktreeBootstrap';
 
 // The real transport has no server in tests and fails as a generic error.
@@ -51,6 +52,7 @@ const createStatus = (diffStats?: GitStatus['diffStats'], files: GitStatus['file
 
 const createDirectoryState = (status: GitStatus): DirectoryGitState => ({
   isGitRepo: true,
+  repoUnreadable: null,
   status,
   branches: null,
   log: null,
@@ -115,6 +117,51 @@ describe('useGitStore', () => {
     const git: GitAPI = { ...createGitApi(async () => createStatus()), checkIsGitRepository: async () => false };
     expect(await useGitStore.getState().recheckRepository('/repo', git)).toBe(false);
     expect(useGitStore.getState().getDirectoryState('/repo')?.isGitRepo).toBe(false);
+  });
+
+  test("keeps Git's message for a directory Git could not read, and clears it once Git answers", async () => {
+    const message = "fatal: detected dubious ownership in repository at '/repo'";
+    let unreadable = true;
+    const git: GitAPI = {
+      ...createGitApi(async () => createStatus()),
+      checkIsGitRepository: async () => {
+        if (unreadable) throw new GitRepositoryUnreadableError(message);
+        return true;
+      },
+    };
+    await useGitStore.getState().fetchStatus('/repo', git);
+    expect(useGitStore.getState().getDirectoryState('/repo')).toMatchObject({ isGitRepo: null, repoUnreadable: message, isLoadingStatus: false });
+
+    unreadable = false;
+    expect(await useGitStore.getState().recheckRepository('/repo', git)).toBe(true);
+    expect(useGitStore.getState().getDirectoryState('/repo')).toMatchObject({ isGitRepo: true, repoUnreadable: null });
+  });
+
+  test('says Git could not read a repository known from a cache that has no status yet', async () => {
+    useGitStore.setState({
+      directories: new Map([['/repo', { ...createDirectoryState(createStatus()), status: null }]]),
+      activeDirectory: '/repo',
+    });
+    const git = createGitApi(async () => {
+      throw new GitRepositoryUnreadableError('fatal: detected dubious ownership');
+    });
+    await useGitStore.getState().fetchStatus('/repo', git, { force: true });
+    expect(useGitStore.getState().getDirectoryState('/repo')).toMatchObject({ isGitRepo: null, repoUnreadable: 'fatal: detected dubious ownership' });
+  });
+
+  test('keeps a repository on screen through one read Git could not answer', async () => {
+    setDirectoryStatus(createStatus());
+    const git = createGitApi(async () => {
+      throw new GitRepositoryUnreadableError('Git did not answer within 30 seconds.');
+    });
+    await useGitStore.getState().fetchStatus('/repo', git, { force: true });
+    expect(useGitStore.getState().getDirectoryState('/repo')).toMatchObject({ isGitRepo: true, repoUnreadable: null, status: { current: 'main' } });
+
+    // The next read in a row says what Git said instead of showing stale files.
+    await useGitStore.getState().fetchStatus('/repo', git, { force: true });
+    expect(useGitStore.getState().getDirectoryState('/repo')).toMatchObject({
+      isGitRepo: null, repoUnreadable: 'Git did not answer within 30 seconds.', status: null,
+    });
   });
 
   test('keeps timed-out diff requests inside the concurrency limit until they settle', async () => {

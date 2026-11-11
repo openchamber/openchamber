@@ -58,7 +58,7 @@ export function onFrameScroll(container: HTMLElement, listener: (direction: Fram
 }
 
 // The reader opened a row (a tool, an agent task, a reasoning block, folded
-// work). The row raises this event from its element as it opens, so the
+// work, a long user message). The row raises this event from its element as it opens, so the
 // timeline holding it lets go of the end before the row grows: the content
 // opens below the header the reader clicked, instead of the end pulling the
 // header up and out of view.
@@ -107,6 +107,24 @@ export function onPageWaiting(container: HTMLElement, listener: (block: HTMLElem
     };
     container.addEventListener(PAGE_WAITING_EVENT, handle);
     return () => container.removeEventListener(PAGE_WAITING_EVENT, handle);
+}
+
+// The reader pressed Next on a waiting form's Tabs. The Tabs raise this from
+// their element once the next tab has drawn, so the timeline can bring its
+// start into view: the reader was at the end of the tab they left.
+const TAB_STEP_EVENT = 'openchamber:tab-step';
+
+export function dispatchTabStep(tabs: HTMLElement | null): void {
+    tabs?.dispatchEvent(new CustomEvent(TAB_STEP_EVENT, { bubbles: true }));
+}
+
+/** Listens for Tabs stepping to their next tab inside `container`. */
+export function onTabStep(container: HTMLElement, listener: (tabs: HTMLElement) => void): () => void {
+    const handle = (event: Event) => {
+        if (event.target instanceof HTMLElement) listener(event.target);
+    };
+    container.addEventListener(TAB_STEP_EVENT, handle);
+    return () => container.removeEventListener(TAB_STEP_EVENT, handle);
 }
 
 // Middle-button press starts the platform's autoscroll pan (Windows/Linux

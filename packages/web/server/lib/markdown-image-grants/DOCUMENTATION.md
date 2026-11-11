@@ -32,6 +32,11 @@ the UI is on a different machine.
   (`generatedImagePaths` in `../openchamber-control/generate-image.js`). The
   chat draws them in place of the call's row
   (`packages/ui/src/components/chat/message/parts/GeneratedImages.tsx`).
+- The screenshot a finished `browser.capture` call saved is referenced too
+  (`capturedScreenshotPaths` in `../openchamber-control/screenshots.js`), from
+  an `openchamber_web` call or from the `execute` script that made it behind
+  Code Mode, whose stored result is the envelope as is or quoted once more.
+  The chat draws it in the call's expanded row.
 - A request that names the page's tool call (`callId`) gets that page's images
   in page order while their files add up to at most 25 MB
   (`fitRenderPageImages`); from the first image past it on, every image of the

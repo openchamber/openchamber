@@ -36,6 +36,8 @@ import nord_dark_Raw from './nord-dark.json';
 import nord_light_Raw from './nord-light.json';
 import osaka_jade_refined_dark_Raw from './osaka-jade-refined-dark.json';
 import osaka_jade_refined_light_Raw from './osaka-jade-refined-light.json';
+import patina_dark_Raw from './patina-dark.json';
+import patina_light_Raw from './patina-light.json';
 import fields_of_the_shire_dark_Raw from './fields-of-the-shire-dark.json';
 import fields_of_the_shire_light_Raw from './fields-of-the-shire-light.json';
 import onedarkpro_dark_Raw from './onedarkpro-dark.json';
@@ -96,6 +98,8 @@ export const presetThemes: Theme[] = [
   nord_light_Raw,
   osaka_jade_refined_dark_Raw,
   osaka_jade_refined_light_Raw,
+  patina_dark_Raw,
+  patina_light_Raw,
   onedarkpro_dark_Raw,
   onedarkpro_light_Raw,
   opencode_dark_Raw,

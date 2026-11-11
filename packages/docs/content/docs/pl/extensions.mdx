@@ -54,6 +54,8 @@ Pokazywanie panelu i odczyt, który projekt i sesja są otwarte, nie wymaga upra
 - **Czytać, co agent mówi w tle**: końcowa odpowiedź każdej tury, pytania, które agent zadaje, i to, o jakie uprawnienia prosi, w każdym projekcie, wysyłane do lokalnej usługi rozszerzenia. Zezwalaj tylko, jeśli ufasz miejscu, do którego rozszerzenie to wysyła.
 - **Samodzielne uruchamianie sesji i wysyłanie wiadomości**: jego lokalna usługa robi to bez otwartego okna, co kosztuje tokeny i może uruchamiać narzędzia.
 - **Dodawanie do tego, co czytają agenci**: tekst w instrukcjach Twoich sesji i skille oferowane każdemu agentowi, gdy rozszerzenie jest włączone.
+- **Dodawanie pluginu do OpenCode**: plugin z pakietu jest ładowany do Twojego OpenCode, gdy rozszerzenie jest włączone. Kod pluginu działa wewnątrz OpenCode z Twoimi pełnymi uprawnieniami, jak lokalna usługa, więc zezwalaj tylko wtedy, gdy ufasz autorowi.
+- **Rozpoznawanie jego linków w czatach**: identyfikatory takie jak `DEMO-12` i linki do strony rozszerzenia stają się klikalne w Twoich wiadomościach na czacie. Okno wymienia, które to są, i mówi, czy kliknięcie otwiera je w rozszerzeniu, czy dołącza do Twojej wiadomości. Linki, które OpenChamber już zna, na przykład pull requesty z GitHub i zadania z Linear, działają jak zwykle.
 
 Lokalna usługa może też działać przez cały czas pracy OpenChamber albo budzić się według harmonogramu. Okno dialogowe mówi o tym pod **Uruchamianie lokalnej usługi** i informuje też, kiedy to, co wpisujesz po `@`, trafia do usługi. Rozszerzenie może dodać własne wiersze do menu `@` i własne bloki do odpowiedzi agenta. Wstrzymanie rozszerzenia to wszystko odbiera.
 
@@ -63,9 +65,17 @@ Gdy nowsza wersja prosi o więcej, niż pozwoliłeś, karta pokazuje **Wymaga zg
 
 ## Gdzie się pojawia
 
-Poza panelem na pasku bocznym rozszerzenie może dodawać pozycje do menu, z których już korzystasz: akcje na wiadomości w czacie, menu sesji, menu + obok pola czatu oraz polecenia z ukośnikiem, jak `/task ABC-12`, które dołączają coś bez otwierania czegokolwiek. Może też nadać własnym narzędziom porządną ikonę, tytuł i układ wyniku w czacie, tak jak mają wbudowane narzędzia OpenChamber. Rozszerzenie samo decyduje, które z nich oferuje; wszystkie są wyłączone, dopóki nie zezwolisz na rozszerzenie.
+Poza panelem na pasku bocznym rozszerzenie może dodawać pozycje do menu, z których już korzystasz: akcje na wiadomości w czacie, menu sesji, menu + obok pola czatu oraz polecenia z ukośnikiem, jak `/task ABC-12`, które dołączają coś bez otwierania czegokolwiek. Może też nadać własnym narzędziom porządną ikonę, tytuł i układ wyniku w czacie, tak jak mają wbudowane narzędzia OpenChamber. Rozszerzenie samo decyduje, które z nich oferuje; wszystkie są wyłączone, dopóki nie zezwolisz na rozszerzenie. Akcje sesji i polecenia z ukośnikiem znajdziesz też w palecie poleceń (⌘P lub Ctrl+P), gdy wyszukasz ich nazwę albo nazwę rozszerzenia.
 
 Niektóre rozszerzenia pokazują obraz na żywo zamiast własnego panelu: to, w czym agent pracuje na serwerze, na przykład przeglądarkę albo symulator. Kliknij w obraz lub wpisz coś, aby przejąć kontrolę; wiersz stanu pokaże **Masz kontrolę**, a działania agenta w przeglądarce będą odrzucane, dopóki nie naciśniesz **Oddaj agentowi**. Kopiowanie i wklejanie działają jak zwykle. Inne urządzenie połączone w tym samym czasie widzi, kto ma kontrolę, i nie może jej przejąć. Takie rozszerzenie może dodać własne kontrolki obok obrazu, na przykład pasek adresu nad nim albo kolumnę narzędzi z boku.
+
+## Rozszerzenie z pluginem OpenCode
+
+Rozszerzenie może dostarczać plugin OpenCode, więc instalujesz jedną rzecz zamiast dwóch. Jego okno uprawnień ma wiersz zaczynający się od **Dodawanie pluginu do OpenCode**. Gdy zezwolisz, OpenChamber w ciągu kilku sekund dodaje plugin do OpenCode, które dla Ciebie uruchamia, bez restartu; wyłączenie lub usunięcie rozszerzenia zabiera go tą samą drogą. Do Twojego własnego `opencode.json` nic nie jest zapisywane, więc plugin nigdy nie przeżyje rozszerzenia i nigdy nie uruchomi się w OpenCode, które startujesz w terminalu.
+
+Gdy OpenChamber nie uruchomił OpenCode, z którym rozmawia, albo Twoje środowisko ustawia własne `OPENCODE_CONFIG`, konfiguracja OpenChamber nie dociera do tego OpenCode. Ekran rozszerzenia mówi o tym i oferuje **Dodaj do globalnej konfiguracji**. To zapisuje folder pluginu do Twojej globalnej konfiguracji OpenCode: działa wtedy w każdym OpenCode na tym komputerze, także w terminalu, pozostaje włączony, gdy rozszerzenie jest wyłączone, i zarządzasz nim w **Ustawieniach → Pluginy**. Jeśli usuniesz rozszerzenie, OpenCode pokaże ten wpis jako plugin, który się nie załadował, i będzie działać dalej, dopóki nie usuniesz tam wpisu. OpenCode na innym komputerze nie może załadować folderu z tego komputera; ekran mówi o tym.
+
+VS Code i aplikacja mobilna nie ładują rozszerzeń. Sesja w izolowanej przestrzeni uruchamia własne OpenCode, które nigdy nie dostaje pluginu. W trybie enterprise plugin liczy się jak lokalna usługa: rozszerzenie instaluje się tylko z repozytorium wskazanego przez administratora.
 
 ## Rozszerzenie jako host Git
 

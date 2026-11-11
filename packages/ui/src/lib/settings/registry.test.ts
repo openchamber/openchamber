@@ -195,17 +195,19 @@ describe('settings registry', () => {
   test('section order: a saved default moves on apply, a dragged order stays', () => {
     const original = useUIStore.getState();
     const savedDefault = ['session', 'repository', 'usage', 'telemetry', 'subagents', 'workflows', 'mcp', 'pinned', 'contextSources'];
+    // Sections added after an order was saved land in it: Tasks after Subagents.
+    const savedWithTasks = ['session', 'repository', 'usage', 'telemetry', 'subagents', 'tasks', 'workflows', 'mcp', 'pinned', 'contextSources'];
     try {
       applySettingsToStores(parseSettingsDocument({ workStatusSectionOrder: savedDefault }) ?? {});
       expect(useUIStore.getState().workStatusSectionOrder.slice(0, 4)).toEqual(['session', 'repository', 'usage', 'contextSources']);
       expect(useUIStore.getState().workStatusSectionOrderExplicit).toBe(false);
 
       useUIStore.getState().setWorkStatusSectionOrder(savedDefault);
-      expect(useUIStore.getState().workStatusSectionOrder).toEqual(savedDefault);
+      expect(useUIStore.getState().workStatusSectionOrder).toEqual(savedWithTasks);
       expect(useUIStore.getState().workStatusSectionOrderExplicit).toBe(true);
 
       applySettingsToStores(parseSettingsDocument({ workStatusSectionOrder: savedDefault, workStatusSectionOrderExplicit: true }) ?? {});
-      expect(useUIStore.getState().workStatusSectionOrder).toEqual(savedDefault);
+      expect(useUIStore.getState().workStatusSectionOrder).toEqual(savedWithTasks);
 
       useUIStore.setState({ workStatusSectionOrderExplicit: false });
       applySettingsToStores(parseSettingsDocument({ workStatusSectionOrder: savedDefault, workStatusSectionOrderExplicit: true }) ?? {});
@@ -220,7 +222,7 @@ describe('settings registry', () => {
     if (!migrate) throw new Error('Expected a migration');
     const savedDefault = ['session', 'repository', 'usage', 'telemetry', 'subagents', 'workflows', 'mcp', 'pinned', 'contextSources'];
     expect(await migrate({ workStatusSectionOrder: savedDefault }, 26)).toMatchObject({
-      workStatusSectionOrder: ['session', 'repository', 'usage', 'contextSources', 'telemetry', 'subagents', 'workflows', 'mcp', 'pinned'],
+      workStatusSectionOrder: ['session', 'repository', 'usage', 'contextSources', 'telemetry', 'subagents', 'tasks', 'workflows', 'mcp', 'pinned'],
     });
   });
 

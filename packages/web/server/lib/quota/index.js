@@ -10,6 +10,7 @@ export {
   attachExtensionQuotaProvider,
   detachExtensionQuotaProvider,
   listConfiguredQuotaProviders,
+  listUsagePageProviders,
   fetchQuotaForProvider,
   fetchClaudeQuota,
   fetchOpenaiQuota,

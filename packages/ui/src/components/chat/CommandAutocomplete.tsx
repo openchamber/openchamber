@@ -12,6 +12,7 @@ import { isVSCodeRuntime } from '@/lib/desktop';
 import { useMobileAutocompleteMaxHeight } from './useMobileAutocompleteMaxHeight';
 import { mergeCommandAutocompleteItems, rankCommandAutocompleteItems } from './commandAutocompleteItems';
 import { useGuestCommands } from '@/hooks/useGuestSurfaces';
+import { reservedComposerCommandNames } from './composer/submit/guestCommands';
 import { AutocompleteRowDetail } from './composer/ui/AutocompleteRowParts';
 import { useAutocompleteSelectionScroll } from './composer/ui/useAutocompleteSelectionScroll';
 import { useHeightMorph } from '@/lib/motion/useSizeMorph';
@@ -33,13 +34,6 @@ export interface CommandInfo {
   /** Name of the extension that contributed the command; shown as its badge. */
   extensionName?: string;
 }
-
-// Every name the composer runs itself; an extension command with one of
-// these names is dropped before it reaches the list.
-const LOCAL_COMMAND_NAMES = [
-  'init', 'review', 'undo', 'redo', 'timeline', 'compact', 'fork', 'btw', 'summary', 'workspace-review', 'handoff-review',
-  'plan-feature', 'craft-goal', 'schedule-task', 'catch-up', 'debug', 'weigh', 'explore',
-];
 
 export interface CommandAutocompleteHandle {
   handleKeyDown: (key: string) => void;
@@ -114,11 +108,10 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
     void refreshCommands();
   }, [refreshCommands]);
 
-  const reservedCommandNames = React.useMemo(() => {
-    const names = new Set<string>(LOCAL_COMMAND_NAMES);
-    for (const command of commandsWithMetadata) names.add(command.name.toLowerCase());
-    return names;
-  }, [commandsWithMetadata]);
+  const reservedCommandNames = React.useMemo(
+    () => reservedComposerCommandNames(commandsWithMetadata),
+    [commandsWithMetadata],
+  );
   const guestCommands = useGuestCommands(reservedCommandNames);
 
   // The list depends on the registries, not on what is typed: it is built
@@ -263,7 +256,7 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
   return (
     <div
       ref={containerRef}
-      className="absolute z-[100] min-w-0 w-full max-w-[420px] max-h-64 oc-glass-popover oc-glass-floating rounded-xl bottom-full mb-2 inset-s-0 flex flex-col"
+      className="absolute z-[100] min-w-0 w-full max-w-[560px] max-h-64 oc-glass-popover oc-glass-floating rounded-xl bottom-full mb-2 inset-s-0 flex flex-col"
       style={mobileMaxHeight !== undefined ? { ...style, maxHeight: mobileMaxHeight } : style}
     >
       <ScrollableOverlay ref={listRef} preventOverscroll outerClassName="flex-1 min-h-0" className="p-1">

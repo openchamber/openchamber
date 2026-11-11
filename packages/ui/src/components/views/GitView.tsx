@@ -23,6 +23,7 @@ import {
 import { useNestedGitDirectory } from '@/hooks/useNestedGitDirectory';
 import { useWorktreeBootstrapPending } from '@/hooks/useWorktreeBootstrapPending';
 import { NestedRepoResolutionStates } from './git/NestedRepoResolutionStates';
+import { GitRepositoryUnreadableState } from './git/GitRepositoryUnreadableState';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { ScrollShadow } from '@/components/ui/ScrollShadow';
 import { toast } from '@/components/ui';
@@ -57,6 +58,7 @@ import { getSessionWorktreeRepairActions, getMutationBlockingReasons } from '@/s
 import { IntegrateCommitsSection } from './git/IntegrateCommitsSection';
 
 import { GitHeader } from './git/GitHeader';
+import { gitRequestErrorMessage } from './git/gitRequestErrorMessage';
 import { ButtonTooltip } from '@/components/ui/action-toolbar';
 import { StashesDialog } from './git/StashesDialog';
 import { ChangesPanel, type ChangesGroupConfig } from './git/ChangesPanel';
@@ -298,7 +300,7 @@ export const GitView: React.FC<GitViewProps> = ({ isActive }) => {
   // repository all git data and actions operate on. The hook owns probing,
   // discovery, auto-select, and stale-selection recovery; data fetching below
   // keys off its result.
-  const { rootIsGitRepo, gitDirectory, nestedRepos, repositoryOptions } = useNestedGitDirectory(
+  const { rootIsGitRepo, gitDirectory, nestedRepos, repositoryOptions, unreadable } = useNestedGitDirectory(
     currentDirectory ?? null,
     { enabled: isActive, recheckOnOpen: true },
   );
@@ -1253,7 +1255,7 @@ export const GitView: React.FC<GitViewProps> = ({ isActive }) => {
               ? t('gitView.toast.contributorPublishCancelled')
               : t('gitView.toast.syncActionFailed', { action: actionLabel })
           : err instanceof Error
-          ? err.message
+          ? gitRequestErrorMessage(err, t)
           : t('gitView.toast.syncActionFailed', { action: actionLabel });
       toast.error(message);
     } finally {
@@ -1357,7 +1359,7 @@ export const GitView: React.FC<GitViewProps> = ({ isActive }) => {
           : err.code === 'contributor-publish-cancelled'
             ? t('gitView.toast.contributorPublishCancelled')
             : t('gitView.toast.syncActionFailed', { action: t('gitView.sync.syncChanges') })
-        : err instanceof Error ? err.message : t('gitView.toast.createCommitFailed');
+        : err instanceof Error ? gitRequestErrorMessage(err, t) : t('gitView.toast.createCommitFailed');
       toast.error(message);
     } finally {
       recovery?.finish();
@@ -2415,6 +2417,10 @@ export const GitView: React.FC<GitViewProps> = ({ isActive }) => {
         )}
       </div>
     );
+  }
+
+  if (unreadable) {
+    return <GitRepositoryUnreadableState directory={unreadable.directory} message={unreadable.message} />;
   }
 
   if (isGitRepo === null || (isGitRepo === true && !status)) {

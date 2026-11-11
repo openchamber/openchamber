@@ -60,7 +60,7 @@ describe('contributes.fileEditors', () => {
   });
 
   test('a file-editor-only package cannot declare things that open or invoke another frame', () => {
-    for (const extra of [{ page: { entry: 'page.html' } }, { attach: 'dialog' }, { commands: [{ name: 'draw' }] }]) {
+    for (const extra of [{ page: true as const }, { attach: 'dialog' }, { commands: [{ name: 'draw' }] }]) {
       expect(parse({ panel: pageless, fileEditors: [editor], ...extra })).toMatchObject({ ok: false, code: 'invalid-panel' });
     }
     expect(parse({ panel: { ...pageless, entry: 'panel/index.html' }, fileEditors: [editor], commands: [{ name: 'draw' }] }))

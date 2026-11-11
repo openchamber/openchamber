@@ -21,6 +21,7 @@ import {
     DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
+import { MobileSheetRow } from '@/components/ui/MobileSheetList';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/lib/i18n';
 import { normalizePath } from '@/lib/pathNormalization';
@@ -127,14 +128,9 @@ export const DraftsHerePicker = React.memo(DraftsHerePickerView);
 const DraftSheetRow: React.FC<{ draft: SessionDraft; onClose: () => void }> = ({ draft, onClose }) => {
     const { label, open } = useSessionDraftRow(draft, onClose);
     return (
-        <button
-            type="button"
-            className="flex w-full cursor-pointer items-center gap-2 rounded-lg px-2 py-2.5 text-start typography-ui-label hover:bg-[var(--interactive-hover)]"
-            onClick={open}
-        >
-            <span dir="auto" className="oc-ui-start-align min-w-0 flex-1 truncate italic">{label}</span>
-            <DraftTime draft={draft} />
-        </button>
+        <MobileSheetRow meta={<DraftTime draft={draft} />} onClick={open}>
+            <span dir="auto" className="oc-ui-start-align font-normal italic">{label}</span>
+        </MobileSheetRow>
     );
 };
 
@@ -159,9 +155,7 @@ const MobileDraftsHerePickerView: React.FC = () => {
                 <Icon name="arrow-down-s" className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground" />
             </button>
             <MobileOverlayPanel open={open} title={t('chat.draftTarget.drafts.heading')} onClose={close}>
-                <div className="flex flex-col px-3 pb-4 pt-1">
-                    {drafts.map((draft) => <DraftSheetRow key={draft.id} draft={draft} onClose={close} />)}
-                </div>
+                {drafts.map((draft) => <DraftSheetRow key={draft.id} draft={draft} onClose={close} />)}
             </MobileOverlayPanel>
         </>
     );

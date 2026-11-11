@@ -455,6 +455,7 @@ export function projectMessage(info: SessionMessageInfo, sessionID: string): Pro
           status: info.status,
           reason: info.reason,
           summary: info.status === "failed" ? "" : info.summary,
+          model: info.status === "completed" ? info.model : undefined,
           error: info.status === "failed" ? info.error : undefined,
           cost: info.status === "running" ? undefined : info.cost,
           tokens: info.status === "running" ? undefined : info.tokens,
@@ -574,26 +575,45 @@ export function deniesAnyProvider(entries: readonly ConfigEntry[]): boolean {
 }
 
 /**
- * One `integration.use` statement: `resource` is `mcp:<server>` or `skill:<id>`,
- * with `*` and `?` wildcards; `path` is the config file it is written in, null
- * for config that has no file.
+ * One MCP server or skill statement: `resource` is `mcp:<server>` or
+ * `skill:<id>`, with `*` and `?` wildcards; `path` is the config file it is
+ * written in, null for config that has no file.
  */
 export type IntegrationPolicy = { resource: string; effect: "allow" | "deny"; path: string | null }
 
 /**
- * The `integration.use` statements of every config document, in the order
+ * The `mcp:<server>` or `skill:<id>` resource a statement decides, or null for
+ * any other statement. OpenCode serves `mcp.use` and `skill.use` with the bare
+ * name; it decodes the legacy `integration.use` with a `mcp:` or `skill:`
+ * prefix into them (`ConfigPolicy.Info` upstream), and any other
+ * `integration.use` decides providers and accounts, not these.
+ */
+function integrationResource(policy: { action: string; resource: string }): string | null {
+  if (policy.action === "mcp.use") return `mcp:${policy.resource}`
+  if (policy.action === "skill.use") return `skill:${policy.resource}`
+  if (policy.action === "plugin.use") return `plugin:${policy.resource}`
+  if (policy.action === "integration.use" && /^(mcp|skill|plugin):/.test(policy.resource)) return policy.resource
+  return null
+}
+
+/**
+ * The MCP server, skill and plugin statements of every config document, in the order
  * OpenCode decides by (`ManagedPolicy.statements` upstream): documents
  * reversed, so the last matching statement wins. Statements from a connected
  * OpenCode Console workspace are not part of `/api/config`.
+ *
+ * OpenCode 2.2 decodes `integration.use` into one action per kind
+ * (`plugin.use`, `skill.use`, `mcp.use`) and drops the resource prefix, so the
+ * document carries the normalized form. Both spellings mean the same rule.
  */
 export function readIntegrationPolicies(entries: readonly ConfigEntry[]): IntegrationPolicy[] {
   return entries
     .filter(isDocument)
     .reverse()
-    .flatMap((entry) => documentPolicies(entry)
-      .flatMap((policy) => (policy.action === "integration.use"
-        ? [{ resource: policy.resource, effect: policy.effect, path: entry.path ?? null }]
-        : [])))
+    .flatMap((entry) => documentPolicies(entry).flatMap((policy) => {
+      const resource = integrationResource(policy)
+      return resource === null ? [] : [{ resource, effect: policy.effect, path: entry.path ?? null }]
+    }))
 }
 
 /** OpenCode's `Wildcard.match`: `*` is any run, `?` one character, a trailing ` *` also matches nothing. */
@@ -607,7 +627,7 @@ function matchesWildcard(input: string, pattern: string): boolean {
   return new RegExp(`^${escaped}$`, "s").test(input.replaceAll("\\", "/"))
 }
 
-/** The statement that decides an MCP server (`mcp:<name>`) or skill (`skill:<id>`), or null when none matches. */
+/** The statement that decides an MCP server (`mcp:<name>`), skill (`skill:<id>`) or plugin (`plugin:<target>`), or null when none matches. */
 export function findIntegrationPolicy(policies: readonly IntegrationPolicy[], resource: string): IntegrationPolicy | null {
   for (let index = policies.length - 1; index >= 0; index -= 1) {
     if (matchesWildcard(resource, policies[index].resource)) return policies[index]
@@ -615,7 +635,7 @@ export function findIntegrationPolicy(policies: readonly IntegrationPolicy[], re
   return null
 }
 
-/** Whether OpenCode drops this MCP server (`mcp:<name>`) or skill (`skill:<id>`) by policy. */
+/** Whether OpenCode drops this MCP server (`mcp:<name>`), skill (`skill:<id>`) or plugin (`plugin:<target>`) by policy. */
 export function isIntegrationDenied(policies: readonly IntegrationPolicy[], resource: string): boolean {
   return findIntegrationPolicy(policies, resource)?.effect === "deny"
 }

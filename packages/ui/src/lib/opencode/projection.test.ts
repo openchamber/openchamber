@@ -221,6 +221,21 @@ describe("projectUserParts", () => {
 })
 
 describe("projectMessage (other roles)", () => {
+  test("completed compactions retain the summarizing model, independently of the session model", () => {
+    const model = { providerID: "summary-provider", id: "summary-model" }
+    const entry = projectMessage({
+      id: "compact", type: "compaction", time: { created: 1 }, status: "completed",
+      reason: "auto", summary: "Summary", model,
+    }, "ses_1")
+    expect(entry.message).toMatchObject({ role: "compaction", model })
+    const legacy = projectMessage({
+      id: "old", type: "compaction", time: { created: 1 }, status: "completed",
+      reason: "auto", summary: "Summary",
+    }, "ses_1")
+    expect(legacy.message).toMatchObject({ role: "compaction", summary: "Summary" })
+    expect(legacy.message).not.toHaveProperty("model")
+  })
+
   test("every non-conversation message projects with its role and no parts", () => {
     const items: SessionMessageInfo[] = [
       { id: "1", type: "synthetic", time: { created: 1 }, text: "ctx" },
@@ -385,6 +400,40 @@ describe("integration policies", () => {
       { type: "document", path: "/repo/opencode.json", info: { policies: [{ action: "integration.use", resource: "mcp:github", effect: "deny" }] } },
     ])
     expect(isIntegrationDenied(policies, "mcp:github")).toBe(true)
+  })
+
+  test("reads the skill.use and mcp.use statements OpenCode decodes the legacy prefix into", () => {
+    // OpenCode 2.2.3+ serves `integration.use` `skill:<id>` as `skill.use` `<id>`.
+    const policies = readIntegrationPolicies([
+      { type: "document", path: "/repo/opencode.json", info: { policies: [
+        { action: "skill.use", resource: "gemini-imagen", effect: "deny" },
+        { action: "mcp.use", resource: "github*", effect: "deny" },
+        { action: "skill.use", resource: "review", effect: "allow" },
+      ] } },
+    ])
+    expect(findIntegrationPolicy(policies, "skill:gemini-imagen")).toEqual({ resource: "skill:gemini-imagen", effect: "deny", path: "/repo/opencode.json" })
+    expect(isIntegrationDenied(policies, "mcp:github-enterprise")).toBe(true)
+    expect(isIntegrationDenied(policies, "skill:review")).toBe(false)
+    expect(isIntegrationDenied(policies, "skill:deploy")).toBe(false)
+  })
+
+  test("ignores an integration.use statement without an mcp:, skill: or plugin: prefix, which decides providers and accounts", () => {
+    const policies = readIntegrationPolicies([
+      { type: "document", path: "/repo/opencode.json", info: { policies: [{ action: "integration.use", resource: "*", effect: "deny" }] } },
+    ])
+    expect(policies).toEqual([])
+    expect(isIntegrationDenied(policies, "skill:deploy")).toBe(false)
+  })
+
+  test("reads plugin statements in both spellings", () => {
+    const policies = readIntegrationPolicies([
+      { type: "document", path: "/repo/opencode.json", info: { policies: [
+        { action: "plugin.use", resource: "leakshield", effect: "deny" },
+        { action: "integration.use", resource: "plugin:other", effect: "allow" },
+      ] } },
+    ])
+    expect(isIntegrationDenied(policies, "plugin:leakshield")).toBe(true)
+    expect(findIntegrationPolicy(policies, "plugin:other")).toEqual({ resource: "plugin:other", effect: "allow", path: "/repo/opencode.json" })
   })
 })
 

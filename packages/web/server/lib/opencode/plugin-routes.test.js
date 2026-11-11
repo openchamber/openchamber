@@ -6,14 +6,19 @@ import path from 'path';
 import request from 'supertest';
 
 import { registerPluginRoutes } from './plugin-routes.js';
+import { createPluginSwitchStore } from './plugin-switches.js';
 
 let projectDir;
 let userConfigPath;
 let rootDir;
 let globalPluginsDir;
+let switchStorePath;
+let switchStore;
 let plugins;
 const originalConfigDir = process.env.OPENCODE_CONFIG_DIR;
 let refreshOpenCodeAfterConfigChange;
+let refreshPluginSwitches;
+let isPluginSwitchAvailable;
 let app;
 let cleanupPaths;
 
@@ -35,12 +40,17 @@ function createApp(overrides = {}) {
     createPluginEntry: plugins.createPluginEntry,
     updatePluginEntry: plugins.updatePluginEntry,
     deletePluginEntry: plugins.deletePluginEntry,
+    setPluginEntryEnabled: plugins.setPluginEntryEnabled,
+    setPluginFileEnabled: plugins.setPluginFileEnabled,
     listPluginDirFiles: plugins.listPluginDirFiles,
     readPluginDirFile: plugins.readPluginDirFile,
     writePluginDirFile: plugins.writePluginDirFile,
     deletePluginDirFile: plugins.deletePluginDirFile,
     encodePluginId: plugins.encodePluginId,
     decodePluginId: plugins.decodePluginId,
+    pluginSwitchStore: switchStore,
+    isPluginSwitchAvailable: () => isPluginSwitchAvailable,
+    refreshPluginSwitches,
     ...overrides,
   });
   return testApp;
@@ -69,6 +79,7 @@ describe('opencode plugin routes', () => {
   beforeAll(async () => {
     rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-plugin-routes-'));
     userConfigPath = path.join(rootDir, 'user-opencode.json');
+    switchStorePath = path.join(rootDir, 'plugin-switches.json');
     // The global config folder is read at import; keep it off the real one.
     // User plugin files land in its `plugins/`, the folder OpenCode scans.
     process.env.OPENCODE_CONFIG_DIR = path.join(rootDir, 'global');
@@ -80,8 +91,12 @@ describe('opencode plugin routes', () => {
   beforeEach(() => {
     projectDir = fs.mkdtempSync(path.join(rootDir, 'project-'));
     fs.rmSync(userConfigPath, { force: true });
+    fs.rmSync(switchStorePath, { force: true });
     fs.rmSync(globalPluginsDir, { recursive: true, force: true });
+    switchStore = createPluginSwitchStore({ filePath: switchStorePath });
     refreshOpenCodeAfterConfigChange = mock(async () => undefined);
+    refreshPluginSwitches = mock(async () => ({ updated: true }));
+    isPluginSwitchAvailable = true;
     cleanupPaths = [];
     app = createApp();
   });
@@ -429,6 +444,103 @@ describe('opencode plugin routes', () => {
       message: 'Plugin file deleted.',
     });
     expect(refreshOpenCodeAfterConfigChange).not.toHaveBeenCalled();
+  });
+
+  test('PUT /entry/:id/enabled records the switch and refreshes the managed config', async () => {
+    await createEntry('switched');
+    const id = plugins.encodePluginId('config', 'user:switched');
+
+    const off = await request(app)
+      .put(`/api/config/plugins/entry/${encodeURIComponent(id)}/enabled`)
+      .send({ enabled: false })
+      .expect(200);
+    expect(off.body).toMatchObject({ enabled: false, changed: true });
+    expect(switchStore.read()).toEqual({ ok: true, resources: ['plugin:switched'] });
+    // The user's own config is never given the deny.
+    expect(readJson(userConfigPath).policies).toBeUndefined();
+    expect(refreshPluginSwitches).toHaveBeenCalledTimes(1);
+
+    const on = await request(app)
+      .put(`/api/config/plugins/entry/${encodeURIComponent(id)}/enabled`)
+      .send({ enabled: true })
+      .expect(200);
+    expect(on.body).toMatchObject({ enabled: true, changed: true });
+    expect(switchStore.read()).toEqual({ ok: true, resources: [] });
+  });
+
+  test('PUT /entry/:id/enabled asks for a restart when the managed config cannot be rewritten', async () => {
+    await createEntry('switched');
+    const id = plugins.encodePluginId('config', 'user:switched');
+    refreshPluginSwitches = mock(async () => ({ updated: false, reason: 'external-config' }));
+    app = createApp();
+
+    const response = await request(app)
+      .put(`/api/config/plugins/entry/${encodeURIComponent(id)}/enabled`)
+      .send({ enabled: false })
+      .expect(200);
+    expect(response.body).toMatchObject({ enabled: false, changed: true, requiresManualRestart: true });
+  });
+
+  test('PUT /entry/:id/enabled keeps the saved switch when rewriting the managed config fails', async () => {
+    await createEntry('switched');
+    const id = plugins.encodePluginId('config', 'user:switched');
+    refreshPluginSwitches = mock(async () => { throw new Error('disk full'); });
+    app = createApp();
+
+    const response = await request(app)
+      .put(`/api/config/plugins/entry/${encodeURIComponent(id)}/enabled`)
+      .send({ enabled: false })
+      .expect(200);
+    expect(response.body).toMatchObject({ enabled: false, changed: true, requiresManualRestart: true });
+    expect(switchStore.read()).toEqual({ ok: true, resources: ['plugin:switched'] });
+  });
+
+  test('PUT /entry/:id/enabled refuses an external OpenCode', async () => {
+    await createEntry('switched');
+    const id = plugins.encodePluginId('config', 'user:switched');
+    isPluginSwitchAvailable = false;
+    app = createApp();
+
+    const list = await request(app).get('/api/config/plugins').expect(200);
+    expect(list.body.entries[0].switchState).toBe('unavailable');
+
+    const response = await request(app)
+      .put(`/api/config/plugins/entry/${encodeURIComponent(id)}/enabled`)
+      .send({ enabled: false })
+      .expect(409);
+    expect(response.body.code).toBe('SWITCH_UNAVAILABLE');
+    expect(switchStore.read()).toEqual({ ok: true, resources: [] });
+  });
+
+  test('PUT /entry/:id/enabled refuses a denial a config allow would beat', async () => {
+    await createEntry('switched');
+    const config = readJson(userConfigPath);
+    const allow = { action: 'plugin.use', resource: '*', effect: 'allow' };
+    fs.writeFileSync(userConfigPath, JSON.stringify({ ...config, policies: [allow] }), 'utf8');
+    const id = plugins.encodePluginId('config', 'user:switched');
+
+    const list = await request(app).get('/api/config/plugins').expect(200);
+    expect(list.body.entries[0].switchState).toBe('overridden');
+
+    const response = await request(app)
+      .put(`/api/config/plugins/entry/${encodeURIComponent(id)}/enabled`)
+      .send({ enabled: false })
+      .expect(409);
+    expect(response.body.code).toBe('SWITCH_OVERRIDDEN');
+    expect(switchStore.read()).toEqual({ ok: true, resources: [] });
+    expect(readJson(userConfigPath).policies).toEqual([allow]);
+    expect(refreshPluginSwitches).not.toHaveBeenCalled();
+  });
+
+  test('PUT /entry/:id/enabled rejects a value that is not a boolean', async () => {
+    await createEntry('switched');
+    const id = plugins.encodePluginId('config', 'user:switched');
+
+    const response = await request(app)
+      .put(`/api/config/plugins/entry/${encodeURIComponent(id)}/enabled`)
+      .send({ enabled: 'yes' })
+      .expect(400);
+    expect(response.body.code).toBe('INVALID_STATE');
   });
 
   test('PATCH unknown entry id returns 404', async () => {

@@ -1,3 +1,5 @@
+import { AgentUnavailableError } from '@/lib/opencode/agent-unavailable-error'
+
 /**
  * The server no longer has this form. The reply or cancel cannot be retried:
  * the request was already settled, or it was never on this directory.
@@ -17,4 +19,15 @@ export function isFormRequestNotFoundError(error: unknown): boolean {
   }
 
   return /Form(?:\.)?NotFoundError|Form request not found/i.test(message)
+}
+
+/**
+ * The reply failed because the folder lacks the agent: nothing was submitted,
+ * and a retry cannot succeed until the user picks an agent the folder has.
+ * Returns that agent's name, or null when something else failed.
+ */
+export function agentUnavailableFrom(error: Error | null): string | null {
+  if (error instanceof AgentUnavailableError) return error.agent
+  if (error?.cause instanceof AgentUnavailableError) return error.cause.agent
+  return null
 }

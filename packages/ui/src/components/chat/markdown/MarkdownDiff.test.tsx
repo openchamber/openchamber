@@ -13,7 +13,7 @@ globalThis.fetch = async (input: string | URL | Request) => {
   return Response.json(payload);
 };
 Object.assign(globalThis, {
-  window: browser, document: browser.document, navigator: browser.navigator,
+  window: browser, document: browser.document, Event: browser.Event, CustomEvent: browser.CustomEvent, navigator: browser.navigator,
   localStorage: browser.localStorage, sessionStorage: browser.sessionStorage,
   HTMLElement: browser.HTMLElement, Element: browser.Element, Node: browser.Node,
   Text: browser.Text, customElements: browser.customElements,

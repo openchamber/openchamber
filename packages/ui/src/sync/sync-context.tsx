@@ -78,6 +78,7 @@ import { subscribeMessageQueueSync } from "./message-queue-sync"
 import { subscribeAutoReviewSync } from "./auto-review-sync"
 import { subscribePrWatchSync } from "./pr-watch-sync"
 import { subscribeSessionWarmingSync } from "./session-warming-sync"
+import { subscribeSessionTodosSync } from "./session-todos-sync"
 import { subscribeSessionFoldersSync } from "./session-folders-sync"
 import { subscribeSessionDraftsSync } from "./session-drafts-sync"
 import { subscribePermissionPolicySync, subscribeSpacePermissionModes } from "./permission-mode-sync"
@@ -112,6 +113,8 @@ import { applyGlobalBlockingRequestEvents, applyWaitingPageEvent, settledPageKey
 import { requestHostTurnStarts } from "./host-session-status-seed"
 import { setHostTurnStartRequester } from "./session-activity-timing"
 import { applyBackgroundShellEvents, directoriesWithRunningShells, refreshBackgroundShells } from "./background-shells"
+import { applyBackgroundImageEvents, refreshBackgroundImages } from "./background-images"
+import { applySessionLiveWorkEvents } from "./session-live-work"
 import { applyReplyCommandEvents } from "./reply-commands"
 import {
   CHAT_LOCATION_RELEASE_DELAY_MS,
@@ -330,6 +333,8 @@ const publishDirectoryEventBatch = (batch: DirectoryEventBatch): void => {
     // Before statuses: an idle that follows a command's start in the same
     // flush must see the command.
     applyBackgroundShellEvents(directory, events)
+    applyBackgroundImageEvents(directory, events)
+    applySessionLiveWorkEvents(events)
     applyReplyCommandEvents(events)
     applyGlobalSessionStatusEvents(directory, events)
     applyGlobalBlockingRequestEvents(directory, events)
@@ -342,13 +347,6 @@ const publishDirectoryEventBatch = (batch: DirectoryEventBatch): void => {
     store.setState(state)
   }
   for (const move of batch.sessionMoves) adoptSessionMove(move.sessionID, move.from, move.to)
-}
-
-/** Read status for a session across all directories */
-export function useGlobalSessionStatus(sessionId: string): SessionStatus | undefined {
-  return useGlobalSessionStatusStore(
-    useCallback((state) => state.statusById.get(sessionId)?.status, [sessionId]),
-  )
 }
 
 /** Read all session statuses (for sidebar) */
@@ -893,6 +891,11 @@ export function applySessionStatusSnapshot(
 
       if (incoming && incoming.type !== "idle") {
         // Confirm or raise active status (catches a busy event the SSE missed).
+        // `session.active` reports a turn waiting for a retry as plain busy, so
+        // its busy confirms a retry status until the attempt is due; the
+        // attempt's own busy event ends it.
+        const held = current[sessionId]
+        if (incoming.type === "busy" && held?.type === "retry" && (held.next === undefined || held.next > Date.now())) continue
         if (!haveEquivalentSyncSnapshots(current[sessionId], incoming)) {
           draft()[sessionId] = incoming
           changed = true
@@ -2224,6 +2227,8 @@ export function handleEvent(
       // Child stores remain the primary source for synced directories; these
       // indexes cover unopened directories and list/status races.
       applyBackgroundShellEvents(directory, [payload])
+      applyBackgroundImageEvents(directory, [payload])
+      applySessionLiveWorkEvents([payload])
       applyReplyCommandEvents([payload])
       applyGlobalSessionStatusEvent(directory, payload)
       if (!heldForAutoAnswer) applyGlobalBlockingRequestEvents(directory, [payload])
@@ -2252,6 +2257,10 @@ export function handleEvent(
       scheduleCatalogReload(result.kind, childStores, null)
     }
     if (payload.type === "server.connected") {
+      // OpenCode restarted behind a live stream: an image it was generating
+      // may be gone, and the job list says which.
+      void runBackgroundNetworkTask(() => refreshBackgroundImages(() => opencodeClient.listRunningImageJobs()))
+        .catch(() => undefined)
       // OpenCode answers for the first time, boot window or not: directory
       // bootstraps that failed while it was starting get their one retry.
       if (expectedRuntimeKey === getRuntimeKey() && claimFirstServerConnect(childStores, expectedRuntimeKey)) {
@@ -3254,6 +3263,7 @@ export function SyncProvider(props: {
     const unsubscribeAutoReviewEvents = subscribeAutoReviewSync(runtimeKey)
     const unsubscribePrWatchEvents = subscribePrWatchSync(runtimeKey)
     const unsubscribeSessionWarming = subscribeSessionWarmingSync(runtimeKey)
+    const unsubscribeSessionTodos = subscribeSessionTodosSync(runtimeKey)
     const unsubscribeFolderEvents = subscribeSessionFoldersSync(runtimeKey)
     const unsubscribeDraftEvents = subscribeSessionDraftsSync(runtimeKey)
     const unsubscribeSpaceModes = subscribeSpacePermissionModes(runtimeKey)
@@ -3364,6 +3374,10 @@ export function SyncProvider(props: {
         void useMessageQueueStore.getState().resync().catch(() => undefined)
         // OpenCode keeps file watches in memory; a restart behind the gap dropped them.
         renewWatchedFiles()
+        // Images in progress have no other source after a start or a gap: the
+        // job list answers for every session at once.
+        void runBackgroundNetworkTask(() => refreshBackgroundImages(() => opencodeClient.listRunningImageJobs()))
+          .catch(() => undefined)
         useConfigStore.setState({
           isConnected: true,
           hasEverConnected: true,
@@ -3413,6 +3427,7 @@ export function SyncProvider(props: {
       unsubscribeAutoReviewEvents()
       unsubscribePrWatchEvents()
       unsubscribeSessionWarming()
+      unsubscribeSessionTodos()
       unsubscribeFolderEvents()
       unsubscribeDraftEvents()
       unsubscribeSpaceModes()

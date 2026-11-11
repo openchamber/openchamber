@@ -52,6 +52,7 @@ import {
     dispatchPageWaiting,
     onPageWaiting,
     onRowExpand,
+    onTabStep,
 } from '@/components/chat/lib/scroll/timelineScrollIntent';
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -433,9 +434,10 @@ export const useChatTimelineScroll = ({
     // onRowExpand below), and whether that row has grown since.
     const rowExpandReleaseRef = React.useRef<{ generation: number; grew: boolean } | null>(null);
     // Waiting pages already brought into view, and the latest one while its
-    // late height still moves it.
+    // late height still moves it. Tabs stepped with Next go the same way, with
+    // no page id: a height report from their page must not take their place.
     const revealedPagesRef = React.useRef(new Set<string>());
-    const pageRevealRef = React.useRef<{ pageId: string; block: HTMLElement; generation: number; until: number } | null>(null);
+    const pageRevealRef = React.useRef<{ pageId: string | null; block: HTMLElement; generation: number; until: number } | null>(null);
     // The streaming reply the last follow frame saw. Its last block lands in
     // the same render that ends its streaming and drops its marker, so the
     // frame after that still checks it as a stop: a reply whose closing block
@@ -1457,6 +1459,18 @@ export const useChatTimelineScroll = ({
             }
             revealWaitingPageRef.current();
         });
+        // Next on a waiting form's Tabs is a press for the next question, so
+        // its start comes into view for any reader, whatever follow or
+        // auto-follow say: Next sat at the end of the tab they left, and the
+        // new tab can start above the viewport or run past it. The tab's height
+        // reaches the list a frame later, and the list's growth aims again
+        // until the reader scrolls. As when a row opens, a scroll command ends
+        // the hold on the end the session opened at.
+        const stopTabStep = onTabStep(scrollNode, (block) => {
+            void listRef.current?.scrollToOffset({ offset: scrollNode.scrollTop, animated: false });
+            pageRevealRef.current = { pageId: null, block, generation: userGenerationRef.current, until: performance.now() + PAGE_REVEAL_SETTLE_MS };
+            revealWaitingPageRef.current();
+        });
         const handleScroll = () => {
             const scrollTop = scrollNode.scrollTop;
             // The list's scroll length is the viewport height it measured,
@@ -1486,6 +1500,7 @@ export const useChatTimelineScroll = ({
             stopFrameScroll();
             stopRowExpand();
             stopPageWaiting();
+            stopTabStep();
             pageRevealRef.current = null;
         };
     }, [isLiveFollowActive, realContentOverflowsViewport, scrollNode]);

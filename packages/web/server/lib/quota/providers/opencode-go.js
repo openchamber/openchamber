@@ -36,7 +36,7 @@ const CONSOLE_INTEGRATION_ID = 'opencode';
 // Console workspaces carry a `wrk_` id on current sign-ins; older stored
 // credentials still carry `org_`, so both prefixes count and nothing else.
 const ORGANIZATION_ID_PATTERN = /^(?:org|wrk)_[A-Za-z0-9]+$/;
-const CONSOLE_PRODUCTS = new Set(['go', 'go-plus']);
+const CONSOLE_PRODUCTS = new Set(['go', 'go-plus', 'go-teams']);
 const NO_CONSOLE_SUBSCRIPTION = 'No active OpenCode Go subscription on the selected Console account';
 // Console keys expire and nothing can renew them, while a Console sign-in is
 // renewed by OpenCode and serves OpenCode Go too. Providers offers that sign-in
@@ -210,7 +210,9 @@ export const fetchConsoleGoUsage = async ({ access, orgID, expires }, fetchImpl 
   if (!response.ok) throw new Error(`OpenCode Console Go status API returned HTTP ${response.status}`);
   const payload = await response.json().catch(() => null);
   if (!asObject(payload)) throw new Error('OpenCode Console Go status returned an unreadable response');
-  if (!CONSOLE_PRODUCTS.has(payload.product)) {
+  // A subscription that ended (refunded, cancelled) keeps the Go product in the
+  // status and drops `access`; that is an absent subscription, not a bad body.
+  if (!CONSOLE_PRODUCTS.has(payload.product) || !asObject(payload.access)) {
     throw new Error(NO_CONSOLE_SUBSCRIPTION);
   }
   const windows = parseConsoleGoUsage(payload);

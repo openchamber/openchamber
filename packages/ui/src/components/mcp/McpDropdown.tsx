@@ -111,7 +111,7 @@ export const McpDropdownContent: React.FC<{ active: boolean }> = ({ active }) =>
           <div className="min-w-0 flex items-baseline gap-2">
             <div className="typography-ui-header font-semibold text-foreground">{t('mcpDropdown.title')}</div>
             {directory && (
-              <div className="truncate typography-micro text-muted-foreground">
+              <div dir="auto" className="truncate oc-ui-start-align typography-micro text-muted-foreground">
                 {directory.split('/').pop() || directory}
               </div>
             )}
@@ -165,7 +165,7 @@ export const McpDropdownContent: React.FC<{ active: boolean }> = ({ active }) =>
                       <p>{tooltip}</p>
                     </TooltipContent>
                   </Tooltip>
-                  <span className="truncate typography-ui-label">
+                  <span dir="auto" className="truncate typography-ui-label">
                     {serverName}
                   </span>
                 </div>
@@ -318,7 +318,7 @@ export const McpDropdown: React.FC<McpDropdownProps> = ({ headerIconButtonClass 
                     </TooltipContent>
                   </Tooltip>
                 )}
-                <span className="typography-ui-label truncate">{serverName}</span>
+                <span dir="auto" className="typography-ui-label truncate">{serverName}</span>
               </div>
             </div>
 
@@ -384,7 +384,7 @@ export const McpDropdown: React.FC<McpDropdownProps> = ({ headerIconButtonClass 
           title={t('mcpDropdown.title')}
           onClose={() => setOpen(false)}
           renderHeader={(closeButton) => (
-            <div className="flex items-center justify-between px-3 py-2 border-b border-edge-muted">
+            <div className="flex items-center justify-between ps-4 pe-3 py-2 border-b border-edge-muted">
               <h2 className="typography-ui-label font-semibold text-foreground">{t('mcpDropdown.title')}</h2>
               <div className="flex items-center gap-1">
                 <button
@@ -406,7 +406,7 @@ export const McpDropdown: React.FC<McpDropdownProps> = ({ headerIconButtonClass 
           </div>
           {directory && (
             <div className="px-2 py-1 border-t border-edge-muted mt-1">
-              <span className="typography-meta text-muted-foreground truncate block">
+              <span dir="auto" className="typography-meta text-muted-foreground truncate block oc-ui-start-align">
                 {directory.split('/').pop() || directory}
               </span>
             </div>

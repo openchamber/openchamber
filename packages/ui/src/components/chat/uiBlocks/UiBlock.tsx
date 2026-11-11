@@ -18,6 +18,7 @@ import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { axisTicks } from './axisTicks';
 import { ExtensionBlockFrame } from './ExtensionBlockFrame';
 import { useExtensionBlocks } from './useExtensionBlocks';
+import { dispatchTabStep } from '../lib/scroll/timelineScrollIntent';
 import {
   answeringFrame,
   NO_EXTENSION_BLOCKS, type ExtensionBlocks, blockDecisions, blockFields, cardDecision, choiceOption, DEFAULT_TIME, decisionOf, decisionTitles, blockName, blockNode, blockPath, blockProps, noteSlot, parseUiBlock, sliderStart, type BlockName, type BlockPath, type BlockValue, tones,
@@ -550,6 +551,10 @@ type StepStatus = z.infer<typeof blockProps.Steps>['items'][number]['status'];
  * A step's mark on the line. The current step holds still: an accent disc
  * with a halo, no pulse. A block can stay on screen for a whole session, and a
  * loop that never ends keeps the compositor busy all that time.
+ *
+ * No status is a static step, not a pending one: a flow the reply explains is
+ * not running, so its marks and titles read at normal contrast. Only an
+ * explicit `todo` says "not started yet".
  */
 function StepMark({ status, index }: { status: StepStatus; index: number }) {
   const base = 'flex size-[1.125rem] shrink-0 items-center justify-center rounded-full';
@@ -567,12 +572,13 @@ function StepMark({ status, index }: { status: StepStatus; index: number }) {
     );
   }
   return (
-    <span className={cn(base, 'typography-micro tabular-nums text-muted-foreground shadow-[inset_0_0_0_1.5px_color-mix(in_srgb,var(--foreground)_22%,transparent)]')}>
+    <span className={cn(base, 'typography-micro tabular-nums shadow-[inset_0_0_0_1.5px_color-mix(in_srgb,var(--foreground)_22%,transparent)]', status === 'todo' ? 'text-muted-foreground' : 'text-foreground')}>
       {index + 1}
     </span>
   );
 }
 
+/** A title's tone: no status is a static step and keeps the normal title colour. */
 const stepTitleTone = {
   done: '',
   current: 'text-[var(--primary-text)]',
@@ -622,7 +628,7 @@ type StepItems = z.infer<typeof blockProps.Steps>['items'];
 function StepText({ item }: { item: StepItems[number] }) {
   return (
     <>
-      <div className={cn('font-medium', stepTitleTone[item.status ?? 'todo'])}>{item.title}</div>
+      <div className={cn('font-medium', item.status ? stepTitleTone[item.status] : '')}>{item.title}</div>
       <Markdown source={item.markdown} className="typography-meta text-muted-foreground" />
     </>
   );
@@ -635,8 +641,8 @@ function StepsRow({ items }: { items: StepItems }) {
       {items.map((item, index) => (
         <div key={index} className="flex min-w-0 flex-col gap-1.5" role="listitem">
           <div className="flex items-center">
-            <StepMark status={item.status ?? 'todo'} index={index} />
-            {index < items.length - 1 && <span className={cn('mx-1.5 h-0.5 flex-1 rounded-full', stepLine(item.status ?? 'todo'))} />}
+            <StepMark status={item.status} index={index} />
+            {index < items.length - 1 && <span className={cn('mx-1.5 h-0.5 flex-1 rounded-full', stepLine(item.status))} />}
           </div>
           <div className="min-w-0 pe-3"><StepText item={item} /></div>
         </div>
@@ -652,8 +658,8 @@ function StepsColumn({ items }: { items: StepItems }) {
       {items.map((item, index) => (
         <div key={index} className="flex gap-2.5" role="listitem">
           <div className="flex flex-col items-center pt-[3px]">
-            <StepMark status={item.status ?? 'todo'} index={index} />
-            {index < items.length - 1 && <span className={cn('my-1 min-h-3 w-0.5 flex-1 rounded-full', stepLine(item.status ?? 'todo'))} />}
+            <StepMark status={item.status} index={index} />
+            {index < items.length - 1 && <span className={cn('my-1 min-h-3 w-0.5 flex-1 rounded-full', stepLine(item.status))} />}
           </div>
           <div className={cn('min-w-0 flex-1', index < items.length - 1 && 'pb-3')}><StepText item={item} /></div>
         </div>
@@ -1137,18 +1143,61 @@ function LineChart({ props }: NodeProps) {
   );
 }
 
+/**
+ * The form an agent waits on, for the nodes drawn in it; null in a reply and on
+ * a page that only shows data. Its Tabs step through their tabs with Next, as
+ * the question tool does, and the form's own Send, with the note before it,
+ * sits on the last tab of the Tabs at `endPath`: the Tabs the form ends with,
+ * when it has no buttons of its own.
+ */
+const WaitingFormContext = React.createContext<{ endPath: BlockPath | null; end: React.ReactNode } | null>(null);
+
 function Tabs({ props }: NodeProps) {
   const value = useBlockProps(blockProps.Tabs, props);
+  const waiting = React.useContext(WaitingFormContext);
+  const path = React.useContext(PathContext);
+  const slot = React.useContext(SlotContext);
+  const { t } = useI18n();
   const [active, setActive] = React.useState('0');
+  const panel = React.useRef<HTMLDivElement>(null);
+  const block = React.useRef<HTMLDivElement>(null);
+  // Next takes focus to the tab it opens: on Next, the next Tab key would
+  // leave the box, and the last tab replaces Next with the form's Send. The
+  // timeline owns the scroll, so it brings the new tab's start into view.
+  const stepped = React.useRef(false);
+  React.useEffect(() => {
+    if (!stepped.current) return;
+    stepped.current = false;
+    panel.current?.focus({ preventScroll: true });
+    dispatchTabStep(block.current);
+  }, [active]);
   if (!value) return null;
   const tabs = value.tabs.flatMap((node) => {
     const tab = blockProps.Tab.safeParse(blockNode.safeParse(node).data?.props);
-    return tab.success ? [tab.data] : [];
+    return tab.success ? [{ ...tab.data, node }] : [];
   });
   const activeIndex = Number(active) < tabs.length ? Number(active) : 0;
   const current = tabs[activeIndex];
+  const next = !waiting || activeIndex >= tabs.length - 1 ? null : (
+    <UiButton
+      type="button"
+      variant="outline"
+      className="w-fit"
+      onClick={() => {
+        stepped.current = true;
+        setActive(String(activeIndex + 1));
+      }}
+    >
+      {t('chat.questionCard.next')}
+    </UiButton>
+  );
+  // A tab that ends with buttons of its own takes Next on their line (`noteSlot`
+  // finds them); otherwise, buttons in a card or a closed Details included, under its content.
+  const run = next && current ? noteSlot(current.node) : null;
+  const tabSlot = run?.parent === '' ? { parent: path, index: run.index, element: null, trailing: next } : null;
+  const footer = tabSlot ? null : next ?? (waiting?.endPath === path ? waiting.end : null);
   return (
-    <div className="flex flex-col gap-2">
+    <div ref={block} className="flex flex-col gap-2">
       <SortableTabsStrip
         items={tabs.map((tab, index) => ({ id: String(index), label: tab.label }))}
         activeId={current ? String(activeIndex) : null}
@@ -1161,7 +1210,17 @@ function Tabs({ props }: NodeProps) {
       />
       {/* In a tile, so the tab's content does not run into the reply's text after the block. */}
       {/* It frames what it holds as a card does: a chart or table inside takes no frame of its own. */}
-      {current && <div className="oc-box flex flex-col gap-3"><InCardContext.Provider value><Children nodes={current.children} /></InCardContext.Provider></div>}
+      {/* Drawn with no tab too, so a form's Send placed here is never lost. */}
+      {(current || footer) && (
+        <div ref={panel} tabIndex={-1} className="oc-box flex flex-col gap-3 outline-none">
+          {current && (
+            <InCardContext.Provider value>
+              <SlotContext.Provider value={tabSlot || slot}><Children nodes={current.children} /></SlotContext.Provider>
+            </InCardContext.Provider>
+          )}
+          {footer}
+        </div>
+      )}
     </div>
   );
 }
@@ -1476,10 +1535,12 @@ function addKitStyles() {
   document.head.append(style);
 }
 
-export function UiBlock({ source, complete, host = noHost, onNotDrawn }: {
+export function UiBlock({ source, complete, host = noHost, onNotDrawn, actions }: {
   source: string;
   complete: boolean;
   host?: UiBlockHost;
+  /** The host's own controls, under the block on every tab: after the form's Send in the same row, or alone when Send sits on the last tab. */
+  actions?: React.ReactNode;
   /** Hears why a finished block could not be drawn: the parser's errors, or a drawing failure. */
   onNotDrawn?: (errors: string[]) => void;
 }) {
@@ -1686,6 +1747,21 @@ export function UiBlock({ source, complete, host = noHost, onNotDrawn }: {
   const replyForm = host.kind === 'reply' && complete && decisions.length === 0 && fields.length > 0 && Boolean(host.submit || sent);
   const hasValue = Object.values(answerValues).some((value) => (Array.isArray(value) ? value.length > 0 : value.trim() !== ''));
   const fallback = <NotDrawn source={source} errors={notDrawnErrors ?? []} />;
+  // A form that ends with Tabs sends from their last tab, where Next stood on the
+  // others. A frame's Send comes with the first letter of its note, and moving
+  // the note there would take the field away mid-word, so a frame's form stays
+  // under the block.
+  const rootChildren = blockProps.Stack.safeParse(blockNode.safeParse(root).data?.props).data?.children ?? [];
+  const endsWithTabs = blockNode.safeParse(rootChildren.at(-1)).data?.typeName === 'Tabs';
+  const sendInTabs = sendButton !== null && !frameName && endsWithTabs;
+  const sendBelow = sendInTabs ? null : sendButton;
+  // A page that only shows data keeps its Tabs as they are.
+  const waitingForm = host.kind === 'page' && Boolean(host.submit || sent)
+    ? {
+        endPath: sendInTabs ? blockPath('', rootChildren.length - 1) : null,
+        end: sendInTabs ? <div className="flex flex-col gap-2">{noteElement}<Button props={sendButton} /></div> : null,
+      }
+    : null;
   if (parsed.kind === 'invalid') return fallback;
   if (parsed.kind === 'empty') return null;
   // A block that fails to draw falls back to its source; the rest of the reply stays.
@@ -1695,18 +1771,28 @@ export function UiBlock({ source, complete, host = noHost, onNotDrawn }: {
         <FormContext.Provider value={form}>
           <SlotContext.Provider value={slot}>
             <ExtensionBlocksContext.Provider value={extensionContext}>
-              <Node value={parsed.root} />
+              <WaitingFormContext.Provider value={waitingForm}>
+                <Node value={parsed.root} />
+              </WaitingFormContext.Provider>
             </ExtensionBlocksContext.Provider>
           </SlotContext.Provider>
         </FormContext.Provider>
       </BlockErrorBoundary>
-      {showNote && !slot && noteElement ? <div className="mt-2">{noteElement}</div> : null}
-      {sendButton ? (
-        <FormContext.Provider value={form}>
-          <div className="mt-2"><Button props={sendButton} /></div>
-        </FormContext.Provider>
+      {showNote && !slot && noteElement && !sendInTabs ? <div className="mt-2">{noteElement}</div> : null}
+      {sendBelow || actions ? (
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          {sendBelow ? (
+            <FormContext.Provider value={form}>
+              <Button props={sendBelow} />
+            </FormContext.Provider>
+          ) : null}
+          {/* Nothing else is sent while the form's answer is on its way. */}
+          {actions ? <fieldset disabled={disabled} className="contents">{actions}</fieldset> : null}
+        </div>
       ) : null}
-      {replyForm ? (
+      {/* The button is the reply's whole answer, so once sent it goes away
+          and the Sent line stays alone. */}
+      {replyForm && !sent ? (
         <div className="mt-2">
           <UiButton type="button" className="w-fit" disabled={disabled || (!hasValue && !(frameName && trimmedNote))} onClick={() => sendReply(chosen)}>
             {t('chat.uiBlock.send')}
@@ -1722,7 +1808,8 @@ export function UiBlock({ source, complete, host = noHost, onNotDrawn }: {
       {/* A block that sends keeps one line for what happened, so the reply does not jump. */}
       {replyForm || ((decisions.length > 0 || frameName) && host.kind === 'reply' && (host.submit || sent)) ? (
         <div className="mt-1 flex min-h-6 items-center gap-2 typography-meta text-muted-foreground" aria-live="polite" data-export-ignore>
-          {failed ? <span className="text-[var(--status-error)]">{t('chat.uiBlock.sendFailed')}</span>
+          {/* Cleared fields leave a form nothing to retry; a press or a frame can always try again. */}
+          {failed && (!replyForm || hasValue || frameName) ? <span className="text-[var(--status-error)]">{t('chat.uiBlock.sendFailed')}</span>
             : sent ? <span>{t('chat.uiBlock.sent')}</span>
               : chosen.size > 0 && decisions.length > 1
                 ? <span>{t('chat.uiBlock.chosenCount', { count: chosen.size, total: decisions.length })}</span>

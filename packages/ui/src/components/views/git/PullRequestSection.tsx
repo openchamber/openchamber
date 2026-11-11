@@ -1178,7 +1178,7 @@ export const PullRequestSection: React.FC<{
             {error ? (
               <div className="space-y-2">
                 <div className="typography-ui-label text-foreground">{t('gitView.pr.statusUnavailable')}</div>
-                <div className="typography-meta text-muted-foreground break-words">{error}</div>
+                <div dir="auto" className="typography-meta text-muted-foreground break-words">{error}</div>
                 {binding.error ? <Button variant="outline" size="sm" onClick={() => void binding.retry()} disabled={binding.status === 'loading'}>
                   {t('settings.sourceControl.transport.retry')}
                 </Button> : null}
@@ -1229,7 +1229,7 @@ export const PullRequestSection: React.FC<{
                 {/* Where it goes: this branch into the base, picked in place. */}
                 <div className="flex min-w-0 items-center gap-1.5">
                   <Icon name="git-pull-request" className="size-4 shrink-0 text-muted-foreground" />
-                  <span className="min-w-0 truncate typography-ui-label text-foreground" title={branch}>{branch}</span>
+                  <span dir="ltr" className="min-w-0 truncate typography-ui-label text-foreground" title={branch}>{branch}</span>
                   <Icon name="arrow-right" className="size-3.5 shrink-0 text-muted-foreground" />
                   {useDetectedUpstream && detectedUpstream ? (
                     <span className="min-w-0 shrink truncate typography-meta text-muted-foreground">{joinProjectPath(detectedUpstream.owner, detectedUpstream.name)}</span>

@@ -368,14 +368,18 @@ export function eventMatchesShortcut(
  * The second chord of a sequence pressed with the leader's modifiers still
  * held: Ctrl+K then Ctrl+B for `mod+k b`.
  */
+export function heldSequenceChord(leader: ShortcutCombo, chord: ShortcutCombo): ShortcutCombo | undefined {
+  const modifiers = parseShortcut(leader)?.chords[0]?.modifiers;
+  return modifiers && normalizeCombo([...modifiers, chord].join('+'));
+}
+
 export function eventMatchesHeldSequenceKey(
   event: KeyboardEvent | React.KeyboardEvent,
   leader: ShortcutCombo,
   chord: ShortcutCombo,
 ): boolean {
-  const modifiers = parseShortcut(leader)?.chords[0]?.modifiers;
-  if (!modifiers) return false;
-  return eventMatchesShortcut(event, [...modifiers, chord].join('+'));
+  const held = heldSequenceChord(leader, chord);
+  return held !== undefined && eventMatchesShortcut(event, held);
 }
 
 export function isShortcutPrefixHeld(prefixCombo: ShortcutCombo, heldKeys: ReadonlySet<string>): boolean {

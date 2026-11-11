@@ -1,5 +1,5 @@
 import React from 'react';
-import { isGuestAttachItem, type AttachIssueRequest, type GuestItem } from '@openchamber/sdk';
+import { isGuestAttachItem, isGuestLinkItem, type AttachIssueRequest, type GuestItem } from '@openchamber/sdk';
 import {
   Dialog,
   DialogContent,
@@ -42,7 +42,9 @@ export const GuestAttachDialog: React.FC<GuestAttachDialogProps> = ({
           <DialogDescription>
             {item === null || isGuestAttachItem(item)
               ? t('contextPanel.plugin.attachDialog.description')
-              : t('contextPanel.plugin.actionDialog.description')}
+              : isGuestLinkItem(item)
+                ? t('contextPanel.plugin.linkDialog.description')
+                : t('contextPanel.plugin.actionDialog.description')}
           </DialogDescription>
         </DialogHeader>
         <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">

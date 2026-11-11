@@ -82,7 +82,7 @@ export function useMobileCommentComposerMode(options: MobileCommentModeOptions):
         } else {
             const open = controller.getState();
             if (open.status === 'open' && open.generation === generation) {
-                toast.error(t('chat.textSelection.comment.attachFailed'));
+                toast.error(t('inlineComment.toast.noRoom'));
             }
         }
     }, [controller, mobileShell, t]);

@@ -26,6 +26,8 @@ test('reports a confirmed missing quote source without paging through history', 
 test('falls back to the rendered message list when the timeline index misses', async () => {
     const scrolls: string[] = [];
     const messageList: MessageListHandle = {
+        resolveUiPageMessageId: (messageId) => messageId,
+        scrollToUiPageRow: () => false,
         scrollToTurnId: () => false,
         scrollToMessageId: (messageId) => {
             scrolls.push(messageId);

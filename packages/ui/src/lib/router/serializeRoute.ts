@@ -1,3 +1,4 @@
+import { pushRouteEntry } from './backGuard';
 import { ROUTE_PARAMS } from './types';
 
 /**
@@ -112,7 +113,7 @@ export function updateBrowserURL(
     if (options.replace) {
       window.history.replaceState({ ...window.history.state, route: state }, '', url);
     } else {
-      window.history.pushState({ route: state }, '', url);
+      pushRouteEntry({ route: state }, url);
     }
   } catch {
     // Silently fail - URL updates are non-critical

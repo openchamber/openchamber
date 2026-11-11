@@ -61,8 +61,8 @@ export function PullRequestComparisonSelector({ comparison, mobile = false }: {
           return <CommandItem key={key} value={key} className={mobile ? 'min-h-11' : undefined}
             onSelect={() => { comparison.select(pr); changeOpen(false); }}>
             <div className="min-w-0 flex-1">
-              <div className="truncate typography-ui-label" title={pr.title}>{reference(pr.number)} {pr.title}</div>
-              <div className="truncate typography-meta text-muted-foreground">{joinProjectPath(pr.project.owner, pr.project.name)} · {pr.head} → {pr.base}</div>
+              <div dir="auto" className="oc-ui-start-align truncate typography-ui-label" title={pr.title}>{reference(pr.number)} {pr.title}</div>
+              <div dir="ltr" className="oc-ui-start-align truncate typography-meta text-muted-foreground">{joinProjectPath(pr.project.owner, pr.project.name)} · {pr.head} → {pr.base}</div>
             </div>
             {selected?.number === pr.number && selected.sourceRepo?.owner === pr.project.owner && selected.sourceRepo?.repo === pr.project.name
               && <Icon name="check" className="size-3.5" />}

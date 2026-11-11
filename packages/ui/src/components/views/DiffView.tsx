@@ -11,6 +11,7 @@ import { CommitComparisonSelector } from '@/components/views/git/CommitCompariso
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useNestedGitDirectory } from '@/hooks/useNestedGitDirectory';
 import { NestedRepoPicker } from '@/components/views/git/NestedRepoPicker';
+import { GitRepositoryUnreadableState } from '@/components/views/git/GitRepositoryUnreadableState';
 import { ContextPanelHeaderToolbar } from '@/components/layout/contextPanelHeaderSlot';
 import { useInContextPanelHeader } from '@/components/layout/contextPanelHeaderSlotContext';
 import { BranchComparisonSelector } from '@/components/views/git/BranchComparisonSelector';
@@ -1597,7 +1598,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
     const runtimeKey = useGitStore((state) => state.runtimeKey);
     // Diffs belong to the repository being diffed: the picked one, or the
     // root when nothing is picked.
-    const { gitDirectory: nestedGitDirectory, rootIsGitRepo, repositoryOptions, repositoriesKnown } = useNestedGitDirectory(rootDirectory ?? null, { enabled: visible, recheckOnOpen: true });
+    const { gitDirectory: nestedGitDirectory, rootIsGitRepo, repositoryOptions, repositoriesKnown, unreadable } = useNestedGitDirectory(rootDirectory ?? null, { enabled: visible, recheckOnOpen: true });
     const effectiveDirectory = nestedGitDirectory ?? rootDirectory;
     // The binding follows the repository actually being diffed.
     const binding = useRepositoryBinding(effectiveDirectory, sourceControl);
@@ -3061,6 +3062,10 @@ export const DiffView: React.FC<DiffViewProps> = ({
             );
         }
 
+        if (activeDiffScope !== 'turn' && unreadable) {
+            return <GitRepositoryUnreadableState directory={unreadable.directory} message={unreadable.message} />;
+        }
+
         if (activeDiffScope !== 'turn' && isLoadingStatus && !status) {
             return (
                 <div className="flex flex-1 items-center justify-center gap-2 text-sm text-muted-foreground">
@@ -3401,7 +3406,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
                                         <Icon name="search-eye" className="size-4" />
                                     )}
                                     <span className="diff-toolbar__review-label typography-ui-label">
-                                        {t('diffView.actions.review')}
+                                        {t('chat.work.reviewHint.aiReview')}
                                     </span>
                                 </Button>
                             </span>

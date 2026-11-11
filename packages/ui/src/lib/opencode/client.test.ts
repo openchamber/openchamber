@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, mock, test } from "bun:test"
+import { beforeEach, describe, expect, jest, mock, test } from "bun:test"
 import { z } from "zod"
 import { isAmbiguousSendFailure } from '@/sync/send-failure-classification'
 import { adoptRelayTunnel, deactivateRelayTunnel } from "@/lib/relay/runtime-tunnel"
@@ -522,6 +522,16 @@ describe("sendMessage", () => {
     expect(requests[0].body).toEqual({ model: { id: "gpt-5.6-luna", providerID: "openai", variant: "high" } })
   })
 
+  test("a selection whose last switch outlives the runtime rejects, so no reply follows it", async () => {
+    responses.push(agentList("build"), noContent(), () => {
+      runtimeKey = "other"
+      return noContent()
+    })
+    await expect(
+      opencodeClient.applySendSelection("ses_1", { model: { id: "grok-4.7", providerID: "xai" }, agent: "build" }, null, "test"),
+    ).rejects.toThrow("runtime changed")
+  })
+
   test("refuses to send when the runtime changed underneath the caller", async () => {
     await expect(
       opencodeClient.sendMessage({ runtimeKey: "other", id: "ses_1", providerID: "openai", text: "x" }),
@@ -614,6 +624,16 @@ describe("sendMessage", () => {
       }),
     ).rejects.toThrow("runtime changed")
     expect(requests.map((r) => r.url.pathname)).toEqual(["/api/session/ses_1/synthetic"])
+  })
+
+  // OpenCode's commit deletes everything admitted past the revert's boundary (#6244).
+  test("commits a staged revert once, before the first context message, and only when there is one", async () => {
+    responses.push(noContent(), json({ id: "syn_1" }), json({ id: "syn_2" }), json({ id: "msg_1" }), noContent(), json({ id: "syn_3" }), noContent(), json({ id: "msg_2" }))
+    const commitRevert = () => opencodeClient.commitRevert("ses_1")
+    await opencodeClient.sendMessage({ id: "ses_1", providerID: "openai", text: "", context: [{ text: "a" }, { text: "b" }], commitRevert })
+    await opencodeClient.sendCommand({ id: "ses_1", command: "review", context: [{ text: "c" }], commitRevert })
+    await opencodeClient.sendMessage({ id: "ses_1", providerID: "openai", text: "plain", commitRevert })
+    expect(requests.map((r) => r.url.pathname.split("/").pop())).toEqual(["commit", "synthetic", "synthetic", "prompt", "commit", "synthetic", "command", "prompt"])
   })
 })
 
@@ -829,6 +849,65 @@ describe("messages and config", () => {
     await opencodeClient.getSessionMessages("ses_1", { limit: 20, partShells: true })
     await opencodeClient.getSessionMessages("ses_1", { limit: 20, partShells: true })
     expect(pageRequests().map((request) => request.headers.get("x-openchamber-part-shells"))).toEqual(["v1", null, null])
+  })
+
+  describe("a page asked before the capability is known", () => {
+    const shellsHeaders = () => requests
+      .filter((request) => request.url.pathname === "/api/session/ses_1/message")
+      .map((request) => request.headers.get("x-openchamber-part-shells"))
+    const capable = () => json({ compatibility: { capabilities: ["api.message-part-shells.v1"] } })
+    const emptyPage = () => json({ data: [], cursor: {} })
+    // A macrotask: every request the client would send without waiting is out by then.
+    const settle = () => new Promise((resolve) => setImmediate(resolve))
+    const pendingCheck = () => {
+      let answer: (response: Response) => void = () => undefined
+      responses.push(() => new Promise<Response>((resolve) => { answer = resolve }))
+      return (response: Response) => answer(response)
+    }
+
+    test("waits for the check and asks for shells", async () => {
+      runtimeKey = "shells-first-page"
+      responses.push(capable(), emptyPage())
+      await opencodeClient.getSessionMessages("ses_1", { limit: 20, partShells: true })
+      expect(shellsHeaders()).toEqual(["v1"])
+    })
+
+    test("waits once per check for a check that does not answer", async () => {
+      runtimeKey = "shells-hung-check"
+      jest.useFakeTimers()
+      try {
+        const answer = pendingCheck()
+        opencodeClient.learnMessagePageShellsSupport()
+        responses.push(emptyPage(), emptyPage(), emptyPage())
+        const first = opencodeClient.getSessionMessages("ses_1", { limit: 20, partShells: true })
+        await settle()
+        expect(shellsHeaders()).toEqual([])
+        jest.advanceTimersByTime(5_000)
+        await first
+        // The bound has passed, so the next page goes out without waiting again.
+        const second = opencodeClient.getSessionMessages("ses_1", { limit: 20, partShells: true })
+        await settle()
+        expect(shellsHeaders()).toEqual([null, null])
+        await second
+        answer(capable())
+        await settle()
+        await opencodeClient.getSessionMessages("ses_1", { limit: 20, partShells: true })
+        expect(shellsHeaders()).toEqual([null, null, "v1"])
+      } finally {
+        jest.useRealTimers()
+      }
+    })
+
+    test("is dropped when the runtime changes during the wait", async () => {
+      runtimeKey = "shells-switch-from"
+      const answer = pendingCheck()
+      const page = opencodeClient.getSessionMessages("ses_1", { limit: 20, partShells: true })
+      await settle()
+      runtimeKey = "shells-switch-to"
+      answer(capable())
+      await expect(page).rejects.toThrow("Runtime instance changed")
+      expect(shellsHeaders()).toEqual([])
+    })
   })
 
   test("a page lost to a relay tunnel drop keeps asking for shelled pages", async () => {
@@ -1052,6 +1131,26 @@ describe("read timeouts (#2470)", () => {
     await new Promise((resolve) => setTimeout(resolve, 60))
     expect(settled).toBe(false)
   })
+
+  test("a usage stats read outlasts the read timeout (#6366)", async () => {
+    const client = createRuntimeOpencodeClient({ baseUrl: "http://runtime.test/api", requestTimeoutMs: 20 })
+    const caller = new AbortController()
+    let settled = false
+    responses.push(HANG)
+    const read = client.experimental.session.stats({}, { signal: caller.signal }).then(
+      () => {
+        settled = true
+      },
+      () => {
+        settled = true
+      },
+    )
+    await new Promise((resolve) => setTimeout(resolve, 60))
+    expect(settled).toBe(false)
+    // The caller's abort ends the hanging read so the test leaves nothing pending.
+    caller.abort()
+    await read
+  })
 })
 
 describe("sendCommand context", () => {
@@ -1132,6 +1231,22 @@ describe("directory availability batching", () => {
       opencodeClient.getDirectoryAvailability("/repo/two"),
     ])
     expect(results).toEqual(["unknown", "unknown"])
+  })
+})
+
+describe("directory real paths", () => {
+  test("maps each resolved directory to its real path and leaves the rest out", async () => {
+    responses.push(json({ results: [
+      { path: "/home/me/link", isDirectory: true, realPath: "/home/me/project" },
+      { path: "/home/me/gone", isDirectory: false, reason: "not-found" },
+    ] }))
+    const realPaths = await opencodeClient.getDirectoryRealPaths(["/home/me/link", "/home/me/gone"])
+    expect([...realPaths]).toEqual([["/home/me/link", "/home/me/project"]])
+  })
+
+  test("resolves nothing when the runtime refuses the probe (VS Code 501)", async () => {
+    responses.push(json({ error: "Directory availability probes are not supported in the VS Code runtime" }, 501))
+    expect((await opencodeClient.getDirectoryRealPaths(["/home/me/link"])).size).toBe(0)
   })
 })
 

@@ -43,6 +43,11 @@ export const UsageProviderCards: React.FC<{
               {group.planLabel}
             </span>
           ) : null}
+          {group.accountLabel ? (
+            <span className="min-w-0 truncate typography-micro text-muted-foreground" title={group.accountLabel}>
+              {group.accountLabel}
+            </span>
+          ) : null}
           {group.status && group.rows.length === 0 ? (
             <span className="shrink-0 truncate typography-micro text-muted-foreground">{group.status}</span>
           ) : null}

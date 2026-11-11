@@ -73,12 +73,15 @@ import { getRuntimeKey } from './runtime-switch';
 import { notifyGitStatusInvalidated, subscribeGitStatusInvalidations } from './gitStatusInvalidation';
 import { notifyGitPush } from './gitPushEvents';
 import { GitPathUnavailableError, gitPathUnavailableBodySchema, gitSubmoduleStateSchema } from './api/git-path-diff';
+import { GIT_REPOSITORY_UNREADABLE, GitRepositoryUnreadableError } from './gitRepositoryUnreadable';
 
 const API_BASE = '/api/git';
 const gitFileVersionsSchema = z.object({ original: z.string(), modified: z.string() });
 const gitRangeDiffSchema = z.object({ diff: z.string() });
 const gitRangeFilesSchema = z.object({ files: z.array(z.object({ path: z.string(), status: z.string(), revision: z.string().optional() })) });
 const gitRangeErrorSchema = z.object({ error: z.string() });
+// `/api/git/status` when Git could not tell whether the directory is a repository.
+const gitRepositoryUnreadableBodySchema = z.object({ error: z.string(), code: z.literal(GIT_REPOSITORY_UNREADABLE) });
 const gitCommitFilesSchema = z.object({ files: z.array(z.object({
   path: z.string(), previousPath: z.string().optional(), changeType: z.string(),
   insertions: z.number(), deletions: z.number(), isBinary: z.boolean(),
@@ -371,6 +374,7 @@ const operationErrorCodeSchema = z.enum([
     'STALE_BINDING',
     'STALE_CONFIG',
     'REMOTE_CHANGED',
+    'REMOTE_URL_USERINFO',
     'AUTHENTICATION_REQUIRED',
     'DESTINATION_SELECTION_REQUIRED',
     'CONTRIBUTOR_MANAGED_TRANSPORT_REQUIRED',
@@ -826,6 +830,8 @@ type ProjectOverviewResponse = {
   worktrees?: GitWorktreeInfo[] | null;
   errors?: string[];
   error?: string;
+  /** `GIT_REPOSITORY_UNREADABLE` when Git could not answer for the directory. */
+  code?: string;
 };
 
 type ProjectOverviewWaiter = {
@@ -952,7 +958,9 @@ const flushProjectOverviews = async (batchKey: string): Promise<void> => {
       if (!overview) {
         waiter.reject(new Error('Project repository read missing from batch response'));
       } else if (overview.error) {
-        waiter.reject(new Error(overview.error));
+        waiter.reject(overview.code === GIT_REPOSITORY_UNREADABLE
+          ? new GitRepositoryUnreadableError(overview.error)
+          : new Error(overview.error));
       } else if (overview.errors?.includes(batch.field)) {
         waiter.reject(new Error(`Failed to read project ${batch.field}`));
       } else {
@@ -1095,6 +1103,8 @@ export async function getGitStatus(directory: string, options?: { mode?: 'light'
     // list warms this cache through `prefetchProjectStatuses` instead.
     const response = await runtimeFetch(buildUrl(`${API_BASE}/status`, directory, mode ? { mode } : undefined));
     if (!response.ok) {
+      const unreadable = gitRepositoryUnreadableBodySchema.safeParse(await response.json().catch(() => null));
+      if (unreadable.success) throw new GitRepositoryUnreadableError(unreadable.data.error);
       throw new Error(`Failed to get git status: ${response.statusText}`);
     }
     // SAFETY: `/api/git/status` is this app's own route; its body is a GitStatus.

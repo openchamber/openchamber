@@ -19,6 +19,7 @@ import {
 import { AddPluginDialog } from './AddPluginDialog';
 import { PluginsGrid, type PluginDeleteTarget } from './PluginsGrid';
 import { SettingsSection } from '@/components/sections/shared/SettingsSection';
+import { useIntegrationPolicyState } from '@/components/sections/shared/useIntegrationPolicyBlock';
 import {
   useAutosave,
   AUTOSAVE_SAVED,
@@ -135,6 +136,11 @@ export const PluginsPage: React.FC = () => {
   const [isAddOpen, setIsAddOpen] = React.useState(false);
   const [deleteTarget, setDeleteTarget] = React.useState<PluginDeleteTarget | null>(null);
   const [isDeleting, setIsDeleting] = React.useState(false);
+  // The switch that writes these policies lives in the grid, so this reads the
+  // same revision the grid and config events bump; otherwise the page keeps an
+  // old deny after the plugin is on again.
+  const policyRevision = usePluginsStore((state) => state.policyRevision);
+  const policy = useIntegrationPolicyState(configDirectory, policyRevision);
 
   React.useEffect(() => {
     const handleOpenAdd = () => setIsAddOpen(true);
@@ -326,6 +332,12 @@ export const PluginsPage: React.FC = () => {
   if (selectedEntry && draft && draft.mode === 'entry') {
     const optionsResult = parseOptionsJson(draft.optionsJson);
     const optionsValid = optionsResult.ok;
+    // A row switched off here stays silent: the list already carries that
+    // state on its switch. Only a rule the user wrote themselves needs a
+    // sentence, because nothing on this page can flip it.
+    const blockedByConfig = selectedEntry.policyResource
+      ? policy.status === 'ready' && selectedEntry.switchState !== 'off' && policy.isBlockedByRule(selectedEntry.policyResource)
+      : false;
 
     return (
       <>
@@ -348,6 +360,9 @@ export const PluginsPage: React.FC = () => {
         <SettingsSection divider={false}>
           <div className="flex flex-col gap-3">
             <PluginStatusBanner target={selectedEntryTarget} name={selectedEntry.spec} />
+            {blockedByConfig ? (
+              <p className="typography-meta text-muted-foreground">{t('settings.plugins.switch.blockedByConfig')}</p>
+            ) : null}
             <RegistryBanner entryId={selectedEntry.id} spec={selectedEntry.spec} />
           </div>
         </SettingsSection>
@@ -372,6 +387,7 @@ export const PluginsPage: React.FC = () => {
           settingsItem="plugins.options"
         >
           <Textarea
+            dir="ltr"
             value={draft.optionsJson}
             onChange={(e) =>
               setDraft({ ...draft, optionsJson: e.target.value })
@@ -397,6 +413,10 @@ export const PluginsPage: React.FC = () => {
   }
 
   if (selectedFile && draft && draft.mode === 'file') {
+    const blockedByConfig = selectedFile.policyResource
+      ? policy.status === 'ready' && selectedFile.switchState !== 'off' && policy.isBlockedByRule(selectedFile.policyResource)
+      : false;
+
     return (
       <>
       <SettingsPageLayout
@@ -427,7 +447,12 @@ export const PluginsPage: React.FC = () => {
         onBlurCapture={autosave.onBlurCapture}
       >
         <SettingsSection divider={false}>
-          <PluginStatusBanner target={selectedFileTarget} name={selectedFile.fileName} />
+          <div className="flex flex-col gap-3">
+            <PluginStatusBanner target={selectedFileTarget} name={selectedFile.fileName} />
+            {blockedByConfig ? (
+              <p className="typography-meta text-muted-foreground">{t('settings.plugins.switch.blockedByConfig')}</p>
+            ) : null}
+          </div>
         </SettingsSection>
 
         <SettingsSection

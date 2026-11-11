@@ -125,6 +125,12 @@ export function registerGitRoutes(app, {
   };
 
   const isNonRepoGitError = (error) => /not a git repository/i.test(extractGitErrorText(error));
+  // Git could not tell whether the directory is a repository (`probeRepository`):
+  // its message goes to the client instead of a "not a repository" answer.
+  const isUnreadableRepositoryError = (error) => error?.code === 'GIT_REPOSITORY_UNREADABLE';
+  const unreadableRepositoryBody = (error) => ({ error: error.message, code: error.code });
+  // Every repository check a client acts on reports a Git that could not answer.
+  const probeOptions = { failOnGitError: true };
 
   const canDisposeWorktreeInstance = Boolean(buildOpenCodeUrl && getOpenCodeAuthHeaders);
 
@@ -185,6 +191,7 @@ export function registerGitRoutes(app, {
     else if (code === 'SOURCE_CONTROL_BINDING_STALE') publicCode = 'STALE_BINDING';
     else if (code === 'UNSUPPORTED_SOURCE_CONTROL_REPOSITORY') publicCode = 'STALE_REPOSITORY';
     else if (code === 'GIT_NETWORK_OPERATION_AUTHORITY_CHANGED') publicCode = 'REMOTE_CHANGED';
+    else if (code === 'INVALID_GIT_REMOTE_USERINFO') publicCode = 'REMOTE_URL_USERINFO';
     if (!publicCode && !storageFailure && code.includes('INVALID')) publicCode = 'INVALID_REQUEST';
     if (!publicCode && preservedCodes.includes(code)) publicCode = code;
     publicCode ??= 'UNKNOWN';
@@ -197,6 +204,7 @@ export function registerGitRoutes(app, {
       STALE_BINDING: 'Source control binding changed',
       STALE_CONFIG: 'Git repository configuration changed',
       REMOTE_CHANGED: 'Git remote or transport binding changed',
+      REMOTE_URL_USERINFO: 'Remove the name before @ from remote URL',
       AUTHENTICATION_REQUIRED: 'Git authentication is required',
       DESTINATION_SELECTION_REQUIRED: 'Contributor push destination selection is required',
       CONTRIBUTOR_MANAGED_TRANSPORT_REQUIRED: 'Contributor transfers require managed credentials',
@@ -527,9 +535,12 @@ export function registerGitRoutes(app, {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
 
-      const isRepo = await isGitRepository(directory);
+      const isRepo = await isGitRepository(directory, probeOptions);
       res.json({ isGitRepository: isRepo });
     } catch (error) {
+      if (isUnreadableRepositoryError(error)) {
+        return res.status(500).json(unreadableRepositoryBody(error));
+      }
       if (isNonRepoGitError(error)) {
         console.warn('Git check treated non-repository path as not a git repo:', extractGitErrorText(error));
         return res.json({ isGitRepository: false });
@@ -601,7 +612,7 @@ export function registerGitRoutes(app, {
     };
     return readProjectBatch(req, res, async (directory) => {
       try {
-        const isRepo = await isGitRepository(directory);
+        const isRepo = await isGitRepository(directory, probeOptions);
         if (!isRepo) {
           return nonRepoEntry(directory);
         }
@@ -642,6 +653,9 @@ export function registerGitRoutes(app, {
         if (failures.length > 0) entry.errors = failures;
         return entry;
       } catch (error) {
+        if (isUnreadableRepositoryError(error)) {
+          return { directory, ...unreadableRepositoryBody(error) };
+        }
         if (isNonRepoGitError(error)) {
           return nonRepoEntry(directory);
         }
@@ -784,7 +798,7 @@ export function registerGitRoutes(app, {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
 
-      const isRepo = await isGitRepository(directory);
+      const isRepo = await isGitRepository(directory, probeOptions);
       if (!isRepo) {
         return res.json(nonRepoStatusPayload());
       }
@@ -798,6 +812,9 @@ export function registerGitRoutes(app, {
       const status = await getStatus(directory, { mode });
       res.json(status);
     } catch (error) {
+      if (isUnreadableRepositoryError(error)) {
+        return res.status(500).json(unreadableRepositoryBody(error));
+      }
       // Non-repo / GitError must not abort callers that enumerate projects or
       // sessions (e.g. sidebar discovery). Log a warning and continue.
       if (isNonRepoGitError(error)) {

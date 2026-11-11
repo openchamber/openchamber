@@ -4,7 +4,7 @@ import { useConfigStore } from '@/stores/useConfigStore';
 import { useI18n } from '@/lib/i18n';
 import { isAutoModel } from '@/lib/routing/autoModel';
 import { swallowGestureClick } from '@/lib/swallowGestureClick';
-import { formatEffortLabel } from './mobileControlsUtils';
+import { formatEffortLabel, getEffortToneClass } from './mobileControlsUtils';
 
 interface MobileEffortButtonProps {
     onCycleThinking: () => void;
@@ -78,7 +78,7 @@ export const MobileEffortButton: React.FC<MobileEffortButtonProps> = ({ onCycleT
             )}
         >
             <span aria-hidden="true" className="opacity-60">/</span>
-            <span className="whitespace-nowrap">{label}</span>
+            <span className={cn('whitespace-nowrap', getEffortToneClass(variant))}>{label}</span>
         </button>
     );
 };

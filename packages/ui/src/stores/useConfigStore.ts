@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { listModelVariantIds, modelVariantNames } from "@/lib/modelVariants";
+import { listModelVariantIds, modelVariantNames, nextThinkingVariant } from "@/lib/modelVariants";
 import { AUTO_MODEL_ID, AUTO_PROVIDER_ID, isAutoModel } from '@/lib/routing/autoModel';
 import { selectAutoReady, useRoutingStore } from '@/stores/useRoutingStore';
 import type { StoreApi, UseBoundStore } from "zustand";
@@ -7,7 +7,8 @@ import { devtools, persist } from "zustand/middleware";
 import { findCatalogModel, type Provider, type Model, type Agent, type Config } from "@/lib/opencode/model";
 import type { DesktopSettings } from "@/lib/desktop";
 import type { CatalogKind } from "@/lib/opencode/events";
-import { opencodeClient, type OpencodeHealthProbe } from "@/lib/opencode/client";
+import { OpencodeApiError, opencodeClient, type OpencodeHealthProbe } from "@/lib/opencode/client";
+import { isOpenCodeTrustPending } from "@/lib/opencodeTrust";
 import { isLocationNotFoundError } from "@/lib/opencode/location-errors";
 import { isSameProjectConfigError, readProjectConfigError, type ProjectConfigError } from "@/lib/opencode/configError";
 import { scopeMatches, subscribeToConfigChanges } from "@/lib/configSync";
@@ -2851,14 +2852,7 @@ export const useConfigStore = create<ConfigStore>()(
                     const currentVariant = currentOverride === undefined
                         ? state.currentVariant
                         : currentOverride;
-                    let nextOverride: string | null;
-
-                    if (currentVariant === null || currentVariant === undefined) {
-                        nextOverride = variantKeys[0];
-                    } else {
-                        const index = variantKeys.indexOf(currentVariant);
-                        nextOverride = index >= 0 ? (variantKeys[index + 1] ?? null) : null;
-                    }
+                    const nextOverride = nextThinkingVariant(variantKeys, currentVariant);
 
                     get().setCurrentVariantOverride(nextOverride, inheritedVariant);
                     // Cycling is a picker choice too: it becomes the model's
@@ -4528,10 +4522,18 @@ export const useConfigStore = create<ConfigStore>()(
                                 // any other failure keeps the startup retry loop going.
                                 // A project whose folder is gone (an unplugged drive) is the
                                 // same: the app opens and the other projects stay reachable.
+                                // So is a folder the user has not trusted ("Not this time"):
+                                // its files stay browsable, and a new message asks again.
                                 const configError = get().projectConfigErrors[configDirectoryKey];
+                                const agentsError = _agentsLoadErrors.get(configDirectoryKey);
+                                const awaitsTrust = !configError && agentsError instanceof OpencodeApiError && agentsError.status === 403
+                                    && await isOpenCodeTrustPending(configDirectory);
+                                if (!isConfigRuntimeContextCurrent(runtimeContext)) return;
                                 if (configError) {
                                     markStartupTrace('initializeApp:projectConfigInvalid', { configDirectoryKey, name: configError.name });
-                                } else if (isLocationNotFoundError(_agentsLoadErrors.get(configDirectoryKey))
+                                } else if (awaitsTrust) {
+                                    markStartupTrace('initializeApp:projectAwaitsTrust', { configDirectoryKey });
+                                } else if (isLocationNotFoundError(agentsError)
                                     || await opencodeClient.getDirectoryAvailability(configDirectory) === 'missing') {
                                     if (!isConfigRuntimeContextCurrent(runtimeContext)) return;
                                     markStartupTrace('initializeApp:projectDirectoryMissing', { configDirectoryKey });

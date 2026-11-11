@@ -52,8 +52,9 @@ describe('applyOutboundProxyFromEnv', () => {
       // Node versions may forward HTTP directly or tunnel it with CONNECT.
       assert.equal(seen.length, 1);
       assert.ok(seen[0] === 'proxy GET http://upstream.invalid/usage' || seen[0] === 'proxy CONNECT upstream.invalid:80');
+      await fetch('https://upstream.invalid/usage').catch(() => {});
       assert.equal(await (await fetch('http://127.0.0.1:' + local.address().port + '/')).text(), 'ok');
-      assert.deepEqual(seen, [seen[0], 'direct']);
+      assert.deepEqual(seen, [seen[0], 'proxy CONNECT upstream.invalid:443', 'direct']);
       process.exit(0);
     `], { encoding: 'utf8', timeout: 15_000, windowsHide: true });
     expect(result.status, result.stderr).toBe(0);

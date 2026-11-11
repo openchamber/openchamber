@@ -7,6 +7,7 @@ import { registerSmallModelRoutes } from '../small-model/routes.js';
 import { registerWalkthroughRoutes } from '../walkthrough/routes.js';
 import { registerSessionGoalRoutes } from '../session-goal/routes.js';
 import { registerSessionWarmingRoutes } from '../session-warming/routes.js';
+import { registerSessionTodosRoutes } from '../session-todos/routes.js';
 import { setWarmingDuration, setWarmingEnabled } from './websearch-config.js';
 import { registerSourceControlRoutes } from '../source-control/routes.js';
 import { registerLinearRoutes } from '../linear/routes.js';
@@ -17,6 +18,8 @@ import { createTrackerOAuth } from '../trackers/extension-oauth.js';
 import { registerGuestRoutes, settleGuestDeactivationListeners } from '../guests/routes.js';
 import { listInstalledGuests, registerBuiltInGuests } from '../guests/catalog.js';
 import { setHostCallbackRoute } from '../guests/host-callback.js';
+import { createGuestOpenCodeProvider } from '../guests/opencode-provider/index.js';
+import { configureGuestOpenCodeProvider } from '../guests/service.js';
 import { registerNotificationChannelRoutes } from '../notifications/channel-routes.js';
 import { createOutboundHandles } from '../source-control/outbound-handles.js';
 import { createExtensionProviders } from '../source-control/extension-providers.js';
@@ -42,6 +45,7 @@ import { registerConfigEntityRoutes } from './config-entity-routes.js';
 import { createThemeFolderWatch } from './theme-watch.js';
 import { registerSettingsUtilityRoutes } from './core-routes.js';
 import { registerProjectIconRoutes } from './project-icon-routes.js';
+import { registerProviderLogoRoutes } from './provider-logo-routes.js';
 import { registerScheduledTaskRoutes } from '../scheduled-tasks/routes.js';
 import { fillScheduledWorktreeBridge } from '../scheduled-tasks/worktree-bridge.js';
 import { createTrackedItemsService } from '../tracked-items/service.js';
@@ -65,9 +69,13 @@ import { listSnippets, getSnippet, createSnippet, updateSnippet, deleteSnippet, 
 import {
   listPluginEntries,
   getPluginEntry,
+  readGlobalPluginEntries,
+  addGlobalPluginEntry,
   createPluginEntry,
   updatePluginEntry,
   deletePluginEntry,
+  setPluginEntryEnabled,
+  setPluginFileEnabled,
   listPluginDirFiles,
   readPluginDirFile,
   writePluginDirFile,
@@ -98,7 +106,7 @@ import { createContributorProvenanceStore } from '../git/contributor-provenance-
 import { createGitNetworkOperationStore } from '../git/network-operation-storage.js';
 import { readEffectiveGitTransportRevision } from '../git/transport-config.js';
 import { completeWorktreeCheckoutHydration, configureRepositoryTransport, deleteBranch as deleteBranchService, isGitRepository as isGitRepositoryService, removeWorktree as removeWorktreeService, resolvePrimaryWorktreeRoot, resolveWorktreeTopLevel } from '../git/service.js';
-import { createPrivateRepositoryIdentityResolver } from '../source-control/repository-identity.js';
+import { createPrivateRepositoryIdentityResolver, resolveRepositoryId } from '../source-control/repository-identity.js';
 import { createSourceControlAuditStore } from '../source-control/audit-storage.js';
 
 export const createFeatureRoutesRuntime = (dependencies) => {
@@ -110,6 +118,9 @@ export const createFeatureRoutesRuntime = (dependencies) => {
     clientReloadDelayMs,
     trackers,
     trackerSessionStatus,
+    pluginSwitchStore,
+    isPluginSwitchAvailable,
+    refreshPluginSwitches,
   } = dependencies;
   const gitRuntimeIdentity = Object.freeze({
     id: `server_${crypto.randomUUID()}`,
@@ -200,9 +211,11 @@ export const createFeatureRoutesRuntime = (dependencies) => {
    * the New worktree dialog makes: the server reads the change request with
    * the project's own account and creates the worktree through the Git
    * routes' contributor pipeline. `name` and `branchName` default to the
-   * change request's head branch.
+   * change request's head branch. `startCommand` holds the project's setup
+   * commands, as the dialog sends them; a contributor fork's worktree
+   * records them without running them (`../git/DOCUMENTATION.md`).
    */
-  const createChangeRequestWorktree = async ({ directory, number, name, branchName }) => {
+  const createChangeRequestWorktree = async ({ directory, number, name, branchName, startCommand }) => {
     if (!(gitWorktreeCreation?.createWorktree instanceof Function)
       || !(walkthroughBindingService?.resolveChangeRequestWorktreeSource instanceof Function)) {
       throw Object.assign(new Error('Worktrees from pull requests are unavailable'), {
@@ -211,18 +224,21 @@ export const createFeatureRoutesRuntime = (dependencies) => {
     }
     const { headBranch, sourceRequest } = await walkthroughBindingService.resolveChangeRequestWorktreeSource({ directory, number });
     const branch = branchName || headBranch;
-    return gitWorktreeCreation.createWorktree(directory, {
+    const input = {
       mode: 'existing',
       branchName: branch,
       worktreeName: name || branch,
       changeRequestSource: sourceRequest,
-    });
+    };
+    if (startCommand) input.startCommand = startCommand;
+    return gitWorktreeCreation.createWorktree(directory, input);
   };
 
   const registerRoutes = async (app, routeDependencies) => {
     const {
       messageSearchRuntime,
       sessionWarmingRuntime,
+      sessionTodosRuntime,
       crypto,
       fs,
       os,
@@ -236,6 +252,8 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       onExtensionSessionEventsChanged = () => {},
       extensionNotificationChannels = null,
       surfaceViewerHeaders,
+      // How an extension's OpenCode plugin reaches OpenCode right now (`guests/opencode-plugin.js`).
+      getOpenCodePluginDelivery = () => 'file',
       openchamberUserConfigRoot,
       managedChatsRoot,
       normalizeDirectoryPath,
@@ -347,6 +365,15 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       resolveGitBinaryForSpawn,
     });
 
+    registerProviderLogoRoutes(app, {
+      fsPromises,
+      path,
+      crypto,
+      openchamberDataDir,
+      readSettingsFromDiskMigrated,
+      persistResolvedSettings,
+    });
+
     registerScheduledTaskRoutes(app, {
       readSettingsFromDiskMigrated,
       sanitizeProjects,
@@ -420,6 +447,8 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       createPluginEntry,
       updatePluginEntry,
       deletePluginEntry,
+      setPluginEntryEnabled,
+      setPluginFileEnabled,
       listPluginDirFiles,
       readPluginDirFile,
       writePluginDirFile,
@@ -430,6 +459,9 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       parseNpmSpec,
       parsePathSpec,
       isExactSemver,
+      pluginSwitchStore,
+      isPluginSwitchAvailable,
+      refreshPluginSwitches,
     });
 
     const { getProfiles, getProfile, getGlobalIdentity, resolveRepositoryGitPaths } = await import('../git/index.js');
@@ -486,9 +518,12 @@ export const createFeatureRoutesRuntime = (dependencies) => {
     const resolveTransportRepository = createPrivateRepositoryIdentityResolver({
       getTransportRevision: (directory) => readEffectiveGitTransportRevision(directory, { gitBinary }),
     });
+    // A provenance record is keyed by the repository ID alone, so its reads
+    // take the ID-only resolver: the remote and transport Git processes a
+    // binding read needs answer nothing here (#6084).
     const contributorProvenance = createContributorProvenanceStore({
       filePath: path.join(openchamberDataDir, 'git-contributor-provenance.json'),
-      resolveRepositoryIdentity: resolveTransportRepository,
+      resolveRepositoryIdentity: resolveRepositoryId,
       resolveGitPaths: resolveRepositoryGitPaths,
       fsImpl: fsPromises,
     });
@@ -787,6 +822,12 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       persistPath: extensionsPersistPath(openchamberDataDir),
       emitChanged: () => announceChange('openchamber:quota-providers-changed'),
     });
+    configureGuestOpenCodeProvider(createGuestOpenCodeProvider({
+      currentGuest: async (guestId) => (await listInstalledGuests({ persistPath: extensionsPersistPath(openchamberDataDir) }))
+        .find((guest) => guest.id === guestId) ?? null,
+      buildOpenCodeUrl,
+      getOpenCodeAuthHeaders,
+    }));
     stopGuestPackageWatch();
     ({ stopPackageWatch: stopGuestPackageWatch } = registerGuestRoutes(app, {
       openchamberDataDir, openchamberVersion, resolveGitBinaryForSpawn, resolveOptionalProjectDirectory, getSmallModelService,
@@ -815,6 +856,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       onGuestsChanged: () => announceChange('openchamber:guests-changed'),
       watchFolderInstalls: true,
       surfaceViewerHeaders, trackers,
+      opencodePlugins: { delivery: getOpenCodePluginDelivery, readGlobalEntries: readGlobalPluginEntries, addGlobalEntry: addGlobalPluginEntry },
     }));
     // The providers extensions served before the restart, before any request reads the list.
     await extensionSourceControlProviders.reconcile().catch((error) => {
@@ -902,6 +944,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
     registerAgentMemoryRoutes(app, { agentMemoryRuntime, isAgentMemoryEnabled });
     registerSessionKnowledgeRoutes(app, { sessionKnowledgeRuntime });
     registerMessageSearchRoutes(app, { messageSearchRuntime });
+    registerSessionTodosRoutes(app, { sessionTodosRuntime });
     registerSessionWarmingRoutes(app, {
       sessionWarmingRuntime,
       setGlobalWarming: setWarmingEnabled,
@@ -959,6 +1002,9 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       cloneRepository: networkOperations.cloneRepository,
       managedChatsRoot,
       environmentRuntime,
+      projectRealpath: (target) => new Promise((resolve, reject) => {
+        fs.realpath(target, (error, resolved) => (error ? reject(error) : resolve(resolved)));
+      }),
     });
     registerEnvironmentRoutes(app, { store: environmentStore, runtime: environmentRuntime, listProjects: listConfiguredProjects });
   };

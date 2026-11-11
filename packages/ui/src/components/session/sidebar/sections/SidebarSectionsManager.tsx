@@ -244,6 +244,7 @@ const SectionRow: React.FC<{ entry: SidebarSectionEntry }> = ({ entry }) => {
   const showPinned = useSessionDisplayStore((state) => state.showPinnedSection);
   const showWork = useSessionDisplayStore((state) => state.showWorkSection);
   const keepWorkInPlace = useSessionDisplayStore((state) => state.keepWorkInPlace);
+  const keepPinnedInPlace = useSessionDisplayStore((state) => state.keepPinnedInPlace);
   const sessionWorkEnabled = useUIStore((state) => state.sessionWorkEnabled);
   const name = entry.kind === 'builtin' ? t(BUILTIN_TITLE_KEY[entry.id]) : entry.name;
   // Built-in sections keep the show toggles they always had; Projects is always shown.
@@ -258,6 +259,13 @@ const SectionRow: React.FC<{ entry: SidebarSectionEntry }> = ({ entry }) => {
     visibility = { shown: showWork, set: (shown) => { useSessionDisplayStore.getState().setShowWorkSection(shown); void updateDesktopSettings({ sidebarShowWorkSection: shown }); } };
   }
   if (entry.kind === 'builtin' && entry.id === 'work' && !sessionWorkEnabled) return null;
+  // Pinned's and In work's one choice: whether their works also stay in their projects.
+  let inPlace: { keep: boolean; set: (keep: boolean) => void } | null = null;
+  if (entry.kind === 'builtin' && entry.id === 'work' && showWork) {
+    inPlace = { keep: keepWorkInPlace, set: (keep) => { useSessionDisplayStore.getState().setKeepWorkInPlace(keep); void updateDesktopSettings({ sidebarKeepWorkInPlace: keep }); } };
+  } else if (entry.kind === 'builtin' && entry.id === 'pinned' && showPinned) {
+    inPlace = { keep: keepPinnedInPlace, set: (keep) => { useSessionDisplayStore.getState().setKeepPinnedInPlace(keep); void updateDesktopSettings({ sidebarKeepPinnedInPlace: keep }); } };
+  }
   return (
     <div
       ref={setNodeRef}
@@ -277,23 +285,23 @@ const SectionRow: React.FC<{ entry: SidebarSectionEntry }> = ({ entry }) => {
             </Button>
           </>
         ) : null}
-        {/* In work's one choice stays on its row, as a chip that says it and
-            switches it: a line under the row pushed the sections below it
-            apart, and a menu behind an edit button hid it. */}
-        {entry.kind === 'builtin' && entry.id === 'work' && showWork ? (
+        {/* The choice stays on its row, as a chip that says it and switches
+            it: a line under the row pushed the sections below it apart, and a
+            menu behind an edit button hid it. */}
+        {inPlace ? (
           <Tooltip>
             <TooltipTrigger asChild>
               <button
                 type="button"
-                aria-pressed={keepWorkInPlace}
-                onClick={() => { const keep = !keepWorkInPlace; useSessionDisplayStore.getState().setKeepWorkInPlace(keep); void updateDesktopSettings({ sidebarKeepWorkInPlace: keep }); }}
+                aria-pressed={inPlace.keep}
+                onClick={() => inPlace.set(!inPlace.keep)}
                 className={cn(
                   'inline-flex h-5 shrink-0 items-center gap-1 rounded px-1.5 typography-micro focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50',
-                  keepWorkInPlace ? 'oc-tile-inset text-foreground' : 'oc-tile text-muted-foreground hover:text-foreground',
+                  inPlace.keep ? 'oc-tile-inset text-foreground' : 'oc-tile text-muted-foreground hover:text-foreground',
                 )}
               >
                 {/* The same width either way: a mark that turns from add to check. */}
-                <Icon name={keepWorkInPlace ? 'check' : 'add'} className="size-3" />
+                <Icon name={inPlace.keep ? 'check' : 'add'} className="size-3" />
                 {t('sessions.sidebar.sections.alsoInProjectsShort')}
               </button>
             </TooltipTrigger>

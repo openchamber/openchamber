@@ -1254,23 +1254,29 @@ export const createOpenCodeEnvRuntime = (deps) => {
     return null;
   };
 
+  // GIT_BINARY or OPENCHAMBER_GIT_BINARY when it names an executable file, else null.
+  const resolveExplicitGitBinary = () => {
+    const explicit = [process.env.GIT_BINARY, process.env.OPENCHAMBER_GIT_BINARY]
+      .map((value) => (typeof value === 'string' ? value.trim() : ''))
+      .filter(Boolean);
+    return explicit.find((candidate) => isExecutable(candidate)) || null;
+  };
+
   const resolveGitBinaryForSpawn = () => {
+    // Outside Windows there is no install-folder search to cache; the override
+    // costs one stat per call, and without it Git comes from PATH.
     if (process.platform !== 'win32') {
-      return 'git';
+      return resolveExplicitGitBinary() || 'git';
     }
 
     if (state.resolvedGitBinary) {
       return state.resolvedGitBinary;
     }
 
-    const explicit = [process.env.GIT_BINARY, process.env.OPENCHAMBER_GIT_BINARY]
-      .map((value) => (typeof value === 'string' ? value.trim() : ''))
-      .filter(Boolean);
-    for (const candidate of explicit) {
-      if (isExecutable(candidate)) {
-        state.resolvedGitBinary = candidate;
-        return state.resolvedGitBinary;
-      }
+    const explicit = resolveExplicitGitBinary();
+    if (explicit) {
+      state.resolvedGitBinary = explicit;
+      return state.resolvedGitBinary;
     }
 
     const candidates = [];
