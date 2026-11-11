@@ -1,21 +1,60 @@
 import { afterEach, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { configureOpenCodeCredentials } from './opencodeAuth';
-import { fetchQuotaForProvider } from './quotaProviders';
+import { fetchQuotaForProvider, listConfiguredQuotaProviders } from './quotaProviders';
 
 const GEMINI_CLIENT_ID = '681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com';
 const ANTIGRAVITY_CLIENT_ID = '1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com';
+const COMMON_AUTH_PLACEHOLDER = 'common-auth-placeholder.google';
 const originalFetch = globalThis.fetch;
+
+const nativeGooglePlaceholderEntry = (overrides: {
+  access?: string;
+  refresh?: string;
+  expires?: number;
+  methodID?: string;
+} = {}) => ({
+  id: 'test-google', integrationID: 'google', label: 'default', active: true,
+  value: {
+    type: 'oauth' as const,
+    methodID: overrides.methodID ?? 'oauth',
+    metadata: { commonAuthPlaceholder: true },
+    access: overrides.access ?? COMMON_AUTH_PLACEHOLDER,
+    refresh: overrides.refresh ?? COMMON_AUTH_PLACEHOLDER,
+    expires: overrides.expires ?? Date.now() + 365 * 24 * 60 * 60 * 1000,
+  },
+});
+
+const stubUnexpectedGoogleFetch = () => {
+  const requests: string[] = [];
+  globalThis.fetch = async (url) => {
+    requests.push(String(url));
+    throw new Error('Unexpected Google request');
+  };
+  return requests;
+};
+
+const assertGooglePlaceholderRefused = async () => {
+  const requests = stubUnexpectedGoogleFetch();
+  const providers = await listConfiguredQuotaProviders();
+  const result = await fetchQuotaForProvider('google');
+
+  assert.deepEqual(requests, []);
+  assert.ok(!providers.includes('google'));
+  assert.equal(result.ok, false);
+  assert.equal(result.configured, false);
+  assert.equal(result.error, 'Not configured');
+};
 
 afterEach(() => {
   globalThis.fetch = originalFetch;
   configureOpenCodeCredentials(null);
 });
 
-const configureLogin = (refresh = 'test-refresh|test-project|managed-project', expires = 1) => {
+const configureLogin = (refresh = 'test-refresh|test-project|managed-project', expires = 1, access = 'old-access') => {
   configureOpenCodeCredentials({ list: async () => [{
     id: 'test-google', integrationID: 'google', label: 'default', active: true,
-    value: { type: 'oauth', methodID: 'oauth', metadata: {}, access: 'old-access', refresh, expires },
+    value: { type: 'oauth', methodID: 'oauth', metadata: {}, access, refresh, expires },
   }] });
 };
 
@@ -23,13 +62,16 @@ const stubGoogle = (
   exchange: (client: string | null, options?: RequestInit) => Response | Promise<Response>,
   accessToken = 'new-access',
   project?: string,
+  refreshToken = 'test-refresh',
 ) => {
   const clients: Array<string | null> = [];
   const quotaRequests: string[] = [];
+  const allRequests: string[] = [];
   globalThis.fetch = async (url, options) => {
+    allRequests.push(String(url));
     if (String(url) === 'https://oauth2.googleapis.com/token') {
       assert.ok(options?.body instanceof URLSearchParams);
-      assert.equal(options.body.get('refresh_token'), 'test-refresh');
+      assert.equal(options.body.get('refresh_token'), refreshToken);
       assert.equal(options.body.get('grant_type'), 'refresh_token');
       assert.equal(options.method, 'POST');
       assert.equal(new Headers(options.headers).get('Content-Type'), 'application/x-www-form-urlencoded');
@@ -46,7 +88,7 @@ const stubGoogle = (
     assert.ok(String(url).endsWith(':fetchAvailableModels'));
     return Response.json({ models: {} });
   };
-  return { clients, quotaRequests };
+  return { clients, quotaRequests, allRequests };
 };
 
 const assertUsage = (result: Awaited<ReturnType<typeof fetchQuotaForProvider>>) => {
@@ -60,6 +102,87 @@ const assertUsage = (result: Awaited<ReturnType<typeof fetchQuotaForProvider>>) 
 };
 
 describe('VS Code Google quota OAuth client compatibility', () => {
+  it('does not dispatch a native placeholder or fall through to google.oauth', async () => {
+    configureOpenCodeCredentials({ list: async () => [
+      nativeGooglePlaceholderEntry(),
+      {
+        id: 'test-google-oauth-alias', integrationID: 'google.oauth', label: 'default', active: true,
+        value: {
+          type: 'oauth', methodID: 'oauth', metadata: {}, access: 'alias-access',
+          refresh: 'alias-refresh', expires: Date.now() + 365 * 24 * 60 * 60 * 1000,
+        },
+      },
+    ] });
+    await assertGooglePlaceholderRefused();
+  });
+
+  it('does not exchange a native placeholder after its access expires', async () => {
+    configureOpenCodeCredentials({ list: async () => [nativeGooglePlaceholderEntry({ expires: 1 })] });
+    await assertGooglePlaceholderRefused();
+  });
+
+  it('does not dispatch when only access starts with the placeholder prefix', async () => {
+    configureOpenCodeCredentials({ list: async () => [nativeGooglePlaceholderEntry({ refresh: 'ordinary-refresh' })] });
+    await assertGooglePlaceholderRefused();
+  });
+
+  it('does not exchange when only refresh starts with the placeholder prefix', async () => {
+    configureOpenCodeCredentials({ list: async () => [nativeGooglePlaceholderEntry({ access: '', expires: 1 })] });
+    await assertGooglePlaceholderRefused();
+  });
+
+  it('refuses the whole row when an otherwise-valid access token has a placeholder refresh', async () => {
+    configureOpenCodeCredentials({ list: async () => [nativeGooglePlaceholderEntry({
+      access: 'ordinary-access',
+      refresh: COMMON_AUTH_PLACEHOLDER,
+      expires: Date.now() + 3_600_000,
+    })] });
+    await assertGooglePlaceholderRefused();
+  });
+
+  it('does not list or request Google quota without a credential', async () => {
+    configureOpenCodeCredentials({ list: async () => [] });
+    const requests = stubUnexpectedGoogleFetch();
+    const providers = await listConfiguredQuotaProviders();
+    const result = await fetchQuotaForProvider('google');
+
+    assert.deepEqual(requests, []);
+    assert.ok(!providers.includes('google'));
+    assert.equal(result.configured, false);
+    assert.equal(result.error, 'Not configured');
+  });
+
+  it('accepts ordinary OAuth tokens with embedded placeholder text', async () => {
+    const accessToken = 'opaque.common-auth-placeholder.google.access';
+    configureOpenCodeCredentials({ list: async () => [nativeGooglePlaceholderEntry({
+      methodID: 'synthetic-method',
+      access: accessToken,
+      refresh: 'test-refresh|test-project',
+      expires: Date.now() + 3_600_000,
+    })] });
+    const accessRequests = stubGoogle(() => { throw new Error('Unexpected refresh'); }, accessToken, 'test-project');
+    assertUsage(await fetchQuotaForProvider('google'));
+    assert.deepEqual(accessRequests.clients, []);
+    assert.equal(accessRequests.allRequests.length, 2);
+
+    const refreshToken = 'opaque.common-auth-placeholder.google.refresh';
+    configureOpenCodeCredentials({ list: async () => [nativeGooglePlaceholderEntry({
+      methodID: 'synthetic-method',
+      access: '',
+      refresh: refreshToken,
+      expires: 1,
+    })] });
+    const refreshRequests = stubGoogle(
+      () => Response.json({ access_token: 'new-access' }),
+      'new-access',
+      undefined,
+      refreshToken,
+    );
+    assertUsage(await fetchQuotaForProvider('google'));
+    assert.deepEqual(refreshRequests.clients, [GEMINI_CLIENT_ID]);
+    assert.equal(refreshRequests.allRequests.length, 3);
+  });
+
   for (const refresh of ['test-refresh', 'test-refresh|test-project|managed-project']) {
     it(`uses Gemini once for ${refresh.includes('|') ? 'packed' : 'plain'} refresh tokens`, async () => {
       configureLogin(refresh);
@@ -142,5 +265,6 @@ describe('VS Code Google quota OAuth client compatibility', () => {
     assertUsage(await fetchQuotaForProvider('google'));
     assert.deepEqual(requests.clients, []);
     assert.equal(requests.quotaRequests.length, 2);
+    assert.equal(requests.allRequests.length, 2);
   });
 });

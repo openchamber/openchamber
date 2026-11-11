@@ -231,6 +231,18 @@ Refreshes are read-only with respect to OpenCode credentials. Neither a guessed
 client nor refreshed tokens are written back. Refresh-token rotation and changes
 to quota endpoint semantics are outside this compatibility fix.
 
+The selected Google credential is not configured when either its access token
+or parsed refresh token starts with `common-auth-placeholder.`. Both runtimes
+apply this check before returning a Google auth source, so the placeholder makes
+no Google OAuth exchange or quota/model request.
+
+### Why placeholder detection stays provider-local
+
+The prefix check stays in the Google resolvers, leaving the shared credential
+projection and its metadata filtering unchanged. It also preserves alias
+precedence, so a marked primary entry does not fall through to the `google.oauth`
+alias.
+
 ## Antigravity quota and limit semantics
 
 Antigravity reports dual-layer quota for Google Cloud Code / Antigravity IDE accounts, querying Google's `retrieveUserQuotaSummary` endpoint (falling back to `daily-cloudcode-pa.googleapis.com` and `fetchAvailableModels` flat quotaInfo).

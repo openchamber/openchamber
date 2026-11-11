@@ -13,6 +13,7 @@ import {
   toTimestamp
 } from '../../utils/index.js';
 import { parseGoogleRefreshToken } from './transforms.js';
+import { isGoogleAuthPlaceholder } from './oauth.js';
 
 export const DEFAULT_PROJECT_ID = 'rising-fact-p41fc';
 
@@ -26,6 +27,10 @@ const resolveGeminiCliAuth = (auth) => {
   const oauthObject = asObject(entryObject.oauth) ?? entryObject;
   const accessToken = asNonEmptyString(oauthObject.access) ?? asNonEmptyString(oauthObject.token);
   const refreshParts = parseGoogleRefreshToken(oauthObject.refresh);
+
+  if (isGoogleAuthPlaceholder(accessToken) || isGoogleAuthPlaceholder(refreshParts.refreshToken)) {
+    return null;
+  }
 
   if (!accessToken && !refreshParts.refreshToken) {
     return null;

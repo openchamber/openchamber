@@ -1,10 +1,46 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { configureOpenCodeCredentials } from '../../../opencode/auth.js';
-import { fetchGoogleQuota } from './index.js';
+import { configureOpenCodeCredentials, readOpenCodeCredentials } from '../../../opencode/auth.js';
+import { fetchGoogleQuota, isConfigured } from './index.js';
+import { listConfiguredQuotaProviders } from '../../providers/index.js';
 import { refreshAntigravityToken } from '../antigravity/api.js';
 
 const GEMINI_CLIENT_ID = '681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com';
 const ANTIGRAVITY_CLIENT_ID = '1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com';
+const COMMON_AUTH_PLACEHOLDER = 'common-auth-placeholder.google';
+
+const nativeGooglePlaceholderEntry = (overrides = {}) => ({
+  id: 'test-google', integrationID: 'google', label: 'default', active: true,
+  value: {
+    type: 'oauth', methodID: 'oauth', metadata: { commonAuthPlaceholder: true },
+    access: COMMON_AUTH_PLACEHOLDER,
+    refresh: COMMON_AUTH_PLACEHOLDER,
+    expires: Date.now() + 365 * 24 * 60 * 60 * 1000,
+    ...overrides,
+  },
+});
+
+const configureCredentials = (...entries) => configureOpenCodeCredentials({ list: async () => entries });
+
+const stubUnexpectedFetch = () => {
+  const requests = [];
+  vi.stubGlobal('fetch', async (url) => {
+    requests.push(String(url));
+    throw new Error('Unexpected Google request');
+  });
+  return requests;
+};
+
+const expectGooglePlaceholderRefused = async () => {
+  const requests = stubUnexpectedFetch();
+  const configured = isConfigured(await readOpenCodeCredentials());
+  const providers = await listConfiguredQuotaProviders();
+  const result = await fetchGoogleQuota();
+
+  expect(requests).toEqual([]);
+  expect(configured).toBe(false);
+  expect(providers).not.toContain('google');
+  expect(result).toMatchObject({ ok: false, configured: false, error: 'Not configured' });
+};
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -20,12 +56,14 @@ const configureLogin = (refresh = 'test-refresh|test-project', expires = 1) => {
   }] });
 };
 
-const stubGoogle = (exchange, { access = 'new-access', project = 'test-project' } = {}) => {
+const stubGoogle = (exchange, { access = 'new-access', project = 'test-project', refreshToken = 'test-refresh' } = {}) => {
   const clients = [];
+  const requests = [];
   vi.stubGlobal('fetch', async (url, options) => {
+    requests.push(String(url));
     if (url === 'https://oauth2.googleapis.com/token') {
       const body = new URLSearchParams(options.body);
-      expect(body.get('refresh_token')).toBe('test-refresh');
+      expect(body.get('refresh_token')).toBe(refreshToken);
       expect(body.get('grant_type')).toBe('refresh_token');
       expect(options.redirect).toBe('error');
       expect(options.signal).toBeInstanceOf(AbortSignal);
@@ -38,13 +76,81 @@ const stubGoogle = (exchange, { access = 'new-access', project = 'test-project' 
     if (url.endsWith(':retrieveUserQuota')) return Response.json({ buckets: [] });
     return Response.json({ models: { 'gemini-test': { quotaInfo: { remainingFraction: 0.75 } } } });
   });
-  return clients;
+  return { clients, requests };
 };
 
 describe('Google quota OAuth client compatibility', () => {
+  it('does not dispatch a native placeholder or fall through to google.oauth', async () => {
+    configureCredentials(nativeGooglePlaceholderEntry(), {
+      id: 'test-google-oauth-alias', integrationID: 'google.oauth', label: 'default', active: true,
+      value: {
+        type: 'oauth', methodID: 'oauth', metadata: {}, access: 'alias-access',
+        refresh: 'alias-refresh', expires: Date.now() + 365 * 24 * 60 * 60 * 1000,
+      },
+    });
+    await expectGooglePlaceholderRefused();
+  });
+
+  it('does not exchange a native placeholder after its access expires', async () => {
+    configureCredentials(nativeGooglePlaceholderEntry({ expires: 1 }));
+    await expectGooglePlaceholderRefused();
+  });
+
+  it('does not dispatch when only access starts with the placeholder prefix', async () => {
+    configureCredentials(nativeGooglePlaceholderEntry({ refresh: 'ordinary-refresh' }));
+    await expectGooglePlaceholderRefused();
+  });
+
+  it('does not exchange when only refresh starts with the placeholder prefix', async () => {
+    configureCredentials(nativeGooglePlaceholderEntry({ access: '', expires: 1 }));
+    await expectGooglePlaceholderRefused();
+  });
+
+  it('refuses the whole row when an otherwise-valid access token has a placeholder refresh', async () => {
+    configureCredentials(nativeGooglePlaceholderEntry({
+      access: 'ordinary-access',
+      refresh: COMMON_AUTH_PLACEHOLDER,
+      expires: Date.now() + 3_600_000,
+    }));
+    await expectGooglePlaceholderRefused();
+  });
+
+  it('accepts ordinary OAuth tokens with embedded placeholder text', async () => {
+    const accessToken = 'opaque.common-auth-placeholder.google.access';
+    configureCredentials(nativeGooglePlaceholderEntry({
+      methodID: 'synthetic-method',
+      access: accessToken,
+      refresh: 'test-refresh|test-project',
+      expires: Date.now() + 3_600_000,
+    }));
+    const accessRequests = stubGoogle(() => { throw new Error('Unexpected refresh'); }, { access: accessToken, project: 'test-project' });
+    const accessResult = await fetchGoogleQuota();
+    expect(accessResult.ok).toBe(true);
+    expect(accessResult.configured).toBe(true);
+    expect(accessRequests.clients).toEqual([]);
+    expect(accessRequests.requests).toHaveLength(2);
+
+    const refreshToken = 'opaque.common-auth-placeholder.google.refresh';
+    configureCredentials(nativeGooglePlaceholderEntry({
+      methodID: 'synthetic-method',
+      access: '',
+      refresh: refreshToken,
+      expires: 1,
+    }));
+    const refreshRequests = stubGoogle(
+      () => Response.json({ access_token: 'new-access' }),
+      { refreshToken, project: 'rising-fact-p41fc' },
+    );
+    const refreshResult = await fetchGoogleQuota();
+    expect(refreshResult.ok).toBe(true);
+    expect(refreshResult.configured).toBe(true);
+    expect(refreshRequests.clients).toEqual([GEMINI_CLIENT_ID]);
+    expect(refreshRequests.requests).toHaveLength(3);
+  });
+
   it('keeps Gemini CLI as the first client even for pipe-packed refresh tokens', async () => {
     configureLogin();
-    const clients = stubGoogle(() => Response.json({ access_token: 'new-access' }));
+    const { clients } = stubGoogle(() => Response.json({ access_token: 'new-access' }));
     const result = await fetchGoogleQuota();
     expect(result.ok).toBe(true);
     expect(result.usage.models['gemini/gemini-test'].windows.daily.usedPercent).toBe(25);
@@ -53,7 +159,7 @@ describe('Google quota OAuth client compatibility', () => {
 
   it('refreshes an ambiguous Antigravity login after Gemini rejects its client', async () => {
     configureLogin();
-    const clients = stubGoogle((client) => client === GEMINI_CLIENT_ID
+    const { clients } = stubGoogle((client) => client === GEMINI_CLIENT_ID
       ? Response.json({ error: 'unauthorized_client', error_description: 'Unauthorized' }, { status: 401 })
       : Response.json({ access_token: 'new-access' }));
     const result = await fetchGoogleQuota();
@@ -65,7 +171,7 @@ describe('Google quota OAuth client compatibility', () => {
 
   it('supports plain tokens and HTTP 400 client rejection without changing model keys', async () => {
     configureLogin('test-refresh');
-    const clients = stubGoogle((client) => client === GEMINI_CLIENT_ID
+    const { clients } = stubGoogle((client) => client === GEMINI_CLIENT_ID
       ? Response.json({ error: 'unauthorized_client' }, { status: 400 })
       : Response.json({ access_token: 'new-access' }), { project: 'rising-fact-p41fc' });
     const result = await fetchGoogleQuota();
@@ -76,9 +182,10 @@ describe('Google quota OAuth client compatibility', () => {
 
   it('uses a valid access token without exchanging the refresh token', async () => {
     configureLogin('test-refresh|test-project', Date.now() + 3_600_000);
-    const clients = stubGoogle(() => { throw new Error('Unexpected refresh'); }, { access: 'old-access' });
+    const { clients, requests } = stubGoogle(() => { throw new Error('Unexpected refresh'); }, { access: 'old-access' });
     expect((await fetchGoogleQuota()).ok).toBe(true);
     expect(clients).toEqual([]);
+    expect(requests).toHaveLength(2);
   });
 
   const excludedFailures = [
@@ -161,7 +268,7 @@ describe('Google quota OAuth client compatibility', () => {
   for (const status of [200, 401]) {
     it(`preserves a body transport failure after HTTP ${status} headers`, async () => {
       configureLogin();
-      const clients = stubGoogle(() => new Response(new ReadableStream({
+      const { clients } = stubGoogle(() => new Response(new ReadableStream({
         start(controller) { controller.error(new Error('sensitive-response')); },
       }), { status }));
       const result = await fetchGoogleQuota();
@@ -174,7 +281,7 @@ describe('Google quota OAuth client compatibility', () => {
 
   it('preserves a body timeout after success headers', async () => {
     configureLogin();
-    const clients = stubGoogle(() => new Response(new ReadableStream({
+    const { clients } = stubGoogle(() => new Response(new ReadableStream({
       start(controller) { controller.error(new DOMException('sensitive-response', 'TimeoutError')); },
     })));
     const result = await fetchGoogleQuota();
@@ -189,7 +296,7 @@ describe('Google quota OAuth client compatibility', () => {
       expect(milliseconds).toBe(15000);
       return nativeTimeout(1);
     });
-    const clients = stubGoogle((_client, options) => new Response(new ReadableStream({
+    const { clients } = stubGoogle((_client, options) => new Response(new ReadableStream({
       start(controller) {
         options.signal.addEventListener('abort', () => controller.error(new DOMException('sensitive-response', 'AbortError')), { once: true });
       },
@@ -202,12 +309,12 @@ describe('Google quota OAuth client compatibility', () => {
 
   it('reads the currently active login again after an account switch', async () => {
     configureLogin();
-    const clients = stubGoogle((client) => client === GEMINI_CLIENT_ID
+    const { clients } = stubGoogle((client) => client === GEMINI_CLIENT_ID
       ? Response.json({ error: 'unauthorized_client' }, { status: 401 })
       : Response.json({ access_token: 'new-access' }));
     expect((await fetchGoogleQuota()).ok).toBe(true);
     configureLogin('test-refresh|test-project', Date.now() + 3_600_000);
-    const switchedClients = stubGoogle(() => { throw new Error('Unexpected refresh'); }, { access: 'old-access' });
+    const { clients: switchedClients } = stubGoogle(() => { throw new Error('Unexpected refresh'); }, { access: 'old-access' });
     expect((await fetchGoogleQuota()).ok).toBe(true);
     expect(clients).toEqual([GEMINI_CLIENT_ID, ANTIGRAVITY_CLIENT_ID]);
     expect(switchedClients).toEqual([]);
@@ -235,13 +342,13 @@ describe('Google quota OAuth client compatibility', () => {
   });
 
   it('preserves direct Antigravity refresh without probing Gemini', async () => {
-    const clients = stubGoogle(() => Response.json({ access_token: 'new-access' }));
+    const { clients } = stubGoogle(() => Response.json({ access_token: 'new-access' }));
     expect(await refreshAntigravityToken('test-refresh')).toBe('new-access');
     expect(clients).toEqual([ANTIGRAVITY_CLIENT_ID]);
   });
 
   it('preserves direct Antigravity refresh failure as null', async () => {
-    const clients = stubGoogle(() => Response.json({ error: 'unauthorized_client' }, { status: 401 }));
+    const { clients } = stubGoogle(() => Response.json({ error: 'unauthorized_client' }, { status: 401 }));
     expect(await refreshAntigravityToken('test-refresh')).toBeNull();
     expect(clients).toEqual([ANTIGRAVITY_CLIENT_ID]);
   });
