@@ -749,6 +749,12 @@ The branch list used to ask every remote by default, so a branch a collaborator 
 - Worktree bootstrap retries transient `index.lock` conflicts. If the lock remains byte-for-byte and metadata-identical across the retry window, it is treated as stale, removed, and population continues automatically; changing locks are left untouched and reported as failures.
 - Worktree population enables Git `core.longpaths` (local repo config plus `-c core.longpaths=true` on `git reset --hard`) so deeply nested checkouts under the managed data-dir worktree root do not fail on Windows MAX_PATH with "Filename too long". The reset disables hooks, lazy fetch, network protocols, recursive submodules, LFS smudge, and every effective executable content filter before materializing checkout files. Path-component limits that the filesystem itself rejects still fail bootstrap, with a clearer path-length guidance message.
 
+#### Why missing failed checkouts are pruned by path
+
+Failed records protect incomplete checkouts, so capacity eviction keeps them. Fast-create rollback removes the failed attempt's durable record once its empty directory is gone, but keeps that failure in memory: the attempt's watcher and its git-ready and setup-ready waiters must still read `failed`, with the recorded code and sentence, even when rollback finished before their first poll. Reads never prune such a rolled-back failure; the next bootstrap of the path replaces it, and a restart forgets it. Status reads and the first proxy-gate load prune any other failed record when no local bootstrap is active and `lstat` confirms `ENOENT`. The store checks the current status and path under its write lock; a newer pending record, an existing entry (including a dangling symlink), or a filesystem error preserves the record. Memory is cleared only after durable cleanup succeeds and only if no newer state replaced it.
+
+The store persists path fingerprints, so it cannot scan old records for missing directories at startup. Old failures are reclaimed when their path is read. A directory recreated before that read keeps its repair blocker because its previous checkout cannot be distinguished safely.
+
 ### Log Response
 - `all`: Array of commit objects with hash, date, message, author info, stats.
 - `latest`: Latest commit object or null.

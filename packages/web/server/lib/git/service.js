@@ -116,6 +116,45 @@ const clearWorktreeBootstrapState = async (directory, bootstrapStore) => {
   worktreeBootstrapState.delete(key);
 };
 
+// Failures of creation attempts this process rolled back. Their durable record
+// is already gone, but the attempt's watcher and waiters still have to read the
+// failure, so reads never prune these; the next bootstrap of the path replaces
+// them, and a restart forgets them.
+const rolledBackAttemptFailures = new WeakSet();
+
+const isReclaimableFailure = (state) => state?.status === WORKTREE_BOOTSTRAP_FAILED
+  && !rolledBackAttemptFailures.has(state);
+
+const forgetMissingWorktreeFailure = async (key, bootstrapStore) => {
+  const current = worktreeBootstrapState.get(key);
+  if (rolledBackAttemptFailures.has(current)) return false;
+  if (bootstrapStore) {
+    if (!await bootstrapStore.remove(key, { ifMissingFailed: true })) return false;
+  } else {
+    if (current?.status !== WORKTREE_BOOTSTRAP_FAILED) return false;
+    try {
+      await fsp.lstat(key);
+      return false;
+    } catch (error) {
+      if (error?.code !== 'ENOENT') throw error;
+    }
+  }
+  // A new bootstrap may have published state while removal waited for the store.
+  if (worktreeBootstrapState.get(key) === current) worktreeBootstrapState.delete(key);
+  return true;
+};
+
+// Fast creation removed the directory of the attempt that just failed. Its
+// durable record goes, so the store's capacity and its checkout gate are not
+// held by a path that no longer exists, while the failure stays in memory for
+// the attempt's watcher and waiters.
+const releaseRolledBackAttemptFailure = async (key, bootstrapStore) => {
+  const current = worktreeBootstrapState.get(key);
+  if (current?.status !== WORKTREE_BOOTSTRAP_FAILED) return;
+  rolledBackAttemptFailures.add(current);
+  if (bootstrapStore) await bootstrapStore.remove(key, { ifMissingFailed: true });
+};
+
 const trackWorktreeBootstrapTask = (directory, task) => {
   const key = toBootstrapStateKey(directory);
   if (!key) {
@@ -2257,7 +2296,7 @@ const isAttachedGitWorktreeDirectory = async (directory) => {
   }
 };
 
-const cleanupFailedFastWorktreeCreate = async (context, candidate) => {
+const cleanupFailedFastWorktreeCreate = async (context, candidate, bootstrapStore) => {
   const candidateDirectory = path.resolve(candidate.directory);
   const worktreeRoot = path.resolve(context.worktreeRoot);
   const isInsideWorktreeRoot = isInsideOrSameDirectory(worktreeRoot, candidateDirectory) && candidateDirectory !== worktreeRoot;
@@ -2267,16 +2306,26 @@ const cleanupFailedFastWorktreeCreate = async (context, candidate) => {
     return;
   }
 
+  // The failure was recorded under the canonical path while the directory existed.
+  const key = await toCanonicalBootstrapStateKey(candidateDirectory);
+  let directoryGone = false;
   try {
     const entries = await fsp.readdir(candidateDirectory);
     if (entries.length === 0) {
       await fsp.rmdir(candidateDirectory);
+      directoryGone = true;
     }
   } catch (error) {
-    if (!['ENOENT', 'ENOTEMPTY', 'EEXIST'].includes(error?.code)) {
+    if (error?.code === 'ENOENT') {
+      directoryGone = true;
+    } else if (!['ENOTEMPTY', 'EEXIST'].includes(error?.code)) {
       console.warn('Failed to clean up empty worktree directory after creation failure:', error instanceof Error ? error.message : String(error));
     }
   }
+  if (!directoryGone) return;
+  await releaseRolledBackAttemptFailure(key, bootstrapStore).catch((error) => {
+    console.warn('Failed to release the bootstrap record of a rolled-back worktree:', error instanceof Error ? error.message : String(error));
+  });
 };
 
 // `projectDirectory` is the directory the worktree was requested from: the user
@@ -6399,7 +6448,7 @@ export async function createWorktree(directory, input = {}, serverOptions = {}) 
         failureCode,
         serverOptions.bootstrapStore,
       ).catch(() => {});
-      await cleanupFailedFastWorktreeCreate(context, candidate);
+      await cleanupFailedFastWorktreeCreate(context, candidate, serverOptions.bootstrapStore);
       console.warn('Background worktree creation failed:', error instanceof Error ? error.message : String(error));
       })
       : null;
@@ -6477,8 +6526,18 @@ const notBootstrappedHere = () => createWorktreeBootstrapState(
 // A persisted record becomes this process's state. One left `pending` with no
 // live bootstrap behind it is a crash mid-population and is inspected.
 const adoptPersistedBootstrapState = async (key, persisted, bootstrapStore) => {
+  const current = worktreeBootstrapState.get(key);
+  // The record a rollback could not release still describes the attempt
+  // reported from memory; pruning it must not erase that report.
+  if (persisted.status === WORKTREE_BOOTSTRAP_FAILED && rolledBackAttemptFailures.has(current)) {
+    return current;
+  }
   if (persisted.status !== WORKTREE_BOOTSTRAP_PENDING || await hasActiveWorktreeBootstrap(key)) {
     worktreeBootstrapState.set(key, persisted);
+    if (persisted.status === WORKTREE_BOOTSTRAP_FAILED && !await hasActiveWorktreeBootstrap(key)
+      && await forgetMissingWorktreeFailure(key, bootstrapStore)) {
+      return worktreeBootstrapState.get(key) ?? notBootstrappedHere();
+    }
     return persisted;
   }
   const blocker = await inspectWorktreeBootstrapRecovery(key);
@@ -6497,14 +6556,24 @@ export async function getWorktreeBootstrapStatus(directory, { bootstrapStore } =
     try {
       const persisted = await bootstrapStore.read(key);
       if (!persisted) {
+        if (isReclaimableFailure(worktreeBootstrapState.get(key)) && !await hasActiveWorktreeBootstrap(key)) {
+          await forgetMissingWorktreeFailure(key, bootstrapStore);
+        }
         return worktreeBootstrapState.get(key) ?? notBootstrappedHere();
       }
       return await adoptPersistedBootstrapState(key, persisted, bootstrapStore);
     } catch {
+      // The rolled-back attempt's own failure beats a guess from its missing
+      // directory, which a later read would prune as a stale record.
+      const current = worktreeBootstrapState.get(key);
+      if (rolledBackAttemptFailures.has(current)) return current;
       const blocker = await inspectWorktreeBootstrapRecovery(key);
       worktreeBootstrapState.set(key, blocker);
       return blocker;
     }
+  }
+  if (isReclaimableFailure(worktreeBootstrapState.get(key)) && !await hasActiveWorktreeBootstrap(key)) {
+    await forgetMissingWorktreeFailure(key);
   }
   return worktreeBootstrapState.get(key) ?? notBootstrappedHere();
 }
