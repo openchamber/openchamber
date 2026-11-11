@@ -41,6 +41,7 @@ import { useI18n, type I18nKey } from '@/lib/i18n';
 import { updateDesktopSettings } from '@/lib/persistence';
 import { sessionEvents } from '@/lib/sessionEvents';
 import { cn } from '@/lib/utils';
+import { useConfigStore } from '@/stores/useConfigStore';
 import { refreshGlobalSessions, useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { resolveSidebarGrouping, useSessionDisplayStore, type ProjectSortOrder } from '@/stores/useSessionDisplayStore';
@@ -248,6 +249,20 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
     // intentionally only on open transition — session events keep the list current after that
     // oxlint-disable-next-line react-hooks/exhaustive-deps
   }, [listActive]);
+
+  // Events sent while the stream was down are lost, so a list on screen when
+  // it comes back (the iPad's sidebar, a drawer left open in the background)
+  // reads again, as opening it does.
+  const connectionPhase = useConfigStore((state) => state.connectionPhase);
+  const previousConnectionPhaseRef = React.useRef(connectionPhase);
+  React.useEffect(() => {
+    const reconnected = previousConnectionPhaseRef.current === 'reconnecting' && connectionPhase === 'connected';
+    previousConnectionPhaseRef.current = connectionPhase;
+    if (!reconnected || !listActive) return;
+    void refreshGlobalSessions(liveSessions).then(() => seedGlobalSessionStatusFromHost());
+    // only on the reconnect edge
+    // oxlint-disable-next-line react-hooks/exhaustive-deps
+  }, [connectionPhase]);
 
   const close = React.useCallback(() => onOpenChange(false), [onOpenChange]);
   const sidebarActions = React.useMemo<MobileSidebarActions>(() => ({

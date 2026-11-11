@@ -94,7 +94,7 @@ import { markConfigCatalogStale, useConfigStore } from "@/stores/useConfigStore"
 import { refreshStoresForCatalogKinds } from "@/stores/catalogRefresh"
 import { useMcpStore } from "@/stores/useMcpStore"
 import { resolveGlobalSessionDirectory, useGlobalSessionsStore } from "@/stores/useGlobalSessionsStore"
-import { spaceIdOfDirectory } from "@/lib/spaces/space-route"
+import { isSpaceDirectory, spaceIdOfDirectory } from "@/lib/spaces/space-route"
 import { isDirectoryOfKnownSpace, isSpaceDirectoryStopped, isSpaceStopped, knownSpaceIds, refreshSpacesJourney, spaceIdsGone, spacesRuntimeGeneration, useSpacesStore } from "@/lib/spaces/spaces-store"
 import { cleanupPersistedSessionState } from "./session-deletion-cleanup"
 import { toast } from "@/components/ui"
@@ -105,9 +105,11 @@ import {
   applyGlobalSessionStatusEvent,
   applyGlobalSessionStatusEvents,
   applyGlobalSessionStatusSnapshot,
+  buildActiveListReconcileEvents,
   getDirectoryOwnedSessionIds,
   setSessionParentResolver,
   useGlobalSessionStatusStore,
+  watchGlobalSessionStatusWrites,
 } from "./global-session-status"
 import { applyGlobalBlockingRequestEvents, applyWaitingPageEvent, settledPageKeys, useGlobalBlockingRequestsStore } from "./global-blocking-requests"
 import { requestHostTurnStarts } from "./host-session-status-seed"
@@ -1714,16 +1716,37 @@ async function resyncDirectoryAfterReconnect(
 }
 
 /**
- * A deferred store that looked idle before a stream gap may own a session
- * that started a turn, or asked a permission or form, during it. OpenCode's
- * active-session list is global, so one read finds those stores without
- * reading any directory. A failed read leaves them deferred as before.
+ * Events lost in a stream gap leave activity that only a re-read corrects.
+ * OpenCode's active-session list is global and starts no location, so one
+ * read answers for every directory:
+ * - the cross-directory status index settles turns that ended during the gap
+ *   and raises turns that began in it, for directories no store resync covers
+ *   (every project but the open one on mobile);
+ * - a deferred store that looked idle before the gap but owns a session that
+ *   started a turn, or asked a permission or form, during it re-reads.
+ * Isolated spaces are not in the host's list and keep their own recovery. A
+ * failed read changes nothing.
  */
-async function refreshStoresActiveAfterGap(childStores: ChildStoreManager): Promise<void> {
+export async function reconcileActivityAfterGap(childStores: ChildStoreManager): Promise<void> {
   const runtime = { key: getRuntimeKey(), sdk: opencodeClient.getSdkClient() }
-  const active = await opencodeClient.getActiveSessionStatuses()
-  if (!active || !isCatalogRuntimeCurrent(runtime)) return
-  childStores.refreshStaleDirectoriesWithActiveSessions(new Set(Object.keys(active)))
+  const writes = watchGlobalSessionStatusWrites()
+  try {
+    const active = await opencodeClient.getActiveSessionStatuses()
+    if (!active || !isCatalogRuntimeCurrent(runtime)) return
+    const activeSessionIds = new Set(Object.keys(active))
+    const events = buildActiveListReconcileEvents(activeSessionIds, {
+      skip: (sessionId) => writes.touched.has(sessionId) || hasPromptInFlight(sessionId),
+      covers: (directory) => !isSpaceDirectory(directory),
+      resolveDirectory: (sessionId) => {
+        const session = useGlobalSessionsStore.getState().entityById.get(sessionId)
+        return session ? resolveGlobalSessionDirectory(session) : null
+      },
+    })
+    for (const [directory, payloads] of events) applyGlobalSessionStatusEvents(directory, payloads)
+    childStores.refreshStaleDirectoriesWithActiveSessions(activeSessionIds)
+  } finally {
+    writes.stop()
+  }
 }
 
 type CatalogRuntime = { key: string; sdk: ReturnType<typeof opencodeClient.getSdkClient> }
@@ -2279,7 +2302,7 @@ export function handleEvent(
           void runBackgroundNetworkTask(() => refreshBackgroundShells(dir, (target) => opencodeClient.listRunningShells(target)))
             .catch(() => undefined)
         }
-        void refreshStoresActiveAfterGap(childStores)
+        void reconcileActivityAfterGap(childStores)
       }
     }
     return
@@ -3285,6 +3308,7 @@ export function SyncProvider(props: {
       // tail refreshes below count as that revalidation.
       messageLoader.markHistoryStale()
       for (const dir of childStores.children.keys()) triggerDirectoryResync(dir, reason)
+      void reconcileActivityAfterGap(childStores)
     }
     const pipeline = createEventPipeline({
       sdk: props.sdk,
