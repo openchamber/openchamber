@@ -1,6 +1,7 @@
 import React from 'react';
 import { TooltipLabelWithShortcut } from '@/components/ui/action-toolbar';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { scrollTabsWithWheel } from '@/components/ui/tab-strip-wheel';
 import { formatShortcutForDisplay, getEffectiveShortcutCombo, getEffectiveShortcutPrefix, UNASSIGNED_SHORTCUT } from '@/lib/shortcuts';
 import { useSessionTurnActivity } from '@/sync/global-session-status';
 import { SessionActivityIndicator } from '@/components/session/SessionActivityIndicator';
@@ -51,22 +52,6 @@ import { SessionProjectIcon } from './SessionProjectIcon';
 import { SESSION_TAB_EDGE_FADE_PX, sessionTabRevealDelta } from './sessionTabReveal';
 
 const restrictToXAxis: Modifier = ({ transform }) => ({ ...transform, y: 0 });
-
-// Firefox can report wheel deltas in lines rather than pixels.
-const WHEEL_LINE_PIXELS = 16;
-
-/**
- * Mouse wheels scroll vertically, so the strip maps vertical wheel movement to
- * horizontal scrolling. Horizontal gestures (trackpad swipes, Shift+wheel)
- * already scroll it natively, and Ctrl/Cmd+wheel stays with zoom.
- */
-const scrollTabsWithWheel = (event: React.WheelEvent<HTMLDivElement>) => {
-  if (event.shiftKey || event.ctrlKey || event.metaKey) return;
-  if (Math.abs(event.deltaY) <= Math.abs(event.deltaX)) return;
-  const delta = event.deltaMode === WheelEvent.DOM_DELTA_LINE ? event.deltaY * WHEEL_LINE_PIXELS : event.deltaY;
-  // Wheel down moves toward the later tabs, which lie to the left in RTL.
-  event.currentTarget.scrollLeft += isRightToLeft(event.currentTarget) ? -delta : delta;
-};
 
 type SessionTab = { id: string; session: Session };
 

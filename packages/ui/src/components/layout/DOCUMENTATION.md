@@ -1,7 +1,6 @@
 # Layout
 
-This file covers the header's session tabs. The tab store, its scopes and
-seeding are owned by `stores/DOCUMENTATION.md` (`useSessionTabsStore`).
+Session tab storage, scopes and seeding belong to `useSessionTabsStore`, documented in `stores/DOCUMENTATION.md`.
 
 ## Header session tabs
 
@@ -42,3 +41,7 @@ setting turned off keep the plain session title (`Header.tsx`).
   neighbour, and with nothing to close it closes the window. Web keeps the
   configurable `close_session_tab` shortcut (Alt+W by default), since the
   browser owns Cmd/Ctrl+W.
+
+## Context panel file tabs
+
+`ContextPanel` owns the open-file strip in each workspace zone. Its editor mounts `FilesView` in editor-only mode, which omits that view's own tab row. The file strip enables `SortableTabsStrip`'s `scrollWithWheel` option, so a regular vertical mouse wheel reaches tabs past either edge without changing the open file or showing a scrollbar. Other context panel tab modes keep their existing wheel behavior.

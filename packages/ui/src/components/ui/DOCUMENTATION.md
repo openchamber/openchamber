@@ -29,8 +29,13 @@ This folder owns runtime-independent controls and their Base UI integration, inc
 - On a phone `DialogContent` is a bottom sheet: `mobile.css` shapes every dialog through `data-slot`, so callers keep one markup for desktop and phone, and the layer's keyboard rider follows the whole keyboard. Tablet layouts and a dialog with `items-start` on its layer keep their centred window.
 - Every scroller a user sees draws the app's overlay scrollbar, never the native one: `ScrollableOverlay` for a scroller the caller renders, `AttachedOverlayScrollbar` for one a library creates (CodeMirror's `.cm-scroller`), `PopupOverlayScrollbar` for a popup that scrolls itself (`DialogContent`, `DropdownMenuContent`, `ContextMenuContent`, the framed `Textarea`). A new `overflow-auto` element goes through one of them. Only fallback screens after a crash keep the native bar, so they depend on nothing that may have failed.
 - `OverlayScrollbar` draws a thumb only on an axis whose computed overflow is `auto` or `scroll`: a scroller its owner switched to `hidden`, or a menu left at `visible`, overflows without scrolling and shows none.
+- Tab strips keep their scrollbar hidden. `SortableTabsStrip` maps vertical mouse wheels to horizontal scrolling only when `scrollWithWheel` is enabled and the layout is scrollable. Scrolling never selects a tab. Horizontal gestures, Shift+wheel and Ctrl/Cmd+wheel keep their native behavior. The shared `tab-strip-wheel.ts` handler also serves the header session tabs.
 
 ## Decisions
+
+### Why wheel scrolling checks the DOM target
+
+React wheel events from a tab's portalled context menu bubble through the strip even while the pointer is over the popup. The shared wheel handler checks DOM containment so scrolling the menu leaves the tabs behind it unchanged.
 
 ### Which tooltip a control takes
 

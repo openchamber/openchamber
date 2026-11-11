@@ -1057,6 +1057,7 @@ export const ContextPanel: React.FC<{ zone?: ContextZone }> = ({ zone = 'right' 
             if (directoryKey) pinContextPanelTab(directoryKey, tabID);
           }}
           layoutMode="scrollable"
+          scrollWithWheel={isFileTabActive}
           variant="default"
           tabContextMenu={renderTabContextMenu}
           onTabDragOut={handleTabDragOut}
