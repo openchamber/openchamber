@@ -276,6 +276,23 @@ button,
   text-align: start;
 }
 
+/* `rehypeTextDirection` gives a block with letters the direction of most of
+   its words. Plaintext would ignore it and go by the first letter again, so
+   these blocks isolate on their own `dir`. `dir="auto"` stays plaintext. */
+.markdown-content :where(p, h1, h2, h3, h4, h5, h6, li, blockquote):where([dir="ltr"], [dir="rtl"]) {
+  unicode-bidi: isolate;
+}
+
+/* A plain-text message line opens with the mark of its majority direction
+   (`plainTextLineDirection.tsx`), so its plaintext container resolves the line
+   by its words. Generated content stays out of copied text. */
+[data-oc-line-dir="rtl"]::before {
+  content: "\200F";
+}
+[data-oc-line-dir="ltr"]::before {
+  content: "\200E";
+}
+
 /* A text field takes the direction of what is typed into it, line by line in a
    textarea, so Persian in an English interface runs from the right. An empty
    field keeps the interface's direction: with plaintext on a field showing its

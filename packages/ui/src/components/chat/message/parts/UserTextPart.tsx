@@ -33,6 +33,7 @@ import { extractTerminalContexts } from '@/lib/messages/terminalContext';
 import { readContextPart } from '@/lib/messages/contextParts';
 import UserContextPart from './UserContextPart';
 import { SessionMentionChipsContext, withSessionMentionChips, type SessionMentionChips } from './sessionMentionChips';
+import { withLineDirectionMarks } from './plainTextLineDirection';
 import { appOwnOrigins } from '@/lib/router/appOrigins';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { useGuestLinkRules } from '@/lib/guests/links';
@@ -346,7 +347,7 @@ const UserTextPart: React.FC<UserTextPartProps> = ({
     }, [agentMention, openSkill, skillByName, textContent]);
 
     // Attachment citations and mentioned sessions become chips in the plain-text path too.
-    const plainTextContent = React.useMemo(() => glueChipPunctuation(
+    const plainTextContent = React.useMemo(() => withLineDirectionMarks(glueChipPunctuation(
         attachmentFilenames.length === 0 && sessionMentionChips.size === 0 ? plainTextNodes : plainTextNodes.flatMap((node, nodeIndex) => (
             React.isValidElement<unknown>(node)
                 ? node
@@ -357,7 +358,7 @@ const UserTextPart: React.FC<UserTextPartProps> = ({
                 ))
         )),
         'chip-glue',
-    ), [attachmentFilenames, isOpenableAttachment, plainTextNodes, sessionMentionChips]);
+    ), 'line-dir'), [attachmentFilenames, isOpenableAttachment, plainTextNodes, sessionMentionChips]);
 
     if (contextPayload) {
         return (
