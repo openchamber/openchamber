@@ -1,4 +1,5 @@
 import { createRealpathCache } from '../path-realpath-cache.js';
+import { canonicalDirectoryPath } from './canonical-path.js';
 import { redactGitText } from '../git/redaction.js';
 import { resolveByteRange } from './byte-range.js';
 import { injectPreviewBridge } from './preview-bridge.js';
@@ -240,23 +241,6 @@ const isPathWithinRoot = (resolvedPath, rootPath, path, os) => {
     return false;
   }
   return true;
-};
-
-// A chats root may not exist until the first draft. Resolve its existing
-// ancestor so both that first mkdir and later OpenCode sessions use disk casing.
-const canonicalDirectoryPath = async (directory, fsPromises, path) => {
-  let ancestor = path.resolve(directory);
-  const missing = [];
-  for (;;) {
-    try {
-      return path.join(await fsPromises.realpath(ancestor), ...missing);
-    } catch (error) {
-      const parent = path.dirname(ancestor);
-      if (error.code !== 'ENOENT' || parent === ancestor) throw error;
-      missing.unshift(path.basename(ancestor));
-      ancestor = parent;
-    }
-  }
 };
 
 const resolveWorkspacePath = ({ targetPath, baseDirectory, path, os, normalizeDirectoryPath, managedRoots }) => {

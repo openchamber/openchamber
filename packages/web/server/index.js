@@ -113,6 +113,7 @@ import { applyOwnedArchiveState } from './lib/opencode/proxy.js';
 import { createScheduledTasksRuntime } from './lib/scheduled-tasks/runtime.js';
 import { resolveSessionDefaults } from './lib/scheduled-tasks/session-defaults.js';
 import { createChatsScope } from './lib/scheduled-tasks/chats-scope.js';
+import { createChatDirectoryCleanupRuntime } from './lib/chat-directories/runtime.js';
 import { createUnregisteredScheduledWorktreeBridge } from './lib/scheduled-tasks/worktree-bridge.js';
 import { createServerStartupRuntime } from './lib/opencode/server-startup-runtime.js';
 import { createTunnelWiringRuntime } from './lib/opencode/tunnel-wiring-runtime.js';
@@ -1504,6 +1505,12 @@ void sessionTodosRuntime.start().catch((error) => {
   console.warn('[session-todos] failed to start:', error?.message ?? error);
 });
 
+const chatDirectoryCleanupRuntime = createChatDirectoryCleanupRuntime({
+  roots: [OPENCHAMBER_CHATS_DIR, path.join(OPENCHAMBER_DEFAULT_CONFIG_ROOT, 'chats')],
+  createClient: () => openCodeSessionClient(''),
+  getOwner: () => ENV_SKIP_OPENCODE_START || isExternalOpenCode || isShuttingDown ? null : openCodeProcess,
+});
+
 const openCodeWatcherRuntime = createOpenCodeWatcherRuntime({
   waitForOpenCodePort: (...args) => waitForOpenCodePort(...args),
   buildOpenCodeUrl,
@@ -1511,6 +1518,7 @@ const openCodeWatcherRuntime = createOpenCodeWatcherRuntime({
   parseSseDataPayload: (...args) => parseSseDataPayload(...args),
   globalEventHub: globalMessageStreamHub,
   onPayload: (payload, { spaceId }) => {
+    if (!spaceId) void chatDirectoryCleanupRuntime.processPayload(payload);
     maybeCacheSessionInfoFromEvent(payload, { spaceId });
     void maybeSendPushForTrigger(payload, { spaceId });
     sessionRuntime.processOpenCodeSsePayload(payload, { spaceId });
@@ -1518,6 +1526,7 @@ const openCodeWatcherRuntime = createOpenCodeWatcherRuntime({
   // Turns already running when the stream (re)connects sent no start this
   // server saw; OpenCode's running list names them.
   onConnect: async () => {
+    void chatDirectoryCleanupRuntime.onConnected();
     const readAt = Date.now();
     const statuses = await createSessionActivityProbe({ buildOpenCodeUrl, getOpenCodeAuthHeaders }).fetchActiveSessionStatuses();
     if (statuses) sessionRuntime.adoptRunningSessions(Object.keys(statuses), readAt);
@@ -2457,6 +2466,7 @@ const gracefulShutdownRuntime = createGracefulShutdownRuntime({
   },
   syncToHmrState,
   openCodeWatcherRuntime,
+  chatDirectoryCleanupRuntime,
   sessionAssistRuntime,
   sessionWorkRuntime,
   sessionGoalRuntime,
