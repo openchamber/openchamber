@@ -836,7 +836,7 @@ Current consumers:
 - `SessionSidebar.tsx`
 - `SessionNodeItem.tsx`
 - `Header.tsx`
-- agent/session activity surfaces using `useGlobalSessionStatus()` / `useAllSessionStatuses()`
+- agent/session activity surfaces using `useGlobalSessionStatusStore` / `useAllSessionStatuses()`
 
 A cross-project session list (a picker or panel listing every project's sessions) merges two sources, as `MobileSessionsSheet.tsx` does: `useGlobalSessionsStore().activeSessions`, replaced by the live copy from `useAllLiveSessions()` where one exists, plus live sessions the global list does not hold yet. `useSessions()` is scoped to one directory and the global list alone does not cover every initialized directory. Call `refreshGlobalSessions()` or `ensureGlobalSessionsLoaded()` on open for projects not bootstrapped, and map a session to a project by prefix-matching its directory against the project root and its worktree paths (`pathBelongsToRoot`), not by an exact directory lookup.
 

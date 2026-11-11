@@ -9,7 +9,7 @@ import { resolveSessionFolderOwnerKey } from './sessionFolderIdentity';
 import { createSessionOwnershipIndex } from './sessionOwnership';
 
 /** Where a session sits in the sidebar, for a session menu opened outside it. */
-export type SessionMenuPlacement = {
+type SessionMenuPlacement = {
   projectId: string | null;
   folderOwnerKey: string | null;
   /** Its sidebar row is a work of its own, so the menu offers Track / Done. */
