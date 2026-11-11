@@ -47,7 +47,7 @@
     "@dnd-kit/utilities": "^3.2.2",
     "@ironcalc/wasm": "0.9.1",
     "@jvmr/pptx-to-html": "1.1.2",
-    "@legendapp/list": "3.7.1",
+    "@legendapp/list": "3.7.2",
     "@lezer/highlight": "^1.2.3",
     "@openchamber/sdk": "workspace:*",
     "@opencode/client": "2.2.7",
