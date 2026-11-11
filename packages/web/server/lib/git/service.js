@@ -3442,6 +3442,7 @@ async function readStatus(normalizedDirectory, lightMode) {
         path: f.path,
         index: f.index,
         working_dir: f.working_dir,
+        previousPath: f.from || undefined,
       })),
       isClean: status.isClean(),
       diffStats: lightMode ? undefined : diffStats,
@@ -3474,12 +3475,12 @@ const getNoIndexDiff = async (repoRoot, repoPath, contextLines) => {
   throw new Error(result.stderr || result.message || 'Failed to get untracked Git diff');
 };
 
-export async function getDiff(directory, { path: filePath, staged = false, contextLines = 3 } = {}) {
+export async function getDiff(directory, { path: filePath, staged = false, contextLines = 3, previousPath } = {}) {
   const context = await createRepositoryGitContext(directory);
   const fileContext = filePath
     ? await resolveGitFileContext(context.directoryPath, context.directoryGit, filePath, context.repoRoot)
     : null;
-  return readDiff(context, fileContext, { staged, contextLines });
+  return readDiff(context, fileContext, { staged, contextLines, previousPath });
 }
 
 /**
@@ -3487,10 +3488,10 @@ export async function getDiff(directory, { path: filePath, staged = false, conte
  * empty when only untracked files changed inside it, so callers need the state
  * to show anything truthful.
  */
-export async function getPathDiff(directory, { path: filePath, staged = false, contextLines = 3 } = {}) {
+export async function getPathDiff(directory, { path: filePath, staged = false, contextLines = 3, previousPath } = {}) {
   const context = await createRepositoryGitContext(directory);
   const fileContext = await resolveGitFileContext(context.directoryPath, context.directoryGit, filePath, context.repoRoot);
-  const diff = await readDiff(context, fileContext, { staged, contextLines });
+  const diff = await readDiff(context, fileContext, { staged, contextLines, previousPath });
   if (!fileContext.isSubmodule) return { diff, submodule: null };
   return { diff, submodule: await readSubmoduleState(context.repoRoot, fileContext) };
 }
@@ -3532,7 +3533,7 @@ export async function getPathDiffs(directory, { paths: filePaths = [], staged = 
   return results;
 }
 
-async function readDiff({ repoRoot, git }, fileContext, { staged, contextLines }) {
+async function readDiff({ repoRoot, git }, fileContext, { staged, contextLines, previousPath }) {
   try {
     const args = ['diff', '--no-color', '--full-index', '--no-ext-diff', '--src-prefix=a/', '--dst-prefix=b/'];
 
@@ -3545,7 +3546,8 @@ async function readDiff({ repoRoot, git }, fileContext, { staged, contextLines }
     }
 
     if (fileContext) {
-      args.push('--', fileContext.repoPath);
+      // A rename needs both paths named; the destination alone reads as a new file.
+      args.push('--', ...[previousPath, fileContext.repoPath].filter(Boolean).map((value) => `:(literal)${value}`));
     }
 
     const diff = await git.raw(args);
@@ -3702,7 +3704,7 @@ async function runWorkingTreeRangeDiff(context, baseRef, headRef, args, paths = 
     }
     return { output, mergeBase };
   };
-  const untracked = await git.raw(['ls-files', '--others', '--exclude-standard', '-z', '--', ...paths]);
+  const untracked = await git.raw(['--literal-pathspecs', 'ls-files', '--others', '--exclude-standard', '-z', '--', ...paths]);
   if (!untracked) return readDiff(git);
 
   const temporaryDirectory = await fsp.mkdtemp(path.join(os.tmpdir(), 'openchamber-branch-diff-'));
@@ -3722,7 +3724,7 @@ async function runWorkingTreeRangeDiff(context, baseRef, headRef, args, paths = 
   }
 }
 
-export async function getRangeDiff(directory, { base, head, path: filePath, contextLines = 3, includeWorkingTree = false } = {}) {
+export async function getRangeDiff(directory, { base, head, path: filePath, previousPath, contextLines = 3, includeWorkingTree = false } = {}) {
   const { directoryPath, directoryGit, repoRoot, git } = await createRepositoryGitContext(directory);
   const baseRef = typeof base === 'string' ? base.trim() : '';
   const headRef = typeof head === 'string' ? head.trim() : '';
@@ -3732,7 +3734,8 @@ export async function getRangeDiff(directory, { base, head, path: filePath, cont
 
   await assertRangeRefsResolve(git, repoRoot, [baseRef, headRef]);
 
-  const args = ['diff', '--no-color', '--no-ext-diff', '--src-prefix=a/', '--dst-prefix=b/'];
+  // Paths are file names, never pathspec patterns: `a[1].txt` must not match `a1.txt`.
+  const args = ['--literal-pathspecs', 'diff', '--no-color', '--no-ext-diff', '--src-prefix=a/', '--dst-prefix=b/'];
   if (typeof contextLines === 'number' && !Number.isNaN(contextLines)) {
     args.push(`-U${Math.max(0, contextLines)}`);
   }
@@ -3740,7 +3743,8 @@ export async function getRangeDiff(directory, { base, head, path: filePath, cont
   if (filePath) {
     try {
       const fileContext = await resolveGitFileContext(directoryPath, directoryGit, filePath, repoRoot);
-      paths.push(fileContext.repoPath);
+      // Both sides of a rename; the destination alone reads as a new file.
+      paths.push(...[previousPath, fileContext.repoPath].filter(Boolean));
     } catch (error) {
       if (error.code !== GIT_PATH_NOT_FOUND) throw error;
       // A committed deletion is absent from HEAD, the index, and the working
@@ -3973,10 +3977,11 @@ export async function getRangeFiles(directory, { base, head, includeWorkingTree 
     const status = (tokens[index] || '').trim();
     if (!status) continue;
     const isRenameOrCopy = status.startsWith('R') || status.startsWith('C');
+    const previousPath = isRenameOrCopy ? tokens[index + 1] || undefined : undefined;
     const path = isRenameOrCopy ? (tokens[index + 2] || '') : (tokens[index + 1] || '');
     index += isRenameOrCopy ? 2 : 1;
     if (path) {
-      files.push({ path, status: status.charAt(0) });
+      files.push({ path, status: status.charAt(0), previousPath });
     }
   }
   if (!workingTree) return files;
@@ -4096,7 +4101,7 @@ const isBinaryDiff = async (directoryPath, filePath, staged) => {
   return false;
 };
 
-export async function getFileDiff(directory, { path: filePath, staged = false } = {}) {
+export async function getFileDiff(directory, { path: filePath, staged = false, previousPath } = {}) {
   if (!directory || !filePath) {
     throw new Error('directory and path are required for getFileDiff');
   }
@@ -4106,6 +4111,7 @@ export async function getFileDiff(directory, { path: filePath, staged = false } 
   const mimeType = isImage ? getImageMimeType(filePath) : null;
   const fileContext = await resolveGitFileContext(directoryPath, directoryGit, filePath, repoRoot);
   const { absolutePath, repoPath, isSymbolicLink } = fileContext;
+  const originalRepoPath = previousPath || repoPath;
 
   if (fileContext.isSubmodule) {
     // Git's own text form of a gitlink, so a plain two-pane view still shows
@@ -4134,14 +4140,19 @@ export async function getFileDiff(directory, { path: filePath, staged = false } 
     }
   }
 
+  // Staged compares HEAD with the index; unstaged compares the index with the
+  // working tree, so what is already staged stays out. A rename's index entry
+  // can sit at either side of the pair, and a path with no merged index entry
+  // (a conflict) falls back to HEAD.
+  const originalRevisions = staged
+    ? [`HEAD:${originalRepoPath}`]
+    : [...new Set([`:${repoPath}`, `:${originalRepoPath}`, `HEAD:${originalRepoPath}`])];
   let original = '';
-  try {
-    if (isImage) {
-      // For images, use git show with raw output and convert to base64
-      try {
-        // Unstaged changes start from the index, so what is staged stays out.
-        const originalRevision = staged ? `HEAD:${repoPath}` : `:${repoPath}`;
-        const { stdout } = await execFileAsync(getGitBinary(), ['show', originalRevision], {
+  for (const revision of originalRevisions) {
+    try {
+      if (isImage) {
+        // For images, use git show with raw output and convert to base64
+        const { stdout } = await execFileAsync(getGitBinary(), ['show', revision], {
           cwd: repoRoot,
           encoding: 'buffer',
           windowsHide: true,
@@ -4149,15 +4160,15 @@ export async function getFileDiff(directory, { path: filePath, staged = false } 
         });
         if (stdout && stdout.length > 0) {
           original = `data:${mimeType};base64,${stdout.toString('base64')}`;
+          break;
         }
-      } catch {
-        original = '';
+      } else {
+        original = await git.show([revision]);
+        break;
       }
-    } else {
-      original = await git.show([`HEAD:${repoPath}`]);
+    } catch {
+      // Not at this path; try the other side of the rename.
     }
-  } catch {
-    original = '';
   }
 
   let modified = '';

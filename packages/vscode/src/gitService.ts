@@ -17,7 +17,7 @@ import { readProjectStartCommand } from '../../web/server/lib/opencode/project-s
 import { resolveWorktreeDirectory } from './worktree-directory';
 import { readSubmoduleState, resolveGitPathTarget, type GitPathUnavailable, type GitSubmoduleState } from './gitPathDiff';
 import { parseGitRemoteListing, type GitRemote } from './gitRemoteListing';
-import type { API as GitAPI, Repository, GitExtension, Status } from './git.d';
+import type { API as GitAPI, Change, Repository, GitExtension, Status } from './git.d';
 
 let gitApi: GitAPI | null = null;
 let gitExtensionEnabled = false;
@@ -379,6 +379,8 @@ interface GitStatusFile {
   path: string;
   index: string;
   working_dir: string;
+  /** Set on a rename or copy: the path this file came from. */
+  previousPath?: string;
 }
 
 interface GitMergeInProgress {
@@ -467,6 +469,11 @@ export async function getGitStatus(directory: string, options?: GitStatusOptions
   const head = state.HEAD;
   
   const files: GitStatusFile[] = [];
+  // A rename's change sits at its destination and keeps the source as `originalUri`.
+  const previousPathOf = (change: Change, relativePath: string) => {
+    const previousPath = getRepositoryRelativePath(repo, change.originalUri);
+    return previousPath !== relativePath ? previousPath : undefined;
+  };
   
   // Process index changes (staged)
   for (const change of state.indexChanges) {
@@ -475,6 +482,7 @@ export async function getGitStatus(directory: string, options?: GitStatusOptions
       path: relativePath,
       index: mapStatus(change.status),
       working_dir: ' ',
+      previousPath: previousPathOf(change, relativePath),
     });
   }
   
@@ -484,11 +492,13 @@ export async function getGitStatus(directory: string, options?: GitStatusOptions
     const existing = files.find(f => f.path === relativePath);
     if (existing) {
       existing.working_dir = mapStatus(change.status);
+      existing.previousPath ??= previousPathOf(change, relativePath);
     } else {
       files.push({
         path: relativePath,
         index: ' ',
         working_dir: mapStatus(change.status),
+        previousPath: previousPathOf(change, relativePath),
       });
     }
   }
@@ -579,7 +589,8 @@ async function getGitStatusRaw(directory: string): Promise<GitStatusResult> {
   // shared UI explains such an entry; this runtime has not adopted that bound.
   // `--no-optional-locks`: a status that refreshes the index holds
   // `.git/index.lock`, and a terminal `git commit` then fails (#2229).
-  const statusResult = await execGit(['--no-optional-locks', 'status', '--porcelain=v1', '-b', '-uall'], directory);
+  // `-z`: paths arrive unquoted, and a rename or copy entry is followed by its source path.
+  const statusResult = await execGit(['--no-optional-locks', 'status', '--porcelain=v1', '-z', '-b', '-uall'], directory);
   
   if (statusResult.exitCode !== 0) {
     return {
@@ -592,14 +603,16 @@ async function getGitStatusRaw(directory: string): Promise<GitStatusResult> {
     };
   }
 
-  const lines = statusResult.stdout.trim().split('\n').filter(Boolean);
+  const entries = statusResult.stdout.split('\0');
   const files: GitStatusFile[] = [];
   let current = '';
   let tracking: string | null = null;
   let ahead = 0;
   let behind = 0;
 
-  for (const line of lines) {
+  for (let entryIndex = 0; entryIndex < entries.length; entryIndex += 1) {
+    const line = entries[entryIndex];
+    if (!line) continue;
     if (line.startsWith('##')) {
       // Parse branch info
       const branchMatch = line.match(/^## (.+?)(?:\.\.\.(.+?))?(?:\s+\[(.+)\])?$/);
@@ -616,11 +629,14 @@ async function getGitStatusRaw(directory: string): Promise<GitStatusResult> {
       // Parse file status
       const index = line[0] || ' ';
       const workingDir = line[1] || ' ';
-      const filePath = line.slice(3).trim();
+      const filePath = line.slice(3);
+      const isRenameOrCopy = 'RC'.includes(index) || 'RC'.includes(workingDir);
+      const previousPath = isRenameOrCopy ? entries[++entryIndex] || undefined : undefined;
       files.push({
         path: filePath,
         index,
         working_dir: workingDir,
+        previousPath,
       });
     }
   }
