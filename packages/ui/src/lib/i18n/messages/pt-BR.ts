@@ -1291,6 +1291,7 @@ export const dict: Record<I18nKey, string> = {
   "worktree.bootstrap.toast.lfsClientMissing": "Instale o Git LFS no servidor e tente configurar o worktree novamente.",
   "worktree.bootstrap.toast.invalidConfiguration": "Revise a configuração de submódulos e do Git LFS do repositório e tente novamente.",
   "worktree.bootstrap.toast.repositoryTooManyFiles": "O repositório tem arquivos demais.",
+  "worktree.bootstrap.toast.branchNameConflict": "O nome do branch conflita com um branch existente: o mesmo nome, ou um aninhado dentro do outro. Renomeie o branch e crie o worktree novamente.",
   "worktree.bootstrap.toast.cancelled": "A configuração do worktree foi cancelada. Tente novamente quando estiver pronto.",
   "worktree.bootstrap.toast.transportFailed": "Verifique o acesso ao repositório e a conexão de rede e tente novamente.",
   "worktree.bootstrap.toast.timeoutDescription": "O worktree foi criado, mas a configuração em segundo plano atingiu o tempo limite.",

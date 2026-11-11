@@ -26,8 +26,14 @@ type WorktreeBootstrapStatus = {
   status: 'pending' | 'ready' | 'failed';
   phase: 'directory-created' | 'git-ready' | 'setup-ready';
   error: string | null;
+  // Set only for a known cause, whose fixed sentence is in `error`.
+  errorCode?: 'BRANCH_NAME_CONFLICT';
   updatedAt: number;
 };
+
+// The server's fixed sentence for this code (`worktree-bootstrap-storage.js`);
+// Git's own message is translated and can carry paths, so it is not shown.
+const BRANCH_NAME_CONFLICT_MESSAGE = 'Git could not create the worktree branch: its name clashes with an existing branch (the same name, or one nested inside the other). Rename the branch and create the worktree again.';
 
 const worktreeBootstrapState = new Map<string, WorktreeBootstrapStatus>();
 const activeWorktreeBootstrapTasks = new Map<string, Promise<unknown>>();
@@ -73,12 +79,16 @@ const setWorktreeBootstrapState = (
 
 const setWorktreeBootstrapFailure = (directory: string, error: unknown): void => {
   const current = worktreeBootstrapState.get(toBootstrapStateKey(directory));
-  setWorktreeBootstrapState(
+  const branchNameConflict = error instanceof Error && 'code' in error && error.code === 'BRANCH_NAME_CONFLICT';
+  const failed = setWorktreeBootstrapState(
     directory,
     WORKTREE_BOOTSTRAP_FAILED,
     current?.phase ?? WORKTREE_PHASE_DIRECTORY_CREATED,
-    error instanceof Error ? error.message : String(error),
+    branchNameConflict
+      ? BRANCH_NAME_CONFLICT_MESSAGE
+      : error instanceof Error ? error.message : String(error),
   );
+  if (failed && branchNameConflict) failed.errorCode = 'BRANCH_NAME_CONFLICT';
 };
 
 const clearWorktreeBootstrapState = (directory: string): void => {
@@ -1930,6 +1940,22 @@ export async function previewWorktreeCreate(directory: string, input: CreateGitW
   };
 }
 
+// Whether a new branch cannot be created because of the refs that exist: the
+// same name, a branch its name sits inside (`a/b` blocks `a/b/c`), or a branch
+// inside its name. Read from refs, not from Git's translated message.
+const branchNameClashesWithExistingRef = async (primaryWorktree: string, branchName: string): Promise<boolean> => {
+  const segments = String(branchName || '').split('/').filter(Boolean);
+  if (segments.length === 0) return false;
+  const candidates = segments.map((_, index) => `refs/heads/${segments.slice(0, index + 1).join('/')}`);
+  const target = candidates[candidates.length - 1];
+  // A pattern matches its ref and every ref below it, so siblings are filtered out here.
+  const result = await runGitCommand(primaryWorktree, ['for-each-ref', '--format=%(refname)', ...candidates]);
+  if (!result.success) return false;
+  return String(result.stdout || '').split(/\r?\n/).map((line) => line.trim()).some((ref) => (
+    candidates.includes(ref) || ref.startsWith(`${target}/`)
+  ));
+};
+
 async function attachGitWorktreeToCandidate(
   context: Awaited<ReturnType<typeof resolveWorktreeProjectContext>>,
   candidate: { name: string; directory: string; branch: string },
@@ -2007,7 +2033,18 @@ async function attachGitWorktreeToCandidate(
     await ensureRemoteWithUrl(context.primaryWorktree, ensureRemoteName, ensureRemoteUrl);
   }
 
-  await runGitCommandOrThrow(context.primaryWorktree, worktreeAddArgs, 'Failed to create git worktree');
+  // Read before the attempt: a failed `worktree add -b` can leave behind the
+  // branch it just created, which is no conflict.
+  const branchNameConflict = worktreeAddArgs.includes('-b')
+    && await branchNameClashesWithExistingRef(context.primaryWorktree, localBranch);
+  try {
+    await runGitCommandOrThrow(context.primaryWorktree, worktreeAddArgs, 'Failed to create git worktree');
+  } catch (error) {
+    if (branchNameConflict) {
+      throw Object.assign(error instanceof Error ? error : new Error(String(error)), { code: 'BRANCH_NAME_CONFLICT' });
+    }
+    throw error;
+  }
 
   const shouldSetUpstream = Boolean(input?.setUpstream);
   const upstreamRemote = String(input?.upstreamRemote || inferredUpstream?.remote || '').trim();

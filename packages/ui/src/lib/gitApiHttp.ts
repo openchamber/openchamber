@@ -387,6 +387,8 @@ const operationErrorCodeSchema = z.enum([
     'RUNTIME_UNSUPPORTED',
     'GIT_LFS_CLIENT_MISSING',
     'CHECKOUT_TOO_LARGE',
+    'PATH_LENGTH_LIMIT',
+    'BRANCH_NAME_CONFLICT',
     'UNKNOWN',
   ]);
 const operationErrorSchema = <const Code extends readonly [string, ...string[]]>(codes: Code) => z.object({

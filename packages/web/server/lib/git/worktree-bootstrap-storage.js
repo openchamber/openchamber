@@ -15,6 +15,7 @@ const ERROR_CODES = new Set([
   'REMOTE_CHANGED', 'AUTHENTICATION_REQUIRED', 'AUTHENTICATION_FAILED', 'TRANSPORT_FAILED',
   'CONFLICT', 'CANCELLED', 'TIMEOUT', 'OUTCOME_UNKNOWN', 'RUNTIME_UNSUPPORTED', 'UNKNOWN',
   'GIT_LFS_CLIENT_MISSING', 'PATH_LENGTH_LIMIT', 'CHECKOUT_TOO_LARGE',
+  'BRANCH_NAME_CONFLICT',
 ]);
 const HYDRATION_STATUSES = new Set([
   'succeeded', 'authorization-required', 'invalid', 'client-missing', 'failed', 'cancelled', 'not-needed',
@@ -38,7 +39,12 @@ const SAFE_ERROR_MESSAGES = Object.freeze({
   GIT_LFS_CLIENT_MISSING: 'Git LFS is required but unavailable',
   CHECKOUT_TOO_LARGE: 'Worktree checkout has too many files to inspect',
   PATH_LENGTH_LIMIT: 'Git reported "File name too long". The worktree checkout path exceeds this system\'s path-length limit. Enable OS long paths or use a shorter repository path.',
+  BRANCH_NAME_CONFLICT: 'Git could not create the worktree branch: its name clashes with an existing branch (the same name, or one nested inside the other). Rename the branch and create the worktree again.',
 });
+
+// The message a known failure code is shown with. The store keeps only these
+// fixed sentences: a raw Git message can carry paths and endpoints.
+export const worktreeBootstrapFailureMessage = (code) => SAFE_ERROR_MESSAGES[code] ?? null;
 
 const exactKeys = (value, required, optional = []) => {
   const keys = Object.keys(value);

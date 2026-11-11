@@ -235,6 +235,22 @@ describe('worktreeBootstrap.waitForWorktreeBootstrap', () => {
     expect(toastErrors).toEqual([{ title: 'worktree.bootstrap.toast.failed', description }]);
   });
 
+  test('background watcher names a branch name conflict in the UI language, not the server sentence', async () => {
+    bootstrapStatusResult = {
+      status: 'failed', phase: 'directory-created', error: 'server sentence',
+      errorCode: 'BRANCH_NAME_CONFLICT', updatedAt: 2,
+    };
+    markWorktreeBootstrapPending('/repo-wt');
+
+    startWorktreeBootstrapWatcher('/repo-wt', { pollIntervalMs: 0 });
+
+    await waitFor(() => toastErrors.length === 1);
+    expect(toastErrors).toEqual([{
+      title: 'worktree.bootstrap.toast.failed',
+      description: 'worktree.bootstrap.toast.branchNameConflict',
+    }]);
+  });
+
   test('background watcher marks failed and toasts when the checkout times out', async () => {
     bootstrapStatusResult = { status: 'pending', error: null, updatedAt: 2 };
     markWorktreeBootstrapPending('/repo-wt');

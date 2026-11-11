@@ -1297,6 +1297,7 @@ export const dict: Record<I18nKey, string> = {
   'worktree.bootstrap.toast.lfsClientMissing': '请在服务器上安装 Git LFS，然后重试工作树设置。',
   'worktree.bootstrap.toast.invalidConfiguration': '请检查仓库的子模块和 Git LFS 配置，然后重试。',
   'worktree.bootstrap.toast.repositoryTooManyFiles': '仓库中的文件太多。',
+  'worktree.bootstrap.toast.branchNameConflict': '分支名称与现有分支冲突：名称相同，或其中一个嵌套在另一个之下。请重命名分支，然后重新创建工作树。',
   'worktree.bootstrap.toast.cancelled': '工作树设置已取消。准备好后请重试。',
   'worktree.bootstrap.toast.transportFailed': '请检查仓库访问权限和网络连接，然后重试。',
   'worktree.bootstrap.toast.timeoutDescription': '工作树已创建，但后台设置超时。',

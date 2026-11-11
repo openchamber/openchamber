@@ -1224,6 +1224,7 @@ export const dict = {
   'worktree.bootstrap.toast.lfsClientMissing': 'יש להתקין Git LFS בשרת ולנסות שוב את הגדרת עץ העבודה.',
   'worktree.bootstrap.toast.invalidConfiguration': 'יש לבדוק את תצורת מודולי המשנה ו-Git LFS של המאגר ולנסות שוב.',
   'worktree.bootstrap.toast.repositoryTooManyFiles': 'במאגר יש יותר מדי קבצים.',
+  'worktree.bootstrap.toast.branchNameConflict': 'שם הענף מתנגש בענף קיים: אותו שם, או שאחד מקונן בתוך השני. שנו את שם הענף וצרו את עץ העבודה מחדש.',
   'worktree.bootstrap.toast.cancelled': 'הגדרת עץ העבודה בוטלה. אפשר לנסות שוב כשמוכנים.',
   'worktree.bootstrap.toast.transportFailed': 'יש לבדוק את הגישה למאגר ואת החיבור לרשת, ולנסות שוב.',
   'worktree.bootstrap.toast.timeoutDescription': 'עץ העבודה נוצר, אבל זמן ההגדרה ברקע תם.',
