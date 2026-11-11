@@ -3,6 +3,7 @@ import type { FileEditorContribution } from './file-editor.ts';
 import { GUEST_STATUS_SOURCE_INTERVAL_DEFAULT, type StatusSectionSource } from './status-view.ts';
 import type { PublicSessionEvents, SessionEventsContribution } from './session-events.ts';
 import type { ServiceScheduleEntry } from './service-host.ts';
+import type { WaitContribution } from './waits.ts';
 
 export const PANEL_ID = /^[a-z][a-z0-9-]*$/;
 
@@ -842,9 +843,11 @@ export const serviceProvides = (
  * role of the same name: the service reads sessions, messages, projects and
  * live events from the OpenCode the host uses, and nothing else. `links`
  * follows from `contributes.links`: identifiers and links in chat messages
- * become the extension's, and a click hands the one clicked to it.
+ * become the extension's, and a click hands the one clicked to it. `wake`
+ * follows from `contributes.waits`: the service's text reaches an agent's
+ * session when a wait it started fires.
  */
-export const GUEST_CAPABILITIES = ['prompt', 'sessions', 'files', 'model', 'shells', 'conversation', 'service', 'network', 'filesystem', 'origins', 'transcript', 'sessionControl', 'sessionAnswers', 'instructions', 'skills', 'opencodePlugin', 'opencode', 'links'] as const;
+export const GUEST_CAPABILITIES = ['prompt', 'sessions', 'files', 'model', 'shells', 'conversation', 'service', 'network', 'filesystem', 'origins', 'transcript', 'sessionControl', 'sessionAnswers', 'instructions', 'skills', 'opencodePlugin', 'opencode', 'links', 'wake'] as const;
 
 export type GuestCapability = (typeof GUEST_CAPABILITIES)[number];
 
@@ -1007,6 +1010,8 @@ export type OpenChamberContributes = {
   sourceControl?: SourceControlContribution;
   /** Session events OpenChamber posts to the service (`session-events.ts`). Needs `service`. */
   sessionEvents?: SessionEventsContribution;
+  /** Waits agents can start on the service (`waits.ts`). Needs `service`; grants `wake`. */
+  waits?: WaitContribution[];
   /** The notification channel a `notifications` service provides; present exactly when it does. */
   notifications?: NotificationsContribution;
   /** The work item tracker a `tracker` service provides; present exactly when it does. */
@@ -1044,7 +1049,7 @@ export type PublicGuestCapabilities = {
 };
 
 export const requestedGuestCapabilities = (
-  contributes: Pick<OpenChamberContributes, 'capabilities' | 'integration' | 'service' | 'filesystem' | 'actions' | 'origins' | 'sessionEvents' | 'sessionControl' | 'instructions' | 'skills' | 'opencodePlugin' | 'links'>,
+  contributes: Pick<OpenChamberContributes, 'capabilities' | 'integration' | 'service' | 'filesystem' | 'actions' | 'origins' | 'sessionEvents' | 'sessionControl' | 'instructions' | 'skills' | 'opencodePlugin' | 'links' | 'waits'>,
 ): GuestCapability[] => {
   const declared = new Set<GuestCapability>(contributes.capabilities ?? []);
   if (guestActionsNeedConversation(contributes.actions)) declared.add('conversation');
@@ -1060,6 +1065,7 @@ export const requestedGuestCapabilities = (
   if (contributes.skills) declared.add('skills');
   if (contributes.opencodePlugin) declared.add('opencodePlugin');
   if (contributes.links) declared.add('links');
+  if (contributes.waits && contributes.waits.length > 0) declared.add('wake');
   return GUEST_CAPABILITIES.filter((capability) => declared.has(capability));
 };
 
@@ -1187,6 +1193,7 @@ export type ParseManifestErrorCode =
   | 'invalid-mentions'
   | 'invalid-blocks'
   | 'invalid-links'
+  | 'invalid-waits'
   | 'invalid-capabilities'
   | 'invalid-integration'
   | 'invalid-service'

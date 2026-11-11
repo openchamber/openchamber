@@ -35,6 +35,7 @@ const CAPABILITY_ROWS = {
   skills: { icon: 'sparkling', titleKey: 'settings.extensions.capability.skills', detailKey: 'settings.extensions.capability.skills.detail' },
   opencodePlugin: { icon: 'puzzle', titleKey: 'settings.extensions.capability.opencodePlugin', detailKey: 'settings.extensions.capability.opencodePlugin.detail' },
   links: { icon: 'link', titleKey: 'settings.extensions.capability.links', detailKey: 'settings.extensions.capability.links.detail' },
+  wake: { icon: 'timer', titleKey: 'settings.extensions.capability.wake', detailKey: 'settings.extensions.capability.wake.detail' },
 } satisfies Record<GuestCapability, { icon: IconName; titleKey: I18nKey; detailKey: I18nKey }>;
 
 type GuestApprovalDialogProps = {
@@ -66,6 +67,7 @@ export const GuestApprovalDialog: React.FC<GuestApprovalDialogProps> = ({ guest,
   const providesQuota = serviceProvides(guest?.service, 'quota');
   const quotaProviders = guest?.quota?.providers ?? [];
   const sessionEvents = guest?.sessionEvents?.events ?? [];
+  const waits = guest?.waits ?? [];
   const apiOrigin = guest?.integration?.apiOrigin ?? null;
 
   return (
@@ -218,6 +220,13 @@ export const GuestApprovalDialog: React.FC<GuestApprovalDialogProps> = ({ guest,
                         ))}
                       </ul>
                     </div>
+                  ) : null}
+                  {capability === 'wake' && waits.length > 0 ? (
+                    <ul className="typography-meta mt-1 list-disc space-y-0.5 ps-4 text-foreground">
+                      {waits.map((wait) => (
+                        <li key={wait.id}>{wait.title}</li>
+                      ))}
+                    </ul>
                   ) : null}
                 </div>
               </li>

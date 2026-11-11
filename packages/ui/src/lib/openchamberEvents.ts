@@ -10,6 +10,7 @@ import { canDriveBrowserPage } from './browser/hostCapability';
 import { messageQueueUpdatedEventSchema, type MessageQueueUpdatedEvent } from '@/stores/messageQueueStore';
 import { autoReviewUpdatedEventSchema, type AutoReviewUpdatedEvent } from '@/stores/useAutoReviewStore';
 import { prWatchUpdatedEventSchema, type PrWatchUpdatedEvent } from '@/sync/pr-watch';
+import { extensionWaitsUpdatedEventSchema, type ExtensionWaitsUpdatedEvent } from '@/sync/extension-waits';
 import { sessionWarmingSnapshotSchema, type SessionWarmingSnapshot } from '@/stores/useSessionWarmingStore';
 import { sessionTodosEventSchema, type SessionTodosEvent } from '@/stores/useSessionTodosStore';
 import { isJsonValue, type JsonValue } from '@openchamber/sdk';
@@ -304,6 +305,7 @@ type OpenChamberEvent =
   | MessageQueueUpdatedEvent
   | AutoReviewUpdatedEvent
   | PrWatchUpdatedEvent
+  | ExtensionWaitsUpdatedEvent
   | PermissionPolicyEvent
   | ControlStreamSyncEnvelope
   /** Which sessions the server keeps warm, as a full snapshot. */
@@ -545,6 +547,14 @@ const dispatchFromEnvelope = (envelope: { type: string; properties: unknown }) =
 
   if (envelope.type === 'openchamber:pr-watch.updated') {
     const parsed = prWatchUpdatedEventSchema.safeParse(envelope);
+    if (parsed.success) {
+      for (const listener of listeners) listener(parsed.data);
+    }
+    return;
+  }
+
+  if (envelope.type === 'openchamber:extension-waits.updated') {
+    const parsed = extensionWaitsUpdatedEventSchema.safeParse(envelope);
     if (parsed.success) {
       for (const listener of listeners) listener(parsed.data);
     }

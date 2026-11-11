@@ -517,6 +517,11 @@ const ExtensionDetail: React.FC<ExtensionHandlers & { guest: InstalledGuest; onB
               })}
             </p>
           ) : null}
+          {guest.waits?.length ? (
+            <p className="typography-meta text-foreground">
+              {t('settings.extensions.service.waits', { list: guest.waits.map((wait) => wait.title).join(', ') })}
+            </p>
+          ) : null}
           {guest.notifications ? (
             <p className="typography-meta text-foreground">{t('settings.extensions.service.providesNotifications')}</p>
           ) : null}

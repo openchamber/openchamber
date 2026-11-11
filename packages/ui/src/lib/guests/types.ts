@@ -16,6 +16,7 @@ import type {
   PublicTracker,
   PublicSessionEvents,
   PublicSourceControl,
+  PublicWait,
 } from '@openchamber/sdk';
 
 export type GuestSource = 'bundled' | 'path' | 'zip' | 'git';
@@ -64,6 +65,8 @@ export type InstalledGuest = {
   sourceControl?: PublicSourceControl;
   /** The session events the service subscribed to (`contributes.sessionEvents`), for the approval dialog and the card. */
   sessionEvents?: PublicSessionEvents;
+  /** The waits agents may start on the service (`contributes.waits`), named on the approval dialog. */
+  waits?: Array<Pick<PublicWait, 'id' | 'title'>>;
   /** The notification channel from `contributes.notifications`, when the service provides `notifications`. */
   notifications?: PublicNotifications;
   /** The tracker from `contributes.tracker`, when the service provides `tracker`. */

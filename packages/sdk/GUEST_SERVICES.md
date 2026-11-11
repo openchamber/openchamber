@@ -706,6 +706,52 @@ OpenChamber posts `POST /session-events` (`SESSION_EVENTS_PATH`) with the servic
 
 `examples/session-events-log` is the reference: a service-only extension that journals every event to a file.
 
+## Waits (`contributes.waits`)
+
+A service can offer agents things to wait on without holding a turn open: a deploy that finishes, a URL that comes up, a timer. The agent starts a wait with the `openchamber` tool's `wait.start`, ends its turn, and OpenChamber wakes its session with one message when the service says the wait fired. It asks for less than `sessionControl`: the service never sends to a session itself, and OpenChamber writes only to the session that started the wait, once. It has its own capability, `wake`.
+
+```json
+"service": { "entry": "service/main.js", "runtime": "host" },
+"waits": [
+  { "id": "timer", "title": "Timer", "description": "Wakes the session once the given number of seconds has passed",
+    "params": { "seconds": { "type": "number", "required": true } }, "interval": 10000 }
+]
+```
+
+| Field | Rule |
+|---|---|
+| `id` | Kebab-case, unique in the package, at most 32 characters. The agent names it as `<panel.id>/<id>` |
+| `title` | 1 to 40 characters; the approval dialog lists it and the wake message names it |
+| `description` | 1 to 200 characters, written for the agent: when the wait fires |
+| `params` | Up to 8 flat arguments, each `{ type: "string" \| "number" \| "boolean", description?, required?: true }`. OpenChamber checks the agent's arguments against them before your service sees a request |
+| `interval` | Milliseconds between two checks, 10 000 to 3 600 000; default 30 000 |
+
+`waits` needs `contributes.service` (`invalid-waits` otherwise) and, like session events, lets the service go without a panel or background entry. Declaring any asks for the `wake` capability, shown as a line of its own with the wait titles under it. Its grant scope is the sorted list of wait ids, so a version that adds a wait is unapproved until the user approves again. Hosts up to 2.7.0 drop the key at parse, so a service with nothing else to start it fails there as `invalid-panel`; declare `engines.openchamber: ">=2.7.1"`.
+
+### Wire
+
+Both requests are `POST` with the service bearer. Parse them with `readWaitStartRequest` and `readWaitCheckRequest` (zod-free; `null` is a body of another version, answer HTTP 400), and answer HTTP 200 with JSON.
+
+| Route | Body | Answer |
+|---|---|---|
+| `/waits/start` (`WAITS_START_PATH`) | `{ v: 1, requestId, wait: { id, type, args, session: { id, directory } } }` | `{ ok: true, state?, label? }` takes the wait; `{ ok: false, error }` refuses it, and the agent's call fails with `error` |
+| `/waits/check` (`WAITS_CHECK_PATH`) | `{ v: 1, requestId, waits: [{ id, type, args, state }] }`, the due waits of one type, at most 50 | `{ results: [{ id, fired: false, state? } \| { id, fired: true, summary }] }`. A wait left out keeps waiting unchanged |
+
+- `state` is any JSON up to 4 096 characters; OpenChamber stores it and posts it back on the next check, so the service needs no storage of its own and may stop between checks. `label` (up to 80, cut it yourself: a longer one refuses the wait) names the wait next to its title: the deploy, the URL.
+- `summary` (1 to 2 000 characters) is what the agent reads when it wakes. OpenChamber removes `<` and `>` from it and wraps it in an envelope that names your extension, so write it as a report of what happened, never as instructions.
+- An answer whose `results` envelope does not parse, a non-200 status, or no answer is a failed check: nothing fires and nothing changes, and OpenChamber asks that type again after its interval doubled per failure, up to ten minutes. A wait whose every check failed for six hours ends with a wake that says so.
+- Inside a good envelope each entry is read on its own. An entry that breaks the limits, such as a `state` over 4 096 characters or a `summary` over 2 000, ends that wait with a wake saying OpenChamber could not read it; the other entries are applied.
+- Each request has `WAIT_REQUEST_TIMEOUT_MS` (10 s). Requests go through the same proxy as `serviceRequest`, so the service starts on the first one and stops ten minutes after the last.
+
+### Delivery
+
+- One wake ends the wait. The agent starts another when it needs to wait again.
+- The message waits until the session and its subagents are idle, and an archived session is not woken.
+- Pausing or removing the extension, withdrawing its approval, or dropping a wait type from the manifest ends the waits it held with a wake that says so.
+- Sessions inside isolated spaces cannot start waits.
+
+`examples/wait-kit` is the reference: a timer and a URL that starts answering.
+
 ## Shared surface (`surface: true`)
 
 A surface lets a person watch what an agent is working in and step in for a manual step. It is not about browsers: a service that drives a browser, a simulator, or a desktop app can show one. The host draws it in the extension's rail panel (a canvas; the extension runs no code there), sends the user's pointer, keyboard, and paste back, and decides who is in control.

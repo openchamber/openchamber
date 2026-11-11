@@ -1,6 +1,6 @@
 # Extension gallery
 
-Sixteen examples to use, explore, and adapt. The five panel extensions also have full-screen pages. Their layouts respond to the iframe width, use the host's light/dark theme, and keep your input when the host updates its context.
+Seventeen examples to use, explore, and adapt. The five panel extensions also have full-screen pages. Their layouts respond to the iframe width, use the host's light/dark theme, and keep your input when the host updates its context.
 
 | Folder | In the app | Try this |
 | --- | --- | --- |
@@ -19,6 +19,7 @@ Sixteen examples to use, explore, and adapt. The five panel extensions also have
 | `agent-desk` | **Agent Desk** | Allow what it asks for and open its panel: a tick arrives every minute with no polling, and **Start a session** opens one from the service. Type `@rel` in the composer, or ask an agent for a `DeskChart`. |
 | `quota-provider` | **Teapot Usage** | Run `bun packages/sdk/examples/quota-provider/usage-server.ts`, store its key `demo` for a `teapot` provider in OpenCode (Settings → Providers → custom provider), allow the local service, then open Settings → Usage: the **Teapot Usage** card sits after the built-ins with the plan, two windows and a balance, and joins Work Status like any of them. The service receives only the `teapot` credential, which the approval dialog names. It has no panel; see [its README](./quota-provider/README.md). |
 | `opencode-plugin` | **Teapot Tools** | Allow **Add a plugin to OpenCode**, then open Settings → Plugins: `teapot-tools` is listed as active within seconds, and in a chat the agent can call `teapot_status`. Disable the extension and the plugin leaves; remove it and it is gone. Where OpenChamber's managed config does not reach OpenCode (an external OpenCode, your own `OPENCODE_CONFIG`), the extension's screen says so and offers **Add to global config**. It has no panel; see [its README](./opencode-plugin/README.md). |
+| `wait-kit` | **Wait Kit** | Allow its local service and the wake line in the approval dialog, then ask an agent to `wait 30 seconds with wait-kit/timer`. The agent ends its turn and is woken by one message when the timer fires; `wait-kit/url-ready` wakes it once a URL answers. It has no panel; see [its README](./wait-kit/README.md). |
 
 ## Install and explore
 
@@ -75,6 +76,7 @@ bun packages/sdk/scripts/bundle-guest.ts packages/sdk/examples/agent-desk/panel/
 bun packages/sdk/scripts/bundle-guest.ts packages/sdk/examples/agent-desk/panel/background.ts packages/sdk/examples/agent-desk/panel/background.js
 bun packages/sdk/scripts/bundle-guest.ts packages/sdk/examples/agent-desk/blocks/chart.ts packages/sdk/examples/agent-desk/blocks/chart.js
 bun packages/sdk/scripts/bundle-guest.ts --node packages/sdk/examples/agent-desk/service/main.ts packages/sdk/examples/agent-desk/service/main.js
+bun packages/sdk/scripts/bundle-guest.ts --node packages/sdk/examples/wait-kit/service/main.ts packages/sdk/examples/wait-kit/service/main.js
 ```
 
 Rebuild all panels after editing `shared.ts` or the SDK. Commit built files with the extension; installation never builds source or installs dependencies. Bump the extension's own version when publishing an update through Git. A Bun upgrade also invalidates every panel bundle, because the minifier assigns different identifier names; regenerate them with the Bun version the repository pins in `package.json`.
@@ -88,4 +90,4 @@ bun run --cwd packages/sdk test
 bun test packages/ui/src/lib/guests/sdk-examples.test.ts
 ```
 
-SDK checks cover example TypeScript, manifests, persistence failures, the optional MCP fixture, the Git host service against its fake forge, the Session Journal service against posted events, the Webhook Notifier service against its receiver, the Teaboard Tracker service against its fake tracker, the Teapot Usage service against its fake usage API, and freshness of every bundle. UI-owned DOM tests exercise those bundles with a simulated host. These tests never read your real config or use a provider credential.
+SDK checks cover example TypeScript, manifests, persistence failures, the optional MCP fixture, the Git host service against its fake forge, the Session Journal service against posted events, the Webhook Notifier service against its receiver, the Teaboard Tracker service against its fake tracker, the Teapot Usage service against its fake usage API, the Wait Kit service against a local site, and freshness of every bundle. UI-owned DOM tests exercise those bundles with a simulated host. These tests never read your real config or use a provider credential.

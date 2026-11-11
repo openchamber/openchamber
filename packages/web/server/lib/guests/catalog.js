@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 
 import { GUEST_PROVIDER_LOGO_BYTES_MAX, hasGuestPage, requestedGuestCapabilities, resolveAttachEntry, resolveAttachMode, resolvePageEntry, resolveStatusSectionEntry, resolveStatusSectionSource, toPublicNotifications,
-  toPublicQuota, toPublicTracker, toPublicService, toPublicSessionEvents, toPublicSourceControl, toPublicIntegration, hostMeetsOpenChamberEngine, openChamberEngineMinimum } from '@openchamber/sdk';
+  toPublicQuota, toPublicTracker, toPublicService, toPublicSessionEvents, toPublicSourceControl, toPublicIntegration, toPublicWaits, hostMeetsOpenChamberEngine, openChamberEngineMinimum } from '@openchamber/sdk';
 import { parseManifestJson } from '@openchamber/sdk/schemas';
 
 import { listRelativeGuestScriptHrefs, resolveGuestHtmlRelativePath } from './html-tokens.js';
@@ -364,6 +364,10 @@ export const inspectGuestPackage = async (packageRoot, { openchamberVersion, ski
   if (parsed.manifest.contributes.sessionEvents) {
     guest.sessionEvents = parsed.manifest.contributes.sessionEvents;
   }
+  // The waits agents may start on the service; the parse requires a service with them.
+  if (parsed.manifest.contributes.waits) {
+    guest.waits = parsed.manifest.contributes.waits;
+  }
   // The notification channel a `notifications` service provides; the parse requires it exactly then.
   if (parsed.manifest.contributes.notifications) {
     guest.notifications = parsed.manifest.contributes.notifications;
@@ -549,6 +553,10 @@ export const toPublicGuest = (guest) => {
   // What the approval dialog names: the events the service is told about, and whether with their text.
   if (guest.sessionEvents) {
     row.sessionEvents = toPublicSessionEvents(guest.sessionEvents);
+  }
+  // What the approval dialog names: the waits whose text may wake a session.
+  if (guest.waits) {
+    row.waits = toPublicWaits(guest.waits);
   }
   // What the approval dialog and the Integrations card name: the channel and where its account lives.
   if (guest.notifications) {

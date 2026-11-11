@@ -321,6 +321,9 @@ export const createOpenChamberControlService = (dependencies) => {
     // An agent waiting on its pull request (../pr-watch); absent means the
     // server cannot offer it.
     prWatch = null,
+    // Waits extensions offer agents (../extension-waits); absent means the
+    // server cannot offer them.
+    extensionWaits = null,
     // Agent workflows (../workflows/runtime.js); absent means the server
     // cannot offer them.
     workflowRuntime = null,
@@ -1364,6 +1367,20 @@ export const createOpenChamberControlService = (dependencies) => {
           if (action === 'pr.unwatch') return await prWatch.unwatch(sessionID);
           const directory = (await resolveSessionDirectory(sessionID)) || asNonEmptyString(contextDirectory);
           return await prWatch.watch({ sessionID, directory, url: input.url });
+        } catch (error) {
+          throw new OpenChamberControlError(error?.message ?? String(error), Number.isInteger(error?.status) ? error.status : 500);
+        }
+      }
+      if (action === 'wait.list' || action === 'wait.start' || action === 'wait.stop') {
+        if (!extensionWaits) throw new OpenChamberControlError('Waits are not available on this server', 503);
+        // Always the calling session: it is the one a wait wakes.
+        const sessionID = asNonEmptyString(options.contextSessionId);
+        if (!sessionID) throw new OpenChamberControlError(`${action} must be called from a session`, 400);
+        try {
+          if (action === 'wait.list') return await extensionWaits.listWaits(sessionID);
+          if (action === 'wait.stop') return await extensionWaits.stopWaits(sessionID, asNonEmptyString(input.waitId));
+          const directory = (await resolveSessionDirectory(sessionID)) || asNonEmptyString(contextDirectory);
+          return await extensionWaits.startWait({ sessionID, directory, source: input.source, args: input.args });
         } catch (error) {
           throw new OpenChamberControlError(error?.message ?? String(error), Number.isInteger(error?.status) ? error.status : 500);
         }

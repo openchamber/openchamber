@@ -74,6 +74,18 @@ import {
 import { isGuestRequestPath } from './contract.ts';
 import { GUEST_SESSION_EVENT_TYPES } from './session-events.ts';
 import { SERVICE_SCHEDULE_MAX, SERVICE_SCHEDULE_TIMEZONE_MAX, isServiceScheduleCron } from './service-host.ts';
+import {
+  GUEST_WAITS_MAX,
+  GUEST_WAIT_DESCRIPTION_MAX,
+  GUEST_WAIT_ID,
+  GUEST_WAIT_PARAMS_MAX,
+  GUEST_WAIT_PARAM_DESCRIPTION_MAX,
+  GUEST_WAIT_PARAM_NAME,
+  GUEST_WAIT_PARAM_TYPES,
+  GUEST_WAIT_TITLE_MAX,
+  WAIT_CHECK_INTERVAL_MAX,
+  WAIT_CHECK_INTERVAL_MIN,
+} from './waits.ts';
 import { GUEST_STATUS_SOURCE_INTERVAL_MAX, GUEST_STATUS_SOURCE_INTERVAL_MIN } from './status-view.ts';
 import {
   GUEST_FILE_EDITORS_MAX,
@@ -664,6 +676,23 @@ const linksSchema = z.object({
 
 const blocksSchema = z.array(blockSchema).min(1).max(GUEST_BLOCKS_MAX)
   .refine((blocks) => uniqueBy(blocks, (block) => block.name), { message: 'block names must be unique' });
+const waitSchema = z.object({
+  id: z.string().regex(GUEST_WAIT_ID),
+  title: z.string().trim().min(1).max(GUEST_WAIT_TITLE_MAX),
+  description: z.string().trim().min(1).max(GUEST_WAIT_DESCRIPTION_MAX),
+  params: z.record(
+    z.string().regex(GUEST_WAIT_PARAM_NAME),
+    z.object({
+      type: z.enum(GUEST_WAIT_PARAM_TYPES),
+      description: z.string().trim().min(1).max(GUEST_WAIT_PARAM_DESCRIPTION_MAX).optional(),
+      required: z.literal(true).optional(),
+    }).strict(),
+  ).refine((params) => Object.keys(params).length <= GUEST_WAIT_PARAMS_MAX, { message: `at most ${GUEST_WAIT_PARAMS_MAX} params` }).optional(),
+  interval: z.number().int().min(WAIT_CHECK_INTERVAL_MIN).max(WAIT_CHECK_INTERVAL_MAX).optional(),
+}).strict();
+
+const waitsSchema = z.array(waitSchema).min(1).max(GUEST_WAITS_MAX)
+  .refine((waits) => uniqueBy(waits, (wait) => wait.id), { message: 'wait ids must be unique' });
 
 const contributesSchema = z.object({
   panel: panelSchema,
@@ -706,6 +735,7 @@ const contributesSchema = z.object({
       .refine((events) => new Set(events).size === events.length, { message: 'event types must be unique' }),
     content: z.literal(true).optional(),
   }).strict().optional(),
+  waits: waitsSchema.optional(),
   notifications: notificationsSchema.optional(),
   tracker: trackerSchema.optional(),
   quota: quotaSchema.optional(),
@@ -744,13 +774,13 @@ const runtimeContributions = (contributes: z.output<typeof contributesSchema>): 
   if (contributes.capabilities && contributes.capabilities.length > 0) declared.push('capabilities');
   if (contributes.integration !== undefined) declared.push('integration');
   // A service the host starts itself (it provides a role or a surface, keeps
-  // running, runs on a schedule, receives session events or answers the
-  // composer) needs no frame; one that only answers a panel's `serviceRequest`
-  // has no caller without one.
+  // running, runs on a schedule, receives session events, answers the composer
+  // or checks waits) needs no frame; one that only answers a panel's
+  // `serviceRequest` has no caller without one.
   if (contributes.service !== undefined && !contributes.service.provides?.length && !contributes.service.surface
     && !contributes.service.keepRunning && !contributes.service.schedule
     && !hasStatusSource(contributes) && contributes.sessionEvents === undefined
-    && contributes.mentions === undefined) declared.push('service');
+    && contributes.mentions === undefined && contributes.waits === undefined) declared.push('service');
   if (contributes.filesystem !== undefined) declared.push('filesystem');
   if (contributes.origins !== undefined) declared.push('origins');
   if (contributes.actions !== undefined) declared.push('actions');
@@ -879,7 +909,7 @@ export const openChamberManifestSchema = z.object({
       });
       return;
     }
-    for (const key of ['sessionControl', 'instructions', 'mentions'] as const) {
+    for (const key of ['sessionControl', 'instructions', 'mentions', 'waits'] as const) {
       if (contributes[key] !== undefined && !contributes.service) {
         ctx.addIssue({
           code: 'custom', path: [key],
@@ -1125,6 +1155,11 @@ const failureFromIssue = (issue: { path: ReadonlyArray<PropertyKey>; code: strin
     return fail('invalid-links', issue.code === 'custom'
       ? `${field}: ${issue.message}`
       : `${field} is invalid: contributes.links is { action: "open" | "attach", identifier?: { keys: 1 to ${GUEST_LINK_KEYS_MAX} upper-case keys like "PROJ" }, urls?: { origin: "https://...", identifier: ${TRACKER_IDENTIFIER_KINDS.map((kind) => `"${kind}"`).join(' | ')}, item: link templates } }.`);
+  }
+  if (path === 'contributes.waits' || path.startsWith('contributes.waits.')) {
+    return fail('invalid-waits', issue.code === 'custom' && path === 'contributes.waits'
+      ? issue.message
+      : `${fieldPath(issue.path)} is invalid: contributes.waits lists 1 to ${GUEST_WAITS_MAX} entries with a unique kebab-case id, a title of 1 to ${GUEST_WAIT_TITLE_MAX} characters, a description of 1 to ${GUEST_WAIT_DESCRIPTION_MAX}, up to ${GUEST_WAIT_PARAMS_MAX} params of type ${GUEST_WAIT_PARAM_TYPES.map((type) => `"${type}"`).join(', ')}, and an optional interval of ${WAIT_CHECK_INTERVAL_MIN} to ${WAIT_CHECK_INTERVAL_MAX} ms.`);
   }
   if (path.startsWith('contributes.integration')) {
     return fail(

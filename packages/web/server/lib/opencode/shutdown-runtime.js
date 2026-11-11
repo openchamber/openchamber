@@ -16,6 +16,7 @@ export const createGracefulShutdownRuntime = (dependencies) => {
     sessionTodosRuntime,
     autoReviewRuntime,
     prWatchRuntime,
+    extensionWaitsRuntime = null,
     mergeFollowRuntime,
     messageQueueRuntime,
     dispatchResultsRuntime,
@@ -82,6 +83,8 @@ export const createGracefulShutdownRuntime = (dependencies) => {
     // ("the host is shutting down") and reads as a broken service entry.
     extensionSessionEvents?.stop?.();
     extensionServiceLifetime?.stop?.();
+    // The same for wait checks: a refused check would back off a healthy type.
+    extensionWaitsRuntime?.stop?.();
     syncToHmrState();
     console.log('Starting graceful shutdown...');
     const exitProcess = typeof options.exitProcess === 'boolean' ? options.exitProcess : getExitOnShutdown();

@@ -17,6 +17,7 @@ import { hasRunningShell, useBackgroundShellsStore } from './background-shells';
 import { hasRunningImage, useBackgroundImagesStore } from './background-images';
 import { useWorkflowActivityStore } from './workflow-activity';
 import { usePrWatchStore } from './pr-watch';
+import { useExtensionWaitsStore } from './extension-waits';
 
 // Shared live busy/retry index for every directory. Global events update it
 // incrementally and authoritative directory snapshots reconcile it, so each
@@ -122,8 +123,8 @@ export const hasActiveSubagent = (sessionId: string, activeSessionIds: ReadonlyS
 
 /**
  * Active sessions plus every session whose turn they keep open: ancestors of
- * running subagents, and sessions waiting on a background command, an image
- * or a pull request.
+ * running subagents, and sessions waiting on a background command, an image,
+ * a pull request or an extension.
  */
 const withBackgroundWork = (activeSessionIds: ReadonlySet<string>): ReadonlySet<string> => {
   let extended: Set<string> | null = null;
@@ -136,6 +137,7 @@ const withBackgroundWork = (activeSessionIds: ReadonlySet<string>): ReadonlySet<
   for (const sessionId of useBackgroundShellsStore.getState().sessionIds) add(sessionId);
   for (const sessionId of useBackgroundImagesStore.getState().sessionIds) add(sessionId);
   for (const sessionId of usePrWatchStore.getState().bySession.keys()) add(sessionId);
+  for (const sessionId of useExtensionWaitsStore.getState().bySession.keys()) add(sessionId);
   return extended ?? activeSessionIds;
 };
 
@@ -145,24 +147,26 @@ export const hasBackgroundWork = (sessionId: string, activeSessionIds: ReadonlyS
   || hasRunningShell(sessionId)
   || hasRunningImage(sessionId)
   || usePrWatchStore.getState().bySession.has(sessionId)
+  || useExtensionWaitsStore.getState().bySession.has(sessionId)
 );
 
 /**
  * What keeps the session's turn open, or null when nothing does: the session
  * runs itself, or it idles while a workflow run it proposed runs, or while a
  * subagent below it runs, or while a command or an image it started in the
- * background runs, or while it waits on its pull request. The session's own run wins; a workflow comes next, because its agents
+ * background runs, or while it waits on its pull request or on an extension. The session's own run wins; a workflow comes next, because its agents
  * are subagents too and the run says what they are doing; then a subagent.
  * The workflow state is the run's own (the OpenChamber server's runs, kept by
  * its events, see `workflow-activity.ts`), so it holds between phases when no
  * agent happens to be busy.
  */
-type SessionTurnActivity = 'running' | 'workflow' | 'subagent' | 'shell' | 'image' | 'pullRequest';
+type SessionTurnActivity = 'running' | 'workflow' | 'subagent' | 'shell' | 'image' | 'pullRequest' | 'extensionWait';
 
 /**
  * The order above: the session's own run, a workflow, a subagent, a command,
- * an image, and last an agent waiting on its pull request (`pr-watch.ts`): the server
- * wakes it, as a background subagent's result does.
+ * an image, then an agent waiting on its pull request (`pr-watch.ts`) and last
+ * one waiting on an extension (`extension-waits.ts`): the server wakes either,
+ * as a background subagent's result does.
  */
 export const resolveSessionTurnActivity = (
   status: 'running' | 'subagent' | null,
@@ -170,13 +174,15 @@ export const resolveSessionTurnActivity = (
   waitingOnShell: boolean,
   waitingOnPullRequest = false,
   waitingOnImage = false,
+  waitingOnExtension = false,
 ): SessionTurnActivity | null => {
   if (status === 'running') return status;
   if (workflowRunning) return 'workflow';
   if (status) return status;
   if (waitingOnShell) return 'shell';
   if (waitingOnImage) return 'image';
-  return waitingOnPullRequest ? 'pullRequest' : null;
+  if (waitingOnPullRequest) return 'pullRequest';
+  return waitingOnExtension ? 'extensionWait' : null;
 };
 
 export const useSessionTurnActivity = (sessionId: string): SessionTurnActivity | null => {
@@ -188,7 +194,8 @@ export const useSessionTurnActivity = (sessionId: string): SessionTurnActivity |
   const waitingOnShell = useBackgroundShellsStore((state) => state.sessionIds.has(sessionId));
   const waitingOnImage = useBackgroundImagesStore((state) => state.sessionIds.has(sessionId));
   const waitingOnPullRequest = usePrWatchStore((state) => state.bySession.has(sessionId));
-  return resolveSessionTurnActivity(status, workflowRunning, waitingOnShell, waitingOnPullRequest, waitingOnImage);
+  const waitingOnExtension = useExtensionWaitsStore((state) => state.bySession.has(sessionId));
+  return resolveSessionTurnActivity(status, workflowRunning, waitingOnShell, waitingOnPullRequest, waitingOnImage, waitingOnExtension);
 };
 
 /** The first of the sessions `useSessionTurnActivity` reads as working, or null. */
@@ -200,7 +207,8 @@ export const useFirstSessionWithOpenTurn = (sessionIds: readonly string[]): stri
   const onShell = useBackgroundShellsStore((state) => sessionIds.find((id) => state.sessionIds.has(id)) ?? null);
   const onImage = useBackgroundImagesStore((state) => sessionIds.find((id) => state.sessionIds.has(id)) ?? null);
   const onPullRequest = usePrWatchStore((state) => sessionIds.find((id) => state.bySession.has(id)) ?? null);
-  return inTurn ?? inWorkflow ?? onShell ?? onImage ?? onPullRequest;
+  const onExtension = useExtensionWaitsStore((state) => sessionIds.find((id) => state.bySession.has(id)) ?? null);
+  return inTurn ?? inWorkflow ?? onShell ?? onImage ?? onPullRequest ?? onExtension;
 };
 
 /**
@@ -245,6 +253,11 @@ useBackgroundImagesStore.subscribe((state, previous) => {
 });
 
 usePrWatchStore.subscribe((state, previous) => {
+  if (state.bySession === previous.bySession) return;
+  settleSessionsWithoutBackgroundWork(previous.bySession.keys(), (sessionId) => state.bySession.has(sessionId));
+});
+
+useExtensionWaitsStore.subscribe((state, previous) => {
   if (state.bySession === previous.bySession) return;
   settleSessionsWithoutBackgroundWork(previous.bySession.keys(), (sessionId) => state.bySession.has(sessionId));
 });
