@@ -3,8 +3,9 @@
  * branch on a tool name.
  *
  * v2 renamed and reshaped the built-ins: `bash` became `shell`, `task` became
- * `subagent`, `apply_patch` became `patch`, and `todowrite`, `todoread`, `lsp`,
- * `multiedit` and `list` are gone. File tools take `path` (not `filePath`), and
+ * `subagent`, `apply_patch` became `patch`, and `todoread`, `lsp`, `multiedit`
+ * and `list` are gone; `todowrite` came back behind `experimental.todo`. File
+ * tools take `path` (not `filePath`), and
  * a tool state no longer carries a server-rendered `title` — the row's
  * description has to be derived from the call's own input and metadata.
  *
@@ -34,6 +35,7 @@ export const OPENCODE_TOOLS = {
   shell: "shell",
   skill: "skill",
   subagent: "subagent",
+  todowrite: "todowrite",
   webfetch: "webfetch",
   websearch: "websearch",
   write: "write",
@@ -78,6 +80,7 @@ export const isSkillTool = is(OPENCODE_TOOLS.skill)
 export const isEditTool = is(OPENCODE_TOOLS.edit)
 export const isWriteTool = is(OPENCODE_TOOLS.write)
 export const isPatchTool = is(OPENCODE_TOOLS.patch)
+export const isTodoWriteTool = is(OPENCODE_TOOLS.todowrite)
 
 // Tools whose transcript row opens the read file or skill in the app and never
 // shows the call's result.
@@ -405,6 +408,29 @@ export function executeOutputTruncation(metadata: Metadata | undefined): { outpu
 /** The script an `execute` call ran (`input.code`). */
 export function executeScript(input: ToolInput | undefined): string | undefined {
   return readInput(input).code
+}
+
+const todoItemSchema = z.object({
+  content: z.string().trim().min(1),
+  status: z.enum(["pending", "in_progress", "completed", "cancelled"]).catch("pending"),
+})
+
+const todoWriteInputSchema = z
+  .object({ todos: z.array(todoItemSchema.nullable().catch(null)).optional().catch(undefined) })
+  .catch({})
+
+export type TodoItem = z.infer<typeof todoItemSchema>
+
+/**
+ * The whole list a `todowrite` call set, in the agent's order, or `null` when
+ * the input carries no list yet (still streaming) or none at all. An entry
+ * without text drops out; an unknown status reads as pending, as the server's
+ * session list does (`packages/web/server/lib/session-todos`).
+ */
+export function todoWriteItems(input: ToolInput | undefined): TodoItem[] | null {
+  const todos = todoWriteInputSchema.parse(input ?? {}).todos
+  if (!todos) return null
+  return todos.filter((item): item is TodoItem => item !== null)
 }
 
 /** The agent a `subagent` call runs (`input.agent`). */
@@ -889,6 +915,7 @@ const LISTING_NEUTRAL_TOOLS = new Set<string>([
   OPENCODE_TOOLS.webfetch,
   OPENCODE_TOOLS.websearch,
   OPENCODE_TOOLS.question,
+  OPENCODE_TOOLS.todowrite,
   // A subagent's own calls arrive in its child session.
   OPENCODE_TOOLS.subagent,
   OPENCODE_TOOLS.sessionRename,
@@ -1006,6 +1033,16 @@ export function toolDescription(
     case OPENCODE_TOOLS.question: {
       const count = parsed.questions?.length ?? 0
       return count > 0 ? { kind: "questions", count } : null
+    }
+
+    // "1/7 · <the item in progress>", the Tasks panel's count: cancelled
+    // items are out of the list there, so they are out of the count here.
+    case OPENCODE_TOOLS.todowrite: {
+      const items = (todoWriteItems(input) ?? []).filter((item) => item.status !== "cancelled")
+      if (items.length === 0) return null
+      const done = items.filter((item) => item.status === "completed").length
+      const active = items.find((item) => item.status === "in_progress")
+      return text(active ? `${done}/${items.length} · ${active.content}` : `${done}/${items.length}`)
     }
 
     // MCP and plugin tools: anything they call a description, then a path.

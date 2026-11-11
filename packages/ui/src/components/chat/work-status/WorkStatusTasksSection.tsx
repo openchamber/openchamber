@@ -1,10 +1,10 @@
 import React from 'react';
 
 import { Icon } from '@/components/icon/Icon';
-import type { IconName } from '@/components/icon/icons';
 import { useI18n } from '@/lib/i18n';
 import { useSessionTodos, type SessionTodo } from '@/stores/useSessionTodosStore';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
+import { TODO_STATUS_ICON } from '../todoStatus';
 import { WorkStatusCollapsibleSection, WorkStatusRow } from './WorkStatusPrimitives';
 import { useReportWorkStatusPresence } from './presenceContext';
 
@@ -24,17 +24,9 @@ const STATUS_RANK = {
   cancelled: 3,
 } satisfies Record<SessionTodo['status'], number>;
 
-/** The icons the Subagents rows use for the same states. */
-const STATUS_ICON = {
-  in_progress: { name: 'record-circle', color: 'var(--status-info)' },
-  completed: { name: 'checkbox-circle', color: 'var(--status-success)' },
-  pending: { name: 'time', color: undefined },
-  cancelled: { name: 'time', color: undefined },
-} satisfies Record<SessionTodo['status'], { name: IconName; color: string | undefined }>;
-
 const TaskRow: React.FC<{ todo: SessionTodo }> = ({ todo }) => {
   const done = todo.status === 'completed';
-  const icon = STATUS_ICON[todo.status];
+  const icon = TODO_STATUS_ICON[todo.status];
   return (
     <WorkStatusRow
       leading={<Icon name={icon.name} className="size-3.5 shrink-0" style={icon.color ? { color: icon.color } : undefined} />}

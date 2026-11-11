@@ -74,7 +74,7 @@ export const getToolIcon = (toolName: string, presentation?: GuestToolRule | nul
     ) {
         return <Icon name="global" className={iconClass} />;
     }
-    if (tool === 'structuredoutput' || tool === 'structured_output') {
+    if (tool === 'structuredoutput' || tool === 'structured_output' || tool === 'todowrite') {
         return <Icon name="list-check-2" className={iconClass} />;
     }
     if (tool === 'skill') {

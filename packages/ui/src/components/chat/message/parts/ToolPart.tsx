@@ -94,7 +94,9 @@ import {
     isQuestionTool,
     isShellTool,
     isSubagentTool,
+    isTodoWriteTool,
     isWebSearchTool,
+    todoWriteItems,
     subagentAgent,
     subagentDescription,
     isWriteTool,
@@ -117,6 +119,7 @@ import { hasOpenChamberView, openChamberVerbKey, parseOpenChamberEnvelope, secre
 import { Field, QuietAction } from './ToolResultParts';
 import { openApplyPatchFileInEditor } from './applyPatchEditorAction';
 import { WebSearchResults } from './WebSearchResults';
+import { TodoWriteList } from './TodoWriteList';
 import { toBackgroundShellPart, type BackgroundShellPhase } from './backgroundShellPart';
 import { toBackgroundSubagentPart, toStoppedSubagentPart, type BackgroundSubagentPhase } from './backgroundSubagentPart';
 import { findSubagentCancellation, findSubagentRun, readBackgroundSubagentChildID } from '@/lib/opencode/subagent-run';
@@ -500,6 +503,14 @@ const describeTool = (described: ToolDescription | null, currentDirectory: strin
         }
     }
 };
+
+/**
+ * The row's title. `todowrite` takes the Work Status section's localized name,
+ * since both show the same list side by side.
+ */
+const toolDisplayName = (toolName: string, t: DescriptionTranslate): string => (
+    isTodoWriteTool(toolName) ? t('chat.workStatus.section.tasks') : getToolMetadata(toolName).displayName
+);
 
 const getToolDescription = (part: ToolPartType, state: ToolStateUnion, currentDirectory: string, t: DescriptionTranslate, namespace?: string): string => {
     const stateWithData = state as ToolStateWithMetadata;
@@ -1206,10 +1217,18 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
         () => getDiffPatchEntries(metadata, diffContent ?? undefined, (path) => getRelativePath(path, currentDirectory)),
         [currentDirectory, diffContent, metadata]
     );
+    // The list a finished `todowrite` call set is its whole story; its text
+    // answer only counts the same items again.
+    const todoItems = React.useMemo(
+        () => (isTodoWriteTool(part.tool) && state.status === 'completed' ? todoWriteItems(input) : null),
+        [input, part.tool, state.status],
+    );
+    const showTodoList = todoItems !== null && todoItems.length > 0;
     // `execute` renders its script and its call list itself, below. An
     // OpenCode namespace view says what the call did; the raw answer and a
     // failed call keep the input beside it.
     const hideToolInputPreview = isOpenChamberTool(part.tool)
+        || showTodoList
         || (opencodeResult !== null && !showRawToolAnswer)
         || isPatchTool(part.tool)
         || isEditTool(part.tool)
@@ -1508,6 +1527,10 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
 
         if (isWriteLikeTool) {
             return null;
+        }
+
+        if (showTodoList && todoItems) {
+            return renderScrollableBlock(<TodoWriteList items={todoItems} />, { maxHeightClass: 'max-h-[40vh]', disableHorizontal: true });
         }
 
         if (webSearchOutput) {
@@ -1894,7 +1917,7 @@ const ToolPartContent: React.FC<ToolPartProps & { header?: ToolRowHeader; subage
     );
     const description = guestHeader?.subtitle ?? builtInDescription;
     const rowTool = scriptNamespace ?? (normalizedPartTool || part.tool);
-    const displayName = guestHeader?.title ?? getToolMetadata(rowTool).displayName;
+    const displayName = guestHeader?.title ?? toolDisplayName(rowTool, t);
 
     // Opened, the body already carries the whole error and output.
     const failureDetail = isError && !isExpanded ? failureReason : undefined;
@@ -2522,7 +2545,7 @@ const ToolPart: React.FC<ToolPartProps> = (incoming) => {
     const part = useShownToolPart(incoming.part);
     const props = part === incoming.part ? incoming : { ...incoming, part };
     const toolName = normalizeToolName(props.part.tool) || 'tool';
-    const displayName = getToolMetadata(toolName).displayName;
+    const displayName = toolDisplayName(toolName, t);
     const backgroundShellID = isShellTool(toolName) ? readBackgroundShellID(props.part) : undefined;
 
     return (

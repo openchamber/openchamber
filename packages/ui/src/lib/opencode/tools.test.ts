@@ -23,6 +23,7 @@ import {
   openChamberCallSummary,
   secretRunCommandLine,
   subagentSessionId,
+  todoWriteItems,
   toolDescription,
   toolFileDiffs,
   toolInputPath, isShownInPlace, proposedWorkflowRunId, generatedImagePaths } from "./tools"
@@ -182,6 +183,26 @@ describe("tool row description", () => {
       .toEqual({ kind: "questions", count: 2 })
     expect(toolDescription("question", { questions: [{ question: "a" }] }, undefined))
       .toEqual({ kind: "questions", count: 1 })
+  })
+
+  test("todowrite counts done items and names the one in progress", () => {
+    const todos = [
+      { content: "Metrics format", status: "completed" },
+      { content: "Fixture repo", status: "in_progress" },
+      { content: "Dropped idea", status: "cancelled" },
+      { content: "", status: "pending" },
+      { content: "Configs", status: "later" },
+    ]
+    expect(toolDescription("todowrite", { todos }, undefined)).toEqual({ kind: "text", value: "1/3 · Fixture repo" })
+    expect(toolDescription("todowrite", { todos: [{ content: "Only", status: "pending" }] }, undefined)).toEqual({ kind: "text", value: "0/1" })
+    expect(toolDescription("todowrite", { todos: [] }, undefined)).toBe(null)
+    expect(todoWriteItems({ todos })).toEqual([
+      { content: "Metrics format", status: "completed" },
+      { content: "Fixture repo", status: "in_progress" },
+      { content: "Dropped idea", status: "cancelled" },
+      { content: "Configs", status: "pending" },
+    ])
+    expect(todoWriteItems({})).toBe(null)
   })
 
   test("execute names the tools the script called, deduplicated and counted", () => {
