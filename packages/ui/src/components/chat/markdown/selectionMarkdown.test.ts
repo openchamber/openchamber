@@ -11,7 +11,7 @@ const bootstrapFetch: typeof fetch = async () => Response.json({
 });
 Object.assign(globalThis, {
   window: dom,
-  document: dom.document,
+  document: dom.document, Event: dom.Event, CustomEvent: dom.CustomEvent,
   HTMLElement: dom.HTMLElement,
   Element: dom.Element,
   Node: dom.Node,

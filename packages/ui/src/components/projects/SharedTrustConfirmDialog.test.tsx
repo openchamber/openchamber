@@ -56,7 +56,7 @@ beforeEach(() => {
   );
   Object.assign(globalThis, {
     window: testWindow,
-    document: testWindow.document,
+    document: testWindow.document, Event: testWindow.Event, CustomEvent: testWindow.CustomEvent,
     navigator: testWindow.navigator,
     HTMLElement: testWindow.HTMLElement,
     Element: testWindow.Element,

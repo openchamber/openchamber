@@ -6,7 +6,7 @@ import type { DesktopHost, HostProbeResult } from '@/lib/desktopHosts';
 
 const dom = new Window({ url: 'http://localhost/' });
 Object.assign(globalThis, {
-  window: dom, document: dom.document, navigator: dom.navigator, localStorage: dom.localStorage,
+  window: dom, document: dom.document, CustomEvent: dom.CustomEvent, navigator: dom.navigator, localStorage: dom.localStorage,
   Node: dom.Node, Element: dom.Element, HTMLElement: dom.HTMLElement,
   Event: dom.Event, MouseEvent: dom.MouseEvent, MutationObserver: dom.MutationObserver,
   requestAnimationFrame: dom.requestAnimationFrame.bind(dom),

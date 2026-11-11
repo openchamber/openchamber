@@ -419,6 +419,10 @@ describe('the page height', () => {
     test('sizes again when the scrollbar appears without the root resizing', async () => {
         const page = mountPage(undefined, '<div id="row" style="height:300px"></div>');
         const { win } = page;
+        // Let the page finish loading first, as it does in a browser before its
+        // own script changes anything; its load handler measures too.
+        await settle();
+        page.reports.length = 0;
         const root = win.document.documentElement;
         let bar = 0;
         Object.defineProperty(win, 'innerHeight', { get: () => 300, configurable: true });
