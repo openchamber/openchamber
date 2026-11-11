@@ -29,6 +29,9 @@
  * cost of re-rendering a whole turn per delta depends on. `agent-*reads-*`
  * reads large files instead, and `agent-100tools-x5-*` makes its calls five
  * at a time, so one step's message carries five tool parts.
+ * `agent-20tools-wait3000ms-300cps` waits three seconds before each step's
+ * first token, as a hosted model does: every step's assistant message then
+ * sits empty for that long, which the instant fixtures never show.
  * `unicode-300cps` streams prose with em dashes, curly quotes and Cyrillic
  * paragraphs and a 150-line TypeScript fence whose comments and strings carry
  * the same characters. A string with any character above Latin-1 is stored by
@@ -299,11 +302,11 @@ const FIXTURE_SHOWCASE_DOCUMENT = [
 const parseModel = (model) => {
   const think = /think-(\d+)s/.exec(String(model ?? ""))
   if (think) return { delayMs: Number(think[1]) * 1000, charactersPerSecond: 1200, document: THINK_ANSWER, toolSteps: 0 }
-  const agent = /agent-(\d+)(tools|reads)(?:-x(\d+))?-(\d+)cps/.exec(String(model ?? ""))
+  const agent = /agent-(\d+)(tools|reads)(?:-x(\d+))?(?:-wait(\d+)ms)?-(\d+)cps/.exec(String(model ?? ""))
   if (agent) {
     return {
-      delayMs: 0,
-      charactersPerSecond: Math.max(1, Number(agent[4])),
+      delayMs: Number(agent[4] ?? 0),
+      charactersPerSecond: Math.max(1, Number(agent[5])),
       document: FIXTURE_DOCUMENT,
       toolSteps: Number(agent[1]),
       reads: agent[2] === "reads",
@@ -467,6 +470,7 @@ export const fixtureProviderConfig = (port) => ({
           `agent-${calls}tools-x${parallel}-${rate}cps`,
           { name: `Fixture agent, ${calls} tool calls ${parallel} at a time, then ${rate} characters/s`, tool_call: true },
         ])),
+        ["agent-20tools-wait3000ms-300cps", { name: "Fixture agent, 20 tool calls, 3 s to each step's first token, then 300 characters/s", tool_call: true }],
       ]),
     },
   },

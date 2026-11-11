@@ -669,23 +669,28 @@ Use `useGlobalSessionsStore` when the UI needs a **shared global session cache**
 
 Each full app root owns one global polling lifecycle through
 `useGlobalSessionsPolling`. The web/desktop root, the desktop Mini Chat window
-root, and the VS Code chat root load a complete snapshot when mounted and schedule a
-head check 45 seconds after completion, so sessions created by another OpenCode
-process are discovered without relying on the sidebar or native tray being
-visible. Before the first successful global load, failures receive at most
-three earlier retries after 1, 2, and 4 seconds; then the normal cadence
-continues. Store error status, including a chats-root
-lookup failure, drives recovery because the loader returns retained data on
-failure. Runtime changes retire the old timer and start a fresh load immediately;
-late completions cannot restart the old timer or seed the new runtime.
-A refresh that comes due while the document is hidden does not run. Returning
-from hidden state takes a complete snapshot even if no poll came due, and the
-cadence resumes from there. A complete sweep also runs within 10 minutes of the
-last successful full load while visible; the timer shortens its final interval
-to meet that deadline. Startup failures keep retrying complete loads.
-Live events keep the list current meanwhile; only sessions another OpenCode
-process created wait for the window to be seen. On desktop that includes a
-window closed to the tray.
+root, and the VS Code chat root load a complete snapshot when mounted. After
+that the live event stream keeps the list current: it is one global stream,
+and `session.created` reaches the client for every directory, opened or not.
+The list is read again only where the stream cannot answer: a complete
+snapshot 10 minutes after the last one, a complete snapshot when the app
+becomes visible again, and a head check after a stream gap (a reconnect or a
+transport switch, `sync/stream-gap.ts`), because a session created during the
+gap arrives in no event. Before the first successful global load, failures
+receive at most three earlier retries after 1, 2, and 4 seconds, then retry
+every 45 seconds; a failed snapshot or head check after a success also
+retries after 45 seconds, and the snapshot keeps its deadline. A gap that
+ends during a load is checked right after that load, the first one included. Store error status, including a chats-root lookup failure, drives
+recovery because the loader returns retained data on failure. Runtime changes
+retire the old timer and start a fresh load immediately; late completions
+cannot restart the old timer or seed the new runtime, and a gap reported for
+another runtime reads nothing.
+A snapshot that comes due while the app is hidden does not run; becoming
+visible takes one. On desktop the document stays `visible` while the window
+is hidden, minimized or closed to the tray, because windows run with
+background throttling off, so the hook reads the shell's
+`openchamber:window-visibility` instead. A window the shell sends no
+visibility to (Mini Chat) counts as visible.
 The sidebar and tray consume the same store and must not start their own
 full-list timers. The tray renders only the sessions the sidebar can place — a
 configured project or worktree, a managed chat, or an isolated space — because
@@ -696,15 +701,26 @@ as opening the mobile session sheet or returning from suspension, may still
 request freshness at their explicit lifecycle edge; the store coalesces an
 overlapping in-flight load.
 Until a load has succeeded, OpenCode's first `server.connected` in the runtime
-runs the refresh at once instead of waiting for the next startup retry or the
-45-second interval; when it arrives during a load that then fails, one more
-load follows immediately. After a success it changes nothing.
+runs the refresh at once instead of waiting for the next retry; when it
+arrives during a load that then fails, one more load follows immediately.
+After a success it changes nothing.
+
+### Why the list is read after stream gaps and not on a timer
+
+A 45-second head check ran here to catch sessions created in directories this
+client never opened. The stream now delivers those, so the timer read the head
+of the list for nothing. It was not free either: while a turn ran, the
+running session's `time.updated` in the page differed from the record events
+had left, so every check republished the store and rebuilt the sidebar
+projection over every session. A gap is the one time the stream may have
+missed a creation, so the head check runs once after it, and the complete
+snapshot every 10 minutes stays the baseline for deletions missed meanwhile.
 
 ### Why head checks and complete snapshots have separate authority
 
-The 45-second check reads 20 records in newest-updated order and merges the whole
+The head check reads 20 records in newest-updated order and merges the whole
 page, continuing while every returned record is new or changed. A known unchanged
-record ends pagination. This bounds idle traffic independently of historical
+record ends pagination. This bounds the read independently of historical
 session count. Only complete loads publish `authoritativeSessions`, the committed
 active-plus-archived snapshot consumed by missed-deletion cleanup. A partial or
 failed check cannot establish absence or advance that cleanup baseline. A session
@@ -961,11 +977,15 @@ Queued reads belong to the instance where they were submitted. On an instance ch
 
 `captureRuntimeInstance` in `lib/runtime-switch.ts` captures the instance key and an instance-change generation. Returning to the same instance cannot revive work from a previous visit. A LAN/relay rebind of the same instance keeps its work and concurrency budget. Lanes retire on the will-change event so changed-event listeners can enqueue new work without losing it to listener order.
 
-Reconnect and watchdog candidates come from non-idle status, the viewed session, or unresolved materialized messages and tool parts. Only ancestors of those candidates join recovery. The watchdog's 5 s status poll and its child discovery run only for sessions with live work of their own; the viewed session joins them only when it is busy or unresolved. An idle viewed session gets its updates from the event stream, and the stale-stream check still covers it. Polling it every 5 s kept the private relay awake for as long as a session stayed open on any device, because the relay hibernates only after 10 s without a message. Parentage in cached session history alone starts no status polling, child discovery, or message materialization; an idle directory with only cached metadata does not scan its history.
+Reconnect and watchdog candidates come from non-idle status, the viewed session, or unresolved materialized messages and tool parts. Only ancestors of those candidates join recovery. The watchdog's status poll and its child discovery run only for sessions with live work of their own; the viewed session joins them only when it is busy or unresolved. An idle viewed session gets its updates from the event stream, and the stale-stream check still covers it. Polling it every 5 s kept the private relay awake for as long as a session stayed open on any device, because the relay hibernates only after 10 s without a message. Parentage in cached session history alone starts no status polling, child discovery, or message materialization; an idle directory with only cached metadata does not scan its history.
 
 ### Why failed watchdog polls back off per directory
 
-A failed watchdog status read preserves the previous status and waits 10, 20, 40, then at most 60 s after failure completion before retrying. A successful snapshot, including an empty one, restores the 5 s cadence and reconciles normally. Directory disposal, having no recovery candidates, and restarting the watchdog for a new SDK clear the delay.
+A failed watchdog status read preserves the previous status and waits 10, 20, 40, then at most 60 s after failure completion before retrying. A successful snapshot, including an empty one, restores the normal cadence and reconciles normally. Directory disposal, having no recovery candidates, and restarting the watchdog for a new SDK clear the delay.
+
+### Why the status poll slows down on a healthy stream
+
+The stream carries every status change, and a lost `session.idle` behind a completed message is caught by the completion check 750 ms later. The poll is left for a frame lost with nothing else to show for it, so it runs every 30 s while the stream delivers anything (heartbeats included) within the 20 s stale window, and every 5 s once it does not. At 5 s throughout, a running turn cost twelve status reads a minute that changed nothing.
 
 ### Why a status snapshot keeps a retry status
 
@@ -973,9 +993,11 @@ A failed watchdog status read preserves the previous status and waits 10, 20, 40
 
 ### Why stale resync and child discovery have separate retry state
 
-Stale resync and child discovery each wait 30 s after a failed attempt completes, then 60 s after subsequent failures. A successful attempt clears only its own delay and restores its 15 s cadence. The watchdog keeps its 5 s tick and per-directory overlap guards. Failure in one directory cannot delay another directory or reset another mechanism's outstanding failure. The 60 s cap bounds the added wait for a missed idle event or an undiscovered child once reads become available again.
+Stale resync and child discovery each wait 30 s after a failed attempt completes, then 60 s after subsequent failures. A successful attempt clears only its own delay. A failed discovery stays owed and runs again once its delay allows. The watchdog keeps its 5 s tick and per-directory overlap guards. Failure in one directory cannot delay another directory or reset another mechanism's outstanding failure. The 60 s cap bounds the added wait for a missed idle event or an undiscovered child once reads become available again.
 
-The no-candidates branch also clears the last-discovery timestamp, making the first discovery after an idle-to-busy transition eligible on the next tick without waiting for any remainder of the previous 15 s window.
+### Why child discovery runs after a stream gap
+
+A child session reaches the client in its own `session.created`, with `parentID`, from the global stream, so listing children every 15 s while a parent ran read the same few records again for as long as it worked. Discovery was added when children created elsewhere did not reach this stream; the stream is now one global stream from the server's OpenCode, which announces every session it creates. What the stream cannot deliver is a child created while it was away: a reconnect resync refreshes only sessions the store already knows. So each gap (a reconnect, a transport switch, or the watchdog's stale-stream resync) owes one discovery per directory, run on the first tick that finds live parents there and dropped after 30 s without one.
 
 A resync reports failure when its active-session snapshot is null, a session record cannot be fetched, the message loader reports a tail-load error, or a form or permission read fails. Successful parts still reconcile and failed parts retain their previous data. `resyncBlockingRequestsForDirectory` returns whether both requested lists succeeded; callers that only need its best-effort updates may ignore the result. Stream-reconnect recovery bypasses the watchdog delay, so a restored stream can repair state immediately. The watchdog's own stale-stream check is different: its reconnect-and-resync attempt waits out the stale-resync delay, while transport-level reconnects and gap recovery stay ungated.
 
@@ -990,7 +1012,7 @@ VS Code does not run the server permission-auto-accept runtime. The extension ho
 
 ### Why child discovery lists each live parent's children
 
-Each discovery pass lists the children of every live session in the directory with `parentID`, one paged list per parent, one after another. It used to page through the whole directory list and keep the children of live parents. In a directory with 1,100 sessions that was 3.6 MB every 15 s for as long as any session there was working, about 1 GB an hour over loopback, which users saw as the app's network traffic. A parent's own children are a few kilobytes. A live subagent is itself a live session, so its children are listed by the same pass.
+Each discovery pass lists the children of every live session in the directory with `parentID`, one paged list per parent, one after another. It used to page through the whole directory list and keep the children of live parents. In a directory with 1,100 sessions that was 3.6 MB on every pass (then every 15 s) for as long as any session there was working, about 1 GB an hour over loopback, which users saw as the app's network traffic. A parent's own children are a few kilobytes. A live subagent is itself a live session, so its children are listed by the same pass.
 
 ### Mutation responsibility
 
@@ -1181,11 +1203,15 @@ Streaming lifecycle derivation has two paths. Directory attach, switch, bootstra
 
 A trailing assistant message that the server stamped `time.completed` is never marked as streaming: the stamp means the whole response (text plus every tool call) finished, so even while the session stays busy for the next step of the turn, the typing indicator and the streaming part-update suspension must not linger on finished content. The message-level streaming state (`streamingMessageIds` / `messageStreamStates`) is therefore a *message* lifecycle, not a turn lifecycle — it is completed by an explicit `time.completed`, by a newer trailing message, or by the session leaving `busy`.
 
-When an assistant `message.updated` event carries `time.completed` and the store still believes the session busy, sync schedules one deferred status check (`maybePollStatusAfterMessageCompletion`, ~750ms). The status is re-read when the timer fires, so a normal turn whose `session.idle` lands inside that window issues no request at all; only a still-busy session spends a directory status poll, sharing the watchdog's one-in-flight-per-directory guard. The invariant is unchanged from the watchdog escalation: the monotonic pass confirms or raises active status and never lowers it, and an authoritative resync runs only when the snapshot disagrees with a store that still believes the session busy. This narrows the stuck-spinner window after a lost `session.idle` from a watchdog interval to one round-trip; the 5s watchdog poll remains the backstop.
+When an assistant `message.updated` event carries `time.completed` and the store still believes the session busy, sync schedules one deferred status check (`maybePollStatusAfterMessageCompletion`, ~750ms). The status is re-read when the timer fires, so a normal turn whose `session.idle` lands inside that window issues no request at all; only a still-busy session spends a directory status poll, sharing the watchdog's one-in-flight-per-directory guard. The invariant is unchanged from the watchdog escalation: the monotonic pass confirms or raises active status and never lowers it, and an authoritative resync runs only when the snapshot disagrees with a store that still believes the session busy. This narrows the stuck-spinner window after a lost `session.idle` from a watchdog interval to one round-trip; the watchdog poll remains the backstop.
 
 A sent prompt sets its session busy before the request goes out, and OpenCode answers the request only after it admits the prompt. A directory starting cold, with plugins or MCP servers that take a while, holds the request open for that long, and until then the active-session list does not name the session. `prompts-in-flight.ts` counts the prompt requests `optimisticSend` has open per session. While one is open, no status snapshot lowers that session: the authoritative pass and the directory bootstrap snapshot keep its busy status in the directory store and in the global status store the sidebar reads, and the watchdog does not escalate for it. Lowering it there made the chat read as idle on an unanswered prompt, and five seconds later `SessionErrorNotice` reported a reply that never started while the folder was still starting (#4875). Live `session.status`, `session.idle` and `session.error` events still settle the session, and a rejected send rolls its status back to idle itself.
 
 Incomplete-session materialization is deduplicated by runtime, directory, and session for the full cooldown window, including after a fast success or failure. A settled-running-tool recovery may supersede a different request in that window so an earlier pre-settlement refresh cannot consume the only terminal recovery signal. Deferred recovery is dropped if its captured runtime is no longer active. If recovery requests a tail refresh while an older load is in flight, one refresh runs after that load instead of losing the newer authority demand. Completion retains the cooldown marker until expiry, and an older completion cannot clear a newer request marker. Recovery starts after the current ordered event batch and rechecks whether local state already contains the requested entity before starting HTTP. An explicit empty part bucket is authoritative fetched-empty state, not a missing snapshot. This prevents repeated orphan/missing-part events from creating message-tail and status request storms while preserving later recovery.
+
+### Why a running step without parts is not a gap
+
+OpenCode 2.x opens every step of a turn as a new assistant message (`session.step.started` becomes a `message.updated` without parts) and sends the step's parts once the model answers, seconds later. Two checks read that wait as lost parts: the `message.updated` handler requested empty-assistant recovery (a 30-record tail, an inbox read and a status read), and the session counted as not renderable, so the chat reloaded the session record, its first page of 100 records and the inbox. Both ran once per step, with pages that grow with the turn; a 21-step turn on the fixture provider made 149 requests, 98 of them these. Now empty-assistant recovery runs only for an assistant message that completed without a part bucket, and `getSessionMaterializationStatus` takes `historyCovered`: when the message loader holds the session's history (`coversHistory`: read and not evicted since), an assistant message still running without parts does not make the session unrenderable. A part lost before completion still shows as an orphan or missing-part delta, which has its own recovery. Records only events delivered are not history, so a session the loader has not read keeps loading its transcript as before, and reconnect recovery still counts such a step as a candidate.
 
 When `session.idle` or `session.error` settles a session but the trailing assistant message still contains a `pending` or `running` tool, sync refreshes that session tail. This narrowly reconciles a missed terminal tool-part event without refetching normally completed turns or stale tools from older turns. A stale refresh or delayed part event cannot regress a locally observed terminal tool to an active status.
 

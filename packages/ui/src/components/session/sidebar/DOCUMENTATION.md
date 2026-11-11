@@ -127,7 +127,8 @@ unconditionally. The hook is the only bootstrap demand owner and publishes
 only the current directory and the selected session's directory; it also
 refreshes newly added topology, coalesces control events, and performs
 authoritative cleanup. Root-level `useGlobalSessionsPolling` remains the only
-initial and 45-second global poller, with bounded startup recovery.
+global poller (initial load, ten-minute snapshot, head check after a stream
+gap), with bounded startup recovery.
 `useSessionListSync` must not create a second global polling lifecycle.
 
 The global sessions cache is the complete source for active and archived

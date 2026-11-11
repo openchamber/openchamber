@@ -40,15 +40,31 @@ export const buildPageSignalsSource = () => `(() => {
   }
 })()`
 
-/** Counts requests the page starts; `data:` and `blob:` URLs are not requests. */
+/**
+ * The route a request counts under: path with session, message and part ids
+ * replaced, plus the query keys and the `limit` value, so a message page read
+ * shows as `GET /api/session/:id/message?limit=30`.
+ */
+const requestRoute = (method, rawUrl) => {
+  const url = new URL(rawUrl)
+  const path = url.pathname.replace(/\/(ses|msg|prt)_[A-Za-z0-9]+/g, "/:id")
+  const query = [...url.searchParams.keys()].sort().map((key) => (key === "limit" ? `limit=${url.searchParams.get(key)}` : key))
+  return `${method} ${path}${query.length ? `?${query.join("&")}` : ""}`
+}
+
+/** Counts requests the page starts, in total and per route; `data:` and `blob:` URLs are not requests. */
 const countRequests = (client) => {
   let requests = 0
+  const byRoute = {}
   const unsubscribe = client.on("Network.requestWillBeSent", ({ request }) => {
-    if (!/^(data|blob):/.test(String(request?.url))) requests += 1
+    if (/^(data|blob):/.test(String(request?.url))) return
+    requests += 1
+    const route = requestRoute(request.method, request.url)
+    byRoute[route] = (byRoute[route] ?? 0) + 1
   })
   return () => {
     unsubscribe()
-    return requests
+    return { requests, requestsByRoute: byRoute }
   }
 }
 
@@ -58,10 +74,10 @@ export const startPageSignals = async (client) => {
   await evaluateValue(client, `globalThis.${GLOBAL}?.start()`)
   return {
     stop: async () => {
-      const requests = stopRequests()
+      const { requests, requestsByRoute } = stopRequests()
       const page = await evaluateValue(client, `globalThis.${GLOBAL}?.stop() ?? null`)
       if (!page) throw new Error("The page signals were never installed; the document loaded before the source was added.")
-      return { ...page, longestTaskMs: page.longestTaskMs === null ? null : round(page.longestTaskMs), layoutShift: page.layoutShift === null ? null : round(page.layoutShift, 4), requests }
+      return { ...page, longestTaskMs: page.longestTaskMs === null ? null : round(page.longestTaskMs), layoutShift: page.layoutShift === null ? null : round(page.layoutShift, 4), requests, requestsByRoute }
     },
   }
 }

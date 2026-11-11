@@ -460,27 +460,36 @@ describe('SyncProvider sibling watchdog reads', () => {
       }
       const failedReads = () => discoveryReads.filter((directory) => directory === DIRECTORY).length
       const healthyReads = () => discoveryReads.filter((directory) => directory === otherDirectory).length
-      // The page helper retains its three attempts, 500 then 1000 ms apart.
-      await advance(10_000)
+      // A live stream delivers every child's `session.created`: nothing is
+      // listed until a gap. Before, both directories were listed every 15 s.
+      await advance(19_000)
+      expect(failedReads()).toBe(0)
+      expect(healthyReads()).toBe(0)
+      // The fixture's stream stalls, so each stale resync is a gap that owes
+      // one discovery. The page helper retains its three attempts, 500 then
+      // 1000 ms apart.
+      await advance(4_000)
       expect(failedReads()).toBe(3)
-      await advance(25_000)
+      expect(healthyReads()).toBe(1)
+      await advance(27_000)
       expect(failedReads()).toBe(3)
       expect(healthyReads()).toBe(3)
-      expect(statusReads.filter((directory) => directory === DIRECTORY)).toHaveLength(9)
-      expect(sessionReads.filter((directory) => directory === DIRECTORY)).toHaveLength(2)
-      await advance(10_000)
+      expect(statusReads.filter((directory) => directory === DIRECTORY)).toHaveLength(11)
+      expect(sessionReads.filter((directory) => directory === DIRECTORY)).toHaveLength(3)
+      await advance(7_000)
       expect(failedReads()).toBe(6)
-      await advance(55_000)
+      // The failed directory waits out its doubled delay; the gaps after it
+      // keep the discovery owed rather than adding reads.
+      await advance(58_000)
       expect(failedReads()).toBe(6)
-      await advance(10_000)
-      expect(failedReads()).toBe(9)
+      expect(healthyReads()).toBe(7)
       failing = false
-      await advance(65_000)
+      await advance(10_000)
+      expect(failedReads()).toBe(8)
+      await advance(15_000)
+      expect(failedReads()).toBe(9)
+      await advance(15_000)
       expect(failedReads()).toBe(10)
-      await advance(15_000)
-      expect(failedReads()).toBe(11)
-      await advance(15_000)
-      expect(failedReads()).toBe(12)
     })
   })
 })
