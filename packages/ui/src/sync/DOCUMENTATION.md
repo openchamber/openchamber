@@ -180,9 +180,11 @@ A HEIC the bundled decoder cannot read (`HeicConversionError`, Apple's HDR gain-
 
 Providers accept PNG, JPEG, GIF and WebP image parts. A raw HEIC image part makes the provider refuse the request, and the whole send fails with it, so the bytes go where the agent's tools can read them and the message carries only the path. A newer decoder would read the gain-map photos in the browser, but it is a new dependency for one class of file that the agent's tools already convert.
 
-### Why sends read the server's agent
+### Why sends read the server's selection
 
-`resolveSendSelection` reads the session through the runtime-aware SDK before comparing a requested agent. A directory sync record can miss an agent switch and already match the picker while the server still runs another agent. The server read makes that send recover and skips switch records when the server already matches. Failed reads are definite pre-send failures and roll back without prompt-confirmation reads; a runtime instance change discards the response, including a switch away and back. Model and effort comparisons use the current sync record after the read, so events received during it remain visible; a directory store without the record falls through to every store, so an unchanged model held elsewhere adds no switch record. Sends without an agent make no extra read.
+`resolveSendSelection` reads the session through the runtime-aware SDK before comparing the requested model and agent, on every send it resolves. A directory sync record can miss a switch and already match the picker while the server still runs another model or agent, and the composer then shows the cached model while the turn runs on the server's (#6035, #6501). The server read makes that send recover and skips switch records when the server already matches. The model must also match the current sync record after the read, so a switch event received during it remains visible; a directory store without the record falls through to every store, so an unchanged model held elsewhere adds no switch record. A runtime instance change discards the response, including a switch away and back.
+
+The read is a check, never a gate for a model-only selection. When it fails for a send without an agent, such as `/compact` or a form reply with only a model pick, the action still goes out with the picked model stated explicitly: at worst OpenCode records one switch to the model it already runs. With an agent the agent cannot be compared, so a failed read is a definite pre-send failure and rolls the send back without prompt-confirmation reads, as before.
 
 ## Catalog changes apply live
 

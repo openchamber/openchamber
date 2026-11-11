@@ -3543,6 +3543,19 @@ describe("replyToForm applies the composer selection", () => {
     expect(selectionPicks.settled).toEqual([])
   })
 
+  test("a failed session read still sends a model-only answer, with the picked model stated explicitly", async () => {
+    mainSessionId = "session-a"
+    seedSession("session-a")
+    // The server read fails; the cache alone already matches the pick.
+    sessionRecords.clear()
+    configState = { currentProviderId: "anthropic", currentModelId: "claude-3" }
+
+    await replyInMainChat()
+
+    expect(replyMethods()).toEqual(["selection.apply", "form.reply"])
+    expect(replyCalls.find((call) => call.method === "selection.apply")?.params.selection).toEqual({ model: SESSION_MODEL })
+  })
+
   test("a changed agent the folder lacks leaves the form pending, and the error names it", async () => {
     mainSessionId = "session-a"
     seedSession("session-a", { agent: "plan" })
