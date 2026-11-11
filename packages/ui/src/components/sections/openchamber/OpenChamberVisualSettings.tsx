@@ -636,6 +636,8 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                 {shouldShow('fontSize') && !isMobile && (
                                     <SettingsStackedField
                                         label={t('settings.openchamber.visual.field.interfaceFont')}
+                                        description={uiFont === CUSTOM_FONT_ID ? t('settings.openchamber.visual.field.customFontHint') : undefined}
+                                        descriptionPlacement="after"
                                         settingsItem="appearance.interface-font-size"
                                         controlClassName="w-full flex-wrap"
                                     >
@@ -679,6 +681,8 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                 {shouldShow('terminalFontSize') && (
                                     <SettingsStackedField
                                         label={t('settings.openchamber.visual.field.codeFont')}
+                                        description={monoFont === CUSTOM_FONT_ID ? t('settings.openchamber.visual.field.customFontHint') : undefined}
+                                        descriptionPlacement="after"
                                         controlClassName="w-full flex-wrap"
                                     >
                                         <Select value={monoFont} onValueChange={(value) => setMonoFont(value as MonoFontOption)}>
