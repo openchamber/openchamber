@@ -448,6 +448,46 @@ repeating registration; a later listing still admits the session, and a parked
 viewed session comes back then. The sidebar stays the only owner of the
 worktree list: admission never publishes topology itself.
 
+### Following a move
+
+`adoptSessionMove` in `session-actions.ts` owns a directory change that the
+client did not initiate: an agent's `session_move`, another client, or this
+client's move whose event beat the response. It moves the transcript, live
+state and pending requests to the destination store, registers the routing
+directory, and updates the selected directory. It also updates the two
+sidebar-facing copies in the same step: the worktree attachment becomes the
+worktree holding the destination (or clears when none does), and the moved
+record is upserted into the global sessions store with its new directory. The
+sidebar and the session switcher read the global store and the attachment, so
+neither may wait for the next poll; the attachment outranks the session record
+in grouping, so leaving it behind keeps a session under the worktree it left.
+The global upsert also protects the correct directory from a poll response
+that predates the move.
+
+Opening a session (`syncSession`) and pending-form recovery
+(`recoverPendingQuestions`) resolve their directory through
+`resolveSessionReadDirectory` (`session-read-directory.ts`) before they read.
+It takes the directory from the global session record, which follows a move;
+a session that record has not listed yet is read by ID through the unscoped
+client. When that directory differs from the one the caller selected, it
+adopts the session before reading, so the directory it left is never
+repopulated. The caller captures its runtime instance before resolving: a
+read that finishes after a runtime switch, including a round trip back to the
+same runtime, adopts nothing and the caller stops before it touches or
+creates a store.
+
+`loadMore` and `prefetchSession` do not resolve: they take the directory the
+caller passes, which is the directory an open chat already reads from. A move
+invalidates the session's message loads in both the source and the
+destination (`relocateSession`), so an older-page or prefetch request still
+in flight for the source is discarded rather than committed, and the next
+request goes to the destination the chat now follows.
+
+The local (VS Code) message queue is keyed by directory as well, and
+`relocateSession` moves the session's queued messages and their in-flight
+marks to the destination key (`followSessionMove`). The server-owned queue is
+rekeyed by the server and arrives as a broadcast.
+
 ### Why admission reacts to moves and not to the session list
 
 The first version scanned the whole global session list and registered every

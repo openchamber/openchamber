@@ -243,6 +243,17 @@ Limits: 20 items per session, 50 sessions (oldest evicted, never one with an
 item in flight), 200k characters of content; attachment payloads are bounded
 by the route family's 50 MB JSON limit.
 
+## A session that moves
+
+A queued message belongs to the session, not to the directory it was queued
+in. The wire translator's move event is `session.updated` with
+`info.projectID`; the runtime rekeys that session's entry to the new directory
+and broadcasts before the next idle tick, so the delivery and every client
+follow the session. Usage and title updates also carry a directory but no
+`projectID`, so an in-flight event from the old location cannot move a queue
+back. The UI drops the session's other directory keys when the server speaks
+for one directory, so the queued row moves instead of appearing twice.
+
 ## UI ownership
 
 `packages/ui/src/stores/messageQueueStore.ts` is the projection: see its

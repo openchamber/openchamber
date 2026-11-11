@@ -805,6 +805,19 @@ export const createOpenChamberControlService = (dependencies) => {
   const resolveSessionDirectory = async (sessionID) => {
     try {
       const client = await getClient();
+      // A moved session can still have a copy under the directory this tool
+      // call came from, and the list is the first place that copy shows up.
+      // The single-session read is by id and returns the session's own
+      // location, so it resolves the real directory before the list is used.
+      let detail = null;
+      try {
+        detail = await client.session.get({ sessionID }).catch(() => null);
+      } catch {
+        // A client without the by-id read falls through to the list.
+      }
+      const direct = asNonEmptyString(detail?.location?.directory) || asNonEmptyString(detail?.directory);
+      if (direct) return direct;
+
       const seenCursors = new Set();
       let cursor;
       for (;;) {

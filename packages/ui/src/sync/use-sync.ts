@@ -3,6 +3,9 @@ import type { Message, Part } from "@/lib/opencode/model"
 import { opencodeClient } from "@/lib/opencode/client"
 import { Binary } from "./binary"
 import { upsertSessionRecord } from "./session-records"
+import { adoptSessionMove } from "./session-actions"
+import { resolveSessionReadDirectory, type SessionReadDirectorySources } from "./session-read-directory"
+import { resolveGlobalSessionDirectory, useGlobalSessionsStore } from "@/stores/useGlobalSessionsStore"
 import { retry } from "./retry"
 import {
   useChildStoreManager,
@@ -16,7 +19,16 @@ import {
 } from "./sync-context"
 import { stripSessionDiffSnapshots } from "./sanitize"
 import { getSessionMaterializationStatus } from "./materialization"
-import { getRuntimeKey } from "@/lib/runtime-switch"
+import { captureRuntimeInstance, getRuntimeKey } from "@/lib/runtime-switch"
+
+const sessionReadDirectorySources: SessionReadDirectorySources = {
+  knownDirectory: (sessionID) => {
+    const record = useGlobalSessionsStore.getState().entityById.get(sessionID)
+    return record ? resolveGlobalSessionDirectory(record) : null
+  },
+  readUnscoped: (sessionID) => opencodeClient.getSessionUnscoped(sessionID),
+  adopt: adoptSessionMove,
+}
 
 // Shared across useSync() hook instances. Chat, model controls, and sidebar can
 // all request the same session during startup; coalesce them into one HTTP load.
@@ -60,8 +72,10 @@ export function useSync() {
 
   const recoverPendingQuestions = useCallback(
     async (sessionID: string, directoryOverride?: string): Promise<boolean> => {
-      const targetDirectory = directoryOverride || directory
-      if (!sessionID || !targetDirectory || getRuntimeKey() !== runtimeKey) return false
+      const selectedDirectory = directoryOverride || directory
+      if (!sessionID || !selectedDirectory || getRuntimeKey() !== runtimeKey) return false
+      const targetDirectory = await resolveSessionReadDirectory(sessionID, selectedDirectory, captureRuntimeInstance(), sessionReadDirectorySources)
+      if (!targetDirectory) return false
       const targetStore = childStores.ensureChild(targetDirectory, {
         priority: "selected",
         reason: "selected-session",
@@ -84,7 +98,10 @@ export function useSync() {
   const syncSession = useCallback(
     async (sessionID: string, force?: boolean, directoryOverride?: string) => {
       if (getRuntimeKey() !== runtimeKey) return
-      const targetDirectory = directoryOverride || directory
+      const selectedDirectory = directoryOverride || directory
+      if (!selectedDirectory) return
+      const targetDirectory = await resolveSessionReadDirectory(sessionID, selectedDirectory, captureRuntimeInstance(), sessionReadDirectorySources)
+      if (!targetDirectory) return
       touch(sessionID, targetDirectory)
       const key = keyFor(sessionID, targetDirectory)
 

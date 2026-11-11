@@ -641,6 +641,17 @@ describe('OpenChamber control service', () => {
     expect(client.session.list).toHaveBeenCalledTimes(2);
   });
 
+  it('prefers the session by-id location over a stale copy in the global list', async () => {
+    const { service, client } = createService();
+    client.session.get.mockResolvedValue({ id: 'ses_target', location: { directory: '/repo/real' } });
+    client.session.list.mockResolvedValue({
+      data: [{ id: 'ses_target', location: { directory: '/repo/stale' } }],
+    });
+
+    await expect(service.resolveSessionDirectory('ses_target')).resolves.toBe('/repo/real');
+    expect(client.session.list).not.toHaveBeenCalled();
+  });
+
   it('keeps paging session.list until the requested limit is satisfied', async () => {
     const { service, client } = createService();
     client.session.list
