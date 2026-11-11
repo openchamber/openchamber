@@ -21,6 +21,7 @@ import {
   commit,
   createWorktree,
   getWorktreeBootstrapStatus,
+  getWorktreeBootstrapGateStatus,
   waitForActiveWorktreeBootstrap,
   getBranches,
   getRepositoryRemoteUrls,
@@ -2027,6 +2028,117 @@ describe('getWorktrees', () => {
 // ---------------------------------------------------------------------------
 
 describe('createWorktree', () => {
+  it('reports the failed attempt after fast creation rolls back its empty directory', async () => {
+    if (!canRunGit()) return;
+    const repo = createTempDir();
+    runGit(repo, ['init', '-b', 'main']);
+    runGit(repo, ['config', 'user.email', 'test@example.com']);
+    runGit(repo, ['config', 'user.name', 'Test User']);
+    runGit(repo, ['commit', '--allow-empty', '-m', 'Initial commit']);
+    runGit(repo, ['branch', 'team/stable']);
+    const previousDataHome = process.env.XDG_DATA_HOME;
+    process.env.XDG_DATA_HOME = createTempDir();
+    const bootstrapStore = createWorktreeBootstrapStore({ filePath: path.join(createTempDir(), 'bootstrap.json') });
+    try {
+      const created = await createWorktree(repo, {
+        mode: 'new', branchName: 'team/stable/feature', worktreeName: 'failed-ref', returnAfterDirectoryCreated: true,
+      }, { bootstrapStore });
+      // Git refuses the nested branch name; the rollback finishes before the first poll.
+      await waitForActiveWorktreeBootstrap(created.path);
+
+      expect(fs.existsSync(created.path)).toBe(false);
+      // The rollback itself releases the durable record and its capacity.
+      await expect(bootstrapStore.read(created.path)).resolves.toBeNull();
+      // The attempt's watcher and waiters still read the failure, on every poll.
+      for (let poll = 0; poll < 2; poll += 1) {
+        await expect(getWorktreeBootstrapStatus(created.path, { bootstrapStore }))
+          .resolves.toMatchObject({ status: 'failed', phase: 'directory-created' });
+      }
+      await expect(getWorktreeBootstrapGateStatus(created.path, { bootstrapStore }))
+        .resolves.toMatchObject({ status: 'failed' });
+    } finally {
+      if (previousDataHome === undefined) delete process.env.XDG_DATA_HOME;
+      else process.env.XDG_DATA_HOME = previousDataHome;
+    }
+  });
+
+  it('keeps the rolled-back failure across a store read that fails once', async () => {
+    if (!canRunGit()) return;
+    const repo = createTempDir();
+    runGit(repo, ['init', '-b', 'main']);
+    runGit(repo, ['config', 'user.email', 'test@example.com']);
+    runGit(repo, ['config', 'user.name', 'Test User']);
+    runGit(repo, ['commit', '--allow-empty', '-m', 'Initial commit']);
+    runGit(repo, ['branch', 'team/stable']);
+    const previousDataHome = process.env.XDG_DATA_HOME;
+    process.env.XDG_DATA_HOME = createTempDir();
+    const store = createWorktreeBootstrapStore({ filePath: path.join(createTempDir(), 'bootstrap.json') });
+    let failNextRead = false;
+    const bootstrapStore = {
+      ...store,
+      read: async (directory) => {
+        if (failNextRead) {
+          failNextRead = false;
+          throw Object.assign(new Error('Busy'), { code: 'EBUSY' });
+        }
+        return store.read(directory);
+      },
+    };
+    try {
+      const created = await createWorktree(repo, {
+        mode: 'new', branchName: 'team/stable/feature', worktreeName: 'failed-ref-read', returnAfterDirectoryCreated: true,
+      }, { bootstrapStore });
+      await waitForActiveWorktreeBootstrap(created.path);
+      expect(fs.existsSync(created.path)).toBe(false);
+
+      const first = await getWorktreeBootstrapStatus(created.path, { bootstrapStore });
+      expect(first).toMatchObject({ status: 'failed', phase: 'directory-created' });
+      failNextRead = true;
+      await expect(getWorktreeBootstrapStatus(created.path, { bootstrapStore }))
+        .resolves.toBe(first);
+      await expect(getWorktreeBootstrapStatus(created.path, { bootstrapStore }))
+        .resolves.toMatchObject({ status: 'failed', errorCode: first.errorCode, error: first.error });
+      await expect(getWorktreeBootstrapGateStatus(created.path, { bootstrapStore }))
+        .resolves.toMatchObject({ status: 'failed', errorCode: first.errorCode });
+    } finally {
+      if (previousDataHome === undefined) delete process.env.XDG_DATA_HOME;
+      else process.env.XDG_DATA_HOME = previousDataHome;
+    }
+  });
+
+  it('still reports the failed attempt when rollback cannot release its record', async () => {
+    if (!canRunGit()) return;
+    const repo = createTempDir();
+    runGit(repo, ['init', '-b', 'main']);
+    runGit(repo, ['config', 'user.email', 'test@example.com']);
+    runGit(repo, ['config', 'user.name', 'Test User']);
+    runGit(repo, ['commit', '--allow-empty', '-m', 'Initial commit']);
+    runGit(repo, ['branch', 'team/stable']);
+    const previousDataHome = process.env.XDG_DATA_HOME;
+    process.env.XDG_DATA_HOME = createTempDir();
+    const store = createWorktreeBootstrapStore({ filePath: path.join(createTempDir(), 'bootstrap.json') });
+    const bootstrapStore = {
+      ...store,
+      remove: async () => { throw Object.assign(new Error('Busy'), { code: 'EBUSY' }); },
+    };
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const created = await createWorktree(repo, {
+        mode: 'new', branchName: 'team/stable/feature', worktreeName: 'failed-ref-kept', returnAfterDirectoryCreated: true,
+      }, { bootstrapStore });
+      await waitForActiveWorktreeBootstrap(created.path);
+
+      expect(fs.existsSync(created.path)).toBe(false);
+      await expect(store.read(created.path)).resolves.toMatchObject({ status: 'failed' });
+      await expect(getWorktreeBootstrapStatus(created.path, { bootstrapStore }))
+        .resolves.toMatchObject({ status: 'failed', phase: 'directory-created' });
+    } finally {
+      warn.mockRestore();
+      if (previousDataHome === undefined) delete process.env.XDG_DATA_HOME;
+      else process.env.XDG_DATA_HOME = previousDataHome;
+    }
+  });
+
   // A directory this server never bootstrapped is not being populated. Reading
   // it as failed refused every ordinary repository once the OpenCode proxy
   // started gating on this status.
@@ -2719,9 +2831,8 @@ describe('createWorktree', () => {
         errorCode: 'BRANCH_NAME_CONFLICT',
         error: expect.stringContaining('clashes with an existing branch'),
       });
-      await expect(bootstrapStore.read(created.path)).resolves.toMatchObject({
-        errorCode: 'BRANCH_NAME_CONFLICT',
-      });
+      // The rollback released the durable record; the attempt's failure stays in memory.
+      await expect(bootstrapStore.read(created.path)).resolves.toBeNull();
     } finally {
       if (previousXdgDataHome === undefined) {
         delete process.env.XDG_DATA_HOME;
@@ -2780,8 +2891,10 @@ describe('createWorktree', () => {
         { timeout: 5_000 },
       ).toBe('failed');
       await waitForActiveWorktreeBootstrap(created.path);
-      const record = await bootstrapStore.read(created.path);
-      expect(record).toMatchObject({ errorCode });
+      // The rollback released the durable record; the attempt's failure stays in memory.
+      await expect(bootstrapStore.read(created.path)).resolves.toBeNull();
+      const record = await getWorktreeBootstrapStatus(created.path, { bootstrapStore });
+      expect(record).toMatchObject({ status: 'failed', errorCode });
       expect(JSON.stringify(record)).not.toContain('geheim');
     } finally {
       if (previousGitBinary === undefined) delete process.env.OPENCHAMBER_GIT_BINARY;

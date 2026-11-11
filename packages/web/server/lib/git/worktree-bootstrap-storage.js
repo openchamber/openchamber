@@ -252,10 +252,21 @@ export function createWorktreeBootstrapStore({
     await writeState(state);
     return clone(record);
   });
-  const remove = (directory) => enqueue(async () => {
+  const remove = (directory, { ifMissingFailed = false } = {}) => enqueue(async () => {
     const state = await readState();
     const fingerprint = await directoryFingerprint(directory, fsImpl);
-    if (!Object.hasOwn(state.records, fingerprint)) return false;
+    if (ifMissingFailed) {
+      const current = state.records[fingerprint];
+      if (current && current.status !== 'failed') return false;
+      try {
+        await fsImpl.lstat(directory);
+        return false;
+      } catch (error) {
+        if (error?.code !== 'ENOENT') throw error;
+      }
+    }
+    // Another reader may already have pruned the same missing checkout.
+    if (!Object.hasOwn(state.records, fingerprint)) return ifMissingFailed;
     delete state.records[fingerprint];
     await writeState(state);
     return true;
