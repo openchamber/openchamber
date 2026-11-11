@@ -14,6 +14,7 @@ import { readConsoleBudgets, withConsoleBudgets, type ConsoleBudgets } from '../
 import { antigravityHeaders, warnIfGeminiGroupMissing } from '../../web/server/lib/quota/providers/antigravity/client.js';
 import { miniMaxStatusError } from '../../web/server/lib/quota/providers/minimax-status.js';
 import { readCodexCliLogin, signInEmailOf } from '../../web/server/lib/quota/providers/codex-cli.js';
+import { formatCredits } from '../../web/server/lib/quota/utils/formatters.js';
 
 type AuthEntry = Record<string, unknown> | string;
 type AuthFile = Record<string, AuthEntry>;
@@ -1073,7 +1074,7 @@ const codexUsageWindowsOf = (payload: OpenAiUsagePayload) => {
     const valueLabel = unlimited
       ? 'Unlimited'
       : balance !== null
-        ? String(balance)
+        ? formatCredits(balance)
         : null;
     windows.credits_balance = toUsageWindow({
       usedPercent: null,
