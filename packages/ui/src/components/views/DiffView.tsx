@@ -50,6 +50,7 @@ import { ReviewFlowDialog } from '@/components/session/ReviewFlowDialog';
 import { useReviewFlowStart } from '@/components/session/useReviewFlowStart';
 import { PierreDiffViewer, type ContextExpansionRequest, type DiffFindWordRequest, type DiffHunkActions, type PierreDiffViewerHandle } from './PierreDiffViewer';
 import { HunkActions, type HunkBusyState, type HunkDiffAction } from './git/HunkActions';
+import { ChangedPathLabel } from './git/ChangedPathLabel';
 import { describeChange } from './git/changeStatus';
 import {
     FileTreeChevron,
@@ -670,7 +671,7 @@ const NestedRepositoryFileDiff = React.memo<NestedRepositoryFileDiffProps>(({
     }, [findKey, onFindWordRequest]);
     // A file changed only in the index has an empty working diff.
     const staged = isStagedStatusFile(file) && !isWorkingStatusFile(file);
-    const fileStatusKey = `${file.index}:${file.working_dir}:${file.insertions}:${file.deletions}`;
+    const fileStatusKey = `${file.index}:${file.working_dir}:${file.previousPath ?? ''}:${file.insertions}:${file.deletions}`;
 
     React.useEffect(() => {
         let cancelled = false;
@@ -678,14 +679,14 @@ const NestedRepositoryFileDiff = React.memo<NestedRepositoryFileDiffProps>(({
         const request: Promise<DiffData> = !git.getGitFileDiff || !git.getGitDiff
             ? Promise.reject(new Error(t('diffView.unavailable.missingTitle')))
             : hasFileVersionsDiff(file.path)
-                ? git.getGitFileDiff(directory, { path: file.path, staged }).then((response) => ({
+                ? git.getGitFileDiff(directory, { path: file.path, staged, previousPath: file.previousPath }).then((response) => ({
                     original: response.original ?? '',
                     modified: response.modified ?? '',
                     isBinary: response.isBinary,
                     submodule: response.submodule,
                     contextMode: 'full',
                 }))
-                : git.getGitDiff(directory, { path: file.path, staged, contextLines: DEFAULT_CONTEXT_DIFF_LINES }).then((response) => ({
+                : git.getGitDiff(directory, { path: file.path, staged, contextLines: DEFAULT_CONTEXT_DIFF_LINES, previousPath: file.previousPath }).then((response) => ({
                     ...createTextDiffDataFromPatch(file.path, response.diff, 'patch'),
                     submodule: response.submodule,
                 }));
@@ -710,7 +711,7 @@ const NestedRepositoryFileDiff = React.memo<NestedRepositoryFileDiffProps>(({
         return () => {
             cancelled = true;
         };
-    }, [directory, file.path, fileStatusKey, git, revision, staged, t]);
+    }, [directory, file.path, file.previousPath, fileStatusKey, git, revision, staged, t]);
 
     if (result.status === 'loading') {
         return (
@@ -1081,7 +1082,7 @@ export const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
     const descriptor = React.useMemo(() => describeChange(file), [file]);
     const renderSideBySide = layout === 'side-by-side';
     const desiredContextMode: DiffContextMode = loadFullFiles ? 'full' : 'patch';
-    const fileStatusKey = `${file.index}:${file.working_dir}:${file.insertions}:${file.deletions}`;
+    const fileStatusKey = `${file.index}:${file.working_dir}:${file.previousPath ?? ''}:${file.insertions}:${file.deletions}`;
     const hunkEligible = hunkActionsEnabled && !readOnlyActions && !initialDiffData && !comparisonDiff && !hasFileVersionsDiff(file.path);
     const patchScope = JSON.stringify([getRuntimeKey(), directory, file.path, staged, fileStatusKey, diffRetryNonce, contentRevision]);
     const actionPatch = canonicalPatch?.scope === patchScope ? canonicalPatch.patch : null;
@@ -1097,6 +1098,11 @@ export const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
     }, [comparisonDiff, cachedDiff, initialDiffData, localDiffData, staged, stagedDiffData]);
 
     const diffDataMatchesContextMode = diffData?.contextMode === desiredContextMode;
+    // A pure rename's patch has no hunks to draw.
+    const renameOnlyDiff = Boolean(
+        diffData && file.previousPath && !diffData.isBinary && !diffData.submodule
+        && diffData.fileDiff?.hunks.length === 0
+    );
 
     const setSectionRef = React.useCallback((node: HTMLDivElement | null) => {
         sectionRef.current = node;
@@ -1174,12 +1180,12 @@ export const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
         const displayRequest = !git.getGitFileDiff || !git.getGitDiff
             ? Promise.reject(new Error(t('diffView.unavailable.missingTitle')))
             : hasFileVersionsDiff(file.path)
-                ? git.getGitFileDiff(directory, { path: file.path, staged })
+                ? git.getGitFileDiff(directory, { path: file.path, staged, previousPath: file.previousPath })
                 : !loadFullFiles && actionPatch !== null
                     ? Promise.resolve({ diff: actionPatch, submodule: actionSubmodule })
-            : git.getGitDiff(directory, { path: file.path, staged, contextLines });
+            : git.getGitDiff(directory, { path: file.path, staged, contextLines, previousPath: file.previousPath });
         const canonicalRequest = hunkEligible && loadFullFiles && actionPatch === null && git.getGitDiff
-            ? git.getGitDiff(directory, { path: file.path, staged, contextLines: DEFAULT_CONTEXT_DIFF_LINES }).then((response) => response.diff)
+            ? git.getGitDiff(directory, { path: file.path, staged, contextLines: DEFAULT_CONTEXT_DIFF_LINES, previousPath: file.previousPath }).then((response) => response.diff)
             : Promise.resolve(actionPatch);
         const fetchPromise = Promise.all([displayRequest, canonicalRequest]);
         const timeoutMs = DIFF_REQUEST_TIMEOUT_MS;
@@ -1247,7 +1253,7 @@ export const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
                 lastDiffRequestRef.current = null;
             }
         };
-    }, [actionPatch, actionSubmodule, contentRevision, diffVersion, hunkEligible, isDiffCurrent, patchScope, comparisonDiff, desiredContextMode, diffData, diffDataMatchesContextMode, diffRetryNonce, directory, fetchStatus, file.path, fileStatusKey, git, initialDiffData, isExpanded, isMounted, loadFullFiles, localDiffLoadFailure, setDiff, staged, t, visible]);
+    }, [actionPatch, actionSubmodule, contentRevision, diffVersion, hunkEligible, isDiffCurrent, patchScope, comparisonDiff, desiredContextMode, diffData, diffDataMatchesContextMode, diffRetryNonce, directory, fetchStatus, file.path, file.previousPath, fileStatusKey, git, initialDiffData, isExpanded, isMounted, loadFullFiles, localDiffLoadFailure, setDiff, staged, t, visible]);
 
     const handleToggle = React.useCallback(() => {
         handleOpenChange(!isExpanded);
@@ -1362,41 +1368,14 @@ export const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
                         </span>
                         <span
                             className="min-w-0 flex-1 overflow-hidden typography-ui-label"
-                            title={file.path}
                         >
                             <span className="flex min-w-0 items-center gap-2">
                                 <FileTypeIcon filePath={file.path} className="h-3.5 w-3.5 flex-shrink-0 align-middle" />
-                                {(() => {
-                                    const lastSlash = file.path.lastIndexOf('/');
-                                    if (lastSlash === -1) {
-                                        return (
-                                            <span
-                                                className="oc-ui-start-align block min-w-0 truncate typography-ui-label text-foreground"
-                                                style={{ direction: 'rtl', unicodeBidi: 'plaintext' }}
-                                            >
-                                                {file.path}
-                                            </span>
-                                        );
-                                    }
-
-                                    const dir = file.path.slice(0, lastSlash);
-                                    const name = file.path.slice(lastSlash + 1);
-
-                                    return (
-                                        <span dir="ltr" className="flex min-w-0 items-baseline overflow-hidden">
-                                            <span
-                                                className="oc-ui-start-align min-w-0 truncate typography-ui-label text-muted-foreground"
-                                                style={{ direction: 'rtl', unicodeBidi: 'plaintext' }}
-                                            >
-                                                {dir}
-                                            </span>
-                                            <span className="flex-shrink-0 typography-ui-label">
-                                                <span className="text-muted-foreground">/</span>
-                                                <span className="text-foreground">{name}</span>
-                                            </span>
-                                        </span>
-                                    );
-                                })()}
+                                <ChangedPathLabel
+                                    path={file.path}
+                                    from={file.previousPath}
+                                    className="typography-ui-label"
+                                />
                             </span>
                         </span>
                     </div>
@@ -1516,7 +1495,12 @@ export const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
                             </button>
                         </div>
                     ) : null}
-                    {isMounted && diffData && (forceRenderLarge || (file.insertions + file.deletions) <= LARGE_DIFF_CHANGED_LINES) ? (
+                    {isMounted && renameOnlyDiff ? (
+                        <div className="px-4 py-3 typography-meta text-muted-foreground">
+                            {t('diffView.change.renamedFrom', { from: file.previousPath ?? '' })}
+                        </div>
+                    ) : null}
+                    {isMounted && diffData && !renameOnlyDiff && (forceRenderLarge || (file.insertions + file.deletions) <= LARGE_DIFF_CHANGED_LINES) ? (
                         <>
                             <InlineDiffViewer
                                 filePath={file.path}
@@ -1973,7 +1957,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
     const changedFiles: FileEntry[] = React.useMemo(() => {
         if (activeDiffScope === 'commit' || activeDiffScope === 'pr') {
             return (comparison.files ?? []).map((file) => ({
-                path: file.path, index: '', working_dir: file.status,
+                path: file.path, index: '', working_dir: file.status, previousPath: file.previousPath,
                 insertions: file.insertions, deletions: file.deletions, isNew: file.status === 'A',
             }));
         }
@@ -1983,6 +1967,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
                     path: file.path,
                     index: '',
                     working_dir: file.status,
+                    previousPath: file.previousPath,
                     insertions: 0,
                     deletions: 0,
                     isNew: file.status === 'A',
@@ -2683,7 +2668,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
                     if (hasFileVersionsDiff(nestedFile.path)) return null;
                     if (!git.getGitDiff) return null;
                     const staged = isStagedStatusFile(nestedFile) && !isWorkingStatusFile(nestedFile);
-                    const response = await git.getGitDiff(nestedDirectory, { path: nestedFile.path, staged, contextLines: DEFAULT_CONTEXT_DIFF_LINES });
+                    const response = await git.getGitDiff(nestedDirectory, { path: nestedFile.path, staged, contextLines: DEFAULT_CONTEXT_DIFF_LINES, previousPath: nestedFile.previousPath });
                     const data = { ...createTextDiffDataFromPatch(nestedFile.path, response.diff, 'patch'), submodule: response.submodule };
                     return resolveFindDiff(diffDataToFileDiff(nestedFile.path, data), diffHideWhitespace);
                 },
@@ -2755,13 +2740,16 @@ export const DiffView: React.FC<DiffViewProps> = ({
         // output for the viewer's fallback and the prefetcher.
         const staged = getFileStaged(filePath);
         const contextLines = fullContext ? FULL_CONTEXT_DIFF_LINES : DEFAULT_CONTEXT_DIFF_LINES;
+        // The batched read compares destination paths only; a rename is read
+        // on its own against its source, as the viewer reads it.
+        const previousPath = file.previousPath;
         let response: Awaited<ReturnType<typeof getGitDiff>>;
         try {
-            const batched = await readBatchedDiffForFind(effectiveDirectory, filePath, revision, staged, fullContext);
+            const batched = previousPath ? null : await readBatchedDiffForFind(effectiveDirectory, filePath, revision, staged, fullContext);
             if (batched && !batched.ok && batched.reason) throw new GitPathUnavailableError(batched.error, batched.reason);
             response = batched?.ok
                 ? batched.diff
-                : await getGitDiff(effectiveDirectory, { path: filePath, staged, contextLines });
+                : await getGitDiff(effectiveDirectory, { path: filePath, staged, contextLines, previousPath });
         } catch (error) {
             if (!(error instanceof GitPathUnavailableError)) throw error;
             if (error.reason === 'nested_repository') return readNestedRepositoryForFind(filePath, getLayoutForFile(file), revision);

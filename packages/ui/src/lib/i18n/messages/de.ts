@@ -1650,6 +1650,7 @@ export const dict = {
   'diffView.change.new': 'Neue Datei',
   'diffView.change.deleted': 'Gelöschte Datei',
   'diffView.change.renamed': 'Umbenannte Datei',
+  'diffView.change.renamedFrom': 'Umbenannt von {from} — Inhalt unverändert',
   'diffView.change.copied': 'Kopierte Datei',
   'diffView.change.modified': 'Geänderte Datei',
   'diffView.change.conflicted': 'Datei mit Konflikt',

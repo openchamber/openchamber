@@ -1910,6 +1910,7 @@ export const dict: Record<I18nKey, string> = {
   'diffView.change.new': '새 파일',
   'diffView.change.deleted': '삭제된 파일',
   'diffView.change.renamed': '이름 변경된 파일',
+  'diffView.change.renamedFrom': '{from}에서 이름 변경 — 내용 변경 없음',
   'diffView.change.copied': '복사된 파일',
   'diffView.change.modified': '수정된 파일',
   'diffView.change.conflicted': '충돌한 파일',

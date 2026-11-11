@@ -38,6 +38,10 @@ const SYNC_SDK = OpenCode.make({
   fetch: async () => new Response('[]', { headers: { 'content-type': 'application/json' } }),
 });
 
+// Git's patch for a rename with unchanged content: headers, no hunks.
+const pureRenamePatch = (from: string, to: string) =>
+  `diff --git a/${from} b/${to}\nsimilarity index 100%\nrename from ${from}\nrename to ${to}\n`;
+
 test('mobile comparisons drill into files, retry, resume, change source, and yield to external working diffs', async () => {
   const dom = new Window({ url: 'http://localhost' });
   dom.happyDOM.setWindowSize({ width: 390, height: 844 });
@@ -82,18 +86,27 @@ test('mobile comparisons drill into files, retry, resume, change source, and yie
           remotes: [], auxiliary: [] },
       });
       case '/api/git/branch-base': return Response.json({ base: null });
-      case '/api/git/range-files': return Response.json({ files: [{ path: url.searchParams.get('base') === 'refs/heads/parent' ? 'parent.png' : 'branch.png', status: 'M' }] });
+      case '/api/git/range-files': return Response.json({ files: url.searchParams.get('base') === 'refs/heads/parent'
+        ? [{ path: 'parent.png', status: 'M' }, { path: 'docs/moved.md', previousPath: 'docs/orig.md', status: 'R' }]
+        : [{ path: 'branch.png', status: 'M' }] });
       case '/api/git/range-diff':
+        if (url.searchParams.get('path') === 'docs/moved.md') return Response.json({ diff: pureRenamePatch('docs/orig.md', 'docs/moved.md') });
         return failBranchDiff
           ? Response.json({ error: 'Branch diff failed' }, { status: 500 })
           : Response.json({ diff: 'Binary files a/branch.png and b/branch.png differ' });
       case '/api/git/log': return Response.json({ all: commits, latest: commits[0], total: commits.length });
-      case '/api/git/commit-files': return Response.json({ files: [{ path: `commit-${url.searchParams.get('hash')?.[0]}.png`, previousPath: 'old.png', changeType: 'R', insertions: 0, deletions: 0, isBinary: true }] });
-      case '/api/git/commit-diff': return Response.json({ diff: 'Binary files a/old.png and b/commit.png differ' });
+      case '/api/git/commit-files': return Response.json({ files: url.searchParams.get('hash')?.[0] === 'a'
+        ? [{ path: 'commit-a.png', previousPath: 'old.png', changeType: 'R', insertions: 0, deletions: 0, isBinary: true }]
+        : [{ path: 'commit-b.md', previousPath: 'old.md', changeType: 'R', insertions: 0, deletions: 0, isBinary: false }] });
+      case '/api/git/commit-diff': return Response.json({ diff: url.searchParams.get('path') === 'commit-b.md'
+        ? pureRenamePatch('old.md', 'commit-b.md')
+        : 'Binary files a/old.png and b/commit.png differ' });
       case '/api/git/file-diff':
         if (url.searchParams.get('path') === 'nested/' && nestedIsRepository) {
           return Response.json({ error: 'Path is a separate Git repository: nested/', code: 'nested_repository' }, { status: 422 });
         }
+        // A staged pure rename: the file-version read answers equal versions and no patch.
+        if (url.searchParams.get('path') === 'docs/moved.md') return Response.json({ path: 'docs/moved.md', original: 'same\n', modified: 'same\n', isBinary: false });
         return Response.json({ path: url.searchParams.get('path'), original: '', modified: '', isBinary: true });
       // The bound status contract echoes the branch it answered for.
       case '/api/source-control/github/pr/status': return Response.json({ identity: GITHUB, project: UPSTREAM,
@@ -162,7 +175,13 @@ test('mobile comparisons drill into files, retry, resume, change source, and yie
     await act(async () => { option.click(); });
   };
   const openFile = async (path: string) => {
-    const button = container.querySelector(`[title="${path}"]`)?.closest('button');
+    // A renamed row names both sides (`old → new`), so match on the destination.
+    const button = [...container.querySelectorAll('[title]')]
+      .find((node) => {
+        const title = node.getAttribute('title') ?? '';
+        return title === path || title.endsWith(` \u2192 ${path}`);
+      })
+      ?.closest('button');
     if (!button) throw new Error(`Missing file ${path}`);
     await act(async () => { button.click(); });
   };
@@ -214,19 +233,29 @@ test('mobile comparisons drill into files, retry, resume, change source, and yie
     await click('[data-value="refs/heads/parent"]');
     expect(container.querySelector('[title="branch.png"]')).toBeNull();
     expect(container.querySelector('[title="parent.png"]')).not.toBeNull();
+    // A pure rename names its source and says the content is unchanged, instead of an empty body.
+    await openFile('docs/moved.md');
+    expect(container.querySelector('h2')?.textContent).toBe('moved.md');
+    expect(container.textContent).toContain('docs/orig.md → docs');
+    expect(container.textContent).toContain('Renamed from docs/orig.md — content unchanged');
+    const renameRequest = [...requests].reverse().find((url) => url.pathname === '/api/git/range-diff');
+    expect(renameRequest?.searchParams.get('previousPath')).toBe('docs/orig.md');
+    await click('[aria-label="Back"]');
 
     await chooseMode('Commit');
     expect(container.querySelector('[aria-label="Sync Changes"]')).toBeNull();
     expect(checkoutControl()).toBeUndefined();
-    expect(container.querySelector('[title="commit-a.png"]')).not.toBeNull();
+    // A renamed entry names both sides: the row reads `old → new`.
+    expect(container.querySelector('[title="old.png \u2192 commit-a.png"]')).not.toBeNull();
     await click('[aria-label="Select commit"]');
     await click(`[data-value="${'b'.repeat(40)}"]`);
     expect(container.querySelector('[title="commit-a.png"]')).toBeNull();
-    await openFile('commit-b.png');
+    await openFile('commit-b.md');
     expect(container.textContent).toContain('Commit · bbbbbbbb');
+    expect(container.textContent).toContain('Renamed from old.md — content unchanged');
     const commitRequest = [...requests].reverse().find((url) => url.pathname === '/api/git/commit-diff');
     expect(commitRequest?.searchParams.get('hash')).toBe('b'.repeat(40));
-    expect(commitRequest?.searchParams.get('previousPath')).toBe('old.png');
+    expect(commitRequest?.searchParams.get('previousPath')).toBe('old.md');
     expect(requests.filter((url) => url.pathname === '/api/git/range-diff').every((url) => url.searchParams.get('includeWorkingTree') === 'true')).toBe(true);
 
     await click('[aria-label="Back"]');
@@ -252,6 +281,15 @@ test('mobile comparisons drill into files, retry, resume, change source, and yie
     expect(container.querySelector('[aria-label="Select change mode"]')?.textContent).toBe('Changes');
     expect(container.querySelector('[aria-label="Publish"]')).not.toBeNull();
     expect(checkoutControl()).toBeDefined();
+
+    // A working-tree pure rename reads as one too, from its equal file versions.
+    await act(async () => { seed('/repo', { ...status, isClean: false, files: [{ path: 'docs/moved.md', previousPath: 'docs/orig.md', index: 'R', working_dir: ' ' }] }); });
+    initialDiff = { path: 'docs/moved.md', staged: true };
+    await render();
+    expect(container.textContent).toContain('Renamed from docs/orig.md — content unchanged');
+    const workingRenameRequest = [...requests].reverse().find((url) => url.pathname === '/api/git/file-diff');
+    expect(workingRenameRequest?.searchParams.get('previousPath')).toBe('docs/orig.md');
+    await click('[aria-label="Back"]');
 
     // A nested-repository answer must not outlive the read that produced it.
     await act(async () => { seed('/repo', { ...status, isClean: false, files: [{ path: 'nested/', index: '?', working_dir: '?' }] }); });
@@ -509,7 +547,13 @@ test('mobile changes last turn scope lists the turn diffs, opens one, and shows 
     await act(async () => { option.click(); });
   };
   const openFile = async (path: string) => {
-    const button = container.querySelector(`[title="${path}"]`)?.closest('button');
+    // A renamed row names both sides (`old → new`), so match on the destination.
+    const button = [...container.querySelectorAll('[title]')]
+      .find((node) => {
+        const title = node.getAttribute('title') ?? '';
+        return title === path || title.endsWith(` \u2192 ${path}`);
+      })
+      ?.closest('button');
     if (!button) throw new Error(`Missing file ${path}`);
     await act(async () => { button.click(); });
   };

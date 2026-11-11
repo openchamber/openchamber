@@ -2254,6 +2254,7 @@ export const dict: Record<I18nKey, string> = {
   'diffView.change.conflicted': 'Plik z konfliktem',
   'diffView.change.new': 'Nowy plik',
   'diffView.change.renamed': 'Plik o zmienionej nazwie',
+  'diffView.change.renamedFrom': 'Zmieniono nazwę z {from} — treść bez zmian',
   'diffView.change.untracked': 'Nieśledzony plik',
   'diffView.image.modified': 'Zmodyfikowany',
   'diffView.image.modifiedAlt': 'Zmodyfikowano: {path}',

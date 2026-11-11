@@ -153,21 +153,25 @@ export const ChangeRow = React.memo<ChangeRowProps>(function ChangeRow({
           {descriptor.code}
         </span>
         <FileTypeIcon filePath={file.path} className="h-3.5 w-3.5 shrink-0" />
-        {(() => {
-          const lastSlash = file.path.lastIndexOf('/');
-          if (lastSlash === -1 || nameOnly) {
-            return (
-              <span
-                className="oc-ui-start-align flex-1 min-w-0 truncate typography-ui-label text-foreground"
-                style={{ direction: 'rtl', unicodeBidi: 'plaintext' }}
-                title={file.path}
-              >
-                {changedPathName(file.path)}
-              </span>
-            );
-          }
-          return <ChangedPathLabel path={file.path} nameFirst={isMobile} className="flex-1 typography-ui-label" />;
-        })()}
+        {nameOnly ? (
+          <span
+            className="oc-ui-start-align flex-1 min-w-0 truncate typography-ui-label"
+            style={{ direction: 'rtl', unicodeBidi: 'plaintext' }}
+            title={file.previousPath ? `${file.previousPath} → ${file.path}` : file.path}
+          >
+            {file.previousPath ? (
+              <span className="text-muted-foreground">{changedPathName(file.previousPath)}{' → '}</span>
+            ) : null}
+            <span className="text-foreground">{changedPathName(file.path)}</span>
+          </span>
+        ) : (
+          <ChangedPathLabel
+            path={file.path}
+            from={file.previousPath}
+            nameFirst={isMobile}
+            className="flex-1 typography-ui-label"
+          />
+        )}
         {actionAtStart ? (
           <>
             {statsLabel}

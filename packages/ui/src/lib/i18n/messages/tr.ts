@@ -1784,6 +1784,7 @@ export const dict = {
   'diffView.change.new': 'Yeni dosya',
   'diffView.change.deleted': 'Silinmiş dosya',
   'diffView.change.renamed': 'Yeniden adlandırılmış dosya',
+  'diffView.change.renamedFrom': '{from} konumundan yeniden adlandırıldı — içerik değişmedi',
   'diffView.change.copied': 'Kopyalanmış dosya',
   'diffView.change.modified': 'Değiştirilmiş dosya',
   'diffView.change.conflicted': 'Çakışan dosya',

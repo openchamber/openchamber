@@ -1876,6 +1876,7 @@ export const dict: Record<I18nKey, string> = {
   'diffView.change.new': '新文件',
   'diffView.change.deleted': '已删除文件',
   'diffView.change.renamed': '已重命名文件',
+  'diffView.change.renamedFrom': '重命名自 {from} — 内容未变',
   'diffView.change.copied': '已复制文件',
   'diffView.change.modified': '已修改文件',
   'diffView.change.conflicted': '有冲突的文件',

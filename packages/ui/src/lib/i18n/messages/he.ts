@@ -1823,6 +1823,7 @@ export const dict = {
   'diffView.change.new': 'קובץ חדש',
   'diffView.change.deleted': 'קובץ שנמחק',
   'diffView.change.renamed': 'קובץ ששמו שונה',
+  'diffView.change.renamedFrom': 'שמו שונה מ-{from} — התוכן לא השתנה',
   'diffView.change.copied': 'קובץ שהועתק',
   'diffView.change.modified': 'קובץ ששונה',
   'diffView.change.conflicted': 'קובץ עם התנגשות',
