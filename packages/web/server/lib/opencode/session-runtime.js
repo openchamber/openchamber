@@ -325,12 +325,15 @@ export const createSessionRuntime = ({
     const existing = sessionStates.get(sessionId);
     const isRestartInterruption = metadata.reason === 'opencode-restart';
     if (existing && existing.lastUpdateAt > now - 5000 && status === existing.status && !isRestartInterruption) {
+      // A repeat the dedupe swallows still proves the status is current now.
+      existing.lastEventAt = now;
       return;
     }
 
     sessionStates.set(sessionId, {
       status,
       lastUpdateAt: now,
+      lastEventAt: now,
       lastEventId: eventId || `server-${now}`,
       metadata: { ...existing?.metadata, ...metadata },
     });
@@ -599,16 +602,31 @@ export const createSessionRuntime = ({
    * Sessions OpenCode reports running when this server connects to its event
    * stream, as read from `readAt` on. Turns that started before then sent no
    * event this server saw, so they are marked busy here and their starts are
-   * read back from history. A session whose status changed while the list was
-   * read is left to that newer status: its turn may have ended meanwhile.
+   * read back from history. A host session this map holds busy that the list
+   * leaves out ended its turn while the stream was down, and settles idle:
+   * clients seed rows from this map, so a missed idle would show the session
+   * running on every client that starts within the seed's age limit. A
+   * session that reported a status while the list was read is left to that
+   * newer status, and sessions of isolated spaces, which the host's list
+   * never names, are left alone.
    */
   const adoptRunningSessions = (sessionIds, readAt) => {
+    const running = new Set();
     for (const sessionId of sessionIds) {
       if (!sessionId || typeof sessionId !== 'string') continue;
-      if ((sessionStates.get(sessionId)?.lastUpdateAt ?? 0) >= readAt) continue;
+      running.add(sessionId);
+      if ((sessionStates.get(sessionId)?.lastEventAt ?? 0) >= readAt) continue;
       const status = sessionStates.get(sessionId)?.status;
       if (status !== 'busy' && status !== 'retry') updateSessionState(sessionId, 'busy', `server-adopted-${Date.now()}`);
       if (!turnStarts.get(sessionId)?.running) readBackTurnStart(sessionId);
+    }
+    for (const [sessionId, state] of [...sessionStates]) {
+      if (state.status !== 'busy' && state.status !== 'retry') continue;
+      if (isolatedSessionIds.has(sessionId) || running.has(sessionId) || state.lastEventAt >= readAt) continue;
+      endTurn(sessionId);
+      settlePendingRequest('permissions', sessionId, '');
+      setSessionActivityPhase(sessionId, 'cooldown');
+      updateSessionState(sessionId, 'idle', `server-settled-${Date.now()}`);
     }
   };
 

@@ -275,11 +275,73 @@ export const getDirectoryOwnedSessionIds = (directory: string, sessions: readonl
   return ids;
 };
 
+// Sessions whose status something wrote while an active-list read was in
+// flight; that read's answer is older than those writes.
+const statusWriteWatchers = new Set<Set<string>>();
+
+const noteStatusWrite = (sessionId: string): void => {
+  for (const touched of statusWriteWatchers) touched.add(sessionId);
+};
+
+/** Records every session whose status is written until `stop` is called. */
+export const watchGlobalSessionStatusWrites = () => {
+  const touched = new Set<string>();
+  statusWriteWatchers.add(touched);
+  return { touched, stop: () => { statusWriteWatchers.delete(touched); } };
+};
+
+type ActiveListReconcileDependencies = {
+  /** A session written since the read began, or one whose prompt OpenCode has not admitted yet. */
+  skip: (sessionId: string) => boolean;
+  /** Whether the list answers for sessions of this directory. */
+  covers: (directory: string) => boolean;
+  resolveDirectory: (sessionId: string) => string | null;
+};
+
+/**
+ * Status events that bring the index in line with OpenCode's global
+ * active-session list. The index is otherwise reconciled only for
+ * directories with a store, so a turn that ended in another project while
+ * the stream was down kept its row running until a reload. A session the list
+ * leaves out is idle now; one it names that the index does not hold is busy,
+ * when its directory is known. Neither manufactures a turn outcome.
+ */
+export const buildActiveListReconcileEvents = (
+  activeSessionIds: ReadonlySet<string>,
+  deps: ActiveListReconcileDependencies,
+): Map<string, SyncEvent[]> => {
+  const { statusById } = useGlobalSessionStatusStore.getState();
+  const eventsByDirectory = new Map<string, SyncEvent[]>();
+  const push = (directory: string, sessionID: string, type: 'idle' | 'busy') => {
+    const events = eventsByDirectory.get(directory) ?? [];
+    events.push({ type: 'session.status', properties: { sessionID, status: { type } } });
+    eventsByDirectory.set(directory, events);
+  };
+  for (const [sessionId, entry] of statusById) {
+    if (activeSessionIds.has(sessionId) || deps.skip(sessionId) || !deps.covers(entry.directory)) continue;
+    push(entry.directory, sessionId, 'idle');
+  }
+  for (const sessionId of activeSessionIds) {
+    if (statusById.has(sessionId) || deps.skip(sessionId)) continue;
+    const directory = deps.resolveDirectory(sessionId);
+    if (!directory || !deps.covers(directory)) continue;
+    push(directory, sessionId, 'busy');
+  }
+  return eventsByDirectory;
+};
+
 // Event-driven path: called by the sync dispatcher for status-bearing events
 // whose directory has no child store. Mirrors the child reducer's semantics
 // (`session.idle` / `session.error` both resolve to idle).
 export const applyGlobalSessionStatusEvents = (directory: string, payloads: readonly SyncEvent[]): void => {
   if (payloads.length === 0) return;
+  if (statusWriteWatchers.size > 0) {
+    for (const payload of payloads) {
+      if (payload.type === 'session.status' || payload.type === 'session.idle' || payload.type === 'session.error' || payload.type === 'session.deleted') {
+        if (payload.properties.sessionID) noteStatusWrite(payload.properties.sessionID);
+      }
+    }
+  }
   const normalizedDirectory = normalizeDirectory(directory);
   const state = useGlobalSessionStatusStore.getState();
   let statusById: Map<string, GlobalSessionStatusEntry> | null = null;
@@ -409,6 +471,13 @@ export const applyGlobalSessionStatusSnapshot = (
 ): void => {
   const directory = normalizeDirectory(rawDirectory);
   const known = new Set(knownSessionIds ?? []);
+  if (statusWriteWatchers.size > 0) {
+    for (const sessionId of known) noteStatusWrite(sessionId);
+    for (const sessionId of Object.keys(raw)) noteStatusWrite(sessionId);
+    for (const [sessionId, entry] of useGlobalSessionStatusStore.getState().statusById) {
+      if (entry.directory === directory) noteStatusWrite(sessionId);
+    }
+  }
   // Built once as a set and shared by both consumers below; only non-idle
   // sessions land here, so it stays small however long the directory's list is.
   const activeSessionIds = new Set<string>();
