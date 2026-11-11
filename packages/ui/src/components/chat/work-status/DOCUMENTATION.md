@@ -93,8 +93,8 @@ overlay.
 `useWorkStatusVisibility` hides the panel when any of these hold:
 
 - the user switched it off;
-- the runtime is mobile or VS Code (the phone shows the sections in its own
-  tab, see below);
+- the runtime is mobile or VS Code. The phone shows the sections in its own
+  tab; VS Code has no inline card and uses the overlay form, see below;
 - the row cannot fit `WORK_STATUS_MIN_CHAT_WIDTH` of transcript alongside
   `WORK_STATUS_PANEL_WIDTH` of panel. Only the threshold decisions are state
   (`roomy`, `roomyBesidePanel`); the width itself is not, because it changes
@@ -121,7 +121,7 @@ and usage readouts before a session exists.
 Managed Chats never render or warm the Project repository section. A Chat draft
 passes no fallback directory to the panel, so an active project's branch cannot
 leak into it. The MCP section prepares the draft's own directory through
-`prepareChatDraftDirectory`, shared with the header dropdown and first send.
+`prepareChatDraftDirectory`, shared with the first send.
 MCP reads and toggles wait for that directory; they never use the previous
 Chat's connections or the shared Chats root for a draft.
 
@@ -188,6 +188,19 @@ Subagents are off on the phone unless the user turns them on, while on desktop
 every section is on. One shared list could not hold both defaults, and a phone
 and a laptop are set up apart anyway, as the drawer's tabs already are.
 
+## In VS Code
+
+The extension has no right slot for the inline card and no desktop header
+switch. Its chat header carries one button that opens the overlay form
+(`workStatusOverlayOpen`). The overlay ignores `workStatusPanelEnabled` there:
+the preference has no switch in VS Code, so respecting it would leave the
+button unable to open anything. The overlay is transient and starts closed.
+
+Rows that would open the context panel are readouts there, because VS Code
+mounts no `ContextPanel`. A pull request row opens its URL in the browser, the
+only surface VS Code has for one; a summary without a URL leaves the row a
+readout (`prRowTarget.ts`).
+
 ## Data sources
 
 Everything is read from already-warm caches. The panel adds no aggregated
@@ -210,9 +223,9 @@ which requests only providers enabled for this panel.
 | Turn stats | `telemetry.ts` over `useSessionMessageRecords` | computed while authoritatively idle, including when collapsed; active mounts read warm records once for the previous turn; either rate above 5,000 tok/s is reported as unknown (see the two-rate description below) |
 | Keep-warm switch | `useSessionWarmingStore`, mirrored from the server's `lib/session-warming` | on the Context row, shown only while Settings chose per-session warming and for a root session outside an isolated space; the tooltip's countdown ticks only while it is open |
 | Goal | `useSessionGoal` | respects the Settings toggle |
-| MCP | `useMcpStore` | the switch reuses the dropdown's `setEnabled` |
+| MCP | `useMcpStore` | the switch reuses `useMcpStore.setEnabled`; a failed toggle shows its error in a toast and leaves the switch usable |
 | Pinned messages | `getContextObligatoryMessages` + `state.part`, else one `getSessionMessage` read | see below |
-| Tasks | `useSessionTodosStore`: the server's list for the session (`packages/web/server/lib/session-todos`), read once by `useLoadSessionTodos` in the section list, then kept current by `openchamber:session-todos` events | listed only once the server says OpenCode's experimental `todowrite` tool is on in the session's directory; while it is off nothing is read or shown |
+| Tasks | `useSessionTodosStore`: the server's list for the session (`packages/web/server/lib/session-todos`), read once by `useLoadSessionTodos` in the section list, then kept current by `openchamber:session-todos` events | listed only once the server says OpenCode's experimental `todowrite` tool is on in the session's directory; while it is off nothing is read or shown. VS Code has no such route, so the loader never reads there and Tasks stays unlisted |
 
 ### Subagent rows
 
@@ -614,7 +627,8 @@ snapshots own this preference; unrelated partial save echoes leave it unchanged.
 `workStatusPanelVisible` is separate and transient: the switch can be on while
 layout still refuses the panel. The header's project/branch line and the git
 rail read it to drop the readouts the panel already carries, and it is deliberately not persisted — it
-describes the current frame, not a preference.
+describes the current frame, not a preference. In VS Code the header button is
+transient and ignores this preference; see *In VS Code*.
 
 ## Appearing and disappearing
 
@@ -884,10 +898,11 @@ per repository.
 
 ## Loading data the header used to own
 
-Two readouts had no loader of their own and appeared only after the user opened
-the matching header dropdown:
+These readouts had no loader of their own and appeared only after the user
+opened the header's MCP or rate-limit dropdown (both since removed):
 
-- **MCP** — `McpDropdown` was the only mount-time caller of `refresh()`.
+- **MCP** — the panel's MCP section calls `ensureFresh` on mount, so it no
+  longer depends on that dropdown.
 - **Usage** — `useQuotaAutoRefresh` owns the initial fetch and the shared
   three-minute refresh while a quota readout is shown. The panel passes its
   visibility through the section list, so retained closing content does no work.
