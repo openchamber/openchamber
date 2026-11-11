@@ -66,7 +66,7 @@ Erişim token'ları burada da, `request` sonucunda da asla görünmez.
 | `onResolve(handler)` | eğik çizgi komutlarınız için işleyiciyi kaydeder. `{ command, args }` alır ve iliştirilecek bir öğe ya da `null` döndürür. |
 | `setBadge(count)` | şerit simgenizi bir noktayla işaretler ve sayıyı (0 ile 999 arası) ipucunda gösterir, `null` ile temizler |
 | `openCommit(sha)` | geçerli projenin o commit'inde Diff görünümünü açar. `sha` 7 ile 64 onaltılık karakterdir; commit'i OpenChamber kendisi okur. |
-| `setHeight(px)` | Work Status bölümünüzün yüksekliğini ayarlar. OpenChamber bunu 24 ile 320 piksel arasında tutar; daha uzun içerik sayfanızın içinde kayar. Başka yerlerde yok sayılır. |
+| `setHeight(px)` | Work Status bölümünüzün yüksekliğini ayarlar. OpenChamber bunu 24 ile 480 piksel arasında tutar; daha uzun içerik sayfanızın içinde kayar. Başka yerlerde yok sayılır. |
 | `onFileOpen(listener)` | dosya düzenleyiciler: düzenlenecek dosyayı alır, `{ path, name, readOnly }` ile birlikte `encoding: "text"` ve `content` ya da `encoding: "binary"` ve `bytes`. Ayrıca sayfanızda Cmd/Ctrl+S ile kaydetmeyi sağlar. |
 | `onFileSnapshot(handler)` | dosya düzenleyiciler: düzenlenmiş dosyanın tamamını `{ content, version }` (ikili bir düzenleyicide `{ bytes, version }`) olarak döndürür. OpenChamber bunu kaydetmek için ve kaynak görünümüne ya da tam ekrana geçmeden önce çağırır. |
 | `onFileSaved(listener)` | dosya düzenleyiciler: bu `version` değerine sahip anlık görüntü diske yazıldı. `reportFileChange` ile yanıt verin. |

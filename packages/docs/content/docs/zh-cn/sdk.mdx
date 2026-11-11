@@ -226,7 +226,7 @@ const { entries } = await host.listDir(".");
 - `true` 复用 `panel.entry`。
 - `entry` 是你文件夹里单独的 HTML 页面。有了它就不需要 `panel.entry`，扩展可以只有这个分区，没有侧栏图标。
 - `title` 替换分区标题中的面板名称，最多 60 个字符。
-- `height` 是初始高度（像素），24 到 320，默认 120。内容尺寸变化时调用 [`host.setHeight()`](/sdk/host/)。
+- `height` 是初始高度（像素），24 到 480，默认 120。内容尺寸变化时调用 [`host.setHeight()`](/sdk/host/)。
 
 你的页面看到的 `ctx.surface` 是 `status`。只有在 Work Status 面板可见且你的分区展开时，OpenChamber 才会加载它；用户折叠分区时会卸载，所以不要在里面保存无法重建的状态。只有分区的扩展可以使用权限、服务、集成、文件和带自己 `entry` 的页面，但不能用 `page: true`、`attach`、`actions` 或 `commands`。仅限 Web 和桌面版。示例 `git-graph-status` 就是一个完整的分区。
 

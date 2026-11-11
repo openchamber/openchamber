@@ -84,7 +84,7 @@ export const GUEST_STATUS_SECTION_TITLE_MAX = 60;
 /** Smallest frame height the host gives a status section, in CSS px. */
 export const GUEST_STATUS_SECTION_HEIGHT_MIN = 24;
 /** Tallest frame height the host gives a status section; taller content scrolls inside the frame. */
-export const GUEST_STATUS_SECTION_HEIGHT_MAX = 320;
+export const GUEST_STATUS_SECTION_HEIGHT_MAX = 480;
 /** Frame height before the manifest or the guest says otherwise. */
 export const GUEST_STATUS_SECTION_HEIGHT_DEFAULT = 120;
 

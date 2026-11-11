@@ -66,7 +66,7 @@ const host = connectHost();
 | `onResolve(handler)` | 슬래시 명령의 핸들러를 등록합니다. `{ command, args }`를 받고 첨부할 항목 또는 `null`을 반환합니다. |
 | `setBadge(count)` | 레일 아이콘에 점을 표시하고 숫자(0부터 999까지)를 툴팁에 보여 주며, `null`이면 지웁니다 |
 | `openCommit(sha)` | 현재 프로젝트의 해당 커밋으로 Diff 뷰를 엽니다. `sha`는 16진수 7~64자이며, 커밋은 OpenChamber가 직접 읽습니다. |
-| `setHeight(px)` | Work Status 섹션의 높이를 정합니다. OpenChamber는 24~320픽셀 사이로 유지하고, 더 긴 콘텐츠는 페이지 안에서 스크롤됩니다. 다른 곳에서는 무시됩니다. |
+| `setHeight(px)` | Work Status 섹션의 높이를 정합니다. OpenChamber는 24~480픽셀 사이로 유지하고, 더 긴 콘텐츠는 페이지 안에서 스크롤됩니다. 다른 곳에서는 무시됩니다. |
 | `onFileOpen(listener)` | 파일 편집기: 편집할 파일을 받습니다. `{ path, name, readOnly }`에 더해 `encoding: "text"`이면 `content`, `encoding: "binary"`이면 `bytes`가 들어 있습니다. 페이지 안에서 Cmd/Ctrl+S로도 저장되게 합니다. |
 | `onFileSnapshot(handler)` | 파일 편집기: 편집된 파일 전체를 `{ content, version }`(바이너리 편집기는 `{ bytes, version }`)으로 반환합니다. OpenChamber는 저장할 때와 소스 보기나 전체 화면으로 전환하기 전에 호출합니다. |
 | `onFileSaved(listener)` | 파일 편집기: 해당 `version`의 스냅샷이 디스크에 저장되었습니다. `reportFileChange`로 응답하세요. |

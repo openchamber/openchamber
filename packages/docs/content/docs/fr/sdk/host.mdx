@@ -66,7 +66,7 @@ Les tokens d'accès n'apparaissent jamais ici ni dans un résultat de `request`.
 | `onResolve(handler)` | enregistre le gestionnaire de vos commandes slash. Il reçoit `{ command, args }` et renvoie un élément à attacher ou `null`. |
 | `setBadge(count)` | marque votre icône de la barre latérale d'un point et affiche le nombre (0 à 999) dans son infobulle, ou `null` pour l'effacer |
 | `openCommit(sha)` | ouvrir la vue Diff sur ce commit du projet courant. `sha` fait de 7 à 64 caractères hexadécimaux ; OpenChamber lit le commit lui-même. |
-| `setHeight(px)` | régler la hauteur de votre section Work Status. OpenChamber la maintient entre 24 et 320 pixels ; un contenu plus haut défile dans votre page. Ailleurs, c'est ignoré. |
+| `setHeight(px)` | régler la hauteur de votre section Work Status. OpenChamber la maintient entre 24 et 480 pixels ; un contenu plus haut défile dans votre page. Ailleurs, c'est ignoré. |
 | `onFileOpen(listener)` | éditeurs de fichiers : recevoir le fichier à modifier, `{ path, name, readOnly }` plus `encoding: "text"` avec `content`, ou `encoding: "binary"` avec `bytes`. Permet aussi d'enregistrer avec Cmd/Ctrl+S dans votre page. |
 | `onFileSnapshot(handler)` | éditeurs de fichiers : renvoyer `{ content, version }` (ou `{ bytes, version }` pour un éditeur binaire), le fichier modifié complet. OpenChamber l'appelle pour enregistrer et avant de passer à la vue source ou en plein écran. |
 | `onFileSaved(listener)` | éditeurs de fichiers : l'instantané avec cette `version` est sur le disque. Répondez avec `reportFileChange`. |

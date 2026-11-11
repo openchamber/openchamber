@@ -226,7 +226,7 @@ As escritas são atômicas: o OpenChamber escreve um arquivo temporário e o ren
 - `true` reutiliza `panel.entry`.
 - `entry` é uma página HTML separada na sua pasta. Com ela você não precisa de `panel.entry`, então a extensão pode ser só essa seção, sem ícone na barra lateral.
 - `title` substitui o nome do painel no cabeçalho da seção, até 60 caracteres.
-- `height` é a altura inicial em pixels, de 24 a 320 (120 por padrão). Chame [`host.setHeight()`](/sdk/host/) quando o tamanho do conteúdo mudar.
+- `height` é a altura inicial em pixels, de 24 a 480 (120 por padrão). Chame [`host.setHeight()`](/sdk/host/) quando o tamanho do conteúdo mudar.
 
 Sua página vê `ctx.surface` como `status`. O OpenChamber só a carrega enquanto o painel Work Status está visível e sua seção está expandida, e a descarrega quando o usuário recolhe a seção, então não guarde ali nada que você não consiga reconstruir. Uma extensão só com a seção pode usar permissões, um serviço, uma integração, arquivos e uma página com `entry` próprio, mas não `page: true`, `attach`, `actions` nem `commands`. Só web e desktop. O exemplo `git-graph-status` é uma seção completa.
 

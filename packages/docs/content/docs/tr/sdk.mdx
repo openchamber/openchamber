@@ -226,7 +226,7 @@ Yazmalar atomiktir: OpenChamber geçici bir dosya yazıp yeniden adlandırır, b
 - `true`, `panel.entry` sayfasını kullanır.
 - `entry`, klasörünüzdeki ayrı bir HTML sayfasıdır. Bununla `panel.entry` gerekmez, yani eklenti şeritte simgesi olmadan yalnızca bu bölümden oluşabilir.
 - `title`, bölüm başlığındaki panel adının yerini alır, en fazla 60 karakter.
-- `height`, piksel cinsinden başlangıç yüksekliğidir, 24 ile 320 arası (varsayılan 120). İçeriğinizin boyutu değişince [`host.setHeight()`](/sdk/host/) çağırın.
+- `height`, piksel cinsinden başlangıç yüksekliğidir, 24 ile 480 arası (varsayılan 120). İçeriğinizin boyutu değişince [`host.setHeight()`](/sdk/host/) çağırın.
 
 Sayfanız `ctx.surface` değerini `status` olarak görür. OpenChamber sayfayı yalnızca Work Status paneli görünürken ve bölümünüz açıkken yükler, kullanıcı bölümü kapatınca kaldırır. Bu yüzden orada yeniden kuramayacağınız bir şey tutmayın. Yalnızca bölümden oluşan bir eklenti izinleri, bir servisi, bir entegrasyonu, dosyaları ve kendi `entry` değeri olan bir sayfayı kullanabilir, ama `page: true`, `attach`, `actions` veya `commands` kullanamaz. Yalnızca web ve masaüstü. `git-graph-status` örneği eksiksiz bir bölümdür.
 

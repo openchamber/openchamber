@@ -66,7 +66,7 @@ Zugriffstokens tauchen hier nie auf, auch nicht in einem `request`-Ergebnis.
 | `onResolve(handler)` | den Handler für deine Slash-Befehle registrieren. Er bekommt `{ command, args }` und liefert einen Eintrag zum Anhängen oder `null`. |
 | `setBadge(count)` | dein Symbol in der Leiste mit einem Punkt markieren und die Zahl (0 bis 999) im Tooltip zeigen, oder `null`, um sie zu entfernen |
 | `openCommit(sha)` | die Diff-Ansicht für diesen Commit des aktuellen Projekts öffnen. `sha` hat 7 bis 64 Hex-Zeichen; OpenChamber liest den Commit selbst. |
-| `setHeight(px)` | die Höhe deines Work-Status-Abschnitts setzen. OpenChamber hält sie zwischen 24 und 320 Pixeln; höherer Inhalt scrollt in deiner Seite. Anderswo wird es ignoriert. |
+| `setHeight(px)` | die Höhe deines Work-Status-Abschnitts setzen. OpenChamber hält sie zwischen 24 und 480 Pixeln; höherer Inhalt scrollt in deiner Seite. Anderswo wird es ignoriert. |
 | `onFileOpen(listener)` | Datei-Editoren: die zu bearbeitende Datei erhalten, `{ path, name, readOnly }` plus `encoding: "text"` mit `content` oder `encoding: "binary"` mit `bytes`. Sorgt außerdem dafür, dass Cmd/Ctrl+S in deiner Seite speichert. |
 | `onFileSnapshot(handler)` | Datei-Editoren: `{ content, version }` zurückgeben (oder `{ bytes, version }` bei einem binären Editor), die ganze bearbeitete Datei. OpenChamber ruft es zum Speichern auf und bevor zur Quelltextansicht oder in den Vollbildmodus gewechselt wird. |
 | `onFileSaved(listener)` | Datei-Editoren: der Snapshot mit dieser `version` liegt auf der Festplatte. Antworte mit `reportFileChange`. |
