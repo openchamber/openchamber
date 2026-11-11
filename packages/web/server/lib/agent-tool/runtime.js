@@ -211,7 +211,7 @@ const CONTROL_PARAMETER_PROPERTIES = {
   ),
   // The web tool's `url` is a page to load; here it names what pr.watch
   // follows or which link session.unlink removes.
-  url: { type: 'string', description: 'pr.watch: the pull or merge request address. session.unlink: the address of the link to remove' },
+  url: { type: 'string', description: 'pr.watch, pr.unwatch: the pull or merge request address. session.unlink: the address of the link to remove' },
   identifier: { type: 'string', description: 'session.unlink: the identifier of the link to remove, when no url' },
   source: { type: 'string', description: 'wait.start: <extension>/<wait> as wait.list names it' },
   args: { type: 'object', description: 'wait.start: the arguments the source\'s params list, such as { "seconds": 60 }' },

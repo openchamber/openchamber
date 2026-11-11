@@ -447,10 +447,11 @@ other.
   `by: 'user'` makes the carried title user-owned. Explicit creation titles and
   UI renames still record that marker; no metadata migration runs.
 - `pr.watch` and `pr.unwatch` let the calling session wait on its pull
-  request without polling: `pr.watch` takes the address in the control tool's
+  requests without polling: `pr.watch` takes the address in the control tool's
   own `url` input and hands it to `prWatch` (`../pr-watch/DOCUMENTATION.md`),
-  which reads it, follows it and wakes the session once when it changes. Both
-  act only on the calling session, never one the input names.
+  which reads it, follows it and wakes the session once when it changes.
+  `pr.unwatch` stops the one at `url`, or every one without it. Both act only
+  on the calling session, never one the input names.
 - `wait.list`, `wait.start` and `wait.stop` are the same kind of wait for what
   an extension's service follows (`../extension-waits/DOCUMENTATION.md`):
   `wait.start` takes `source` (`<extension>/<wait>`) and `args`, `wait.stop`

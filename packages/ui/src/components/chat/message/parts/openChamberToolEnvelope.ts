@@ -257,7 +257,8 @@ export const prWatchedSchema = z.object({
   }),
 });
 
-const prUnwatchedSchema = z.object({ watching: z.literal(false), stopped: z.boolean() });
+// `watching` lists what the session still waits on; transcripts from before a session could wait on several hold `false`.
+const prUnwatchedSchema = z.object({ watching: z.union([z.literal(false), z.array(z.unknown())]), stopped: z.boolean() });
 
 export const workNamedSchema = z.object({
   title: text,
