@@ -1,5 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { WorktreeCreationError, createWorktreeCreation } from './worktree-creation.js';
+import { createGitCredentialResolver, createHttpsCredentialReference, normalizeGitRemoteEndpoint } from './credential-resolver.js';
+import { githubDescriptor } from '../github/descriptor.js';
 import { sourceControlProviderDescriptors } from '../source-control/provider-descriptors.js';
 
 const sourceRequest = {
@@ -49,6 +51,28 @@ const setup = (overrides = {}) => {
 const request = { mode: 'existing', branchName: 'feature', worktreeName: 'feature', changeRequestSource: sourceRequest };
 
 describe('worktree creation from a change request', () => {
+  it.each(['company.ghe.com', 'github.example.com'])('fetches a PR head with its bound account on %s', async (instance) => {
+    const context = { ...sourceRequest.context, instance };
+    const source = { ...resolvedSource, context, endpoint: `https://${instance}/Alice/app.git` };
+    const account = { ...validAccount, providerUserId: `${instance}#42` };
+    const resolver = createGitCredentialResolver({ describeProvider: () => githubDescriptor, readTransportCredential: async () => ({
+      ...account, secret: 'fixture-secret', user: { login: 'actor' },
+    }) });
+    const transferContributorHead = vi.fn(async ({ credentialId, source: transferSource }) => {
+      await resolver.resolve({ mode: 'managed', credentialId, endpoint: normalizeGitRemoteEndpoint(transferSource.endpoint) });
+      return { state: 'succeeded' };
+    });
+    const { creation } = setup({ dependencies: {
+      resolveChangeRequestSource: async () => source,
+      resolveSourceControlAccount: async () => account,
+      createHttpsCredentialReference,
+      networkOperations: { transferContributorHead, hydrateBoundCheckout: vi.fn() },
+    } });
+    await expect(creation.create('/repo', { ...request, changeRequestSource: { ...sourceRequest, context } }))
+      .resolves.toEqual({ path: '/worktrees/feature', branch: 'feature' });
+    expect(transferContributorHead).toHaveBeenCalledOnce();
+  });
+
   it('creates a contributor worktree from the server-resolved head only', async () => {
     const { libraries, dependencies, creation } = setup();
 

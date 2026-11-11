@@ -3,6 +3,7 @@ import { getRemotes, getTrackingBranch, isAncestorOfHead, isPatchEquivalentOfHea
 import { resolveGitHubRepoFromDirectory } from './repo/index.js';
 import { noteIfGitHubRateLimit } from './rate-limit.js';
 import { getOctokitCacheIdentity } from './octokit.js';
+import { gitHubRepositoryFromApiUrl } from './api-origin.js';
 
 const directoryExists = async (dir) => {
   if (!dir) return false;
@@ -431,14 +432,13 @@ export const invalidateRepoPullsCache = (owner, repo, octokitOrCacheIdentity = n
     }
   }
   // A just-created PR must also clear remembered search misses for this repo.
-  const repoNameLower = normalizeText(repo).toLowerCase();
   for (const key of _searchMissCache.keys()) {
-    if (repoKey && key.split('::').some((part) => part.split(',').includes(repoNameLower)) && matchesIdentity(key)) {
+    if (repoKey && key.split('::').some((part) => part.split(',').includes(repoKey)) && matchesIdentity(key)) {
       _searchMissCache.delete(key);
     }
   }
   for (const [token, key] of pendingSearchMissWrites) {
-    if (repoKey && key.split('::').some((part) => part.split(',').includes(repoNameLower)) && matchesIdentity(key)) {
+    if (repoKey && key.split('::').some((part) => part.split(',').includes(repoKey)) && matchesIdentity(key)) {
       pendingSearchMissWrites.delete(token);
     }
   }
@@ -495,28 +495,6 @@ const getRepoPulls = (octokit, repo, state, { force = false } = {}) => {
   return promise;
 };
 
-const parseRepoFromApiUrl = (value) => {
-  const normalized = normalizeText(value);
-  if (!normalized) {
-    return null;
-  }
-  try {
-    const url = new URL(normalized);
-    const parts = url.pathname.replace(/^\/+/, '').split('/').filter(Boolean);
-    if (parts.length < 2 || parts[0] !== 'repos') {
-      return null;
-    }
-    const owner = parts[1];
-    const repo = parts[2];
-    if (!owner || !repo) {
-      return null;
-    }
-    return { owner, repo };
-  } catch {
-    return null;
-  }
-};
-
 // Track repos where the GitHub Search API returned 403 (token lacks scope for that org)
 const _searchApiDisabledRepos = new Map();
 const SEARCH_API_RETRY_MS = 5 * 60 * 1000; // retry after 5 minutes
@@ -540,11 +518,13 @@ const rememberSearchMiss = (key) => {
   }
 };
 
-const searchFallbackPr = async ({ octokit, branch, repoNames, host }) => {
+const searchFallbackPr = async ({ octokit, branch, targets, sourceCandidates, host }) => {
+  const targetKeys = new Set(targets.map((target) => normalizeRepoKey(target.repo?.owner, target.repo?.repo)).filter(Boolean));
+  const sourceKeys = new Set(sourceCandidates.map((candidate) => normalizeRepoKey(candidate.repo?.owner, candidate.repo?.repo)).filter(Boolean));
   // Build a repo key to check/store 403 status per-repo. Keyed by host too:
   // the Search API is per-instance, and a 403/miss on github.com must not
   // suppress a retry for the same names on an enterprise host.
-  const repoKey = scopedCacheKey(octokit, `${normalizeLower(host) || 'github.com'}::${[...repoNames].sort().join(',').toLowerCase()}`);
+  const repoKey = scopedCacheKey(octokit, `${normalizeLower(host) || 'github.com'}::${[...targetKeys].sort().join(',')}::${[...sourceKeys].sort().join(',')}`);
 
   // Skip if this repo set returned 403 recently
   const disabledAt = repoKey ? _searchApiDisabledRepos.get(repoKey) : null;
@@ -562,8 +542,6 @@ const searchFallbackPr = async ({ octokit, branch, repoNames, host }) => {
   if (writeToken) pendingSearchMissWrites.set(writeToken, missKey);
 
   try {
-    const normalizedRepoNames = new Set(repoNames.map((name) => normalizeLower(name)).filter(Boolean));
-
     // The Search API has a tiny quota, so it is only spent on live branch status.
     // Closed/merged history is resolved by the cheaper per-head repo queries.
     let response;
@@ -589,11 +567,11 @@ const searchFallbackPr = async ({ octokit, branch, repoNames, host }) => {
 
     const items = Array.isArray(response?.data?.items) ? response.data.items : [];
     for (const item of items) {
-      const repo = parseRepoFromApiUrl(item?.repository_url);
+      const repo = gitHubRepositoryFromApiUrl(item?.repository_url, host);
       if (!repo) {
         continue;
       }
-      if (normalizedRepoNames.size > 0 && !normalizedRepoNames.has(normalizeLower(repo.repo))) {
+      if (!targetKeys.has(normalizeRepoKey(repo.owner, repo.repo))) {
         continue;
       }
       try {
@@ -603,7 +581,8 @@ const searchFallbackPr = async ({ octokit, branch, repoNames, host }) => {
           pull_number: item.number,
         });
         const pr = prResponse?.data;
-        if (!pr || normalizeText(pr.head?.ref) !== branch) {
+        const headKey = normalizeRepoKey(pr?.head?.repo?.owner?.login, pr?.head?.repo?.name);
+        if (!pr || normalizeText(pr.head?.ref) !== branch || !headKey || !sourceKeys.has(headKey)) {
           continue;
         }
         return {
@@ -900,7 +879,8 @@ export async function resolveGitHubPrStatus({ octokit, directory, branch, remote
     const fallbackSearch = await searchFallbackPr({
       octokit,
       branch: candidateBranch,
-      repoNames: resolvedTargets.map((target) => target.repo.repo),
+      targets: resolvedTargets,
+      sourceCandidates,
       host: resolvedTargets[0]?.repo?.host,
     });
     if (fallbackSearch) {

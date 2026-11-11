@@ -308,10 +308,10 @@ export function createProvider({
       // view and walkthroughs. An exact-account 401 tells the registry, which
       // lets bindings go of the account.
       readChangeRequestPatch: async (input) => (await modules()).patch.readGitHubChangeRequestPatch(input, {
-        onAccountUnavailable: events?.invalidated,
+        octokit: accountOf(input.session).octokit, resolveGitHubRepoFromDirectory: resolveRepo, resolveRepoNetwork: resolveNetwork,
       }),
       readChangeRequestFile: async (input) => (await modules()).patch.readGitHubChangeRequestFile(input, {
-        onAccountUnavailable: events?.invalidated,
+        octokit: accountOf(input.session).octokit, resolveGitHubRepoFromDirectory: resolveRepo, resolveRepoNetwork: resolveNetwork,
       }),
     }),
     mutations: Object.freeze({

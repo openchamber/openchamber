@@ -104,7 +104,7 @@ describe('GitHub auth credentials', () => {
     const oauth = await auth.setGitHubAuth({ accessToken: 'oauth', user: { id: 7, login: 'user' }, source: 'oauth' });
     const pat = await auth.setGitHubAuth({ accessToken: 'pat', user: { id: 7, login: 'user' }, source: 'pat' });
 
-    await expect(auth.markGitHubAuthAccountInvalid(oauth.accountId, 'unauthorized')).resolves.toBe(true);
+    await expect(auth.markGitHubAuthAccountInvalidForHost('github.com', oauth.accountId, 'unauthorized')).resolves.toBe(true);
     await expect(auth.getGitHubAuthByAccountId(oauth.accountId)).resolves.toBeNull();
     await expect(auth.getGitHubAuthByAccountId(pat.accountId)).resolves.toMatchObject({ accessToken: 'pat' });
     expect(await auth.getGitHubAuthAccounts()).toEqual([

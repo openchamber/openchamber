@@ -1,3 +1,5 @@
+import { gitHubInstanceFromApiHost } from './api-origin.js';
+
 // Lightweight, per-host GitHub rate-limit gate.
 //
 // Octokit is configured without the throttling plugin, so a primary or
@@ -34,7 +36,7 @@ export const hostFromError = (error) => {
     return 'github.com';
   }
   try {
-    return hostKeyFor(new URL(String(url)).hostname);
+    return hostKeyFor(gitHubInstanceFromApiHost(new URL(String(url)).hostname));
   } catch {
     return 'github.com';
   }

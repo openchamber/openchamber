@@ -205,7 +205,26 @@ describe('Git credential resolver', () => {
       credentialId: createHttpsCredentialReference({
         provider: 'github', instance: 'attacker.example', credentialId: 'github.com#7', credentialRevision: 1, providerUserId: 'github.com#7',
       }),
-    })).rejects.toThrow('Invalid managed provider instance');
+    })).rejects.toThrow('outside the managed credential policy');
+  });
+
+  it('uses the exact enterprise account only on its own HTTPS host', async () => {
+    const instance = 'company.ghe.com';
+    const credentialId = createHttpsCredentialReference({
+      provider: 'github', instance, credentialId: 'enterprise-account', credentialRevision: 1, providerUserId: `${instance}#7`,
+    });
+    const readTransportCredential = vi.fn(async () => ({
+      credentialId: 'enterprise-account', credentialRevision: 1, providerUserId: `${instance}#7`,
+      status: 'valid', secret: 'fixture-secret', user: { login: 'user' },
+    }));
+    const resolver = createGitCredentialResolver({ readTransportCredential, describeProvider });
+    const input = { mode: 'managed', credentialId, endpoint: { protocol: 'https', host: instance, path: 'team/repo.git' } };
+    await expect(resolver.resolve(input)).resolves.toMatchObject({
+      transport: 'https', username: 'x-access-token', allowedEndpoint: { host: instance, path: 'team/repo.git' },
+    });
+    await expect(resolver.resolve({ ...input, endpoint: { ...input.endpoint, host: 'github.com' } }))
+      .rejects.toThrow('outside the managed credential policy');
+    expect(readTransportCredential).toHaveBeenCalledTimes(1);
   });
 
   it('reaches a loopback HTTP instance of a provider that allows one, and no plain HTTP host besides', async () => {

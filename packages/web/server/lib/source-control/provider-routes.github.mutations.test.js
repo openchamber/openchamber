@@ -813,6 +813,31 @@ describe('canonical GitHub mutations', () => {
       expect(store.records.get('request-one')).toMatchObject({ kind: 'change-request-comment', state: 'succeeded' });
     });
 
+    it('comments on a data-residency pull request through that instance API', async () => {
+      const host = 'company.ghe.com';
+      const account = await auth.setGitHubAuthForHost(host, { accessToken: 'fixture-token', user: { id: 1, login: 'actor' }, source: 'pat' });
+      const pull = pullRequest();
+      pull.html_url = `https://${host}/acme/app/pull/7`;
+      pull.base.repo.html_url = `https://${host}/acme/app`;
+      pull.head.repo.html_url = `https://${host}/acme/app`;
+      pull.head.repo.clone_url = `https://${host}/acme/app.git`;
+      pull.head.repo.ssh_url = `git@${host}:acme/app.git`;
+      const calls = [];
+      vi.stubGlobal('fetch', vi.fn(async (url, options) => {
+        calls.push({ url: String(url), method: options.method, redirect: options.redirect });
+        return options.method === 'GET' ? jsonResponse(pull) : jsonResponse({ id: 11 }, 201);
+      }));
+      const { app, store } = makeApp({ resolveRepo: async () => ({ repo: { owner: 'acme', repo: 'app', host } }) });
+      const response = await request(app).post('/api/source-control/github/pr/comment')
+        .send({ ...context(account.accountId, { instance: host, target: pullTarget }), body: 'Looks good' }).expect(200);
+      expect(response.body.actor.providerAccountId).toBe(`${host}#1`);
+      expect(calls).toEqual([
+        { url: `https://api.${host}/repos/acme/app/pulls/7`, method: 'GET', redirect: 'error' },
+        { url: `https://api.${host}/repos/acme/app/issues/7/comments`, method: 'POST', redirect: 'error' },
+      ]);
+      expect(store.records.get('request-one')).toMatchObject({ state: 'succeeded' });
+    });
+
     it("comments on and merges a contributor's fork pull request from the upstream clone", async () => {
       const account = await auth.setGitHubAuth({ accessToken: 'token-one', user: { id: 1, login: 'actor' } });
       // The network is acme/app alone; the head lives in a fork outside it.

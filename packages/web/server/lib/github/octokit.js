@@ -8,6 +8,7 @@ import {
 } from './auth.js';
 import { forgetGhCliToken, getGhCliToken } from './gh-cli-credential.js';
 import { isTrustedGitHubHostOrStored } from './host-trust.js';
+import { gitHubApiBaseUrl } from './api-origin.js';
 
 // Per-request timeout for every GitHub call. Octokit v22 uses native fetch,
 // which has no built-in timeout — without this, a stuck connection hangs until
@@ -99,7 +100,7 @@ export function createOctokit(token, accountId = '', host = '') {
   const options = { auth: token, request: { fetch: createConditionalFetch(cacheIdentity, host) } };
   const normalizedHost = String(host ?? '').trim().toLowerCase();
   if (normalizedHost && normalizedHost !== 'github.com') {
-    options.baseUrl = `https://${normalizedHost}/api/v3`;
+    options.baseUrl = gitHubApiBaseUrl(normalizedHost);
   }
   const octokit = new Octokit(options);
   // A refused token that came from gh is asked from gh again next time.

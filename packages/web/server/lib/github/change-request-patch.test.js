@@ -11,21 +11,19 @@ const PATCH = `diff --git a/src/a.ts b/src/a.ts
 
 describe('readGitHubChangeRequestPatch', () => {
   let request;
-  let getOctokitForAccountId;
+  let octokit;
   let resolveGitHubRepoFromDirectory;
-  let onAccountUnavailable;
   let resolveRepoNetwork;
   const session = { instance: 'github.com', accountId: 'github.com#7' };
 
   const read = ({ sourceRepo, linked, ...overrides } = {}) => readGitHubChangeRequestPatch(
     { session, directory: '/repo', remote: 'upstream', number: 2122, sourceRepo, linked },
-    { getOctokitForAccountId, resolveGitHubRepoFromDirectory, resolveRepoNetwork, onAccountUnavailable, ...overrides },
+    { octokit, resolveGitHubRepoFromDirectory, resolveRepoNetwork, ...overrides },
   );
 
   beforeEach(() => {
     request = vi.fn().mockResolvedValue({ data: PATCH });
-    getOctokitForAccountId = vi.fn().mockResolvedValue({ octokit: { request } });
-    onAccountUnavailable = vi.fn();
+    octokit = { request };
     // The bound repository is a fork of `upstream/project`: the same network the
     // bound pull request list reads.
     resolveRepoNetwork = vi.fn().mockResolvedValue([
@@ -52,7 +50,6 @@ describe('readGitHubChangeRequestPatch', () => {
       pull_number: 2122,
       headers: { accept: 'application/vnd.github.v3.diff' },
     });
-    expect(getOctokitForAccountId).toHaveBeenCalledWith(session.accountId, expect.any(Object));
     expect(resolveGitHubRepoFromDirectory).toHaveBeenCalledWith('/repo', 'upstream');
   });
 
@@ -109,36 +106,32 @@ describe('readGitHubChangeRequestPatch', () => {
   });
 
   it('requires the bound account, resolving the repository first for its host', async () => {
-    getOctokitForAccountId.mockResolvedValue(null);
-
-    // The repository resolves first: its remote names the instance, and an
-    // enterprise host selects its own octokit, so no GitHub call can be made
-    // before that. A github.com repository with no exact account still fails
-    // closed with the 401 below.
-    await expect(read()).rejects.toMatchObject({
+    await expect(read({ octokit: null })).rejects.toMatchObject({
       code: 'github-not-connected',
       statusCode: 401,
     });
     expect(resolveGitHubRepoFromDirectory).toHaveBeenCalled();
   });
 
-  it('reconciles only an exact-account 401', async () => {
-    getOctokitForAccountId.mockImplementation(async (_accountId, options) => {
-      await options.onUnauthorized({ provider: 'github', instance: 'github.com', accountId: session.accountId }, false);
-      throw Object.assign(new Error('bad credentials'), { status: 401 });
-    });
+  it('uses the bound enterprise account for the diff', async () => {
+    resolveGitHubRepoFromDirectory.mockResolvedValue({ repo: { owner: 'team', repo: 'app', host: 'company.ghe.com' } });
+    const enterprise = { instance: 'company.ghe.com', accountId: 'bound-enterprise-account' };
+    await readGitHubChangeRequestPatch(
+      { session: enterprise, directory: '/repo', remote: 'origin', number: 7 },
+      { octokit, resolveGitHubRepoFromDirectory },
+    );
+    expect(request).toHaveBeenCalledOnce();
+  });
 
-    await expect(read()).rejects.toMatchObject({ status: 401 });
-    expect(onAccountUnavailable).toHaveBeenCalledWith({
-      provider: 'github', instance: 'github.com', accountId: session.accountId,
-    });
+  it('refuses an octokit for another instance', async () => {
+    await expect(read({ octokit: { request, openChamberHost: 'other.example.com' } })).rejects.toMatchObject({ statusCode: 401 });
+    expect(request).not.toHaveBeenCalled();
   });
 
   it.each([403, undefined])('does not reconcile a %s provider failure', async (status) => {
     request.mockRejectedValue(Object.assign(new Error('provider failed'), status ? { status } : {}));
 
     await expect(read()).rejects.toThrow('provider failed');
-    expect(onAccountUnavailable).not.toHaveBeenCalled();
   });
 });
 
@@ -165,7 +158,7 @@ describe('readGitHubChangeRequestFile', () => {
       throw new Error(`unexpected ${route}`);
     });
     dependencies = {
-      getOctokitForAccountId: vi.fn().mockResolvedValue({ octokit: { request } }),
+      octokit: { request },
       resolveGitHubRepoFromDirectory: vi.fn().mockResolvedValue({ repo: { owner: 'o', repo: 'r' }, remoteUrl: null }),
       resolveRepoNetwork: vi.fn().mockResolvedValue([
         { owner: 'o', repo: 'r', source: 'origin' },
@@ -227,4 +220,3 @@ describe('readGitHubChangeRequestFile', () => {
     await expect(read({ owner: 'o', repo: 'r' }, { path: 'a.ts', status: 'M' })).rejects.toMatchObject({ code: 'file-too-large', statusCode: 413 });
   });
 });
-

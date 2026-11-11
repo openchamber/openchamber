@@ -37,6 +37,7 @@ import {
   searchGitHubReferencesAcross,
 } from './reference-search.js';
 import { fetchReviewState } from './review-draft.js';
+import { gitHubRepositoryFromApiUrl } from './api-origin.js';
 
 /**
  * GitHub's bound reads behind the shared route shell: change request status,
@@ -407,9 +408,9 @@ export function createGitHubResources({
           if (!isPlainObject(item) || !Number.isSafeInteger(item.number) || item.number <= 0) {
             throw invalidProviderPayload('GitHub returned an invalid pull request search item');
           }
-          const match = (isProviderString(item.repository_url) ? item.repository_url : '').match(/\/repos\/([^/]+)\/([^/]+)$/);
-          if (!match) throw invalidProviderPayload('GitHub returned invalid pull request repository metadata');
-          const repoRef = repos.find((entry) => entry.owner === match[1] && entry.repo === match[2]);
+          const found = gitHubRepositoryFromApiUrl(item.repository_url, session.instance);
+          if (!found) throw invalidProviderPayload('GitHub returned invalid pull request repository metadata');
+          const repoRef = repos.find((entry) => entry.owner === found.owner && entry.repo === found.repo);
           if (!repoRef) throw invalidProviderPayload('GitHub returned pull request outside the bound repository network');
           return { number: item.number, repoRef };
         });
@@ -551,8 +552,8 @@ export function createGitHubResources({
           if (!isPlainObject(item) || !Number.isSafeInteger(item.number) || item.number <= 0) {
             throw invalidProviderPayload('GitHub returned an invalid issue search item');
           }
-          const match = (isProviderString(item.repository_url) ? item.repository_url : '').match(/^https:\/\/api\.github\.com\/repos\/([^/]+)\/([^/]+)$/);
-          const repoRef = match ? repos.find((entry) => entry.owner === match[1] && entry.repo === match[2]) : null;
+          const found = gitHubRepositoryFromApiUrl(item.repository_url, session.instance);
+          const repoRef = found ? repos.find((entry) => entry.owner === found.owner && entry.repo === found.repo) : null;
           if (!repoRef) throw invalidProviderPayload('GitHub issue search returned an invalid repository URL');
           try {
             const issue = await octokit.rest.issues.get({ owner: repoRef.owner, repo: repoRef.repo, issue_number: item.number });
@@ -945,7 +946,9 @@ export function createGitHubResources({
         throw sourceControlError('Change request head changed', 'SOURCE_CONTROL_CHANGE_REQUEST_STALE', 409);
       }
       const parsed = new URL(endpoint);
-      if (parsed.protocol !== 'https:' || parsed.pathname.replace(/^\//, '').replace(/\.git$/, '') !== `${headOwner}/${headName}`) {
+      if (parsed.protocol !== 'https:' || parsed.hostname.toLowerCase() !== session.instance
+        || parsed.port || parsed.username || parsed.password || parsed.search || parsed.hash
+        || parsed.pathname.replace(/^\//, '').replace(/\.git$/, '') !== `${headOwner}/${headName}`) {
         throw invalidProviderPayload('GitHub returned an invalid head repository endpoint');
       }
       return Object.freeze({

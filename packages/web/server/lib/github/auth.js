@@ -523,7 +523,6 @@ export async function activateGitHubAuthForHost(host, credentialId) {
   if (activated && normalizeInstance(host) === 'github.com' && readSettingsFile().ghCliActive) setGhCliActive(false);
   return activated;
 }
-export const markGitHubAuthAccountInvalid = (credentialId, reason = 'unauthorized') => authStore.markInvalid(credentialId, reason);
 export const markGitHubAuthAccountInvalidForHost = (host, credentialId, reason = 'unauthorized') => (normalizeInstance(host) === 'github.com'
   ? authStore.markInvalidForHost(host, credentialId, reason)
   : instanceAuthStore().github.markAccountInvalid(host, credentialId, reason));

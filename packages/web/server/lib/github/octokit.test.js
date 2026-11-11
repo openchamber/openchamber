@@ -390,6 +390,27 @@ describe('reused gh token', () => {
 });
 
 describe('enterprise-host octokit request URLs', () => {
+  test('data residency sends REST and GraphQL to its API host', async () => {
+    const requested = [];
+    const previousFetch = globalThis.fetch;
+    globalThis.fetch = async (url, options = {}) => {
+      requested.push({ url: String(url), redirect: options.redirect });
+      return Response.json(options.method === 'GET' ? { id: 42, login: 'user' } : { data: { viewer: { id: 42 } } });
+    };
+    try {
+      const octokit = createOctokit('fixture', '', 'company.ghe.com');
+      await octokit.rest.users.getAuthenticated();
+      await octokit.graphql('{ viewer { id } }');
+      expect(requested).toEqual([
+        { url: 'https://api.company.ghe.com/user', redirect: 'error' },
+        { url: 'https://api.company.ghe.com/graphql', redirect: 'error' },
+      ]);
+      expect(octokit.openChamberHost).toBe('company.ghe.com');
+    } finally {
+      globalThis.fetch = previousFetch;
+    }
+  });
+
   test('GraphQL goes to /api/graphql and REST to /api/v3 on the host root', async () => {
     const requestedUrls = [];
     const previousFetch = globalThis.fetch;

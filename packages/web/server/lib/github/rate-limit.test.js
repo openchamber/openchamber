@@ -73,6 +73,15 @@ describe('rate-limit', () => {
     expect(isGitHubRateLimited('enterprise.do-not-collide.test')).toBe(false);
   });
 
+  test('data residency API rate limits apply to its web host only', () => {
+    setNow(NOW_BASE);
+    const error = rateLimit403();
+    error.request = { url: 'https://api.company.ghe.com/repos/acme/app' };
+    noteIfGitHubRateLimit(error);
+    expect(isGitHubRateLimited('company.ghe.com')).toBe(true);
+    expect(isGitHubRateLimited('other.ghe.com')).toBe(false);
+  });
+
   test('cooldown expires after the retry window', () => {
     setNow(NOW_BASE);
 

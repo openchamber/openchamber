@@ -1,5 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
+import express from 'express';
 import { createProvider } from './provider.js';
+import { githubDescriptor } from './descriptor.js';
+import { readGitHubChangeRequestPatch } from './change-request-patch.js';
+import { createProviderDescriptors } from '../source-control/provider-descriptors.js';
+import { createSourceControlProviders } from '../source-control/provider-registry.js';
+import { registerProviderRoutes } from '../source-control/provider-routes.js';
 
 const rateLimitModule = (limited = false) => ({
   isGitHubRateLimited: () => limited,
@@ -19,8 +25,10 @@ const providerWith = ({
   rateLimit = rateLimitModule(),
   events = null,
   patch = {},
+  resolveRepo,
 } = {}) => createProvider({
   events,
+  resolveGitHubRepoFromDirectory: resolveRepo,
   modules: async () => ({
     octokit: { getOctokitOrNull: octokitFor, getOctokitForAccountId: octokitForAccount },
     summaries: { fetchPrSummaries, isGraphqlRateLimitError: () => false },
@@ -138,16 +146,53 @@ describe('GitHub live summaries', () => {
 });
 
 describe('GitHub change request patch reads', () => {
-  it('passes the shell\'s input to the patch module and reports an exact-account 401 as invalidated', async () => {
+  it('invalidates a refused CLI account once through the real read shell', async () => {
+    const instance = 'company.ghe.com';
+    const identity = { provider: 'github', instance, accountId: `${instance}#cli:7` };
     const events = { invalidated: vi.fn() };
-    const readGitHubChangeRequestPatch = vi.fn(async (_input, dependencies) => {
-      await dependencies.onAccountUnavailable({ provider: 'github', instance: 'github.com', accountId: 'github.com#7' });
-      return { patch: '', meta: null };
+    const octokitForAccount = vi.fn(async (_accountId, { onUnauthorized }) => ({
+      ...boundAccount({
+        openChamberHost: instance,
+        request: async () => {
+          await onUnauthorized(identity, false);
+          throw Object.assign(new Error('Bad credentials'), { status: 401, sourceControlIdentity: identity,
+            sourceControlPersistedAccount: false, sourceControlInvalidated: true });
+        },
+      }, `${instance}#7`),
+      source: 'cli',
+    }));
+    const provider = providerWith({ events, octokitForAccount, patch: { readGitHubChangeRequestPatch },
+      resolveRepo: async () => ({ repo: { host: instance, owner: 'team', repo: 'app' } }) });
+    const providers = createSourceControlProviders({
+      descriptors: createProviderDescriptors([githubDescriptor]),
+      loaders: { github: async () => ({ createProvider: () => provider }) },
     });
-    const provider = providerWith({ events, patch: { readGitHubChangeRequestPatch } });
-    const input = { session: { instance: 'github.com', accountId: 'github.com#7' }, directory: '/repo', remote: 'origin', number: 3 };
+    const shell = registerProviderRoutes(express(), { providers });
+    const context = { ...identity, directory: '/repo', primaryRemote: 'origin' };
+    await expect(shell.readChangeRequestPatch({ context, number: 7 })).rejects.toMatchObject({ status: 401 });
+    expect(octokitForAccount).toHaveBeenCalledOnce();
+    expect(events.invalidated).toHaveBeenCalledOnce();
+    expect(events.invalidated).toHaveBeenCalledWith(identity);
+  });
+
+  it('passes the already-resolved account to both diff and file reads', async () => {
+    const octokit = { openChamberHost: 'company.ghe.com' };
+    const octokitForAccount = vi.fn(async () => boundAccount(octokit, 'company.ghe.com#7'));
+    const readGitHubChangeRequestPatch = vi.fn(async () => ({ patch: '', meta: null }));
+    const readGitHubChangeRequestFile = vi.fn(async () => ({ original: '', modified: '' }));
+    const provider = providerWith({ octokitForAccount, patch: { readGitHubChangeRequestPatch, readGitHubChangeRequestFile } });
+    const session = await provider.auth.resolveAccount({ instance: 'company.ghe.com', accountId: 'bound' });
+    const input = { session, directory: '/repo', remote: 'origin', number: 3 };
     await provider.resources.readChangeRequestPatch(input);
-    expect(readGitHubChangeRequestPatch).toHaveBeenCalledWith(input, expect.any(Object));
-    expect(events.invalidated).toHaveBeenCalledWith({ provider: 'github', instance: 'github.com', accountId: 'github.com#7' });
+    await provider.resources.readChangeRequestFile(input);
+    expect(octokitForAccount).toHaveBeenCalledTimes(1);
+    expect(readGitHubChangeRequestPatch).toHaveBeenCalledWith(input, expect.objectContaining({ octokit }));
+    expect(readGitHubChangeRequestFile).toHaveBeenCalledWith(input, expect.objectContaining({ octokit }));
+  });
+
+  it('refuses a session not resolved by the provider', async () => {
+    const provider = providerWith({ patch: { readGitHubChangeRequestPatch: vi.fn() } });
+    const input = { session: { instance: 'github.com', accountId: 'github.com#7' }, directory: '/repo', remote: 'origin', number: 3 };
+    await expect(provider.resources.readChangeRequestPatch(input)).rejects.toMatchObject({ status: 401, sourceControlAccountUnavailable: true });
   });
 });

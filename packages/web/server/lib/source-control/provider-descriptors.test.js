@@ -90,7 +90,7 @@ describe('source control provider descriptors', () => {
   });
 
   it('keeps the transport username and clone policy each provider had', () => {
-    expect(github.transport).toMatchObject({ httpsUsername: { kind: 'fixed', value: 'x-access-token' }, managedHttpsInstances: 'default-only', appendDotGitToHttpsClone: false });
+    expect(github.transport).toMatchObject({ httpsUsername: { kind: 'fixed', value: 'x-access-token' }, managedHttpsInstances: 'any', appendDotGitToHttpsClone: false });
     expect(gitlab.transport).toMatchObject({ httpsUsername: { kind: 'fixed', value: 'oauth2' }, managedHttpsInstances: 'any', appendDotGitToHttpsClone: true });
     expect(gitlab.capabilities.merge.methods).toEqual(['merge', 'squash']);
   });
@@ -240,4 +240,3 @@ describe('provider ids', () => {
     });
   });
 });
-

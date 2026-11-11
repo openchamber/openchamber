@@ -2,6 +2,7 @@ import { describe, expect, spyOn, test, vi } from 'bun:test';
 
 import { createGitHubResources } from './resources.js';
 import { isGitHubRateLimitError } from './rate-limit.js';
+import { matchesGitHubRepositoryUrl } from './mappers.js';
 
 const openPull = {
   number: 42,
@@ -65,6 +66,63 @@ const session = { instance: 'github.com', accountId: 'acct', credentialRevision:
 const CAN_MERGE_TEST_OFFSET_MS = 6 * 60_000;
 const readStatus = (resources, accountId = session.accountId) => resources.changeRequestStatus({
   session: { ...session, accountId }, directory: '/repo', branch: 'feature', remote: 'origin',
+});
+
+describe('enterprise repository search', () => {
+  test.each([
+    ['company.ghe.com', 'https://api.company.ghe.com/repos/acme/app'],
+    ['github.example.com', 'https://github.example.com/api/v3/repos/acme/app'],
+    ['github.com', 'https://api.github.com/repos/acme/app'],
+  ])('reads an issue from the API of %s and rejects another host', async (instance, repositoryUrl) => {
+    let resultUrl = repositoryUrl;
+    const get = vi.fn(async () => ({ data: { number: 7, title: 'Issue', html_url: `https://${instance}/acme/app/issues/7`, state: 'open' } }));
+    const resources = createGitHubResources({
+      accountOf: () => ({ octokit: { rest: { search: { issuesAndPullRequests: async () => ({ data: {
+        total_count: 1, items: [{ number: 7, repository_url: resultUrl }],
+      } }) }, issues: { get } } } }),
+      resolveRepo: async () => ({ repo: { owner: 'acme', repo: 'app', host: instance } }),
+      resolveNetwork: async () => null,
+    });
+    const input = { session: { ...session, instance }, directory: '/repo', page: 1, query: 'issue', remote: 'origin' };
+    expect((await resources.listIssues(input)).items[0]).toMatchObject({ number: 7, instance });
+    resultUrl = 'https://attacker.example/repos/acme/app';
+    await expect(resources.listIssues(input)).rejects.toMatchObject({ code: 'MALFORMED_PROVIDER_RESPONSE' });
+    expect(get).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('enterprise pull request worktree source', () => {
+  test.each([
+    ['git@ssh.company.ghe.com:alice/app.git', true],
+    ['aliceuser@ssh.company.ghe.com:alice/app.git', true],
+    ['ssh://aliceuser@ssh.company.ghe.com/alice/app.git', true],
+    ['ssh://ssh.company.ghe.com/alice/app.git', false],
+    ['aliceuser@ssh.company.ghe.com:other/app.git', false],
+    ['https://aliceuser@company.ghe.com/alice/app.git', false],
+  ])('validates the SSH repository URL %s', (url, expected) => {
+    expect(matchesGitHubRepositoryUrl(url, 'alice', 'app')).toBe(expected);
+  });
+
+  test('accepts the head on the bound host and refuses a clone on another host', async () => {
+    const instance = 'company.ghe.com';
+    const head = {
+      ref: 'feature', sha: 'a'.repeat(40), repo: { owner: { login: 'alice' }, name: 'app',
+        html_url: `https://${instance}/alice/app`, clone_url: `https://${instance}/alice/app.git`,
+        ssh_url: 'aliceuser@ssh.company.ghe.com:alice/app.git' },
+    };
+    const resources = createGitHubResources({
+      accountOf: () => ({ octokit: { rest: { pulls: { get: async () => ({ data: {
+        number: 7, title: 'PR', html_url: `https://${instance}/acme/app/pull/7`, state: 'open', base: { ref: 'main' }, head,
+      } }) } } } }),
+      resolveRepo: async () => ({ repo: { owner: 'acme', repo: 'app', host: instance } }),
+      resolveNetwork: async () => null,
+    });
+    const input = { session: { ...session, instance }, context: { directory: '/repo', primaryRemote: 'origin' },
+      project: { id: 'acme/app', owner: 'acme', name: 'app' }, number: 7, expectedHeadSha: head.sha, requestedRemoteName: 'pr-alice' };
+    expect(await resources.resolveChangeRequestSource(input)).toMatchObject({ endpoint: `https://${instance}/alice/app.git`, headSha: head.sha });
+    head.repo.clone_url = 'https://other.example/alice/app.git';
+    await expect(resources.resolveChangeRequestSource(input)).rejects.toMatchObject({ code: 'MALFORMED_PROVIDER_RESPONSE' });
+  });
 });
 
 describe('changeRequestStatus merge permission', () => {
