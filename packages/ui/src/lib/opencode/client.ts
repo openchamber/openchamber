@@ -1179,6 +1179,17 @@ class OpencodeService {
     return projectSession(info)
   }
 
+  /**
+   * Reads the session from OpenCode's unscoped client. A moved session can
+   * still have a stale copy in the directory the app currently has selected;
+   * the scoped read would return that copy. Use this when the session's real
+   * directory is what is being resolved.
+   */
+  async getSessionUnscoped(id: string): Promise<Session> {
+    const info = await call("session.get", () => this.client.session.get({ sessionID: id }))
+    return projectSession(info)
+  }
+
   async deleteSession(id: string, directory?: string | null): Promise<boolean> {
     await call("session.remove", () => this.clientFor(directory).session.remove({ sessionID: id }))
     return true

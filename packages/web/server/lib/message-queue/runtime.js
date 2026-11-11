@@ -255,6 +255,22 @@ const extractDeletedSessionId = (payload) => {
   return asNonEmptyString(asRecord(properties.info)?.id) || asNonEmptyString(properties.sessionID) || null;
 };
 
+/**
+ * The directory a session reports after a move. The wire translator tags a
+ * move with `info.projectID`; usage, title and other session updates also
+ * carry a directory but can still be in flight from the old location, so they
+ * must not drag a queue with them.
+ */
+const extractSessionDirectoryUpdate = (payload) => {
+  if (payload.type !== 'session.updated') return null;
+  const properties = asRecord(payload.properties) ?? {};
+  const info = asRecord(properties.info) ?? {};
+  const sessionId = asNonEmptyString(info.id) || asNonEmptyString(properties.sessionID);
+  const directory = asNonEmptyString(info.directory);
+  const projectID = asNonEmptyString(info.projectID);
+  return sessionId && directory && projectID ? { sessionId, directory } : null;
+};
+
 export function createMessageQueueRuntime({
   globalEventHub,
   buildOpenCodeUrl,
@@ -934,6 +950,18 @@ export function createMessageQueueRuntime({
       failures.delete(deletedSessionId);
       commit(deletedSessionId);
       directories.delete(deletedSessionId);
+      return;
+    }
+
+    const moved = extractSessionDirectoryUpdate(payload);
+    if (moved) {
+      const queue = queues.get(moved.sessionId);
+      if (queue && queue.directory !== moved.directory) {
+        // The session now reads and sends from its new directory; keep its
+        // queued messages there instead of delivering them to the old one.
+        setQueueItems(moved.sessionId, moved.directory, queue.items);
+        commit(moved.sessionId);
+      }
       return;
     }
 

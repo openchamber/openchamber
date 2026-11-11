@@ -28,6 +28,8 @@ import { findMessagePageItem } from "@/lib/opencode/messagePaging"
 import { toJsonRecord } from "@/lib/opencode/json"
 import { ascendingId } from "@/lib/opencode/ids"
 import { mergeSessionDirectoryMetadata, resolveGlobalSessionDirectory, useGlobalSessionsStore } from "@/stores/useGlobalSessionsStore"
+import { findWorktreeHoldingDirectory } from "@/lib/worktrees/worktreePaths"
+import { createMessageQueueTarget, useMessageQueueStore } from "@/stores/messageQueueStore"
 import { readGlobalSessionLineage } from "@/stores/sessionLineage"
 import { isRestorableOnItsOwn } from "./session-restore-rule"
 import { useConfigStore } from "@/stores/useConfigStore"
@@ -356,8 +358,7 @@ export async function moveSessionToDirectory(
   // already happened, but we must not publish stale local state to the UI/stores.
   if (isCurrent && !isCurrent()) return
 
-  const moved = relocateSession(session, sourceDirectory, destinationDirectory)
-  useGlobalSessionsStore.getState().upsertSession(moved)
+  relocateSession(session, sourceDirectory, destinationDirectory)
 }
 
 /**
@@ -428,7 +429,24 @@ function relocateSession(session: Session, sourceDirectory: string, destinationD
   const moved = reconcileSessionMove(session, sourceDirectory, destinationDirectory)
   dropSessionLiveStateOutside(session.id, destinationDirectory)
   registerSessionDirectory(session.id, destinationDirectory)
-  useSessionUIStore.getState().setSessionDirectory(session.id, destinationDirectory)
+  const ui = useSessionUIStore.getState()
+  ui.setSessionDirectory(session.id, destinationDirectory)
+  // The attachment is this client's own idea of the session's worktree. A
+  // move can leave that worktree (or enter another one), and grouping reads
+  // the attachment before the session's directory, so it must follow the move.
+  const destinationWorktree = findWorktreeHoldingDirectory(
+    [...ui.availableWorktreesByProject.values()].flat(),
+    destinationDirectory,
+  )
+  ui.setWorktreeMetadata(session.id, destinationWorktree ?? null, destinationDirectory)
+  // The sidebar and the session switcher read the global list; a move from an
+  // agent or another client arrives only as an event, so waiting for the next
+  // poll would leave the old directory in place until it runs.
+  useGlobalSessionsStore.getState().upsertSession(moved)
+  // The local (VS Code) queue is keyed by directory too; a queued message
+  // follows its session instead of waiting under the directory it left.
+  const queueTarget = createMessageQueueTarget(session.id, destinationDirectory)
+  if (queueTarget) useMessageQueueStore.getState().followSessionMove(queueTarget)
   return moved
 }
 

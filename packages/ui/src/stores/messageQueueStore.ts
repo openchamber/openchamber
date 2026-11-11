@@ -445,6 +445,17 @@ interface MessageQueueActions {
     markSending: (target: MessageQueueTarget, messageId: string) => void;
     clearSending: (target: MessageQueueTarget, messageId: string) => void;
     getSendableQueue: (target: MessageQueueTarget) => QueuedMessage[];
+    /**
+     * Local queue: a session moved to `destination`'s directory takes its queued messages and
+     * their in-flight marks along, so the old key has nothing left to dispatch. The server-owned
+     * queue is rekeyed by the server and arrives as a broadcast instead.
+     */
+    followSessionMove: (destination: MessageQueueTarget) => void;
+    /**
+     * The key that holds a message of the target's session now: a move can rekey the local queue
+     * while that message's send is in flight. The target itself when no key holds it.
+     */
+    locateQueuedMessage: (target: MessageQueueTarget, messageId: string) => MessageQueueTarget;
     setFollowUpBehavior: (behavior: FollowUpBehavior) => void;
     getQueueForTarget: (target: MessageQueueTarget) => QueuedMessage[];
     /** Server-owned queue: load the authoritative queue for the active runtime. */
@@ -509,24 +520,47 @@ const removeMessageLocally = (
     return { queuedMessages: { ...state.queuedMessages, [key]: newQueue } };
 };
 
-/** Every projection of one session in this runtime, whatever directory it was keyed under. */
+/**
+ * Every projection of one session in this runtime, whatever directory it was keyed under; with
+ * `owner`, only the directories that owner serves. A cleared key keeps its revision as a
+ * tombstone, so a response that started before the clear cannot bring it back.
+ */
 const clearSessionProjection = (
     state: Pick<MessageQueueState, 'queuedMessages' | 'sendingIds'>,
     runtimeKey: string,
     sessionId: string,
     revision: number,
+    owner?: string,
 ): Pick<MessageQueueState, 'queuedMessages' | 'sendingIds'> => {
     let queuedMessages = state.queuedMessages;
     let sendingIds = state.sendingIds;
     for (const key of new Set([...Object.keys(queuedMessages), ...Object.keys(sendingIds)])) {
         const parsed = parseMessageQueueKey(key);
         if (parsed?.runtimeKey !== runtimeKey || parsed.sessionId !== sessionId) continue;
+        if (owner !== undefined && queueOwnerOf(parsed.directory) !== owner) continue;
         if ((appliedRevisions.get(key) ?? -1) > revision) continue;
         appliedRevisions.set(key, revision);
         queuedMessages = withoutKey(queuedMessages, key);
         sendingIds = withoutKey(sendingIds, key);
     }
     return { queuedMessages, sendingIds };
+};
+
+/**
+ * The newest revision one owner has applied to a session under any directory. A session that
+ * moves keeps its owner's revision sequence, so freshness is per session, not per directory key:
+ * an old-directory response must not overwrite a newer move it started before.
+ */
+const newestSessionRevision = (runtimeKey: string, owner: string, sessionId: string): number => {
+    let newest = -1;
+    for (const [key, revision] of appliedRevisions) {
+        if (revision <= newest) continue;
+        const parsed = parseMessageQueueKey(key);
+        if (parsed?.runtimeKey === runtimeKey && parsed.sessionId === sessionId && queueOwnerOf(parsed.directory) === owner) {
+            newest = revision;
+        }
+    }
+    return newest;
 };
 
 export const useMessageQueueStore = create<MessageQueueStore>()(
@@ -549,16 +583,20 @@ export const useMessageQueueStore = create<MessageQueueStore>()(
                         return;
                     }
                     const key = getMessageQueueKey(target);
-                    if ((appliedRevisions.get(key) ?? -1) > revision) return;
-                    appliedRevisions.set(key, revision);
+                    if (newestSessionRevision(expectedRuntimeKey, owner, session.sessionId) > revision) return;
                     set((state) => {
+                        // A moved session speaks for one directory only: its projection under
+                        // every other directory of this owner goes, or the composer would show
+                        // the same queued message in both places until the next full snapshot.
+                        const cleared = clearSessionProjection(state, expectedRuntimeKey, session.sessionId, revision, owner);
+                        appliedRevisions.set(key, revision);
                         const queue = session.items.map(toQueuedMessage);
                         const queuedMessages = queue.length > 0
-                            ? { ...state.queuedMessages, [key]: queue }
-                            : withoutKey(state.queuedMessages, key);
+                            ? { ...cleared.queuedMessages, [key]: queue }
+                            : cleared.queuedMessages;
                         const sendingIds = session.sendingId
-                            ? { ...state.sendingIds, [key]: [session.sendingId] }
-                            : withoutKey(state.sendingIds, key);
+                            ? { ...cleared.sendingIds, [key]: [session.sendingId] }
+                            : cleared.sendingIds;
                         return { queuedMessages, sendingIds };
                     });
                 };
@@ -619,7 +657,9 @@ export const useMessageQueueStore = create<MessageQueueStore>()(
                             const target = createMessageQueueTarget(session.sessionId, session.directory, runtimeKey);
                             if (!target) continue;
                             const key = getMessageQueueKey(target);
-                            if (isNewerThanSnapshot(key)) continue;
+                            // Per session, not per key: a move broadcast newer than this snapshot
+                            // already placed the session under another directory.
+                            if (newestSessionRevision(runtimeKey, owner, session.sessionId) > snapshot.revision) continue;
                             appliedRevisions.set(key, snapshot.revision);
                             if (session.items.length > 0) queuedMessages[key] = session.items.map(toQueuedMessage);
                             if (session.sendingId) sendingIds[key] = [session.sendingId];
@@ -826,6 +866,42 @@ export const useMessageQueueStore = create<MessageQueueStore>()(
                         const sending = state.sendingIds[key];
                         if (!sending || sending.length === 0) return queue;
                         return queue.filter((message) => !sending.includes(message.id));
+                    },
+
+                    followSessionMove: (destination) => {
+                        if (isServerOwnedMessageQueue()) return;
+                        const destinationKey = getMessageQueueKey(destination);
+                        set((state) => {
+                            const queuedMessages = { ...state.queuedMessages };
+                            const sendingIds = { ...state.sendingIds };
+                            let moved = false;
+                            for (const key of new Set([...Object.keys(state.queuedMessages), ...Object.keys(state.sendingIds)])) {
+                                if (key === destinationKey) continue;
+                                const parsed = parseMessageQueueKey(key);
+                                if (parsed?.runtimeKey !== destination.runtimeKey || parsed.sessionId !== destination.sessionId) continue;
+                                moved = true;
+                                const messages = queuedMessages[key] ?? [];
+                                delete queuedMessages[key];
+                                if (messages.length > 0) {
+                                    const existing = queuedMessages[destinationKey] ?? [];
+                                    queuedMessages[destinationKey] = [...existing, ...messages.filter((message) => !existing.some((entry) => entry.id === message.id))];
+                                }
+                                const ids = sendingIds[key] ?? [];
+                                delete sendingIds[key];
+                                if (ids.length > 0) sendingIds[destinationKey] = [...new Set([...(sendingIds[destinationKey] ?? []), ...ids])];
+                            }
+                            return moved ? { queuedMessages, sendingIds } : {};
+                        });
+                    },
+
+                    locateQueuedMessage: (target, messageId) => {
+                        const { queuedMessages, sendingIds } = get();
+                        for (const key of new Set([...Object.keys(queuedMessages), ...Object.keys(sendingIds)])) {
+                            const parsed = parseMessageQueueKey(key);
+                            if (parsed?.runtimeKey !== target.runtimeKey || parsed.sessionId !== target.sessionId) continue;
+                            if (queuedMessages[key]?.some((message) => message.id === messageId) || sendingIds[key]?.includes(messageId)) return parsed;
+                        }
+                        return target;
                     },
 
                     setFollowUpBehavior: (behavior) => {

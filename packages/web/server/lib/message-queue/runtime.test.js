@@ -559,6 +559,51 @@ describe('message queue runtime', () => {
     expect(promptSent).toEqual([SESSION, SESSION]);
   });
 
+  it('delivers a message queued while busy to the directory the session moved to, once', async () => {
+    const { runtime, openCode, emit, broadcasts } = createRuntime();
+    runtime.start();
+    openCode.state.active = { [SESSION]: { type: 'running' } };
+    await runtime.enqueue(SESSION, DIRECTORY, item({ content: 'after the move', text: 'after the move' }));
+    await settle();
+    expect(openCode.state.sent).toHaveLength(0);
+
+    emit({ type: 'session.updated', properties: { sessionID: SESSION, info: { id: SESSION, directory: '/repo/moved', projectID: 'project-1' } } });
+    expect(runtime.sessionSnapshot(SESSION).directory).toBe('/repo/moved');
+    expect(broadcasts.at(-1)).toMatchObject({
+      properties: { session: { sessionId: SESSION, directory: '/repo/moved', items: [{ content: 'after the move' }] } },
+    });
+
+    openCode.state.active = {};
+    emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
+    await settle();
+
+    expect(openCode.state.sent).toHaveLength(1);
+    expect(openCode.state.sent[0].body).toEqual({ text: 'after the move' });
+    const promptUrls = openCode.fetchImpl.mock.calls
+      .map(([url]) => new URL(url))
+      .filter((url) => url.pathname === `/api/session/${SESSION}/prompt`);
+    expect(promptUrls.map((url) => url.searchParams.get('directory'))).toEqual(['/repo/moved']);
+    expect(runtime.sessionSnapshot(SESSION)).toMatchObject({ directory: '/repo/moved', items: [], sendingId: null });
+
+    // A later idle finds nothing left to send.
+    emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'busy' } } });
+    emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
+    await settle();
+    expect(openCode.state.sent).toHaveLength(1);
+  });
+
+  it('a session update without a projectID does not move the queue', async () => {
+    const { runtime, emit } = createRuntime();
+    runtime.start();
+    await runtime.enqueue(SESSION, DIRECTORY, item());
+
+    emit({ type: 'session.updated', properties: { sessionID: SESSION, info: { id: SESSION, directory: '/repo/elsewhere', title: 'Renamed' } } });
+
+    expect(runtime.sessionSnapshot(SESSION).directory).toBe(DIRECTORY);
+    runtime.stop();
+    await runtime.flush();
+  });
+
   it('waits for a background subagent before sending the queued message', async () => {
     const { runtime, openCode, emit } = createRuntime();
     runtime.start();

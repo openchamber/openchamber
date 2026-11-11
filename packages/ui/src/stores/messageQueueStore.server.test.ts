@@ -479,6 +479,71 @@ describe("server-owned message queue", () => {
     expect(useMessageQueueStore.getState().queuedMessages[key]?.map((m) => m.content)).toEqual(["newer"])
   })
 
+  test("a session move moves its queue projection instead of copying it", () => {
+    applyMessageQueueUpdatedEvent(updated(4, session([serverItem("q1", "queued")])), "runtime-a")
+    applyMessageQueueUpdatedEvent(updated(5, { ...session([serverItem("q1", "queued")]), directory: "/repo/moved" }), "runtime-a")
+
+    const movedTarget = createMessageQueueTarget("session-1", "/repo/moved", "runtime-a")
+    if (!movedTarget) throw new Error("moved target must be valid")
+    expect(useMessageQueueStore.getState().queuedMessages[key]).toBeUndefined()
+    expect(useMessageQueueStore.getState().queuedMessages[getMessageQueueKey(movedTarget)]?.map((m) => m.id)).toEqual(["q1"])
+  })
+
+  test("an old-directory response that arrives after the move event cannot bring the old row back", async () => {
+    const movedTarget = createMessageQueueTarget("session-1", "/repo/moved", "runtime-a")
+    if (!movedTarget) throw new Error("moved target must be valid")
+    const movedKey = getMessageQueueKey(movedTarget)
+    const enqueue = deferredResponse()
+    respond = () => enqueue.promise
+    const pending = useMessageQueueStore.getState().addToQueue(target, {
+      content: "first",
+      text: "first",
+      sendConfig: { providerID: "p", modelID: "m" },
+    })
+
+    applyMessageQueueUpdatedEvent(updated(5, {
+      ...session([serverItem("q1", "first"), serverItem("q2", "second")], "q1"),
+      directory: "/repo/moved",
+    }), "runtime-a")
+    enqueue.resolve(json({ revision: 4, session: session([serverItem("q1", "first")]) }))
+    await pending
+
+    const state = useMessageQueueStore.getState()
+    expect(Object.keys(state.queuedMessages)).toEqual([movedKey])
+    expect(state.queuedMessages[movedKey]?.map((m) => m.id)).toEqual(["q1", "q2"])
+    expect(state.sendingIds).toEqual({ [movedKey]: ["q1"] })
+  })
+
+  test("a first snapshot older than a move cannot restore the old directory, delivered or not", async () => {
+    const movedTarget = createMessageQueueTarget("session-1", "/repo/moved", "runtime-a")
+    if (!movedTarget) throw new Error("moved target must be valid")
+    const movedKey = getMessageQueueKey(movedTarget)
+    for (const delivered of [false, true]) {
+      useMessageQueueStore.getState().resetForRuntimeSwitch("runtime-a")
+      useMessageQueueStore.setState({ queuedMessages: {}, sendingIds: {} })
+      const snapshot = deferredResponse()
+      respond = () => snapshot.promise
+      const bootstrap = useMessageQueueStore.getState().hydrate()
+      applyMessageQueueUpdatedEvent(updated(5, { ...session([serverItem("q1", "queued")], "q1"), directory: "/repo/moved" }), "runtime-a")
+      if (delivered) applyMessageQueueUpdatedEvent(updated(6, { ...session([]), directory: "/repo/moved" }), "runtime-a")
+      snapshot.resolve(json({ revision: 4, sessions: [session([serverItem("q1", "queued")], "q1")] }))
+      await bootstrap
+
+      const state = useMessageQueueStore.getState()
+      expect(Object.keys(state.queuedMessages)).toEqual(delivered ? [] : [movedKey])
+      expect(state.sendingIds).toEqual(delivered ? {} : { [movedKey]: ["q1"] })
+    }
+  })
+
+  test("an older broadcast for a directory the session never showed under is ignored after a move", () => {
+    const movedTarget = createMessageQueueTarget("session-1", "/repo/moved", "runtime-a")
+    if (!movedTarget) throw new Error("moved target must be valid")
+    applyMessageQueueUpdatedEvent(updated(5, { ...session([serverItem("q1", "moved")]), directory: "/repo/moved" }), "runtime-a")
+    applyMessageQueueUpdatedEvent(updated(4, session([serverItem("q0", "before the move")])), "runtime-a")
+
+    expect(Object.keys(useMessageQueueStore.getState().queuedMessages)).toEqual([getMessageQueueKey(movedTarget)])
+  })
+
   test("an empty session without a directory still clears the projection it was keyed under", () => {
     applyMessageQueueUpdatedEvent(updated(4, session([serverItem("q1", "queued")], "q1")), "runtime-a")
     expect(useMessageQueueStore.getState().queuedMessages[key]).toHaveLength(1)
