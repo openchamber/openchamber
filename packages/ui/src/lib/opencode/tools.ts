@@ -239,6 +239,38 @@ const renderPageInputSchema = renderPageFields
   .extend({ parameters: renderPageFields.optional().catch(undefined) })
   .catch({})
 
+/**
+ * The plugin also revives a call a harness spilled into `action` as JSON text,
+ * and the server then waits on the page it revived. The chat reads the same
+ * fields, or a waiting page had nothing to draw and its wait ended as "the
+ * user wrote in the chat" (#6709). A field the call carried itself wins, and
+ * the spilled object's own `parameters` wins over its siblings, as in the
+ * plugin. A `parameters` that is not an object is ignored there and here, so
+ * its siblings still make the page.
+ */
+const jsonObject = z.record(z.string(), z.json())
+
+const spilledCallSchema = z
+  .object({ action: z.string() })
+  .transform(({ action }): z.infer<typeof renderPageFields> => {
+    let revived: unknown
+    try {
+      revived = JSON.parse(action)
+    } catch {
+      return {}
+    }
+    const spilled = jsonObject.safeParse(revived)
+    if (!spilled.success) return {}
+    const { parameters, ...siblings } = spilled.data
+    const nested = jsonObject.safeParse(parameters)
+    return renderPageFields.parse({ ...siblings, ...nested.data })
+  })
+  .catch({})
+
+const spilledCallFields = (input: JsonValue | undefined): z.infer<typeof renderPageFields> => (
+  spilledCallSchema.parse(input ?? {})
+)
+
 // What the user answered on a page that waited (render.page with
 // awaitAnswer), as the plugin records it in the call's metadata.
 const pageAnswerSchema = z.union([
@@ -479,16 +511,17 @@ export function renderedPage(
 ): { html: string; ui?: string; title: string; ask: RenderedPageAsk } | null {
   if (!isRenderTool(toolName)) return null
   const parsed = renderPageInputSchema.parse(state.input ?? {})
-  const html = parsed.parameters?.html ?? parsed.html ?? ""
+  const spilled = spilledCallFields(state.input)
+  const html = parsed.parameters?.html ?? parsed.html ?? spilled.html ?? ""
   // A ui page (the UI block language) is drawn by the chat's own components.
-  const ui = parsed.parameters?.ui ?? parsed.ui
+  const ui = parsed.parameters?.ui ?? parsed.ui ?? spilled.ui
   const page = ui?.trim() ? { html: "", ui } : html.trim() ? { html } : null
   if (!page) return null
   // Empty when neither the call nor the page names it; the chat shows its own word then.
-  const title = (parsed.parameters?.title ?? parsed.title)?.trim() || pageTitleFromHtml(html)
+  const title = (parsed.parameters?.title ?? parsed.title ?? spilled.title)?.trim() || pageTitleFromHtml(html)
   // A page that waited stays in the chat when its call ends without an
   // answer (the user stopped the turn), so the question it asked is still there.
-  if ((parsed.parameters?.awaitAnswer ?? parsed.awaitAnswer) === true) {
+  if ((parsed.parameters?.awaitAnswer ?? parsed.awaitAnswer ?? spilled.awaitAnswer) === true) {
     if (state.status === "running") return { ...page, title, ask: { kind: "waiting" } }
     if (state.status === "error") return { ...page, title, ask: { kind: "unanswered" } }
   }
@@ -799,7 +832,11 @@ export function openChamberToolCall(toolName: ToolName, input: JsonValue | undef
   const tool = normalizeToolName(toolName)
   if (!OPENCHAMBER_TOOLS.has(tool)) return null
   const parsed = openChamberCallSchema.parse(input ?? {})
-  const awaitsAnswer = (tool === OPENCHAMBER_SECRET_TOOL && !isSecretForget(parsed.action)) || (parsed.parameters?.awaitAnswer ?? parsed.awaitAnswer) === true
+  // Only the render tool revives a spilled action; the multi-action tools
+  // refuse that input, so it never waits there.
+  const spilledWait = tool === OPENCHAMBER_RENDER_TOOL ? spilledCallFields(input).awaitAnswer : undefined
+  const waits = parsed.parameters?.awaitAnswer ?? parsed.awaitAnswer ?? spilledWait
+  const awaitsAnswer = (tool === OPENCHAMBER_SECRET_TOOL && !isSecretForget(parsed.action)) || waits === true
   return { tool, action: parsed.action, awaitsAnswer }
 }
 
