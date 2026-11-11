@@ -109,6 +109,7 @@ const MOBILE_SETTINGS_PAGES = [
   'notifications',
   'sessions',
   'routing',
+  'projects',
   'git',
   'magic-prompts',
   'snippets',

@@ -22,6 +22,7 @@
 - The Settings root supplies no selected directory to the shared sync provider. It does not start global session polling, selected-directory session bootstrap or background queue delivery/cleanup, and seeing it never marks a chat as viewed. Settings pages resolve their own project through `useSettingsDirectory`; catalog updates still use the shared sync context.
 - Its runtime shortcut hook registers Settings actions only and requires no chat sync context. Chat, model and session shortcuts remain with chat roots, so a key pressed in Settings cannot create an unseen draft or change a session selection there. Escape reaches an input or menu before the tab's close handler.
 - On mobile, a request for the Settings dialog opens the fullscreen Settings surface and clears the dialog flag (`mobileSettingsNavigation.ts`). It lands on the requested page when the phone shows that page, otherwise on the page list. Entry points keep calling `setSettingsDialogOpen` and need no mobile branch.
+- Mobile Settings exposes Projects in navigation, search and shared Settings links. Project chat defaults use the shared Projects page and its project-scoped save path; the main-window worktrees shortcut remains unavailable on mobile. `MobileSessionsSheet` receives shared Add project requests so its directory picker can open above Settings.
 - On mobile web, Back runs the same close ladder as the Android back button, one step per press, and the app is left only when nothing is open. Forward and traversals between routes never run the ladder. Layers closed through the UI leave no empty Back presses (`useMobileWebBackButton`, `lib/router/backGuard.ts`).
 - Every route entry written while a layer is open goes through `pushRouteEntry` or `updateBrowserURL`, so it lands under the back guard. A direct `pushState` would bury the guard between two routes. A replacement keeps the guard and changes its URL; the route under it normalizes to the same place when Back reaches it.
 - Inside the mobile shell the Settings stages write no history. A `SettingsView` given `registerBackHandler` steps through its stages in state only.
@@ -58,3 +59,7 @@ An unfolded iPhone Duo is 951 px wide: one 320 to 380 px panel leaves a readable
 ### Why mobile listens for the dialog flag and not a mobile branch at every entry point
 
 About twenty shared entry points open Settings through `setSettingsDialogOpen`. The phone renders no dialog, so each one did nothing there and left the flag set, which blocks chat shortcuts. One bridge in the shell covers every entry point, the same way the VS Code bridge does.
+
+### Why mobile uses the Projects page and not a separate defaults form
+
+The shared page already supports project selection through mobile split-page navigation. Reusing it keeps the defaults controls, search anchors and persistence in one place.

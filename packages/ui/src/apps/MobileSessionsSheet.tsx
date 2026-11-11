@@ -39,6 +39,7 @@ import {
 import { isChatDirectoryPath } from '@/lib/chatDirectories';
 import { useI18n, type I18nKey } from '@/lib/i18n';
 import { updateDesktopSettings } from '@/lib/persistence';
+import { sessionEvents } from '@/lib/sessionEvents';
 import { cn } from '@/lib/utils';
 import { refreshGlobalSessions, useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
@@ -222,6 +223,11 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
   React.useEffect(() => {
     if (searchOpen && variant === 'sidebar') searchInputRef.current?.focus();
   }, [searchOpen, variant]);
+
+  React.useEffect(
+    () => sessionEvents.onDirectoryRequest(() => setDirectoryDialogOpen(true)),
+    [],
+  );
 
   React.useEffect(() => {
     if (!listActive) {
