@@ -704,6 +704,7 @@ export const settingsDict = {
   'settings.agents.page.field.scopePlaceholder': 'היקף',
   'settings.agents.page.field.descriptionPlaceholder': 'מה הסוכן הזה עושה?',
   'settings.agents.page.runtimeProvided.note': 'מסופק על ידי OpenCode או תוסף, בלי קובץ הגדרות משלו. רמזים באפור מציגים את הערכים הנוכחיים; כל מה שמזינים נשמר כעקיפה.',
+  'settings.agents.page.systemScoped.note': 'מנוהל על ידי הגדרות המערכת שלך ({path}) ולקריאה בלבד כאן. שכפל את הסוכן כדי להתאים אותו בהגדרות שלך.',
   'settings.agents.page.field.mode': 'מצב',
   'settings.agents.page.field.modeTooltip': 'נראות כסוכן ראשי או כסוכן משנה',
   'settings.agents.page.field.overrideModel': 'מודל חלופי',

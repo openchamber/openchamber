@@ -613,6 +613,8 @@ interface SettingsChipGroupProps<T extends string> {
   onChange: (value: T) => void;
   className?: string;
   'aria-label'?: string;
+  /** Disables every option: the whole choice is read-only. */
+  disabled?: boolean;
 }
 
 /**
@@ -688,6 +690,7 @@ export function SettingsChipGroup<T extends string>({
   onChange,
   className,
   'aria-label': ariaLabel,
+  disabled = false,
 }: SettingsChipGroupProps<T>) {
   return (
     <div
@@ -695,6 +698,7 @@ export function SettingsChipGroup<T extends string>({
       aria-label={ariaLabel}
       className={cn(
         'oc-recessed inline-flex max-w-full flex-wrap items-center gap-0.5 rounded-lg bg-[color-mix(in_srgb,var(--foreground)_4%,transparent)] p-0.5',
+        disabled && 'opacity-60',
         className,
       )}
     >
@@ -706,7 +710,7 @@ export function SettingsChipGroup<T extends string>({
             type="button"
             variant="ghost"
             size="sm"
-            disabled={option.disabled}
+            disabled={disabled || option.disabled}
             aria-pressed={selected}
             className={cn(
               'rounded-md !font-normal',

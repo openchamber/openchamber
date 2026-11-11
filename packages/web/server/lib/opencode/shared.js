@@ -36,9 +36,33 @@ const PROMPT_FILE_PATTERN = /^\{file:(.+)\}$/i;
 const getOpenCodeDataDir = (env = process.env) =>
   path.join(env.XDG_DATA_HOME?.trim() || path.join(os.homedir(), '.local', 'share'), 'opencode');
 
+/**
+ * OpenCode's platform system configuration directory, as
+ * `ConfigDiscovery.systemDirectory()` resolves it in the OpenCode repository
+ * (`/Library/Application Support/opencode`, `%ProgramData%\opencode`, else
+ * `/etc/opencode`). OpenCode loads it last, so it outranks every other config
+ * layer; OpenChamber reads it and never writes it. `OPENCODE_SYSTEM_CONFIG_DIR`
+ * overrides the platform default the way `OPENCODE_CONFIG_DIR` does the user
+ * one, so containers and tests can point it at a scratch directory.
+ */
+function getSystemConfigDir(env = process.env) {
+  const override = env.OPENCODE_SYSTEM_CONFIG_DIR?.trim();
+  if (override) {
+    return path.resolve(override);
+  }
+  if (process.platform === 'darwin') {
+    return '/Library/Application Support/opencode';
+  }
+  if (process.platform === 'win32') {
+    return path.join(env.ProgramData || 'C:\\ProgramData', 'opencode');
+  }
+  return '/etc/opencode';
+}
+
 // ============== SCOPE TYPE CONSTANTS ==============
 
 const AGENT_SCOPE = {
+  SYSTEM: 'system',
   USER: 'user',
   PROJECT: 'project'
 };
@@ -192,7 +216,9 @@ function getProjectConfigPath(workingDirectory) {
 }
 
 function getConfigPaths(workingDirectory) {
+  const systemDir = getSystemConfigDir();
   return {
+    systemPaths: ['opencode.json', 'opencode.jsonc'].map((name) => path.join(systemDir, name)),
     userPaths: [
       path.join(OPENCODE_CONFIG_DIR, 'opencode.json'),
       path.join(OPENCODE_CONFIG_DIR, 'opencode.jsonc'),
@@ -358,8 +384,17 @@ function readConfigLayer(filePath) {
   }
 }
 
+function getPrimaryConfigPath(configPaths) {
+  for (const candidate of configPaths) {
+    if (fs.existsSync(candidate)) {
+      return candidate;
+    }
+  }
+  return null;
+}
+
 function readConfigLayers(workingDirectory) {
-  const { userPaths, projectPath, customPath } = getConfigPaths(workingDirectory);
+  const { systemPaths, userPaths, projectPath, customPath } = getConfigPaths(workingDirectory);
   const userPath = getPrimaryUserConfigPath(userPaths);
   // OpenCode loads every global config file in order, so an `opencode.jsonc`
   // next to `opencode.json` overrides it. New entries still go to the primary
@@ -369,12 +404,27 @@ function readConfigLayers(workingDirectory) {
   const userOverrideLayer = readConfigLayer(userOverridePath);
   const projectLayer = readConfigLayer(projectPath);
   const customLayer = readConfigLayer(customPath);
+  // The system layer is read-only: OpenCode loads it last, so it outranks
+  // every other layer, and nothing here may ever pick it as a write target.
+  // It is kept out of `mergedConfig` on purpose — only the agents module reads
+  // it — so every other settings surface keeps its exact behavior.
+  const systemPath = getPrimaryConfigPath(systemPaths) ?? systemPaths[0];
+  const systemOverridePath = systemPaths.find((candidate) => candidate !== systemPath && fs.existsSync(candidate)) ?? null;
+  const systemLayer = readConfigLayer(systemPath);
+  const systemOverrideLayer = readConfigLayer(systemOverridePath);
+  const systemConfig = mergeConfigs(systemLayer.config, systemOverrideLayer.config);
   const mergedConfig = mergeConfigs(
     mergeConfigs(mergeConfigs(userLayer.config, userOverrideLayer.config), projectLayer.config),
     customLayer.config,
   );
 
   const layerErrors = [];
+  if (systemLayer.error && systemPath) {
+    layerErrors.push({ path: systemPath, code: systemLayer.error.code, message: systemLayer.error.message });
+  }
+  if (systemOverrideLayer.error && systemOverridePath) {
+    layerErrors.push({ path: systemOverridePath, code: systemOverrideLayer.error.code, message: systemOverrideLayer.error.message });
+  }
   if (userLayer.error) {
     layerErrors.push({ path: userPath, code: userLayer.error.code, message: userLayer.error.message });
   }
@@ -389,12 +439,13 @@ function readConfigLayers(workingDirectory) {
   }
 
   return {
+    systemConfig,
     userConfig: userLayer.config,
     userOverrideConfig: userOverrideLayer.config,
     projectConfig: projectLayer.config,
     customConfig: customLayer.config,
     mergedConfig,
-    paths: { userPath, userOverridePath, projectPath, customPath },
+    paths: { systemPath, systemOverridePath, userPath, userOverridePath, projectPath, customPath },
     layerErrors,
   };
 }
@@ -1089,6 +1140,7 @@ function deleteSkillSupportingFile(skillDir, relativePath) {
 
 export {
   getOpenCodeDataDir,
+  getSystemConfigDir,
   OPENCODE_CONFIG_DIR,
   AGENT_DIR,
   COMMAND_DIR,

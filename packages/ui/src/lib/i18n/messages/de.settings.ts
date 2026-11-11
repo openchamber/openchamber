@@ -663,6 +663,7 @@ export const settingsDict = {
   'settings.agents.page.field.scopePlaceholder': 'Geltungsbereich',
   'settings.agents.page.field.descriptionPlaceholder': 'Was macht dieser Agent?',
   'settings.agents.page.runtimeProvided.note': 'Wird von OpenCode oder einem Plugin bereitgestellt und hat keine eigene Konfigurationsdatei. Graue Hinweise zeigen die aktuellen Werte; Ihre Eingaben werden als Überschreibung gespeichert.',
+  'settings.agents.page.systemScoped.note': 'Wird von Ihrer Systemkonfiguration verwaltet ({path}) und ist hier schreibgeschützt. Duplizieren Sie den Agenten, um ihn in Ihrer eigenen Konfiguration anzupassen.',
   'settings.agents.page.field.mode': 'Modus',
   'settings.agents.page.field.modeTooltip': 'Sichtbarkeit: Primär vs. Subagent',
   'settings.agents.page.field.overrideModel': 'Modell überschreiben',

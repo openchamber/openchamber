@@ -84,15 +84,16 @@ export const registerConfigEntityRoutes = (app, dependencies) => {
       }
       const sources = getAgentSources(agentName, directory);
 
-      const scope = sources.md.exists
-        ? sources.md.scope
-        : (sources.json.exists ? sources.json.scope : null);
-
+      // `sources.scope` is the scope the agent resolves to with the system
+      // layer included; `readOnly` marks the system layer, which Settings can
+      // read but never write. `isBuiltIn` stays reserved for agents OpenCode
+      // provides at runtime with no definition of their own.
       res.json({
         name: agentName,
         sources: sources,
-        scope,
-        isBuiltIn: !sources.md.exists && !sources.json.exists
+        scope: sources.scope ?? null,
+        readOnly: sources.readOnly === true,
+        isBuiltIn: !sources.md.exists && !sources.json.exists && !sources.systemJson.exists
       });
     } catch (error) {
       console.error('Failed to get agent sources:', error);

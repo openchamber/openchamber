@@ -19,7 +19,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from '@/components/ui/context-menu';
 import { useSettingsDirectory } from '@/hooks/useSettingsDirectory';
-import { selectAgentsForDirectory, selectDisabledAgentsForDirectory, useAgentsStore, isAgentBuiltIn, isAgentHidden, isAgentManageable, type AgentScope, type AgentWithExtras } from '@/stores/useAgentsStore';
+import { selectAgentsForDirectory, selectDisabledAgentsForDirectory, useAgentsStore, buildAgentDuplicateDraft, isAgentBuiltIn, isAgentHidden, isAgentManageable, type AgentScope, type AgentWithExtras } from '@/stores/useAgentsStore';
 import { isPrimaryMode } from '@/components/chat/mobileControlsUtils';
 import { useShallow } from 'zustand/react/shallow';
 import { cn } from '@/lib/utils';
@@ -85,6 +85,11 @@ export const AgentsSidebar: React.FC<AgentsSidebarProps> = ({ onItemSelect }) =>
   // agent a chat can run as is never offered, so the composer keeps one.
   const selectablePrimaryCount = agents.filter((agent) => isPrimaryMode(agent.mode) && !isAgentHidden(agent)).length;
   const canDisable = (agent: Agent) => !(isPrimaryMode(agent.mode) && !isAgentHidden(agent) && selectablePrimaryCount <= 1);
+  // A system-scoped agent is managed by the system configuration: rename,
+  // delete and disable cannot take effect (OpenCode applies that layer last),
+  // so Settings never offers them. Duplicate stays: it copies into user scope.
+  // SAFETY: the agents store attaches `scope` to every entry it loads.
+  const isSystemScopedAgent = (agent: Agent) => (agent as Agent & { scope?: AgentScope }).scope === 'system';
 
   const setAgentDisabled = async (name: string, disabled: boolean) => {
     setPendingToggleAgent(name);
@@ -125,7 +130,7 @@ export const AgentsSidebar: React.FC<AgentsSidebarProps> = ({ onItemSelect }) =>
   };
 
   const handleDeleteAgent = async (agent: Agent) => {
-    if (isAgentBuiltIn(agent)) {
+    if (isAgentBuiltIn(agent) || isSystemScopedAgent(agent)) {
       toast.error(t('settings.agents.sidebar.toast.builtInCannotDelete'));
       return;
     }
@@ -166,39 +171,24 @@ export const AgentsSidebar: React.FC<AgentsSidebarProps> = ({ onItemSelect }) =>
   };
 
   const handleDuplicateAgent = async (agent: Agent) => {
-    const baseName = agent.name;
     let copyNumber = 1;
-    let newName = `${baseName}-copy`;
+    let newName = `${agent.name}-copy`;
 
     while (agents.some((a) => a.name === newName)) {
       copyNumber++;
-      newName = `${baseName}-copy-${copyNumber}`;
+      newName = `${agent.name}-copy-${copyNumber}`;
     }
 
     // Copy the agent's OWN stored entry, not the resolved `AgentInfo`: the
     // resolved view merges global config and built-in defaults, and baking
     // those into a new file would silently widen the copy's permissions.
     // SAFETY: the agents store attaches `scope` to every entry it loads.
-    const extAgent = agent as AgentWithExtras & { scope?: AgentScope };
     const envelope = await fetchAgentEntity(agent.name, settingsDirectory);
     if (!envelope) {
       toast.error(t('settings.agents.sidebar.toast.renameFailed'));
       return;
     }
-    const body = envelope.config.request?.body;
-    setAgentDraft({
-      name: newName,
-      scope: envelope.scope ?? extAgent.scope ?? 'user',
-      description: envelope.config.description ?? undefined,
-      model: envelope.config.model ?? null,
-      system: envelope.config.system ?? undefined,
-      steps: envelope.config.steps ?? undefined,
-      temperature: body?.temperature,
-      top_p: body?.top_p,
-      mode: envelope.config.mode ?? extAgent.mode,
-      permissions: envelope.config.permissions ?? undefined,
-      hidden: envelope.config.hidden,
-    });
+    setAgentDraft(buildAgentDuplicateDraft(agent, envelope, newName));
     setSelectedAgent(newName);
     onItemSelect?.();
 
@@ -380,10 +370,10 @@ export const AgentsSidebar: React.FC<AgentsSidebarProps> = ({ onItemSelect }) =>
                           onItemSelect?.();
 
                         }}
-                        onRename={() => handleOpenRenameDialog(agent)}
-                        onDelete={() => handleDeleteAgent(agent)}
+                        onRename={isSystemScopedAgent(agent) ? undefined : () => handleOpenRenameDialog(agent)}
+                        onDelete={isSystemScopedAgent(agent) ? undefined : () => handleDeleteAgent(agent)}
                         onDuplicate={() => void handleDuplicateAgent(agent)}
-                        onDisable={canDisable(agent) ? () => void setAgentDisabled(agent.name, true) : undefined}
+                        onDisable={isSystemScopedAgent(agent) ? undefined : (canDisable(agent) ? () => void setAgentDisabled(agent.name, true) : undefined)}
                         getAgentModeIcon={getAgentModeIcon}
                         isMenuOpen={openMenuAgent === agent.name}
                         onMenuOpenChange={(open) => setOpenMenuAgent(open ? agent.name : null)}
@@ -403,10 +393,10 @@ export const AgentsSidebar: React.FC<AgentsSidebarProps> = ({ onItemSelect }) =>
                       onItemSelect?.();
 
                     }}
-                    onRename={() => handleOpenRenameDialog(agent)}
-                    onDelete={() => handleDeleteAgent(agent)}
+                    onRename={isSystemScopedAgent(agent) ? undefined : () => handleOpenRenameDialog(agent)}
+                    onDelete={isSystemScopedAgent(agent) ? undefined : () => handleDeleteAgent(agent)}
                     onDuplicate={() => void handleDuplicateAgent(agent)}
-                    onDisable={canDisable(agent) ? () => void setAgentDisabled(agent.name, true) : undefined}
+                    onDisable={isSystemScopedAgent(agent) ? undefined : (canDisable(agent) ? () => void setAgentDisabled(agent.name, true) : undefined)}
                     getAgentModeIcon={getAgentModeIcon}
                     isMenuOpen={openMenuAgent === agent.name}
                     onMenuOpenChange={(open) => setOpenMenuAgent(open ? agent.name : null)}

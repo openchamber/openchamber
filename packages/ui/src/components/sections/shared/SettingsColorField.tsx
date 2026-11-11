@@ -27,7 +27,8 @@ export const SettingsColorField: React.FC<{
   onChange: (value: string) => void;
   labels: SettingsColorFieldLabels;
   legacyCss?: string | null;
-}> = ({ value, onChange, labels, legacyCss = null }) => {
+  disabled?: boolean;
+}> = ({ value, onChange, labels, legacyCss = null, disabled = false }) => {
   const selected = value.toLowerCase();
   const isPreset = COLOR_PRESETS.some((color) => color === selected);
   const isLegacy = selected !== '' && !isHexColor(selected) && legacyCss !== null;
@@ -43,11 +44,12 @@ export const SettingsColorField: React.FC<{
   };
 
   return (
-    <div className="flex flex-wrap items-center gap-2.5">
+    <div className={cn('flex flex-wrap items-center gap-2.5', disabled && 'pointer-events-none opacity-60')}>
       <button
         type="button"
         onClick={() => onChange('')}
         aria-pressed={selected === ''}
+        aria-disabled={disabled || undefined}
         className={cn(SWATCH_CLASS, 'border border-border text-muted-foreground', selected === '' && SELECTED_CLASS)}
         title={labels.empty}
         aria-label={labels.empty}
@@ -63,6 +65,7 @@ export const SettingsColorField: React.FC<{
           type="button"
           onClick={() => onChange(color)}
           aria-pressed={selected === color}
+          aria-disabled={disabled || undefined}
           className={cn(SWATCH_CLASS, selected === color && SELECTED_CLASS)}
           style={{ backgroundColor: color }}
           title={color}
@@ -73,6 +76,7 @@ export const SettingsColorField: React.FC<{
         type="button"
         onClick={() => pickerRef.current?.click()}
         aria-pressed={isCustom}
+        aria-disabled={disabled || undefined}
         className={cn(
           SWATCH_CLASS,
           isCustom ? SELECTED_CLASS : 'border border-dashed border-border text-muted-foreground hover:text-foreground',

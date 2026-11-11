@@ -704,6 +704,7 @@ export const settingsDict = {
   'settings.agents.page.field.scopePlaceholder': 'النطاق',
   'settings.agents.page.field.descriptionPlaceholder': 'ماذا يفعل هذا الوكيل؟',
   'settings.agents.page.runtimeProvided.note': 'يوفره OpenCode أو مكوّن إضافي، وليس له ملف إعدادات خاص. تعرض التلميحات الرمادية قيمه الحالية؛ وأي قيمة تدخلها تُحفظ كتجاوز.',
+  'settings.agents.page.systemScoped.note': 'يُدار بواسطة إعدادات النظام لديك ({path}) وهو للقراءة فقط هنا. كرر الوكيل لتخصيصه في الإعدادات الخاصة بك.',
   'settings.agents.page.field.mode': 'الوضع',
   'settings.agents.page.field.modeTooltip': 'الظهور كوكيل رئيسي أو وكيل فرعي',
   'settings.agents.page.field.overrideModel': 'تجاوز النموذج',

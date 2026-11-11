@@ -705,6 +705,7 @@ export const settingsDict = {
   'settings.agents.page.field.scopePlaceholder': 'スコープ',
   'settings.agents.page.field.descriptionPlaceholder': 'この Agent は何をしますか？',
   'settings.agents.page.runtimeProvided.note': 'OpenCode またはプラグインが提供しており、独自の設定ファイルはありません。グレーのヒントは現在の値です。入力した内容は上書きとして保存されます。',
+  'settings.agents.page.systemScoped.note': 'システム設定 ({path}) によって管理されており、ここでは読み取り専用です。エージェントを複製して、自分の設定でカスタマイズしてください。',
   'settings.agents.page.field.mode': 'モード',
   'settings.agents.page.field.modeTooltip': 'プライマリと Subagent の表示設定',
   'settings.agents.page.field.overrideModel': 'モデルを上書き',

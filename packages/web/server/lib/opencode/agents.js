@@ -7,10 +7,12 @@ import {
   AGENT_DIR,
   OPENCODE_CONFIG_DIR,
   AGENT_SCOPE,
+  getSystemConfigDir,
   ensureDirs,
   parseMdFile,
   writeMdFile,
   readConfigLayers,
+  readConfigFile,
   writeConfig,
   getJsonEntrySource,
   isPromptFileReference,
@@ -21,6 +23,7 @@ import {
   toAgentEntity,
   fromAgentEntity,
   isLegacyAgentFrontmatter,
+  readSectionEntry,
   writeSectionEntry,
   deleteSectionEntry,
   effectiveAgentRules,
@@ -40,6 +43,111 @@ import {
 
 const USER_AGENT_DIRS = ['agents', 'agent', 'modes', 'mode'].map((name) => path.join(OPENCODE_CONFIG_DIR, name));
 const PROJECT_AGENT_DIR_NAMES = ['agents', 'agent', 'modes', 'mode'];
+const SYSTEM_AGENT_DIR_NAMES = ['agents', 'agent', 'modes', 'mode'];
+
+// ============== SYSTEM SCOPE ==============
+//
+// OpenCode loads the system configuration directory
+// (`ConfigDiscovery.systemDirectory()`: `/etc/opencode` and platform
+// equivalents) last, so an agent defined there outranks the project and user
+// definitions of the same name. It is read-only here: nothing in this module
+// writes under it, and mutations of a system-scoped agent are rejected.
+
+function isFileEntry(targetPath) {
+  try {
+    return fs.statSync(targetPath).isFile();
+  } catch {
+    return false;
+  }
+}
+
+/** First `<dir>/…/<agentName>.md` under one system agent directory, direct file first. */
+function findSystemAgentFile(directory, agentName) {
+  const direct = path.join(directory, `${agentName}.md`);
+  if (isFileEntry(direct)) {
+    return direct;
+  }
+  let entries;
+  try {
+    entries = fs.readdirSync(directory, { withFileTypes: true });
+  } catch {
+    return null;
+  }
+  entries.sort((a, b) => a.name.localeCompare(b.name));
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    const found = findSystemAgentFile(path.join(directory, entry.name), agentName);
+    if (found) {
+      return found;
+    }
+  }
+  return null;
+}
+
+/** The system layer's markdown file for one agent, or null when it defines none. */
+function getSystemAgentPath(agentName) {
+  const systemDir = getSystemConfigDir();
+  for (const dirName of SYSTEM_AGENT_DIR_NAMES) {
+    const found = findSystemAgentFile(path.join(systemDir, dirName), agentName);
+    if (found) {
+      return found;
+    }
+  }
+  return null;
+}
+
+/**
+ * The system layer's stored entry for one agent, or null when the system
+ * layer does not define it. OpenCode applies a layer's `opencode.json(c)`
+ * agents section before the layer's markdown files, so where both exist the
+ * markdown fields win per field and the two permissions lists accumulate.
+ */
+function getSystemAgentEntry(agentName, workingDirectory) {
+  const layers = readConfigLayers(workingDirectory);
+  const json = readSectionEntry(layers.systemConfig, 'agents', agentName);
+  const jsonExists = json.value !== undefined;
+  let jsonPath = null;
+  if (jsonExists) {
+    const primary = readSectionEntry(readConfigFile(layers.paths.systemPath), 'agents', agentName);
+    jsonPath = primary.value !== undefined ? layers.paths.systemPath : layers.paths.systemOverridePath;
+  }
+  const mdPath = getSystemAgentPath(agentName);
+  if (!jsonExists && !mdPath) {
+    return null;
+  }
+  const jsonEntity = jsonExists ? toAgentEntity(json.value) : null;
+  if (!mdPath) {
+    return {
+      mdPath: null,
+      jsonPath,
+      legacy: Boolean(json.legacy),
+      config: jsonEntity,
+      jsonEntity,
+    };
+  }
+  const md = readMdAgent(mdPath);
+  return {
+    mdPath,
+    jsonPath,
+    legacy: md.legacy,
+    config: jsonEntity ? mergeAgentEntities(jsonEntity, md.entity) : md.entity,
+    jsonEntity,
+  };
+}
+
+/** Overlay the markdown entity over the JSON entry, field by field as OpenCode does. */
+function mergeAgentEntities(base, overlay) {
+  const merged = { ...base };
+  for (const [key, value] of Object.entries(overlay)) {
+    if (value === undefined) continue;
+    if (key === 'permissions' && Array.isArray(value)) {
+      merged.permissions = [...(Array.isArray(base.permissions) ? base.permissions : []), ...value];
+      continue;
+    }
+    merged[key] = value;
+  }
+  return merged;
+}
 
 /** Ensure the v2 project agent directory exists. */
 function ensureProjectAgentDir(workingDirectory) {
@@ -145,9 +253,15 @@ function getUserAgentPath(agentName, lookupCache = null) {
 
 /**
  * Determine agent scope based on where the .md file exists
- * Priority: project level > user level > null (built-in only)
+ * Priority: system level > project level > user level > null (built-in only)
  */
 function getAgentScope(agentName, workingDirectory, lookupCache = null) {
+  // The system layer outranks everything OpenCode loads after it.
+  const systemPath = getSystemAgentPath(agentName);
+  if (systemPath) {
+    return { scope: AGENT_SCOPE.SYSTEM, path: systemPath };
+  }
+
   if (workingDirectory) {
     const projectPath = getProjectAgentPath(workingDirectory, agentName);
     if (fs.existsSync(projectPath)) {
@@ -201,21 +315,26 @@ function readMdAgent(mdPath) {
 }
 
 function getAgentSources(agentName, workingDirectory, lookupCache = createAgentLookupCache()) {
+  const systemEntry = getSystemAgentEntry(agentName, workingDirectory);
   const projectPath = workingDirectory ? getProjectAgentPath(workingDirectory, agentName) : null;
   const projectExists = Boolean(projectPath) && fs.existsSync(projectPath);
 
   const userPath = getUserAgentPath(agentName, lookupCache);
   const userExists = fs.existsSync(userPath);
 
-  const mdPath = projectExists ? projectPath : (userExists ? userPath : null);
+  // The system layer wins over project and user, as in OpenCode's load order.
+  const mdPath = systemEntry?.mdPath ?? (projectExists ? projectPath : (userExists ? userPath : null));
   const mdExists = Boolean(mdPath);
-  const mdScope = projectExists ? AGENT_SCOPE.PROJECT : (userExists ? AGENT_SCOPE.USER : null);
+  const mdScope = systemEntry?.mdPath
+    ? AGENT_SCOPE.SYSTEM
+    : (projectExists ? AGENT_SCOPE.PROJECT : (userExists ? AGENT_SCOPE.USER : null));
 
   const layers = readConfigLayers(workingDirectory);
   const jsonSource = getJsonEntrySource(layers, 'agents', agentName);
   const jsonPath = jsonSource.path || layers.paths.customPath || layers.paths.projectPath || layers.paths.userPath;
   const jsonScope = jsonSource.path === layers.paths.projectPath ? AGENT_SCOPE.PROJECT : AGENT_SCOPE.USER;
 
+  const systemJsonExists = Boolean(systemEntry?.jsonEntity);
   const sources = {
     md: {
       exists: mdExists,
@@ -232,6 +351,14 @@ function getAgentSources(agentName, workingDirectory, lookupCache = createAgentL
       legacy: Boolean(jsonSource.legacy),
       fields: [],
     },
+    systemJson: {
+      exists: systemJsonExists,
+      path: systemJsonExists ? systemEntry.jsonPath : null,
+      scope: systemJsonExists ? AGENT_SCOPE.SYSTEM : null,
+      sectionKey: systemJsonExists ? 'agents' : null,
+      legacy: systemJsonExists ? Boolean(systemEntry.legacy) : false,
+      fields: [],
+    },
     projectMd: {
       exists: projectExists,
       path: projectPath,
@@ -240,6 +367,9 @@ function getAgentSources(agentName, workingDirectory, lookupCache = createAgentL
       exists: userExists,
       path: userPath,
     },
+    // The scope the agent actually resolves to, and whether Settings may edit it.
+    scope: systemEntry ? AGENT_SCOPE.SYSTEM : (mdExists ? mdScope : (jsonSource.exists ? jsonScope : null)),
+    readOnly: Boolean(systemEntry),
   };
 
   if (mdExists) {
@@ -252,6 +382,10 @@ function getAgentSources(agentName, workingDirectory, lookupCache = createAgentL
     sources.json.fields = Object.keys(toAgentEntity(jsonSource.section));
   }
 
+  if (systemJsonExists) {
+    sources.systemJson.fields = Object.keys(systemEntry.jsonEntity);
+  }
+
   return sources;
 }
 
@@ -261,6 +395,19 @@ function getAgentSources(agentName, workingDirectory, lookupCache = createAgentL
  * rule array, even when the file still uses a v1 `permission` map.
  */
 function getAgentConfig(agentName, workingDirectory, lookupCache = createAgentLookupCache()) {
+  // The system layer outranks the project and user layers in OpenCode's load
+  // order, so it is resolved first and cannot be written to.
+  const systemEntry = getSystemAgentEntry(agentName, workingDirectory);
+  if (systemEntry) {
+    return {
+      source: systemEntry.mdPath ? 'md' : 'json',
+      scope: AGENT_SCOPE.SYSTEM,
+      path: systemEntry.mdPath ?? systemEntry.jsonPath,
+      legacy: systemEntry.legacy,
+      config: systemEntry.config,
+    };
+  }
+
   const projectPath = workingDirectory ? getProjectAgentPath(workingDirectory, agentName) : null;
   const projectExists = Boolean(projectPath) && fs.existsSync(projectPath);
 
@@ -313,6 +460,8 @@ function getAgentPermissions(agentName, workingDirectory, lookupCache = createAg
     ...readGlobalPermissionRules(layers.userConfig),
     ...readGlobalPermissionRules(layers.projectConfig),
     ...readGlobalPermissionRules(layers.customConfig),
+    // The system layer's global rules apply at runtime too (it loads last).
+    ...readGlobalPermissionRules(layers.systemConfig),
   ];
   const agent = getAgentConfig(agentName, workingDirectory, lookupCache);
   return {
@@ -352,6 +501,12 @@ function createAgent(agentName, config, workingDirectory, scope) {
   const layers = readConfigLayers(workingDirectory);
   if (getJsonEntrySource(layers, 'agents', agentName).exists) {
     throw new Error(`Agent ${agentName} already exists in opencode.json`);
+  }
+
+  // A user-level copy of a system-defined agent would never take effect:
+  // OpenCode applies the system layer last, so it would shadow this one.
+  if (getSystemAgentEntry(agentName, workingDirectory)) {
+    throw new Error(`Agent ${agentName} already exists in the system configuration (read-only)`);
   }
 
   let targetPath;
@@ -445,6 +600,9 @@ function updateAgent(agentName, updates, workingDirectory) {
   const lookupCache = createAgentLookupCache();
 
   const current = getAgentConfig(agentName, workingDirectory, lookupCache);
+  if (current.scope === AGENT_SCOPE.SYSTEM) {
+    throw new Error(`Agent ${agentName} is defined in the system configuration and is read-only`);
+  }
   const entity = applyAgentUpdates(current.config, updates);
 
   if (current.source === 'md') {
@@ -487,6 +645,13 @@ function updateAgent(agentName, updates, workingDirectory) {
 function deleteAgent(agentName, workingDirectory, scope) {
   const lookupCache = createAgentLookupCache();
   const requestedScope = scope === AGENT_SCOPE.PROJECT || scope === AGENT_SCOPE.USER ? scope : null;
+
+  // A system-defined agent cannot be removed from here: the system layer is
+  // not writable, and deleting a lower-layer copy would change nothing the
+  // daemon runs (the system definition still applies).
+  if (getAgentConfig(agentName, workingDirectory, lookupCache).scope === AGENT_SCOPE.SYSTEM) {
+    throw new Error(`Agent ${agentName} is defined in the system configuration and is read-only`);
+  }
 
   if ((!requestedScope || requestedScope === AGENT_SCOPE.PROJECT) && workingDirectory) {
     const projectPath = getProjectAgentPath(workingDirectory, agentName);
@@ -589,6 +754,9 @@ function listDisabledAgents(workingDirectory) {
   const disabled = [];
   for (const name of [...names].sort((a, b) => a.localeCompare(b))) {
     const entry = getAgentConfig(name, workingDirectory, lookupCache);
+    // A system-scoped agent cannot be switched back on from here: its
+    // `disabled` flag lives in the read-only system layer.
+    if (entry.scope === AGENT_SCOPE.SYSTEM) continue;
     if (entry.config.disabled !== true) continue;
     disabled.push({
       name,

@@ -114,6 +114,10 @@ export const AgentsPage: React.FC = () => {
   // stored entry, not from the resolved `AgentInfo`.
   const selectedAgent = (selectedAgentName ? getAgentByName(selectedAgentName, settingsDirectory) : null) as AgentWithExtras | null;
   const isNewAgent = Boolean(agentDraft && agentDraft.name === selectedAgentName && !selectedAgent);
+  // An agent the system configuration defines is managed there: OpenCode
+  // applies the system layer last, so nothing written below it changes what
+  // runs. The form shows the stored system entry, read-only.
+  const isSystemAgent = !isNewAgent && selectedAgent?.scope === 'system';
   // The resolved runtime values (built-in defaults, plugin-injected agents) are
   // shown only as placeholder hints; the form state stays the stored entry, so
   // a save never writes them back.
@@ -461,6 +465,12 @@ export const AgentsPage: React.FC = () => {
           <span>{t('settings.agents.page.runtimeProvided.note')}</span>
         </p>
       )}
+      {!isNewAgent && isSystemAgent && (
+        <p className={`mb-4 flex items-start gap-1.5 ${SETTINGS_HELPER_CLASS}`}>
+          <Icon name="lock" className="mt-[0.2em] h-3.5 w-3.5 shrink-0 opacity-70" />
+          <span>{t('settings.agents.page.systemScoped.note', { path: storedAt?.path ?? selectedAgent?.path ?? '' })}</span>
+        </p>
+      )}
       <SettingsSection
         title={t('settings.agents.page.section.identityRole')}
         divider={false}
@@ -513,6 +523,7 @@ export const AgentsPage: React.FC = () => {
             onChange={(e) => setDescription(e.target.value)}
             placeholder={runtimeDescription || t('settings.agents.page.field.descriptionPlaceholder')}
             rows={2}
+            disabled={isSystemAgent}
             className="w-full resize-none min-h-[60px] bg-transparent"
           />
         </SettingsStackedField>
@@ -525,6 +536,7 @@ export const AgentsPage: React.FC = () => {
           <SettingsChipGroup
             aria-label={t('settings.agents.page.field.mode')}
             value={mode}
+            disabled={isSystemAgent}
             onChange={(next) => {
               setMode(next);
               requestSave();
@@ -544,6 +556,7 @@ export const AgentsPage: React.FC = () => {
         >
           <SettingsColorField
             value={color}
+            disabled={isSystemAgent}
             labels={{
               empty: t('settings.agents.page.field.colorAutomatic'),
               swatch: (swatch) => t('settings.agents.page.field.colorSwatchAria', { color: swatch }),
@@ -569,6 +582,7 @@ export const AgentsPage: React.FC = () => {
           <ModelSelector
             providerId={parseModelIdentifier(model)?.providerId ?? ''}
             modelId={parseModelIdentifier(model)?.modelId ?? ''}
+            disabled={isSystemAgent}
             onChange={(providerId: string, modelId: string) => {
               if (providerId && modelId) {
                 setModel(`${providerId}/${modelId}`);
@@ -595,6 +609,7 @@ export const AgentsPage: React.FC = () => {
           {shouldUseVariantSelect ? (
             <Select
               value={selectedVariantValue}
+              disabled={isSystemAgent}
               onValueChange={(value) => {
                 setVariant(value === '__default' ? '' : value);
                 requestSave();
@@ -618,10 +633,10 @@ export const AgentsPage: React.FC = () => {
                 value={variant}
                 onChange={(event) => setVariant(event.target.value)}
                 placeholder={t('settings.agents.page.field.variantPlaceholder')}
-                disabled={!model && !variant}
+                disabled={isSystemAgent || (!model && !variant)}
                 className="h-8 w-40 rounded-md px-3"
               />
-              {variant && (
+              {variant && !isSystemAgent && (
                 <Button
                   size="sm"
                   type="button"
@@ -654,6 +669,7 @@ export const AgentsPage: React.FC = () => {
           <NumberInput
             value={temperature}
             fallbackValue={0.7}
+            disabled={isSystemAgent}
             onValueChange={setTemperature}
             onClear={() => {
               setTemperature(undefined);
@@ -667,7 +683,7 @@ export const AgentsPage: React.FC = () => {
             emptyLabel="—"
             className={SETTINGS_NUMBER_INPUT_CLASS}
           />
-          {temperature !== undefined && (
+          {temperature !== undefined && !isSystemAgent && (
             <Button
               size="sm"
               type="button"
@@ -698,6 +714,7 @@ export const AgentsPage: React.FC = () => {
           <NumberInput
             value={topP}
             fallbackValue={0.9}
+            disabled={isSystemAgent}
             onValueChange={setTopP}
             onClear={() => {
               setTopP(undefined);
@@ -711,7 +728,7 @@ export const AgentsPage: React.FC = () => {
             emptyLabel="—"
             className={SETTINGS_NUMBER_INPUT_CLASS}
           />
-          {topP !== undefined && (
+          {topP !== undefined && !isSystemAgent && (
             <Button
               size="sm"
               type="button"
@@ -737,6 +754,7 @@ export const AgentsPage: React.FC = () => {
           <NumberInput
             value={steps}
             fallbackValue={20}
+            disabled={isSystemAgent}
             onValueChange={setSteps}
             onClear={() => {
               setSteps(undefined);
@@ -750,7 +768,7 @@ export const AgentsPage: React.FC = () => {
             emptyLabel="—"
             className={SETTINGS_NUMBER_INPUT_CLASS}
           />
-          {steps !== undefined && (
+          {steps !== undefined && !isSystemAgent && (
             <Button
               size="sm"
               type="button"
@@ -778,11 +796,12 @@ export const AgentsPage: React.FC = () => {
           onChange={(e) => setSystem(e.target.value)}
           placeholder={runtimeSystem || t('settings.agents.page.field.systemPromptPlaceholder')}
           rows={8}
+          disabled={isSystemAgent}
           className="w-full font-mono typography-meta min-h-[120px] max-h-[60vh] bg-transparent"
         />
       </SettingsSection>
 
-      {!isNewAgent && selectedAgent && (
+      {!isNewAgent && selectedAgent && selectedAgent.scope !== 'system' && (
         <AgentPermissionsEditor
           agent={selectedAgent}
           registerSave={registerPermissionsSave}

@@ -705,6 +705,7 @@ export const settingsDict = {
   'settings.agents.page.field.scopePlaceholder': 'Bereik',
   'settings.agents.page.field.descriptionPlaceholder': 'Wat doet deze agent?',
   'settings.agents.page.runtimeProvided.note': 'Wordt geleverd door OpenCode of een plugin, zonder eigen config-bestand. Grijze hints tonen de huidige waarden; alles wat u invoert wordt als overschrijving opgeslagen.',
+  'settings.agents.page.systemScoped.note': 'Beheerd door je systeemconfiguratie ({path}) en hier alleen-lezen. Dupliceer de agent om hem in je eigen configuratie aan te passen.',
   'settings.agents.page.field.mode': 'Modus',
   'settings.agents.page.field.modeTooltip': 'Zichtbaarheid als primary of subagent',
   'settings.agents.page.field.overrideModel': 'Model overschrijven',

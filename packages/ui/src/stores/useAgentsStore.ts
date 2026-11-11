@@ -129,7 +129,7 @@ const buildAgentsSignature = (agents: Agent[]): string => {
     .join('||');
 };
 
-export type AgentScope = 'user' | 'project';
+export type AgentScope = 'system' | 'user' | 'project';
 
 /** Effect of a permission rule in OpenCode 2. */
 export type PermissionEffect = 'allow' | 'ask' | 'deny';
@@ -342,6 +342,42 @@ interface AgentDraft {
   mode?: "primary" | "subagent" | "all";
   permissions?: PermissionRule[];
   hidden?: boolean;
+}
+
+/**
+ * Draft for a copy of one agent, from the agent's OWN stored entry — never the
+ * resolved `AgentInfo`, which already merges global config and built-in
+ * defaults, and baking those into a new file would silently widen the copy.
+ * A system-scoped entry can be a partial override of a built-in (an org
+ * pinning only a model), so there the resolved description and system prompt
+ * stand in for the fields the entry omits, and the copy lands in the user
+ * scope: the system layer is read-only and outranks everything anyway.
+ */
+export function buildAgentDuplicateDraft(
+  agent: Agent,
+  envelope: AgentEntityEnvelope,
+  name: string,
+): AgentDraft {
+  // SAFETY: callers pass agents the store loaded, so the `AgentWithExtras`
+  // fields (here only `scope`) are present; the resolved entry carries the
+  // runtime description and system prompt the fallbacks read.
+  const extended = agent as AgentWithExtras;
+  const resolvedScope = envelope.scope ?? extended.scope ?? 'user';
+  const isSystem = resolvedScope === 'system';
+  const body = envelope.config.request?.body;
+  return {
+    name,
+    scope: isSystem ? 'user' : resolvedScope,
+    description: envelope.config.description ?? (isSystem ? agent.description : undefined) ?? undefined,
+    model: envelope.config.model ?? null,
+    system: envelope.config.system ?? (isSystem ? agent.system : undefined) ?? undefined,
+    steps: envelope.config.steps ?? undefined,
+    temperature: body?.temperature,
+    top_p: body?.top_p,
+    mode: envelope.config.mode ?? extended.mode,
+    permissions: envelope.config.permissions ?? undefined,
+    hidden: envelope.config.hidden,
+  };
 }
 
 interface AgentsStore {
@@ -593,7 +629,7 @@ export const useAgentsStore = create<AgentsStore>()(
                         // config-entity route derives it from the sources.
                         const native = data.isBuiltIn === true;
 
-                        if (scope === 'project' || scope === 'user') {
+                        if (scope === 'project' || scope === 'user' || scope === 'system') {
                           return { ...agent, scope: scope as AgentScope, group, legacy, path: sourcePath, native };
                         }
 

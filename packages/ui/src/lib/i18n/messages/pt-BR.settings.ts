@@ -672,6 +672,7 @@ export const settingsDict = {
   "settings.agents.page.field.scopePlaceholder": "Escopo",
   "settings.agents.page.field.descriptionPlaceholder": "O que este agente faz?",
   "settings.agents.page.runtimeProvided.note": "Fornecido pelo OpenCode ou por um plugin, sem arquivo de configuração próprio. As dicas em cinza mostram os valores atuais; o que você digitar é salvo como uma substituição.",
+  "settings.agents.page.systemScoped.note": "Gerenciado pela configuração do sistema ({path}) e somente leitura aqui. Duplique o agente para personalizá-lo na sua própria configuração.",
   "settings.agents.page.field.mode": "Modo",
   "settings.agents.page.field.modeTooltip": "Visibilidade principal vs subagente",
   "settings.agents.page.field.overrideModel": "Sobrescrever modelo",

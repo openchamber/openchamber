@@ -672,6 +672,7 @@ export const settingsDict = {
   'settings.agents.page.field.scopePlaceholder': '作用域',
   'settings.agents.page.field.descriptionPlaceholder': '这个智能体的作用是什么？',
   'settings.agents.page.runtimeProvided.note': '由 OpenCode 或插件提供，没有自己的配置文件。灰色提示显示当前值；你输入的内容会保存为覆盖。',
+  'settings.agents.page.systemScoped.note': '由系统配置（{path}）管理，在此处为只读。复制该智能体即可在自己的配置中进行自定义。',
   'settings.agents.page.field.mode': '模式',
   'settings.agents.page.field.modeTooltip': '主智能体与子智能体可见性',
   'settings.agents.page.field.overrideModel': '覆盖模型',
