@@ -18,7 +18,7 @@ const SETTLE_VELOCITY_PX_S = 20;
 // A frame that arrives late (a long task) advances the spring this far at most.
 const MAX_STEP_S = 0.05;
 // A scroll offset further than this from our last write was moved by someone
-// else: the reader's wheel or keys, or the list holding a row in place.
+// else.
 const FOREIGN_WRITE_PX = 1;
 // How long a just-issued native smooth scroll counts as moving before it has
 // moved: it starts a frame or two after it is issued.
@@ -38,8 +38,8 @@ interface FollowGlideOptions {
     shouldContinue: () => boolean;
     /** The glide reached its target and stopped. */
     onSettle: () => void;
-    /** Something else moved the viewport mid-glide; the glide carries on from there. */
-    onInterrupt: () => void;
+    /** Someone else moved the viewport, and the glide stopped there. */
+    onYield?: () => void;
     /** Leave the motion to the browser's smooth scroll (iOS WebKit). */
     native?: boolean;
     requestFrame?: (callback: FrameRequestCallback) => number;
@@ -94,7 +94,7 @@ const createNativeFollowGlide = (options: FollowGlideOptions): FollowGlide => {
 
 export const createFollowGlide = (options: FollowGlideOptions): FollowGlide => {
     if (options.native) return createNativeFollowGlide(options);
-    const { node, shouldContinue, onSettle, onInterrupt } = options;
+    const { node, shouldContinue, onSettle, onYield } = options;
     const requestFrame = options.requestFrame ?? ((callback) => window.requestAnimationFrame(callback));
     const cancelFrame = options.cancelFrame ?? ((handle) => window.cancelAnimationFrame(handle));
     const now = options.now ?? (() => performance.now());
@@ -106,13 +106,11 @@ export const createFollowGlide = (options: FollowGlideOptions): FollowGlide => {
     let written = 0;
     let lastTime = 0;
     let aimedStateEnd = 0;
-    let interrupted = false;
 
     const stop = () => {
         if (frame !== null) cancelFrame(frame);
         frame = null;
         velocity = 0;
-        interrupted = false;
     };
 
     const write = (top: number) => {
@@ -133,13 +131,15 @@ export const createFollowGlide = (options: FollowGlideOptions): FollowGlide => {
             stop();
             return;
         }
-        const actual = node.scrollTop;
-        if (Math.abs(actual - written) > FOREIGN_WRITE_PX) {
-            position = actual;
-            interrupted = true;
-            onInterrupt();
-            // The interrupt may have stopped the glide.
-            if (!interrupted) return;
+        // Someone else moved the viewport: the list holding the end it opened
+        // at or a row in place, a wheel, a resize. The glide yields, as the
+        // browser's own smooth scroll does, and the next growth aims it again.
+        // Carrying on fought the list's instant writes every frame, and the
+        // chat shook until the reader scrolled.
+        if (Math.abs(node.scrollTop - written) > FOREIGN_WRITE_PX) {
+            stop();
+            onYield?.();
+            return;
         }
         const dt = Math.min(MAX_STEP_S, Math.max(0, (time - lastTime) / 1000));
         lastTime = time;
@@ -167,7 +167,6 @@ export const createFollowGlide = (options: FollowGlideOptions): FollowGlide => {
     const aim = (nextTarget: number, stateEnd: number, instant: boolean) => {
         target = nextTarget;
         aimedStateEnd = stateEnd;
-        interrupted = false;
         const actual = node.scrollTop;
         if (frame === null || Math.abs(actual - written) > FOREIGN_WRITE_PX) position = actual;
         written = actual;
@@ -184,7 +183,7 @@ export const createFollowGlide = (options: FollowGlideOptions): FollowGlide => {
     };
 
     const isHeadingTo = (stateEnd: number) => (
-        frame !== null && !interrupted && Math.abs(aimedStateEnd - stateEnd) <= 1
+        frame !== null && Math.abs(aimedStateEnd - stateEnd) <= 1
     );
 
     return { aim, isHeadingTo, stop, dispose: stop };

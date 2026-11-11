@@ -17,13 +17,13 @@ const createStand = (max = 10_000) => {
     });
     let pending: FrameRequestCallback | null = null;
     let time = 0;
-    const events = { settled: 0, interrupted: 0 };
+    const events = { settled: 0, yielded: 0 };
     let proceed = true;
     const glide = createFollowGlide({
         node,
         shouldContinue: () => proceed,
         onSettle: () => { events.settled += 1; },
-        onInterrupt: () => { events.interrupted += 1; },
+        onYield: () => { events.yielded += 1; },
         requestFrame: (callback) => { pending = callback; return 1; },
         cancelFrame: () => { pending = null; },
         now: () => time,
@@ -86,18 +86,23 @@ describe('createFollowGlide', () => {
         expect(steps.slice(3).every((step) => step > 0.1)).toBe(true);
     });
 
-    test('carries on from where something else moved the viewport', () => {
+    test('yields to someone else moving the viewport', () => {
         const stand = createStand();
         stand.glide.aim(400, 400, false);
         for (let i = 0; i < 5; i++) stand.frame();
-        stand.node.scrollTop = stand.node.scrollTop + 50;
-        const moved = stand.node.scrollTop;
+        stand.node.scrollTop = 20;
         stand.frame();
-        expect(stand.events.interrupted).toBe(1);
-        expect(stand.node.scrollTop).toBeGreaterThan(moved);
+        // The other writer keeps the viewport; the next aim starts from there.
+        expect(stand.node.scrollTop).toBe(20);
+        expect(stand.running()).toBe(false);
+        expect(stand.events.settled).toBe(0);
+        // The owner hears it, so a viewport left short is checked.
+        expect(stand.events.yielded).toBe(1);
         expect(stand.glide.isHeadingTo(400, 0)).toBe(false);
         stand.glide.aim(400, 400, false);
         expect(stand.glide.isHeadingTo(400, 0)).toBe(true);
+        stand.frame();
+        expect(stand.node.scrollTop).toBeGreaterThan(20);
     });
 
     test('says whether it still heads to the end the list reports', () => {
@@ -137,7 +142,7 @@ describe('createFollowGlide', () => {
         Object.defineProperty(node, 'scrollTop', { value: 1000 });
         Object.defineProperty(node, 'scrollTo', { value: (options: ScrollToOptions) => { calls.push(options); } });
         const glide = createFollowGlide({
-            node, native: true, shouldContinue: () => true, onSettle: () => { settled += 1; }, onInterrupt: () => {}, now: () => time,
+            node, native: true, shouldContinue: () => true, onSettle: () => { settled += 1; }, now: () => time,
         });
         expect(glide.isHeadingTo(1400, 1000)).toBe(false);
         glide.aim(1400, 1400, false);

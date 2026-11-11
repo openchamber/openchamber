@@ -423,9 +423,6 @@ export const useChatTimelineScroll = ({
     // The live follow's glide (followGlide.ts), one per scroll node. A
     // gesture stops it.
     const liveGlideRef = React.useRef<FollowGlide | null>(null);
-    // Whether the follow has let go of the list's own hold on the end the
-    // session opened at (see followEnd).
-    const listEndHoldReleasedRef = React.useRef(false);
     // Collapsed activity stops the follow at the end of the reader's message.
     const activityRenderMode = useUIStore((state) => state.activityRenderMode);
     const stopAfterUserMessageRef = React.useRef(activityRenderMode === 'collapsed');
@@ -1134,15 +1131,6 @@ export const useChatTimelineScroll = ({
             const list = listRef.current;
             const glide = liveGlideRef.current;
             if (!glide) return;
-            // The list holds the end the session opened at (`initialScrollAtEnd`)
-            // with an instant scroll to it in the frame the content grows,
-            // until a scroll command ends the hold: every tool row arriving
-            // was a jump, ahead of this frame. The follow owns the end from
-            // its first live growth on.
-            if (!listEndHoldReleasedRef.current && list) {
-                listEndHoldReleasedRef.current = true;
-                void list.scrollToOffset({ offset: node.scrollTop, animated: false });
-            }
             const state = list?.getState();
             const stateEnd = state ? Math.max(0, (state.contentLength ?? 0) - state.scrollLength) : null;
             if (state && stateEnd !== null && glide.isHeadingTo(stateEnd, state.scroll)) return;
@@ -1545,8 +1533,6 @@ export const useChatTimelineScroll = ({
         setUserOwnsScroll(false);
         setNearContentStart(true);
         liveGlideRef.current?.stop();
-        // The list entered holds its own end until a scroll command.
-        listEndHoldReleasedRef.current = false;
         modeRef.current = 'following-end';
         liveFollowGenerationRef.current = userGenerationRef.current;
         // A stop in the session left behind does not count as one here: a
@@ -1656,6 +1642,7 @@ export const useChatTimelineScroll = ({
     // Where a follow glide that stopped on its target landed is checked by the
     // pinned-end effect below.
     const followLandedRef = React.useRef<() => void>(() => {});
+    const followYieldsRef = React.useRef(0);
     React.useEffect(() => {
         if (!scrollNode) return;
         const glide = createFollowGlide({
@@ -1663,15 +1650,15 @@ export const useChatTimelineScroll = ({
             native: drawsScrollInWholePixels(),
             shouldContinue: () => scrollRef.current === scrollNode && !followGlideHeld(),
             onSettle: () => followLandedRef.current(),
-            // Moved by something else on the way: a side column re-wrapping
-            // the rows holds the end itself, anything else (the list keeping
-            // a row in place, a wheel down) gets a fresh aim at the end.
-            onInterrupt: () => {
-                if (widthResizingRef.current || isLayoutAnimating()) {
-                    glide.stop();
-                    return;
-                }
-                followEndRef.current();
+            // A glide stopped short by another writer (a wheel down, the list)
+            // checks where it is like a landing, so the reader is not left
+            // short of an end that grows no more. Twice at most between two
+            // growths: the list's hold on the end writes its own offset each
+            // frame, and answering every write fought it.
+            onYield: () => {
+                if (followYieldsRef.current >= 2) return;
+                followYieldsRef.current += 1;
+                followLandedRef.current();
             },
         });
         liveGlideRef.current = glide;
@@ -1733,9 +1720,13 @@ export const useChatTimelineScroll = ({
         // painted, so the pin lands in the same frame as the growth. A
         // ResizeObserver would only see the container a rendering step later
         // and let one frame paint with the end out of view.
-        const mutations = new MutationObserver(pin);
+        const grew = () => {
+            followYieldsRef.current = 0;
+            pin();
+        };
+        const mutations = new MutationObserver(grew);
         mutations.observe(content, { childList: true, subtree: true, attributes: true, attributeFilter: ['style'] });
-        const resizes = globalThis.ResizeObserver ? new ResizeObserver(pin) : null;
+        const resizes = globalThis.ResizeObserver ? new ResizeObserver(grew) : null;
         resizes?.observe(content);
         // The viewport itself shrinking (window height, a panel docked below)
         // moves the end out of view just like content growth does.
