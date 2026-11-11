@@ -101,6 +101,7 @@ unchanged; raw global session records remain available for cleanup.
      partial answer. The shared store retains OpenCode's indexed hits first.
      A webview that moved on stops the walk with `api:fs:search:abort`.
   - Read paths are authorized in the requested workspace path space before symlink resolution, matching the web runtime; directly requested outside-workspace paths remain denied.
+  - Workspace containment normalizes Windows drive-letter case: VS Code supplies lowercase drives while OpenCode supplies uppercase drives. The remaining path casing and directory-separator boundary stay significant.
 
 The sidebar installs a script-free CSP bootstrap document before changing webview options, so VS Code does not diagnose the transient blank document as an extension webview without CSP. The final webview CSP permits `blob:` only for `worker-src` so shared UI parsers can run bounded local decompression off the main thread. Blob scripts remain disallowed by `script-src`.
 
