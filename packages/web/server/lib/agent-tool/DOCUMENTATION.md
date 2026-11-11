@@ -232,13 +232,16 @@ default and when to set it. Field names and JSON types carry the rest.
   `html`, is that input's description.
 - The tool exposes one shared parameter object rather than repeating parameters
   in a large per-action union.
-- The action schema carries `oneOf` and no `enum`. A node combining `enum` and
+- The action schema carries `enum` and no `oneOf`. A node combining `enum` and
   `oneOf` is valid JSON Schema, but some OpenAI-compatible gateways reject it
-  and answer with an empty completion instead of an error.
+  and answer with an empty completion instead of an error. Using `enum` alone
+  avoids the gateway collision while preventing OpenAPI 3.0 / Gemini schema
+  normalizers from collapsing `oneOf` to its first element. Action descriptions
+  are folded into the property description.
 - A tool with a single action (render, notify) declares `action` as a plain,
   optional string and always runs its one action. A weaker model put the whole
   render call into `action` as a JSON string, title included, with the html
-  beside it; the strict `oneOf` refused that before the tool ran, and every
+  beside it; the strict action list refused that before the tool ran, and every
   retry sent the whole page again. Such a string is revived, and its fields
   fill only what the call did not already carry.
 - Obvious fields rely on their names and JSON types. Parameter descriptions are
