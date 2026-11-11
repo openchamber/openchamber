@@ -359,6 +359,58 @@ describe("renderedPage", () => {
     expect(renderedPage("openchamber_render", running(conflict))).toBeNull()
   })
 
+  test("reads a call a harness spilled into a JSON-string action, as the plugin revives it", () => {
+    // A harness serialized the whole call into `action`. The plugin revives those
+    // fields and the server waits for an answer on that page, so the chat has to
+    // read the same shape: reading only the top level left a waiting page
+    // undrawn, and its wait ended as "the user wrote in the chat" (#6709).
+    const spilled = { action: '{"awaitAnswer": true, "ui": "root = Stack([q1])"}' }
+    expect(renderedPage("openchamber_render", running(spilled)))
+      .toEqual({ html: "", ui: "root = Stack([q1])", title: "", ask: { kind: "waiting" } })
+    // The call's own `parameters` object inside the spilled action is read too.
+    const nested = { action: '{"parameters": {"html": "<p>a</p>", "title": "Chart"}}' }
+    expect(renderedPage("openchamber_render", completed(nested, accepted)))
+      .toEqual({ html: "<p>a</p>", title: "Chart", ask: { kind: "show" } })
+    // A field the call carried itself wins over the revived one, as in the plugin.
+    const carried = { action: '{"ui": "root = Stack([])", "awaitAnswer": true}', ui: "root = Stack([q1])" }
+    expect(renderedPage("openchamber_render", running(carried))?.ui).toBe("root = Stack([q1])")
+    // The call counts as waiting for the user, so the turn says so while it waits.
+    expect(openChamberToolCall("openchamber_render", spilled)?.awaitsAnswer).toBe(true)
+    // Anything that is not a spilled call adds nothing.
+    expect(renderedPage("openchamber_render", completed({ action: "render.page" }, accepted))).toBeNull()
+    expect(renderedPage("openchamber_render", completed({ action: "{not json" }, accepted))).toBeNull()
+    expect(renderedPage("openchamber_render", completed({ action: "[1, 2]" }, accepted))).toBeNull()
+  })
+
+  test("keeps the sibling fields of a spilled action whose parameters is not an object, as the plugin does", () => {
+    for (const parameters of [null, [1, 2], "x", 5]) {
+      const input = { action: JSON.stringify({ awaitAnswer: true, ui: "root = Stack([q1])", parameters }) }
+      expect(renderedPage("openchamber_render", running(input)))
+        .toEqual({ html: "", ui: "root = Stack([q1])", title: "", ask: { kind: "waiting" } })
+      expect(openChamberToolCall("openchamber_render", input)?.awaitsAnswer).toBe(true)
+    }
+  })
+
+  test("reads a spilled action with the plugin's precedence", () => {
+    // The spilled object's own parameters win over its siblings.
+    const nested = { action: JSON.stringify({ html: "<p>sibling</p>", title: "Sibling", parameters: { html: "<p>nested</p>" } }) }
+    expect(renderedPage("openchamber_render", completed(nested, accepted)))
+      .toEqual({ html: "<p>nested</p>", title: "Sibling", ask: { kind: "show" } })
+    // A field the call carried itself, at the top level or in its parameters, wins over the spilled one.
+    const spilled = JSON.stringify({ html: "<p>spilled</p>", title: "Spilled", awaitAnswer: true })
+    expect(renderedPage("openchamber_render", running({ action: spilled, html: "<p>own</p>" })))
+      .toEqual({ html: "<p>own</p>", title: "Spilled", ask: { kind: "waiting" } })
+    expect(renderedPage("openchamber_render", completed({ action: spilled, parameters: { title: "Own", awaitAnswer: false } }, accepted)))
+      .toEqual({ html: "<p>spilled</p>", title: "Own", ask: { kind: "show" } })
+  })
+
+  test("counts a spilled waiting call as waiting only on the render tool, which revives it", () => {
+    const spilled = { action: JSON.stringify({ awaitAnswer: true, ui: "root = Stack([q1])" }) }
+    expect(openChamberToolCall("openchamber_render", spilled)?.awaitsAnswer).toBe(true)
+    expect(openChamberToolCall("openchamber", spilled)?.awaitsAnswer).toBe(false)
+    expect(openChamberToolCall("openchamber_memory", spilled)?.awaitsAnswer).toBe(false)
+  })
+
   test("leaves a refused, unfinished, empty or foreign call to its tool row", () => {
     const input = { action: "render.page", parameters: { html: "<p>a</p>", title: "Chart" } }
     expect(renderedPage("openchamber_render", completed(input, { openchamber: { ok: false } }))).toBeNull()
