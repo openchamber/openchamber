@@ -192,12 +192,13 @@ const tasksOutput = { total: 2, items: [
 
 type ScriptCall = { tool: string; status: string; input?: { [key: string]: string } };
 
-const script = (calls: ScriptCall[], output: string, status: 'completed' | 'running' = 'completed'): ToolPartData => ({
+const script = (calls: ScriptCall[], output: string, status: 'completed' | 'running' | 'failed' = 'completed'): ToolPartData => ({
   id: 'prt_script', sessionID: 'ses_tasks', messageID: 'msg_tasks',
   type: 'tool', tool: 'execute', callID: 'call_script',
   state: status === 'running'
     ? { status, input: { code: 'return await tools.tasks.list({ project: "DEMO" })' }, metadata: { toolCalls: calls }, time: { start: 1 } }
-    : { status, input: { code: 'return await tools.tasks.list({ project: "DEMO" })' }, output, metadata: { toolCalls: calls }, time: { start: 1, end: 2 } },
+    // OpenCode finishes a script that threw as `completed`, with `error: true` beside its calls.
+    : { status: 'completed', input: { code: 'return await tools.tasks.list({ project: "DEMO" })' }, output, metadata: status === 'failed' ? { toolCalls: calls, error: true } : { toolCalls: calls }, time: { start: 1, end: 2 } },
 });
 
 const listCall: ScriptCall = { tool: 'tasks.list', status: 'completed', input: { project: 'DEMO' } };
@@ -225,9 +226,14 @@ test('a Code Mode script that made one call shows as the row of that tool\'s rul
       ['DEMO-2', 'Ship it', ''],
     ]);
 
-    // A running call already carries its arguments, so the title is there before the result.
-    await render(script([{ ...listCall, status: 'running' }], '', 'running'));
+    // A running script can still make another call, so it keeps the script row until it has finished.
+    await render(script([listCall], '', 'running'));
+    expect(ruleShows()).toBe(false);
+    const row = container.querySelector('.group\\/tool');
+    expect(row).not.toBeNull();
+    await render(script([listCall], JSON.stringify(tasksOutput, null, 2)));
     expect(ruleShows()).toBe(true);
+    expect(container.querySelector('.group\\/tool')).toBe(row);
 
     // The script returned something other than the tool's answer: the row keeps its title and shows what came back.
     await render(script([listCall], '2'));
@@ -239,12 +245,15 @@ test('a Code Mode script that made one call shows as the row of that tool\'s rul
     expect(container.querySelector('table')).toBeNull();
     expect(container.textContent).toContain('fetched');
 
-    // Several calls, a call without a rule, and a failed call stay script rows.
+    // Several calls, a call without a rule, a failed call, and a script that failed after its call stay script rows.
     await render(script([listCall, { ...listCall, input: { project: 'OTHER' } }], '[]'));
     expect(ruleShows()).toBe(false);
     await render(script([{ ...listCall, tool: 'tasks.remove' }], '{}'));
     expect(ruleShows()).toBe(false);
     await render(script([{ ...listCall, status: 'error' }], 'The backend is down.'));
+    expect(ruleShows()).toBe(false);
+    expect(container.textContent).toContain('tools.tasks.list');
+    await render(script([listCall], "TypeError: Cannot read properties of undefined (reading 'name')", 'failed'));
     expect(ruleShows()).toBe(false);
     expect(container.textContent).toContain('tools.tasks.list');
 

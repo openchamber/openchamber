@@ -614,13 +614,32 @@ describe("directToolName", () => {
 })
 
 describe("soleDirectCall", () => {
-  test("is the one call of a script under its direct name, with the call's arguments and status", () => {
+  test("is the one call of a script under its direct name, with the call's arguments", () => {
     expect(soleDirectCall({ toolCalls: [{ tool: "example.findings", status: "completed", input: { scope: "Billing" } }] }))
       .toEqual({ tool: "example_findings", input: { scope: "Billing" }, status: "completed" })
-    expect(soleDirectCall({ toolCalls: [{ tool: "fx.boom", status: "error", input: { scope: "Fail" } }] }))
-      .toEqual({ tool: "fx_boom", input: { scope: "Fail" }, status: "error" })
-    expect(soleDirectCall({ toolCalls: [{ tool: "custom_tool", status: "running" }] }))
-      .toEqual({ tool: "custom_tool", input: {}, status: "running" })
+    // A tool an OpenCode plugin adds has no namespace.
+    expect(soleDirectCall({ toolCalls: [{ tool: "custom_tool", status: "completed" }] }))
+      .toEqual({ tool: "custom_tool", input: {}, status: "completed" })
+  })
+
+  test("is nothing when the call did not complete or the script failed after it", () => {
+    const call = { tool: "example.findings", input: { scope: "Billing" } }
+    expect(soleDirectCall({ toolCalls: [{ ...call, status: "error" }] })).toBeUndefined()
+    expect(soleDirectCall({ toolCalls: [{ ...call, status: "running" }] })).toBeUndefined()
+    // OpenCode 2.2.7 on a script that threw after its call returned.
+    expect(soleDirectCall({ toolCalls: [{ ...call, status: "completed" }], error: true })).toBeUndefined()
+  })
+
+  test("is nothing for Code Mode's own search and fetch", () => {
+    expect(soleDirectCall({ toolCalls: [{ tool: "fetch", status: "completed", input: { method: "GET", url: "https://example.com" } }] })).toBeUndefined()
+    expect(soleDirectCall({ toolCalls: [{ tool: "search", status: "completed", input: { query: "issues" } }] })).toBeUndefined()
+    expect(soleDirectCall({ toolCalls: [{ tool: "fetch.get", status: "completed" }] })?.tool).toBe("fetch_get")
+  })
+
+  test("is nothing for a name a built-in tool has", () => {
+    expect(soleDirectCall({ toolCalls: [{ tool: "shell", status: "completed", input: { command: "ls" } }] })).toBeUndefined()
+    expect(soleDirectCall({ toolCalls: [{ tool: "Subagent", status: "completed" }] })).toBeUndefined()
+    expect(soleDirectCall({ toolCalls: [{ tool: "acme.shell", status: "completed" }] })?.tool).toBe("acme_shell")
   })
 
   test("counts arguments that are not an object as none", () => {

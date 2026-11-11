@@ -366,6 +366,7 @@ const executeRawCallSchema = z
       .array(z.object({ tool: optionalText, status: optionalText, input: z.json().optional().catch(undefined) }).nullable().catch(null))
       .optional()
       .catch(undefined),
+    error: z.boolean().optional().catch(undefined),
   })
   .catch({})
 
@@ -419,15 +420,29 @@ export function directToolName(called: string): string {
   return called.replaceAll(".", "_")
 }
 
+/** What Code Mode puts in a script's scope beside the tools; a call to one is recorded like a tool without a namespace. */
+const CODE_MODE_HELPERS = new Set(["search", "fetch"])
+
+const BUILT_IN_TOOLS = new Set<string>(Object.values(OPENCODE_TOOLS))
+
 /**
  * The one call an `execute` script made, under the name a direct call of the
- * same tool has, or `undefined` when the script made none or several. Rules
- * written for a tool's direct name (an extension's `contributes.tools`) find
- * the call through it.
+ * same tool has. Rules written for a tool's direct name (an extension's
+ * `contributes.tools`) find the call through it.
+ *
+ * `undefined` whenever the script's result is not that call's: it made no
+ * call or several, the call did not complete, or the script failed after it
+ * (OpenCode then finishes the part with `error: true` and the error as its
+ * output). Also for Code Mode's own `search` and `fetch`, and for a name a
+ * built-in tool has, which a script cannot call: neither is the tool a rule
+ * for that name was written for.
  */
 export function soleDirectCall(metadata: Metadata | undefined): SoleCall | undefined {
   const call = soleRawCall(metadata)
-  return call ? soleCallAs(directToolName(call.tool), call) : undefined
+  if (!call || call.status !== "completed" || CODE_MODE_HELPERS.has(call.tool)) return undefined
+  if (executeRawCallSchema.parse(metadata ?? {}).error) return undefined
+  const tool = directToolName(call.tool)
+  return BUILT_IN_TOOLS.has(normalizeToolName(tool)) ? undefined : soleCallAs(tool, call)
 }
 
 /**

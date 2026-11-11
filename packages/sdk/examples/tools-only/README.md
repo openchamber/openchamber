@@ -1,6 +1,6 @@
 # Tool Gallery
 
-A page-less extension that makes structured tool results readable in the conversation. Two exact rules turn sample review findings and project checks into tables. The `mcp.*` fallback keeps other matching results in the JSON viewer.
+A page-less extension that makes structured tool results readable in the conversation. Two exact rules turn sample review findings and project checks into tables. The `example_*` fallback puts the result of any other tool you add to that server in the JSON viewer.
 
 ## Try the complete example
 
@@ -23,9 +23,9 @@ A page-less extension that makes structured tool results readable in the convers
 
 These are labeled sample results. The fixture does not read files, run project commands, or contact a network service. Starting an MCP server is separate from installing an extension.
 
-The manifest matches the tool names `example_findings` and `example_checks`. If your MCP configuration uses another server name, update those exact matches to the names OpenCode reports. Columns read keys from each entry in the result's `items` array. Titles read tool inputs; subtitles read the result's summary.
+The manifest matches the tool names `example_findings` and `example_checks`, and `example_*` for the rest. If your MCP configuration uses another server name, update the matches to the names OpenCode reports. Columns read keys from each entry in the result's `items` array. Titles read tool inputs; subtitles read the result's summary.
 
-With Code Mode on, the agent calls tools from a script. A script that makes one call shows as that tool's row, and the rule reads what the script returned. A script that makes several calls keeps the script row, which is why step 3 asks for one tool at a time.
+With Code Mode on, the agent calls tools from a script. A script that makes one call shows as that tool's row once it has finished, and the rule reads what the script returned. A script that makes several calls, or that fails, keeps the script row, which is why step 3 asks for one tool at a time.
 
 ## Make it yours
 

@@ -2555,8 +2555,10 @@ const SubagentToolPartContent: React.FC<ToolPartProps> = (props) => {
  *
  * The same goes for a sole call to a tool an active extension has a rule for:
  * the row is the one a direct call of that tool gets, found under the tool's
- * direct name. A failed call keeps the script row, the only one that marks
- * it: the part itself reports a finished script.
+ * direct name. Only a finished script gets it: a running one can still make
+ * another call, and the row would then lose the tool's identity mid-run. A
+ * failed call or a failed script keeps the script row, the only one that
+ * shows what went wrong.
  */
 const useShownToolPart = (part: ToolPartProps['part']): ToolPartProps['part'] => {
     const metadata = 'metadata' in part.state ? part.state.metadata : undefined;
@@ -2564,11 +2566,12 @@ const useShownToolPart = (part: ToolPartProps['part']): ToolPartProps['part'] =>
         () => (isExecuteTool(part.tool) ? soleNamedCall(metadata) : undefined),
         [metadata, part.tool],
     );
+    const finished = part.state.status === 'completed';
     const direct = React.useMemo(
-        () => (!sole && isExecuteTool(part.tool) ? soleDirectCall(metadata) : undefined),
-        [metadata, part.tool, sole],
+        () => (!sole && finished && isExecuteTool(part.tool) ? soleDirectCall(metadata) : undefined),
+        [finished, metadata, part.tool, sole],
     );
-    const ruled = useGuestToolPresentation(direct?.tool) && direct?.status !== 'error' ? direct : undefined;
+    const ruled = useGuestToolPresentation(direct?.tool) ? direct : undefined;
     const shown = sole ?? ruled;
     return React.useMemo(
         () => (shown ? { ...part, tool: shown.tool, state: { ...part.state, input: shown.input } } : part),
