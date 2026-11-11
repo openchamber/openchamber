@@ -51,6 +51,7 @@ Showing a panel and reading which project and session are open needs no permissi
 - **Start sessions and send messages on its own**: its local service does this with no window open, which costs tokens and can run tools.
 - **Add to what agents read**: text in the instructions of your sessions, and skills offered to every agent while the extension is on.
 - **Add a plugin to OpenCode**: the package's plugin is loaded into your OpenCode while the extension is on. Plugin code runs inside OpenCode with your full access, like a local service, so allow it only if you trust the author.
+- **Recognise its links in chats**: identifiers like `DEMO-12` and links to the extension's site become clickable in your chat messages. The dialog lists which ones and says whether a click opens them in the extension or attaches them to your message. Links OpenChamber already knows, such as GitHub pull requests and Linear issues, keep their usual behavior.
 
 A local service can also keep running while OpenChamber runs, or wake on a schedule. The dialog says so under **Run a local service**, and it says when what you type after `@` goes to the service. An extension can add its own rows to the `@` menu and its own blocks to agent replies. Pausing the extension takes all of this away.
 
@@ -64,7 +65,7 @@ An extension can also offer a full-screen page, such as a task board. Open it fr
 
 Extensions can save their own data on the connected OpenChamber server without putting files in your project. The data survives reloads and is deleted when you remove the extension. A board can track agents working in different projects or worktrees, while deciding its own task statuses.
 
-Besides its panel on the rail, an extension can add entries to menus you already use: the actions on a chat message, the menu of a session, the + menu next to the chat box, and slash commands like `/task ABC-12` that attach something without opening anything. It can also give its own tools a proper icon, title, and output layout in the chat, the way OpenChamber's built-in tools have. The extension decides which of these it offers; all of them are off until you allow the extension.
+Besides its panel on the rail, an extension can add entries to menus you already use: the actions on a chat message, the menu of a session, the + menu next to the chat box, and slash commands like `/task ABC-12` that attach something without opening anything. It can also give its own tools a proper icon, title, and output layout in the chat, the way OpenChamber's built-in tools have. The extension decides which of these it offers; all of them are off until you allow the extension. Session actions and slash commands also turn up in the command palette (⌘P or Ctrl+P) when you search for their name or the extension's.
 
 Some extensions show a live picture instead of a panel of their own: what an agent is working in on the server, such as a browser or a simulator. Click into the picture or type to take control, and the status line says **You have control**; the agent's own browser actions are refused until you press **Hand back to agent**. Copy and paste work as usual. Another device connected at the same time sees who is in control and cannot take it over. Such an extension can add its own controls beside the picture, an address bar above it or a tool column next to it for example.
 

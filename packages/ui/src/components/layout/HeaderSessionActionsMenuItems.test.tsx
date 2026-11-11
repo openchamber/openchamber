@@ -1,9 +1,9 @@
-import { afterAll, afterEach, beforeEach, expect, spyOn, test } from 'bun:test';
+import { afterAll, afterEach, beforeEach, expect, mock, spyOn, test } from 'bun:test';
 import React, { act } from 'react';
 import type { Root } from 'react-dom/client';
 import { Window } from 'happy-dom';
 import type { Session } from '@/lib/opencode/model';
-import type { SessionTabMenuComponents } from './SessionTabsStrip';
+import type { SessionMenuSlots } from '@/components/session/sidebar/sessions/sessionMenuSlots';
 
 const browser = new Window({ url: 'http://localhost' });
 const descriptors = new Map<string, PropertyDescriptor | undefined>();
@@ -12,6 +12,12 @@ for (const [key, value] of Object.entries({ window: browser, document: browser.d
   Object.defineProperty(globalThis, key, { value, configurable: true });
 }
 
+const sync = await import('@/sync/use-sync');
+mock.module('@/sync/use-sync', () => ({
+  ...sync,
+  useSessionMessageRecordsForExport: () => async () => [],
+}));
+mock.module('@/components/session/SessionAiRenameMenuItem', () => ({ SessionAiRenameMenuItem: () => null }));
 const { createRoot } = await import('react-dom/client');
 const { I18nProvider } = await import('@/lib/i18n');
 const { toast } = await import('@/components/ui');
@@ -19,11 +25,19 @@ const { useGlobalSessionsStore } = await import('@/stores/useGlobalSessionsStore
 const { useSessionUIStore } = await import('@/sync/session-ui-store');
 const { useUIStore } = await import('@/stores/useUIStore');
 const { formatShortcutForDisplay } = await import('@/lib/shortcuts');
-const { HeaderSessionArchiveMenuItem } = await import('./HeaderSessionArchiveMenuItem');
+const { HeaderSessionActionsMenuItems } = await import('./HeaderSessionActionsMenuItems');
 const initialSessions = useGlobalSessionsStore.getState();
 const initialUI = useSessionUIStore.getState();
 const initialShortcutOverrides = useUIStore.getState().shortcutOverrides;
-const Item: SessionTabMenuComponents['Item'] = (props) => <button {...props} />;
+const Passthrough = ({ children }: { children?: React.ReactNode }) => <>{children}</>;
+const slots: SessionMenuSlots = {
+  Item: (props: React.ComponentProps<'button'>) => <button type="button" {...props} />,
+  Separator: () => <hr />,
+  Sub: Passthrough,
+  SubTrigger: Passthrough,
+  SubContent: () => null,
+};
+const noop = () => undefined;
 const session = (id: string, archived?: number): Session => ({
   id, title: id, directory: '/workspace', projectID: 'project', cost: 0,
   tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
@@ -73,13 +87,30 @@ afterAll(async () => {
   }
 });
 
-const renderMenuItem = async () => {
+const renderMenu = async () => {
   await act(async () => root.render(
     <I18nProvider>
-      <HeaderSessionArchiveMenuItem sessionId="target" Item={Item} onArchive={() => { archiveRequests += 1; }} />
+      <HeaderSessionActionsMenuItems
+        sessionId="target"
+        open={false}
+        slots={slots}
+        onRename={noop}
+        onExport={noop}
+        onMoveSession={noop}
+        onArchive={() => { archiveRequests += 1; }}
+        onDelete={noop}
+      />
     </I18nProvider>,
   ));
-  const button = document.querySelector('button');
+};
+
+// The archive item is the one before Delete; it reads Archive or Restore.
+const retentionButton = (): HTMLButtonElement | null => [...document.querySelectorAll('button')]
+  .find((button) => /^(Archive|Restore)/.test(button.textContent ?? '')) ?? null;
+
+const renderMenuItem = async () => {
+  await renderMenu();
+  const button = retentionButton();
   if (!button) throw new Error('Archive menu item missing');
   return button;
 };
@@ -101,7 +132,7 @@ test('archive hint follows rebindings and appears only for the current active se
     useSessionUIStore.setState({ currentSessionId: 'target' });
     useGlobalSessionsStore.getState().upsertSession(session('target', 2));
   });
-  expect(button.textContent).toBe('Restore');
+  expect(retentionButton()?.textContent).toBe('Restore');
 });
 
 for (const archived of [undefined, 0]) {
@@ -127,9 +158,9 @@ test('restores the menu session, including an inactive tab, and reacts to archiv
   expect(useSessionUIStore.getState().currentSessionId).toBe('another-session');
   expect(successMessages).toEqual(['Session restored']);
   expect(errorMessages).toEqual([]);
-  expect(button.textContent).toBe('Archive');
+  expect(retentionButton()?.textContent).toBe('Archive');
   await act(async () => useGlobalSessionsStore.getState().upsertSession(session('target', 3)));
-  expect(button.textContent).toBe('Restore');
+  expect(retentionButton()?.textContent).toBe('Restore');
 });
 
 test('waits for confirmation and leaves a failed restore available for retry', async () => {
@@ -157,23 +188,15 @@ test('waits for confirmation and leaves a failed restore available for retry', a
 
 test('offers no restore for an archived subsession whose parent is archived or unknown', async () => {
   useGlobalSessionsStore.getState().upsertSession({ ...session('target', 2), parentID: 'parent' });
-  await act(async () => root.render(
-    <I18nProvider>
-      <HeaderSessionArchiveMenuItem sessionId="target" Item={Item} onArchive={() => { archiveRequests += 1; }} />
-    </I18nProvider>,
-  ));
-  expect(document.querySelector('button')).toBeNull();
+  await renderMenu();
+  expect(retentionButton()).toBeNull();
   await act(async () => { useGlobalSessionsStore.getState().upsertSession(session('parent', 3)); });
-  expect(document.querySelector('button')).toBeNull();
+  expect(retentionButton()).toBeNull();
 });
 
 test('offers restore for an archived subsession whose parent is active', async () => {
   useGlobalSessionsStore.getState().upsertSession(session('parent', 0));
   useGlobalSessionsStore.getState().upsertSession({ ...session('target', 2), parentID: 'parent' });
-  await act(async () => root.render(
-    <I18nProvider>
-      <HeaderSessionArchiveMenuItem sessionId="target" Item={Item} onArchive={() => { archiveRequests += 1; }} />
-    </I18nProvider>,
-  ));
-  expect(document.querySelector('button')?.textContent).toBe('Restore');
+  await renderMenu();
+  expect(retentionButton()?.textContent).toBe('Restore');
 });

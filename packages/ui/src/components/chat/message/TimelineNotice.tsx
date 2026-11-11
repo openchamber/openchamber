@@ -19,6 +19,7 @@ import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { ReasoningTimelineBlock } from './parts/ReasoningPart';
 import ToolPart from './parts/ToolPart';
+import { QuietAction } from './parts/ToolResultParts';
 import { getLastOutputLine } from './parts/toolOutput';
 import { OPENCODE_TOOLS } from '@/lib/opencode/tools';
 import { isRunningSubagentRunMessage, readSubagentRun, type SubagentRun } from '@/lib/opencode/subagent-run';
@@ -313,10 +314,7 @@ const DispatchedSessionNotice: React.FC<{ message: SyntheticMessage; result: Dis
                 }}
                 actions={(
                     <HoverTooltip label={t('contextTooltips.chat.dispatchedOpen')}>
-                        <Button type="button" variant="ghost" size="xs" onClick={handleOpen}>
-                            <Icon name="external-link" className="h-3.5 w-3.5" />
-                            {t('chat.dispatchedSession.open')}
-                        </Button>
+                        <QuietAction icon="external-link" label={t('chat.dispatchedSession.open')} onClick={handleOpen} />
                     </HoverTooltip>
                 )}
             />

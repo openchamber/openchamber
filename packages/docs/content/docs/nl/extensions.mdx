@@ -51,6 +51,7 @@ Een paneel tonen en lezen welk project en welke sessie geopend zijn, vereist gee
 - **Zelfstandig sessies starten en berichten sturen:** de lokale service doet dit zonder geopend venster. Dit verbruikt tokens en kan tools uitvoeren.
 - **Toevoegen aan wat agents lezen:** tekst in de instructies van uw sessies, en skills die aan elke agent worden aangeboden zolang de extensie aanstaat.
 - **Een plugin toevoegen aan OpenCode:** de plugin van het pakket wordt in uw OpenCode geladen zolang de extensie aanstaat. Plugincode draait binnen OpenCode met uw volledige toegang, net als een lokale service, dus sta dit alleen toe als u de auteur vertrouwt.
+- **Zijn links in chats herkennen:** ID's zoals `DEMO-12` en links naar de site van de extensie worden klikbaar in uw chatberichten. Het venster toont welke en zegt of een klik ze in de extensie opent of aan uw bericht koppelt. Links die OpenChamber al kent, zoals pull requests op GitHub en issues in Linear, werken zoals altijd.
 
 Een lokale service kan ook blijven draaien zolang OpenChamber draait, of volgens schema actief worden. Het toestemmingsvenster meldt dat onder **Een lokale service uitvoeren**, en ook wanneer wat u na `@` typt naar de service gaat. Een extensie kan eigen rijen aan het `@`-menu toevoegen en eigen blokken aan antwoorden van de agent. De extensie pauzeren haalt dit allemaal weg.
 
@@ -64,7 +65,7 @@ Een extensie kan ook een schermvullende pagina aanbieden, bijvoorbeeld een taken
 
 Extensies kunnen eigen gegevens op de verbonden OpenChamber-server opslaan, buiten uw projectbestanden. Die gegevens blijven na herladen behouden en worden bij het verwijderen van de extensie gewist. Een bord kan agents in meerdere projecten of worktrees volgen en daarbij eigen taakstatussen gebruiken.
 
-Naast het paneel kan een extensie onderdelen toevoegen aan bestaande menu's: acties bij chatberichten, het sessiemenu, het +-menu naast het invoerveld en slash-opdrachten zoals `/task ABC-12`, die iets koppelen zonder een venster te openen. Ze kan ook eigen tools in de chat een pictogram, titel en uitvoeropmaak geven, zoals de ingebouwde tools. De extensie bepaalt welke mogelijkheden ze aanbiedt. Alles blijft uit totdat u de extensie toestaat.
+Naast het paneel kan een extensie onderdelen toevoegen aan bestaande menu's: acties bij chatberichten, het sessiemenu, het +-menu naast het invoerveld en slash-opdrachten zoals `/task ABC-12`, die iets koppelen zonder een venster te openen. Ze kan ook eigen tools in de chat een pictogram, titel en uitvoeropmaak geven, zoals de ingebouwde tools. De extensie bepaalt welke mogelijkheden ze aanbiedt. Alles blijft uit totdat u de extensie toestaat. Sessieacties en slash-opdrachten vindt u ook in het opdrachtenpalet (⌘P of Ctrl+P) als u zoekt op hun naam of die van de extensie.
 
 Sommige extensies tonen een livebeeld van wat de agent op de server gebruikt, zoals een browser of simulator. Klik of typ in het beeld om de bediening over te nemen. De statusregel toont **U heeft de controle**. Browseracties van de agent worden dan geweigerd totdat u op **Teruggeven aan de agent** klikt. Kopiëren en plakken werken normaal. Een ander verbonden apparaat ziet wie bedient en kan de controle niet overnemen. Zo'n extensie kan eigen bediening naast het beeld plaatsen, bijvoorbeeld een adresbalk erboven of een kolom met tools ernaast.
 

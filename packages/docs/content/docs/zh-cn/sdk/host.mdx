@@ -149,7 +149,9 @@ host.onSessionLifecycle((event) => {
 
 `await onProjects(listener)`、`await onWorktrees(projectId, listener)`、`await onSessions(projectId, listener)` 返回取消订阅函数。请处理注册失败。先发送初始快照，再发送更新。每个 iframe 最多32个订阅；`dispose()`、关闭、暂停、移除和切换服务器都会清理订阅。`state` 为 `loading`、`ready` 或 `error`，会话另有按目录的 `coverage`。失败保留已有数据，只有 `ready` 表示完整结果，包括真正的空列表。
 
-`activity` 为 `unknown`、`idle`、`running`、`retrying`、`waiting-permission` 或 `waiting-question`。`outcome` 为观测到的 `completed`、`failed` 或 `null`，仅在内存中保留最多2,000个会话，不从历史推断。错误后的 idle 保留失败结果直到下次运行。这不代表任务完成。`openSession(sessionId)` 显式打开聊天。
+`activity` 为 `unknown`、`idle`、`running`、`retrying`、`waiting-permission` 或 `waiting-question`。`outcome` 为观测到的 `completed`、`failed` 或 `null`，仅在内存中保留最多2,000个会话，不从历史推断。错误后的 idle 保留失败结果直到下次运行。这不代表任务完成。会话位于侧边栏的进行中区块时，`inWork` 为 `true`；用户关闭进行中时始终为 `false`；旧版主机不提供该字段。最后一轮结束后、还没有人打开该会话时，`unread` 为 `true`，即侧边栏显示的标记；它在重启后依然保留，并在所有设备上一起清除。`openSession(sessionId)` 显式打开聊天。
+
+`tool` 是 `activity` 为 `running` 时会话正在处理的内容：正在进行的工具调用，或在代理思考其结果时最后结束的那次调用。字段：`name` 是 OpenCode 中的名称（`read`、`edit`、`bash`），`target` 是调用指向的文件或文件夹，相对于会话的 `directory`（位于其外时只给名称），未指向任何路径时为 `null`。Shell 命令的文本绝不会出现在这里。`context` 表示会话最近一步之后上下文窗口的占用：`tokens` 是其中的 token 数，`limit` 是模型的窗口大小，主机不知道时为 `null`。`tool` 在会话未运行时为 `null`；`context` 在主机看到第一步之前、以及压缩后到下一步测量之前为 `null`。旧版主机不提供这两个字段。
 
 `host.storage.get(key)`、`set(key, value)`、`delete(key)`、`keys()` 无需额外权限即可在连接的服务器保存扩展自己的 JSON。缺少的键返回 `undefined`，保存的 null 仍为 null。键长1到128字符，每个值最多64 KiB UTF-8，整个空间最多2 MiB及2,000个键。项目专属数据可将项目 ID 加入键名。写入串行且原子化，失败保留已有数据。卸载扩展会删除存储。
 

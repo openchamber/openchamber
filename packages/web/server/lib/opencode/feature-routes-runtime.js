@@ -7,6 +7,7 @@ import { registerSmallModelRoutes } from '../small-model/routes.js';
 import { registerWalkthroughRoutes } from '../walkthrough/routes.js';
 import { registerSessionGoalRoutes } from '../session-goal/routes.js';
 import { registerSessionWarmingRoutes } from '../session-warming/routes.js';
+import { registerSessionTodosRoutes } from '../session-todos/routes.js';
 import { setWarmingDuration, setWarmingEnabled } from './websearch-config.js';
 import { registerSourceControlRoutes } from '../source-control/routes.js';
 import { registerLinearRoutes } from '../linear/routes.js';
@@ -44,6 +45,7 @@ import { registerConfigEntityRoutes } from './config-entity-routes.js';
 import { createThemeFolderWatch } from './theme-watch.js';
 import { registerSettingsUtilityRoutes } from './core-routes.js';
 import { registerProjectIconRoutes } from './project-icon-routes.js';
+import { registerProviderLogoRoutes } from './provider-logo-routes.js';
 import { registerScheduledTaskRoutes } from '../scheduled-tasks/routes.js';
 import { fillScheduledWorktreeBridge } from '../scheduled-tasks/worktree-bridge.js';
 import { createTrackedItemsService } from '../tracked-items/service.js';
@@ -236,6 +238,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
     const {
       messageSearchRuntime,
       sessionWarmingRuntime,
+      sessionTodosRuntime,
       crypto,
       fs,
       os,
@@ -360,6 +363,15 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       createFsSearchRuntime,
       spawn,
       resolveGitBinaryForSpawn,
+    });
+
+    registerProviderLogoRoutes(app, {
+      fsPromises,
+      path,
+      crypto,
+      openchamberDataDir,
+      readSettingsFromDiskMigrated,
+      persistResolvedSettings,
     });
 
     registerScheduledTaskRoutes(app, {
@@ -932,6 +944,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
     registerAgentMemoryRoutes(app, { agentMemoryRuntime, isAgentMemoryEnabled });
     registerSessionKnowledgeRoutes(app, { sessionKnowledgeRuntime });
     registerMessageSearchRoutes(app, { messageSearchRuntime });
+    registerSessionTodosRoutes(app, { sessionTodosRuntime });
     registerSessionWarmingRoutes(app, {
       sessionWarmingRuntime,
       setGlobalWarming: setWarmingEnabled,
@@ -989,6 +1002,9 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       cloneRepository: networkOperations.cloneRepository,
       managedChatsRoot,
       environmentRuntime,
+      projectRealpath: (target) => new Promise((resolve, reject) => {
+        fs.realpath(target, (error, resolved) => (error ? reject(error) : resolve(resolved)));
+      }),
     });
     registerEnvironmentRoutes(app, { store: environmentStore, runtime: environmentRuntime, listProjects: listConfiguredProjects });
   };

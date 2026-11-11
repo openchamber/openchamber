@@ -23,9 +23,18 @@ export const loadHighlights = (): Promise<HighlightsModule | null> => {
 /** Whether the Highlights import has finished, successfully or not. */
 export const highlightsSettled = (): boolean => loaded !== undefined;
 
+/**
+ * Whether code in `lang` goes through Highlights. ANSI stays on Shiki: its
+ * Highlights tokens drop the escape sequences and merge the text around them,
+ * so token text stops matching the source, and every consumer here positions
+ * tokens by source offset (packed ranges, CodeMirror decorations).
+ */
+export const isHighlightsLanguage = (highlights: HighlightsModule, lang: string): lang is Lang =>
+  lang !== 'ansi' && highlights.isSupportedLanguage(lang);
+
 /** Highlights for a language it has a lexer for, once loaded; null keeps Shiki. */
 export const highlightsNow = (lang: string): HighlightsTarget | null => {
-  if (!loaded || !loaded.isSupportedLanguage(lang)) return null;
+  if (!loaded || !isHighlightsLanguage(loaded, lang)) return null;
   return { highlights: loaded, lang };
 };
 

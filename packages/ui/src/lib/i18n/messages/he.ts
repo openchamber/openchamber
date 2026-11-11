@@ -26,6 +26,7 @@ import { compactionSettingsI18n } from './compaction-settings.i18n';
 import { heapSnapshotI18n } from './heap-snapshot.i18n';
 import { consoleBudgetsI18n } from './console-budgets.i18n';
 import { imageToolI18n } from './image-tool.i18n';
+import { memoryDreamingI18n } from './memory-dreaming.i18n';
 import { usageToolI18n } from './usage-tool.i18n';
 import { openchamberToolsLayoutI18n } from './openchamber-tools-layout.i18n';
 import { openchamberToolOutputI18n } from './openchamber-tool-output.i18n';
@@ -730,8 +731,6 @@ export const dict = {
   'sessions.sidebar.session.menu.copyLink': 'העתק קישור',
   'sessions.sidebar.session.menu.unshare': 'בטל שיתוף',
   'sessions.sidebar.session.menu.exportMarkdown': 'ייצא ל-Markdown',
-  'sessions.sidebar.session.menu.moveToWorktree': 'העבר לעץ עבודה חדש',
-  'sessions.sidebar.session.menu.moveToWorktreeTargets': 'העבר לעץ עבודה',
   'sessions.sidebar.session.menu.newWorktree': 'עץ עבודה חדש…',
   'sessions.sidebar.session.moveToWorktree.success': 'ההפעלה הועברה לעץ עבודה חדש',
   'sessions.sidebar.session.moveToWorktree.failed': 'לא ניתן היה להעביר את ההפעלה לעץ עבודה חדש',
@@ -741,7 +740,6 @@ export const dict = {
   'sessions.sidebar.session.moveToWorktree.current': 'עץ העבודה הנוכחי',
   'sessions.sidebar.session.moveToWorktree.existingSuccess': 'ההפעלה הועברה לעץ העבודה',
   'sessions.sidebar.session.moveToWorktree.existingFailed': 'לא ניתן היה להעביר את ההפעלה לעץ העבודה',
-  'sessions.sidebar.session.moveToWorktree.tooltip': 'יוצר עץ עבודה חדש מהענף הנוכחי ומעביר אליו את ההפעלה הזו ואת הפעלות המשנה שלה. שינויים שלא בוצע להם קומיט נשארים בעץ העבודה המקורי.',
   'sessions.sidebar.session.moveToWorktree.tooltipBusy': 'זמין כשההפעלה אינה פעילה. אפשר לעצור את הפעילות הנוכחית או להמתין לסיומה.',
   'sessions.sidebar.session.moveToWorktree.tooltipMoving': 'ההפעלה הזו כבר מועברת לעץ עבודה חדש.',
   'sessions.sidebar.session.menu.openInSidePanel': 'פתח בחלונית הצד',
@@ -1978,8 +1976,6 @@ export const dict = {
   'rightSidebar.contextNotesTodo.todo.addAria': 'הוסף משימה',
   'rightSidebar.contextNotesTodo.todo.empty': 'אין עדיין משימות. אפשר להוסיף רשימת משימות קצרה לפרויקט הזה.',
   'rightSidebar.contextNotesTodo.todo.actions.markComplete': "סמן את \"{text}\" כהושלמה",
-  'rightSidebar.contextNotesTodo.todo.actions.collapse': "כווץ את המשימה \"{text}\"",
-  'rightSidebar.contextNotesTodo.todo.actions.expand': "הרחב את המשימה \"{text}\"",
   'rightSidebar.contextNotesTodo.todo.actions.send': "שלח את \"{text}\"",
   'rightSidebar.contextNotesTodo.todo.actions.reorder': "שנה את מיקום \"{text}\"",
   'rightSidebar.contextNotesTodo.todo.sendMenu.currentSession': 'שלח להפעלה הנוכחית',
@@ -2177,6 +2173,7 @@ export const dict = {
   'directoryExplorerDialog.browse.retry': 'נסה שוב',
   'directoryExplorerDialog.browse.parentDirectory': 'תיקיית האב',
   'directoryExplorerDialog.browse.addedBadge': 'נוסף',
+  'directoryExplorerDialog.browse.linkTarget': 'קישור אל {path}',
   'directoryExplorerDialog.browse.quickAdd': 'הוסף',
   'directoryExplorerDialog.browse.selectForAdd': 'בחר להוספה',
   'directoryExplorerDialog.footer.navigate': 'ניווט',
@@ -2333,6 +2330,7 @@ export const dict = {
   'session.githubIntegration.validation.failed': 'האימות נכשל',
   'chat.fileAttachment.toast.attachFailed': 'לא ניתן היה לצרף את הקובץ',
   'chat.fileAttachment.toast.tooLarge': '{name} גדול מדי לצירוף (מעל {size}). אם הקובץ נמצא בפרויקט, אפשר לאזכר אותו עם @.',
+  'chat.fileAttachment.toast.heicConversionFailed': 'לא ניתן היה להמיר את {name} מ-HEIC ל-JPEG, ולכן הוא לא צורף. שמרו את התמונה כ-JPEG וצרפו אותה שוב.',
   'chat.fileAttachment.toast.overSendLimit': '{name} גדול מדי לצירוף (מעל {size}).',
   'chat.fileAttachment.toast.someFilesSkipped': "חלק מהקבצים דולגו:\n{summary}",
   'chat.fileAttachment.toast.vscodePickFailed': 'לא ניתן היה לבחור קבצים ב-VS Code',
@@ -2492,6 +2490,8 @@ export const dict = {
   'sessions.sidebar.group.empty.loadingSessions': 'טוען הפעלות…',
   'sessions.sidebar.group.empty.loadFailed': 'לא ניתן היה לרענן את ההפעלות.',
   'sessions.sidebar.group.empty.initializationFailed': 'לא ניתן היה לאתחל את סביבת העבודה.',
+  'sessions.sidebar.group.empty.trustPaused': 'הסוכנים מושהים עד שתסמכו על התיקייה הזו.',
+  'sessions.sidebar.group.empty.reviewTrust': 'לבדוק ולסמוך',
   'sessions.search.submitHint': 'יש ללחוץ Enter כדי לחפש',
   'sessions.sidebar.group.empty.retry': 'נסה שוב',
   'sessions.sidebar.group.empty.permissionDenied': 'נדרשת גישה לתיקייה.',
@@ -3895,6 +3895,8 @@ export const dict = {
   'sessions.moveSession.failed': 'לא ניתן להעביר את הסשן',
   'chat.folderMissing.text': 'התיקייה {name} כבר לא קיימת',
   'chat.folderMissing.action': 'העברת הסשן',
+  'chat.trustPaused.text': 'סוכנים לא יכולים לעבוד ב-{name} עד שתסמכו על התוספים והפקודות שלה.',
+  'chat.trustPaused.action': 'לבדוק ולסמוך',
   'chat.worktreeSetup.running': 'מכין את עץ העבודה: מריץ את פקודות ההכנה של הפרויקט…',
   'chat.draft.creatingSession': 'יוצר הפעלה…',
   'desktopHostSwitcher.startup.fellBackToLocal': 'החיבור אליו לא נפתח, ולכן OpenChamber הופעל על המופע המקומי. אפשר להתחבר אליו ממחליף המופעים כשהוא יהיה זמין.',
@@ -3937,6 +3939,7 @@ export const dict = {
   ...heapSnapshotI18n.he,
   ...consoleBudgetsI18n.he,
   ...imageToolI18n.he,
+  ...memoryDreamingI18n.he,
   ...usageToolI18n.he,
   ...openchamberToolsLayoutI18n.he,
   ...openchamberToolOutputI18n.he,
@@ -4005,7 +4008,6 @@ export const dict = {
   'spaces.failure.loginNotSupported': 'אי אפשר להשתמש בהתחברות הזו ל-{name} במרחבים.',
   'chat.chatInput.waitingForOpenCode': 'ממתין ל-OpenCode…',
   'chat.chatInput.waitingForOpenCodeHint': 'ההודעה תישלח מיד כש-OpenCode יופעל',
-  'sessions.sidebar.session.menu.openInMiniChat': "פתיחה במיני-צ'אט",
   'contextPanel.zone.moveLeft': 'העברת החלונית לימין',
   'contextPanel.zone.moveBottom': 'העברת החלונית למטה',
   'contextPanel.zone.moveRight': 'העברת החלונית לשמאל',

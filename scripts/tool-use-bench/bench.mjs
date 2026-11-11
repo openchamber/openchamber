@@ -322,8 +322,18 @@ const waitsForUser = (part) => {
 
 const readMessages = async (instance, sessionId) => (await api(instance, 'GET', `/api/session/${sessionId}/message?limit=200`)).data ?? [];
 
+// A case that hands work to an existing session gets it once per instance,
+// idle and titled as the prompt names it.
+const ensureOtherSession = async (instance, title) => {
+  instance.otherSessions ??= new Map();
+  if (instance.otherSessions.has(title)) return;
+  const created = await api(instance, 'POST', '/api/session', { title, location: { directory: instance.dirs.proj } });
+  instance.otherSessions.set(title, created.data.id);
+};
+
 const runOnce = async (instance, testCase, model, timeoutMs) => {
   await resetState(instance);
+  if (testCase.otherSession) await ensureOtherSession(instance, testCase.otherSession);
   const created = await api(instance, 'POST', '/api/session', {
     title: `bench ${testCase.id}`,
     location: { directory: instance.dirs.proj },

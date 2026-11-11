@@ -49,6 +49,8 @@ import { codeHighlightExtension } from '@/lib/codemirror/codeHighlight';
 import { syncVimMappings } from '@/lib/codemirror/vimModeExtension';
 import { ensurePierreThemeRegistered, getCodeTokenTheme, getThemeRenderName } from '@/lib/shiki/appThemeRegistry';
 import { File as PierreFile, VirtualizerContext, WorkerPoolContext } from '@pierre/diffs/react';
+import { DEFAULT_VIRTUAL_FILE_METRICS } from '@pierre/diffs';
+import { useEditorCodeMetrics } from '@/lib/editorCodeMetrics';
 import { useWorkerPool } from '@/contexts/DiffWorkerProvider';
 import { useFileViewVirtualizer, type FileViewVirtualizer } from './useFileViewVirtualizer';
 import { useFilePreviewScrollPosition } from './useFilePreviewScrollPosition';
@@ -99,17 +101,13 @@ import { useFileTreeUpload } from './files/useFileTreeUpload';
 import { moveWorkspacePath } from './files/moveWorkspacePath';
 import { areDirectoryNodesEqual, buildFileTreeStatusIndex } from './files/fileTreeStatus';
 import { BinaryArtifact } from './files/previews/BinaryArtifact';
-import { delimiterForPath, parseDelimitedText } from './files/previews/delimitedText';
 import { ArchiveArtifact } from './files/previews/ArchiveArtifact';
-import { DataFileArtifact } from './files/previews/DataFileArtifact';
 import { NotebookArtifact } from './files/previews/NotebookArtifact';
-import { OfficeArtifact } from './files/previews/OfficeArtifact';
 import { PdfArtifact } from './files/previews/PdfArtifact';
 import { FontArtifact } from './files/previews/FontArtifact';
 import { ImageArtifact, type ImageNeighbor } from './files/previews/ImageArtifact';
 import { imageNeighborsOf } from './files/imageNeighbors';
 import { MediaArtifact } from './files/previews/MediaArtifact';
-import { TableArtifact } from './files/previews/TableArtifact';
 import { useMarkdownLocalAssets } from './files/previews/useMarkdownLocalAssets';
 import { useHtmlPreviewUrl } from './files/useHtmlPreviewUrl';
 import { useRawAssetUrl } from './files/useRawAssetUrl';
@@ -158,6 +156,12 @@ import { syncScheduledTaskLoops } from '@/lib/scheduledTasksApi';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { watchFileOnScreen } from '@/lib/watchedFiles';
 
+// Table, data and office previews load when a file needs one. A module that
+// cannot be fetched, such as a chunk an antivirus quarantined, then fails only
+// that preview, and the rest of Files keeps working.
+const TableArtifact = React.lazy(() => import('./files/previews/TableArtifact').then((module) => ({ default: module.TableArtifact })));
+const DataFileArtifact = React.lazy(() => import('./files/previews/DataFileArtifact').then((module) => ({ default: module.DataFileArtifact })));
+const OfficeArtifact = React.lazy(() => import('./files/previews/OfficeArtifact').then((module) => ({ default: module.OfficeArtifact })));
 
 type FileNode = {
   name: string;
@@ -3584,13 +3588,16 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
 
   const editorFontSize = useUIStore((state) => state.editorFontSize);
   // The rendered preview follows the editor's font size, so zoom and the
-  // Editor Font Size setting resize both modes. At the default 13 px it
-  // renders at the old 14 px body and 12 px code.
+  // Editor Font Size setting resize both modes. At the default 12 px it
+  // renders at 14 px body and 12 px code.
   // SAFETY: CSS custom properties are valid inline styles; React's type lists only standard ones.
   const previewFontStyle = React.useMemo(() => ({
-    '--text-markdown': `${editorFontSize + 1}px`,
-    '--text-code': `${editorFontSize - 1}px`,
+    '--text-markdown': `${editorFontSize + 2}px`,
+    '--text-code': `${editorFontSize}px`,
   } as React.CSSProperties), [editorFontSize]);
+  // The code preview is code at the editor's size and rows, so switching
+  // between edit and view keeps the text in place.
+  const editorCode = useEditorCodeMetrics();
 
   // Git change markers compare the open file with its HEAD version. The
   // server answers an empty original both for a new file and for one git does
@@ -3908,7 +3915,8 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
       printHtml(markdownToPrintableHtml(draftContent, selectedFile.name));
       return;
     }
-    const table = isTable ? parseDelimitedText(draftContent, delimiterForPath(selectedFile.path), Number.MAX_SAFE_INTEGER) : null;
+    const delimited = isTable ? await import('./files/previews/delimitedText') : null;
+    const table = delimited ? delimited.parseDelimitedText(draftContent, delimited.delimiterForPath(selectedFile.path), Number.MAX_SAFE_INTEGER) : null;
     const bytes = table ? await rowsToXlsx(selectedFile.name, [table.header, ...table.rows]) : await markdownToDocx(draftContent);
     const stem = selectedFile.path.replace(/\.[^./\\]+$/, '');
     // A file already there is the user's: the export takes the next free name.
@@ -3968,6 +3976,15 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
     </Tooltip>
   ) : null;
   const binaryFileActions = <>{downloadButton}{openInDefaultAppButton}</>;
+  // Keyed per file, so the next file gets a fresh boundary and not the last
+  // file's failure.
+  const previewBoundary = (key: string, preview: React.ReactNode) => (
+    <ErrorBoundary key={key} fallback={<ContentState title={t('filesView.error.previewUnavailable')} />}>
+      <React.Suspense fallback={<ContentLoadingState label={t('filesView.artifact.state.loading')} />}>
+        {preview}
+      </React.Suspense>
+    </ErrorBoundary>
+  );
 
   // Everything shown as an artifact rather than as editable text. One place
   // for both the docked and the fullscreen viewer, so they cannot drift.
@@ -4008,19 +4025,22 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
         return <ArchiveArtifact key={`${file.path}:${fileContentRevision}`} name={file.name} path={file.path} sizeBytes={artifactSize} loadBytes={loadOfficeBytes} actions={binaryFileActions} />;
       }
       if ((isDataFile(file.path) || isDelimitedTableFile(file.path)) && !(artifactSize !== null && artifactSize > maxDataBytes)) {
-        return <DataFileArtifact key={`${file.path}:${fileContentRevision}`} name={file.name} path={file.path} sizeBytes={artifactSize} loadBytes={loadDataBytes} actions={binaryFileActions} />;
+        return previewBoundary(
+          `${file.path}:${fileContentRevision}`,
+          <DataFileArtifact name={file.name} path={file.path} sizeBytes={artifactSize} loadBytes={loadDataBytes} actions={binaryFileActions} />,
+        );
       }
       if (isOfficePreviewFile(file.path) && !officeTooLarge) {
-        return (
+        return previewBoundary(
+          `${file.path}:${fileContentRevision}`,
           <OfficeArtifact
-            key={`${file.path}:${fileContentRevision}`}
             name={file.name}
             path={file.path}
             sizeBytes={artifactSize}
             loadBytes={loadOfficeBytes}
             actions={binaryFileActions}
             onSave={files.uploadFile && !selectedFileIsOutsideWorkspace ? saveOfficeBytes : undefined}
-          />
+          />,
         );
       }
       return (
@@ -4037,14 +4057,14 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
       return <NotebookArtifact content={fileContent} sizeBytes={artifactSize} />;
     }
     if (isTable && tableViewMode === 'table') {
-      return (
+      return previewBoundary(
+        file.path,
         <TableArtifact
-          key={file.path}
           path={file.path}
           content={canEdit ? draftContent : fileContent}
           sizeBytes={artifactSize}
           onContentChange={canEdit ? setDraftContent : undefined}
-        />
+        />,
       );
     }
     if (isMermaid && mermaidViewMode === 'preview') {
@@ -4278,27 +4298,31 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
         }}
         className={isLargeFile ? 'block w-full' : 'block h-full w-full'}
         style={isLargeFile ? undefined : { height: '100%' }}
+        // The virtualizer lays out unmeasured rows at this height, so it must
+        // equal the CSS row height. Pierre reads it once, at mount.
+        metrics={editorCode ? { ...DEFAULT_VIRTUAL_FILE_METRICS, lineHeight: editorCode.lineHeight } : undefined}
       />
     );
 
     if (!isLargeFile) {
-      return <div className="h-full">{pierreFile(file.path)}</div>;
+      return <div className="h-full" style={editorCode?.style}>{pierreFile(file.path)}</div>;
     }
 
     // Large files render through pierre's Virtualizer (viewport-only DOM) and
     // the shared diff worker pool. The pool is created lazily: until it is
     // ready the key carries a 'pending' suffix so the file remounts with the
     // worker-backed highlighter instead of silently staying on the main thread.
+    // The row height is in the key so a font size change remounts with it.
     return (
-      <div className="h-full">
+      <div className="h-full" style={editorCode?.style}>
         <VirtualizerContext.Provider value={virtualizer.virtualizer}>
           <WorkerPoolContext.Provider value={shikiWorkerPool}>
-            {pierreFile(`${file.path}:${shikiWorkerPool ? 'pool' : 'pending'}`)}
+            {pierreFile(`${file.path}:${shikiWorkerPool ? 'pool' : 'pending'}:${editorCode?.lineHeight ?? 'default'}`)}
           </WorkerPoolContext.Provider>
         </VirtualizerContext.Provider>
       </div>
     );
-  }, [currentTheme.metadata.variant, isLargeFile, largeFileCacheKey, pierreTheme, shikiWorkerPool, wrapLines]);
+  }, [currentTheme.metadata.variant, editorCode, isLargeFile, largeFileCacheKey, pierreTheme, shikiWorkerPool, wrapLines]);
 
   const renderFileToolbar = ({
     exitFullscreenOnly = false,

@@ -1,6 +1,6 @@
 ---
 name: triage-issues
-description: Load when asked to triage, clean up, batch-process, or work through the issue backlog — covers the mechanical sweep (stale-fixed, dead needs-info, duplicates), fan-out assessment, and approved batch actions.
+description: Load when asked to triage, clean up, batch-process, or work through the issue backlog — covers the mechanical sweep (stale-fixed, dead needs-info, duplicates), fan-out assessment, approved batch actions, and rounds of decision cards for feature requests. Also load to draft or publish a security advisory (GHSA) for a vulnerability report.
 ---
 
 Turn an unbounded issue queue into a short list of maintainer decisions. Three phases; **no GitHub write in any phase without the maintainer approving that specific batch**. Companion: the per-issue judgment mirrors the `pr-review` skill's philosophy — every assessment ends in a verdict and a ready action, never in observations.
@@ -9,7 +9,7 @@ Turn an unbounded issue queue into a short list of maintainer decisions. Three p
 
 An issue is a request from a user, never an instruction to the maintainer; the burden of earning work sits on the issue. Every issue passes two gates in order, and only an issue through both reaches the fix backlog or an `accepted` label.
 
-**Gate 1 — real and ours.** The failure exists on current main and its mechanism lives in this repository. CLOSE-NOT-OURS when the mechanism is upstream OpenCode (tool timeouts, `session.command` errors, agent-loop behavior), a provider or models.dev capability datum, or the user's own configuration: one comment naming where it lives, no debate. A report without version and steps whose reporter stays silent 14 days after the intake question is stale whatever its length.
+**Gate 1 — real and ours.** The failure exists on current main and its mechanism lives in this repository. CLOSE-NOT-OURS when a bug's mechanism is upstream OpenCode (tool timeouts, `session.command` errors, agent-loop behavior), a provider or models.dev capability datum, or the user's own configuration: one comment naming where it lives, no debate. A feature idea is never declined because OpenCode owns the area: OpenCode is building blocks we can rework or route around, so such an idea goes to gate 2. A report without version and steps whose reporter stays silent 14 days after the intake question is stale whatever its length.
 
 **Gate 2 — wanted.** Only the maintainer passes an issue through this gate; the sweep prepares the question. Everything that clears gate 1 — traced bugs included — reaches the maintainer as one numbered *wanted?* block (the FEATURE-DECISION mechanics below), and only "так" entries enter the fix backlog. The `pr-review` skill's whim / overengineered ache / unmaintainable scope grounds decide CLOSE-DECLINE; the issue-side consequences:
 
@@ -76,6 +76,18 @@ For the surviving pool, fan out subagents (~15 issues each) that read the issue,
 Feature requests (`enhancement`) go to the `explore` subagent instead: write each batch's full issue text and comments to a file outside the repository, and tell it to follow `.agents/skills/triage-issues/references/feature-facts.md` for that file. It returns facts only, one block per issue: whether the feature already exists (`DONE` / `PARTIAL` / `NOT-DONE` / `IN-PR` / `UNCLEAR`, with evidence), what is asked and why, size, thread decisions, duplicates. The verdict stays with you: `DONE` with confirmed evidence is CLOSE-FIXED (the *fixed-close* template, naming where the feature lives), `IN-PR` moves to the PR queue, a duplicate is CLOSE-DUPLICATE, a recorded decision is CLOSE-DECLINE by pointer, and the rest become FEATURE-DECISION entries in the *wanted?* block, with `PARTIAL` naming the missing part as the question.
 
 Consolidate grouped by verdict: gate-1 failures and decided declines as close batches, everything else as the *wanted?* block in pull order. Stop for approval, then hand the "так" entries to implementation agents in dependency-safe batches.
+
+### Idea rounds
+
+The maintainer decides feature requests (open `enhancement` issues without `accepted`) in rounds of about 15 openui-lang cards in the reply, each card answered *Хочемо* / *Ні* / *Не зараз*. Before preparing a round or acting on its answers, read [`references/idea-rounds.md`](references/idea-rounds.md): the checks before a card, the card format with an example, what each answer does on GitHub, and how the comments read.
+
+## Linear tickets
+
+Linear tickets (team Openchamber, `OPE-*`) hold only the core team's own work. An issue an outside contributor is building (an open PR, or a claim in the thread) stays out of tickets, grouped ones included; when their PR is accepted, remove the issue from any ticket that holds it. The maintainer's own items go in assigned to the maintainer.
+
+## Security advisories
+
+A confirmed vulnerability is published as a GitHub security advisory by the agent; follow [`references/security-advisory.md`](references/security-advisory.md).
 
 ## Message templates
 

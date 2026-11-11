@@ -7,6 +7,10 @@ import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useGlobalSessionStatusStore } from '@/sync/global-session-status';
 import { getAllSyncSessionMap, getDirectoryState, getSyncChildStores } from '@/sync/sync-refs';
 import { getLinkedIssues, isLinkedChange } from '@/lib/linkedIssues';
+import { isSessionInWork } from '@/lib/sessionWorkMetadata';
+import { isSessionUnread } from '@/sync/session-unread';
+import { currentLiveTool, useSessionLiveWorkStore } from '@/sync/session-live-work';
+import { findSessionModelKey, limitsForAnsweringModel } from '@/lib/routing/contextWindowLimits';
 import { normalizePath } from '@/lib/pathNormalization';
 import { checkoutHoldsDirectory, checkoutHoldsSubfolder } from '@/lib/worktrees/worktreePaths';
 import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
@@ -27,6 +31,41 @@ const toWorktree = (entry: WorktreeMetadata): GuestWorktree => ({
   directory: entry.path, name: entry.name ?? entry.label, branch: entry.branch,
   status: entry.worktreeStatus === 'not-a-repo' ? 'invalid' : entry.worktreeStatus ?? 'ready',
 });
+/** Longest tool target a record carries; a longer path keeps its end. */
+const TOOL_TARGET_MAX = 200;
+
+const isAbsolute = (path: string): boolean => path.startsWith('/') || /^[A-Za-z]:/.test(path);
+
+/** `path` with `.` and `..` resolved, against `root` when it is relative. */
+const resolvePath = (path: string, root: string): string => {
+  const joined = isAbsolute(path) ? path : `${root}/${path}`;
+  const segments: string[] = [];
+  for (const segment of joined.split('/')) {
+    if (segment === '' || segment === '.') continue;
+    if (segment === '..') segments.pop();
+    else segments.push(segment);
+  }
+  // `//server/share` keeps both slashes, `/` its one.
+  const lead = joined.startsWith('//') ? '//' : joined.startsWith('/') ? '/' : '';
+  return `${lead}${segments.join('/')}`;
+};
+
+/**
+ * A tool's path relative to the session's folder, or its bare name when it
+ * lies outside: an extension learns nothing about folders beyond the session's.
+ */
+const toolTarget = (path: string, directory: string): string => {
+  const root = normalizePath(directory) ?? directory;
+  const full = resolvePath(normalizePath(path) ?? path, root);
+  // A root such as `/` or `C:/` already ends in its separator.
+  const prefix = root.endsWith('/') ? root : `${root}/`;
+  let target: string;
+  if (full === root || `${full}/` === prefix) target = '.';
+  else if (full.startsWith(prefix)) target = full.slice(prefix.length);
+  else target = full.split('/').pop() || '.';
+  return target.length > TOOL_TARGET_MAX ? `…${target.slice(-(TOOL_TARGET_MAX - 1))}` : target;
+};
+
 const combinedState = (states: GuestLoadState[]): GuestLoadState => states.includes('error') ? 'error' : states.includes('loading') ? 'loading' : 'ready';
 
 const projectSession = (session: Session, projectId: string, guestId: string, worktrees: ReadonlyMap<string, GuestWorktree>): GuestSessionRecord => {
@@ -47,6 +86,12 @@ const projectSession = (session: Session, projectId: string, guestId: string, wo
   const connected = useConfigStore.getState().isConnected;
   const statusInvalidated = child?.sessionStatusInvalidated?.[session.id] === true;
   const linked = getLinkedIssues(session);
+  const liveWork = useSessionLiveWorkStore.getState();
+  const liveTool = currentLiveTool(liveWork.tools.get(session.id));
+  const reading = liveWork.context.get(session.id);
+  const contextLimit = reading?.state === 'measured'
+    ? limitsForAnsweringModel(findSessionModelKey(session), useConfigStore.getState().providers).context
+    : 0;
   let activity: GuestSessionRecord['activity'] = 'unknown';
   if (connected) {
     if (status?.type === 'busy') activity = 'running';
@@ -73,6 +118,14 @@ const projectSession = (session: Session, projectId: string, guestId: string, wo
     // user's too: no more than the session titles it already reads. Another
     // extension's opaque `data` stays out.
     links: linked.map((item) => ({ title: item.title, url: item.url, kind: isLinkedChange(item) ? 'change' : 'issue', linkedAt: item.linkedAt })),
+    // The sidebar's In work rule (`orderInWorkWorks`): a top-level session that
+    // is not archived, and nobody while In work is off.
+    inWork: useUIStore.getState().sessionWorkEnabled && !session.parentID && !session.time.archived && isSessionInWork(session),
+    unread: isSessionUnread(session),
+    // Shown only while the session runs: a tool whose end event was lost
+    // must not outlive the turn.
+    tool: liveTool && activity === 'running' ? { name: liveTool.name, target: liveTool.path ? toolTarget(liveTool.path, directory) : null } : null,
+    context: reading?.state === 'measured' ? { tokens: reading.tokens, limit: contextLimit > 0 ? contextLimit : null } : null,
   };
 };
 
@@ -166,7 +219,9 @@ export const observeGuestWorkspace = (query: GuestWorkspaceQuery, guestId: strin
       unsubs.push(
         useGlobalSessionsStore.subscribe((state, previous) => { if (state.activeSessions !== previous.activeSessions || state.archivedSessions !== previous.archivedSessions || state.status !== previous.status) update(); }),
         useGlobalSessionStatusStore.subscribe(update),
-        useConfigStore.subscribe((state, previous) => { if (state.isConnected !== previous.isConnected) update(); }),
+        useConfigStore.subscribe((state, previous) => { if (state.isConnected !== previous.isConnected || state.providers !== previous.providers) update(); }),
+        useSessionLiveWorkStore.subscribe(update),
+        useUIStore.subscribe((state, previous) => { if (state.sessionWorkEnabled !== previous.sessionWorkEnabled) update(); }),
         manager.subscribeBootstrap(update),
         manager.subscribeAllSelected((state) => state.session, update),
         manager.subscribeAllSelected((state) => state.permission, update),

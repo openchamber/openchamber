@@ -35,7 +35,9 @@ Auto. There is no env gate — the feature shipped dark behind
   `toStoredConfig` is its inverse. A missing file is the defaults, a malformed
   one throws.
 - `jev.js` — request builders, answer parsing, and the HTTP call with a
-  timeout to the endpoint `classifierEndpoint` chose.
+  timeout to the endpoint `classifierEndpoint` chose. The first timed-out
+  request per endpoint keeps running in the background (see the decision
+  below).
 - `history.js` — the last three settled turns through session assist's
   `loadAssistContext` (text parts only, attached quotes included, no files or
   tool payloads), each user message cut to its head and each answer to head
@@ -88,6 +90,11 @@ Auto. There is no env gate — the feature shipped dark behind
 - Routing failures keep the user's own behaviour: a Jev error, timeout, unknown
   category or low confidence routes to the fallback model, and the decision
   carries the reason.
+- A Jev call fails as a timeout after `JEV_TIMEOUT_MS` (4 s) whatever the
+  endpoint does next. At most one timed-out request per endpoint URL and model
+  stays open in the process, across routing, session work and goals, and it is
+  aborted at `JEV_LINGER_MS` (5 minutes) from its start. Its answer is never
+  used.
 - The routing and safety-net questions send `ROUTING_INSTRUCTIONS` and
   `SAFETY_INSTRUCTIONS` as one string each, the same form as the Test probe,
   and the safety-net `ask` question passes `SAFETY_CRITERIA` (`true` / `false`)
@@ -153,6 +160,20 @@ which after a routed Plan is `plan`, so the composer has no agent of its own
 to send. Only the runtime knows that it set the agent and which one was there
 before. Before #6392 an empty category agent left the routed agent in place,
 and every later send stayed in Plan.
+
+### Why a timed-out request keeps running and not a longer timeout
+
+A local model on Ollama loads on its first request, which takes 5 to 7 s for
+`d3:9b` on Apple Silicon, and Ollama cancels the load when the client
+disconnects. The 4 s abort therefore cancelled every cold load, and routing
+never recovered by itself (#6743). Letting the first timed-out request finish
+loads the model, so the next turn routes, while every turn still waits at most
+4 s. A longer timeout would make a hung server slow every send, and a timeout
+field per endpoint is one more setting. The one-per-endpoint limit and the
+5-minute cap keep repeated sends to a hung server from piling up connections.
+It applies to every source, which keeps `jev.js` free of a per-source switch.
+A hosted source loads nothing, so there it only lets one slow request finish
+after its turn has moved on.
 
 ## Where a Jev request goes
 
@@ -290,6 +311,8 @@ features that need Jev.
 
 ## Tests
 
+`jev.test.js` (the timeout, the one request that keeps running per endpoint
+and its cap),
 `store.test.js` (defaults, deviation round-trip, the cache setting's default,
 deleted built-ins, malformed
 file, token file mode, classifier pick, custom endpoint file), `runtime.test.js` (request text,

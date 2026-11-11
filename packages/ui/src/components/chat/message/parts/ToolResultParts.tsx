@@ -2,7 +2,6 @@ import * as React from 'react';
 
 import { Icon } from '@/components/icon/Icon';
 import type { IconName } from '@/components/icon/icons';
-import { Button } from '@/components/ui/button';
 import { useI18n } from '@/lib/i18n';
 import { useChatColumnActions } from '../../chatColumnSession';
 import { ChatExternalLink } from './ChatExternalLink';
@@ -27,32 +26,43 @@ export const Field: React.FC<{ label: string; children: React.ReactNode }> = ({ 
 );
 
 
+/**
+ * A quiet text action inside a tool row: muted text with its icon that
+ * brightens on hover or keyboard focus, no fill and no padding, so its icon
+ * lines up with the row's content and nothing sticks out of the row's
+ * scroll box. A click stays inside: it never collapses the row. Pointer and
+ * focus handlers pass through, so a `HoverTooltip` can wrap it.
+ */
+export const QuietAction: React.FC<
+    { label: string; icon?: IconName; onClick: () => void }
+    & Pick<React.ComponentProps<'button'>, 'onPointerEnter' | 'onPointerLeave' | 'onPointerDown' | 'onFocus' | 'onBlur'>
+> = ({ label, icon, onClick, onPointerDown, ...handlers }) => (
+    <button
+        {...handlers}
+        type="button"
+        className="inline-flex h-6 items-center gap-1.5 whitespace-nowrap typography-meta text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:text-foreground"
+        onPointerDown={(event) => {
+            onPointerDown?.(event);
+            event.stopPropagation();
+        }}
+        onClick={(event) => {
+            event.stopPropagation();
+            onClick();
+        }}
+    >
+        {icon ? <Icon name={icon} className="size-3.5 shrink-0" /> : null}
+        {label}
+    </button>
+);
+
 export type OpenActionInput = { label: string; icon: IconName; onOpen: () => void };
 
-/**
- * The quiet actions under a view: where to open what the call made, then the
- * raw answer. Text that brightens on hover, the way the raw switch looks,
- * in one row.
- */
+/** The quiet actions under a view: where to open what the call made, then the raw answer, in one row. */
 export const Actions: React.FC<{ open?: OpenActionInput | null }> = ({ open }) => {
     const rawToggle = React.useContext(RawToggleContext);
     return (
-        <div className="-ms-2 flex flex-wrap items-center gap-x-1">
-            {open ? (
-                <Button
-                    variant="ghost"
-                    size="xs"
-                    className="text-muted-foreground hover:text-foreground"
-                    onPointerDown={(event) => event.stopPropagation()}
-                    onClick={(event) => {
-                        event.stopPropagation();
-                        open.onOpen();
-                    }}
-                >
-                    <Icon name={open.icon} className="size-3.5" />
-                    {open.label}
-                </Button>
-            ) : null}
+        <div className="flex flex-wrap items-center gap-x-4">
+            {open ? <QuietAction icon={open.icon} label={open.label} onClick={open.onOpen} /> : null}
             {rawToggle}
         </div>
     );

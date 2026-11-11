@@ -26,6 +26,7 @@ import { compactionSettingsI18n } from './compaction-settings.i18n';
 import { heapSnapshotI18n } from './heap-snapshot.i18n';
 import { consoleBudgetsI18n } from './console-budgets.i18n';
 import { imageToolI18n } from './image-tool.i18n';
+import { memoryDreamingI18n } from './memory-dreaming.i18n';
 import { usageToolI18n } from './usage-tool.i18n';
 import { openchamberToolsLayoutI18n } from './openchamber-tools-layout.i18n';
 import { openchamberToolOutputI18n } from './openchamber-tool-output.i18n';
@@ -207,6 +208,7 @@ export const dict = {
   ...heapSnapshotI18n.de,
   ...consoleBudgetsI18n.de,
   ...imageToolI18n.de,
+  ...memoryDreamingI18n.de,
   ...usageToolI18n.de,
   ...openchamberToolsLayoutI18n.de,
   ...openchamberToolOutputI18n.de,
@@ -1804,8 +1806,6 @@ export const dict = {
   'rightSidebar.contextNotesTodo.todo.addAria': 'Aufgabe hinzufügen',
   'rightSidebar.contextNotesTodo.todo.empty': 'Noch keine Aufgaben. Fügen Sie eine kleine Checkliste für dieses Projekt hinzu.',
   'rightSidebar.contextNotesTodo.todo.actions.markComplete': 'Markiere "{text}" als erledigt',
-  'rightSidebar.contextNotesTodo.todo.actions.collapse': 'Aufgabe "{text}" einklappen',
-  'rightSidebar.contextNotesTodo.todo.actions.expand': 'Aufgabe "{text}" ausklappen',
   'rightSidebar.contextNotesTodo.todo.actions.send': 'Sende "{text}"',
   'rightSidebar.contextNotesTodo.todo.actions.reorder': 'Ordne "{text}" neu',
   'rightSidebar.contextNotesTodo.todo.sendMenu.currentSession': 'An aktuelle Sitzung senden',
@@ -1999,6 +1999,7 @@ export const dict = {
   'directoryExplorerDialog.browse.retry': 'Erneut versuchen',
   'directoryExplorerDialog.browse.parentDirectory': 'Übergeordnetes Verzeichnis',
   'directoryExplorerDialog.browse.addedBadge': 'Hinzugefügt',
+  'directoryExplorerDialog.browse.linkTarget': 'Verknüpfung zu {path}',
   'directoryExplorerDialog.browse.quickAdd': 'Hinzufügen',
   'directoryExplorerDialog.browse.selectForAdd': 'Zum Hinzufügen auswählen',
   'directoryExplorerDialog.footer.navigate': 'Navigieren',
@@ -2155,6 +2156,7 @@ export const dict = {
   'session.githubIntegration.validation.failed': 'Validierung fehlgeschlagen',
   'chat.fileAttachment.toast.attachFailed': 'Fehler beim Anhängen der Datei',
   'chat.fileAttachment.toast.tooLarge': '{name} ist zu groß zum Anhängen (über {size}). Liegt die Datei im Projekt, erwähne sie mit @.',
+  'chat.fileAttachment.toast.heicConversionFailed': '{name} konnte nicht von HEIC in JPEG umgewandelt werden und wurde deshalb nicht angehängt. Speichere das Foto als JPEG und hänge es erneut an.',
   'chat.fileAttachment.toast.overSendLimit': '{name} ist zu groß zum Anhängen (über {size}).',
   'chat.fileAttachment.toast.someFilesSkipped': 'Einige Dateien wurden übersprungen:\n{summary}',
   'chat.fileAttachment.toast.vscodePickFailed': 'Fehler beim Auswählen von Dateien in VS Code',
@@ -3406,11 +3408,8 @@ export const dict = {
   'sessions.archivePage.restoreSessionAria': '{title} wiederherstellen',
   'header.sessionActions.openAria': 'Sitzungsaktionen öffnen',
   'sessions.sidebar.session.menu.copyId': 'Sitzungs-ID kopieren',
-  'sessions.sidebar.session.menu.openInMiniChat': 'In Mini Chat öffnen',
   'sessions.sidebar.session.copyId.success': 'Sitzungs-ID kopiert',
   'sessions.sidebar.session.copyId.error': 'Sitzungs-ID konnte nicht kopiert werden',
-  'sessions.sidebar.session.menu.moveToWorktree': 'In neuen Worktree verschieben',
-  'sessions.sidebar.session.menu.moveToWorktreeTargets': 'In Worktree verschieben',
   'sessions.sidebar.session.menu.newWorktree': 'Neuer Worktree...',
   'sessions.sidebar.session.moveToWorktree.success': 'Sitzung in einen neuen Worktree verschoben',
   'sessions.sidebar.session.moveToWorktree.failed': 'Sitzung konnte nicht in einen neuen Worktree verschoben werden',
@@ -3420,7 +3419,6 @@ export const dict = {
   'sessions.sidebar.session.moveToWorktree.current': 'Aktueller Worktree',
   'sessions.sidebar.session.moveToWorktree.existingSuccess': 'Sitzung in Worktree verschoben',
   'sessions.sidebar.session.moveToWorktree.existingFailed': 'Sitzung konnte nicht in Worktree verschoben werden',
-  'sessions.sidebar.session.moveToWorktree.tooltip': 'Erstellt einen neuen Worktree aus dem aktuellen Branch und verschiebt diese Sitzung samt Untersitzungen dorthin. Ungespeicherte Änderungen bleiben im Quell-Worktree.',
   'sessions.sidebar.session.moveToWorktree.tooltipBusy': 'Verfügbar, wenn die Sitzung inaktiv ist. Warten Sie oder beenden Sie die aktuelle Aktivität.',
   'sessions.sidebar.session.moveToWorktree.tooltipMoving': 'Diese Sitzung wird bereits in einen neuen Worktree verschoben.',
   'sessions.sidebar.session.export.failedLoadHistory': 'Die vollständige Sitzungshistorie konnte nicht geladen werden',
@@ -3602,6 +3600,8 @@ export const dict = {
   'sessions.sidebar.group.empty.loadingSessions': 'Sitzungen werden geladen...',
   'sessions.sidebar.group.empty.loadFailed': 'Sitzungen konnten nicht geladen werden',
   'sessions.sidebar.group.empty.initializationFailed': 'Arbeitsbereich konnte nicht initialisiert werden.',
+  'sessions.sidebar.group.empty.trustPaused': 'Agenten pausieren, bis du diesem Ordner vertraust.',
+  'sessions.sidebar.group.empty.reviewTrust': 'Prüfen und vertrauen',
   'sessions.search.submitHint': 'Zum Suchen die Eingabetaste drücken',
   'sessions.sidebar.group.empty.retry': 'Erneut versuchen',
   'sessions.sidebar.group.empty.permissionDenied': 'Ordnerzugriff ist erforderlich.',
@@ -3985,6 +3985,8 @@ export const dict = {
   'sessions.moveSession.failed': 'Sitzung konnte nicht verschoben werden',
   'chat.folderMissing.text': 'Ordner {name} existiert nicht mehr',
   'chat.folderMissing.action': 'Sitzung verschieben',
+  'chat.trustPaused.text': 'Agenten können in {name} nicht arbeiten, bis du seinen Plugins und Befehlen vertraust.',
+  'chat.trustPaused.action': 'Prüfen und vertrauen',
   'chat.worktreeSetup.running': 'Worktree wird eingerichtet: Setup-Befehle des Projekts laufen…',
   'chat.draft.creatingSession': 'Sitzung wird erstellt…',
   'desktopHostSwitcher.startup.fellBackToLocal': 'Die Verbindung kam nicht zustande, daher wurde OpenChamber mit Local gestartet. Verbinde sie über den Instanzwechsler, sobald sie erreichbar ist.',

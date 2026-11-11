@@ -419,6 +419,8 @@ export const registerOpenCodeProxy = (app, deps) => {
     // the host's own answers go out exactly as before spaces.
     mergeSpaceSessionList = null,
     spaceEventHub = null,
+    // Sessions OpenChamber runs for itself (`hidden-sessions.js`): left out of every list.
+    hiddenSessions = null,
     // The folder trust check (`../opencode-trust`): requests for a folder
     // whose configuration runs code wait for the user's trust.
     openCodeTrust = null,
@@ -981,7 +983,8 @@ export const registerOpenCodeProxy = (app, deps) => {
       }
 
       res.setHeader('content-type', result.contentType);
-      const hostList = await overlayOwnedStateOnList(sanitizeSessionListPayload(result.payload));
+      const visible = hiddenSessions ? hiddenSessions.filterSessionList(result.payload) : result.payload;
+      const hostList = await overlayOwnedStateOnList(sanitizeSessionListPayload(visible));
       // The first page of the global list carries every space's sessions after the host's; a
       // later page, and a list scoped to one directory, are the host's alone.
       const listQuery = new URL(upstreamPath, 'http://localhost').searchParams;
@@ -1202,6 +1205,26 @@ export const registerOpenCodeProxy = (app, deps) => {
   // V2 lists sessions across directories on every platform and owns pagination.
   app.get('/api/session', (req, res, next) => {
     return forwardSanitizedSessionListRequest(req, res, next);
+  });
+
+  // The running sessions, without the ones OpenChamber runs for itself: a
+  // hidden dreaming pass must not read as work in a badge or the tray.
+  app.get('/api/session/active', async (req, res, next) => {
+    if (!hiddenSessions) return next();
+    try {
+      const result = await fetchSessionListPayload(await getRequestUpstreamPath(req), { req });
+      res.status(result.upstream.status);
+      res.setHeader('content-type', result.contentType);
+      if (!result.isJson || result.parseError || !result.upstream.ok) {
+        res.end(result.bodyText);
+        return;
+      }
+      res.json(hiddenSessions.filterActive(result.payload));
+    } catch (error) {
+      const status = sessionRouteErrorStatus(error);
+      if (status === null) return;
+      if (!res.headersSent) res.status(status).json({ error: 'OpenCode service unavailable' });
+    }
   });
 
   // One session: the same overlay, so a detail read agrees with the list it

@@ -2,9 +2,10 @@ import { resolveAttachMode, type GuestItem } from '@openchamber/sdk';
 import { create } from 'zustand';
 
 import { pluginModeFromId } from '@/lib/surfaces/modes';
-import { useUIStore } from '@/stores/useUIStore';
+import { normalizeContextPanelDirectoryKey } from '@/stores/useUIStore';
 
 import { useGuestItemStore } from './item-store.ts';
+import { openGuestSurface } from './open-surface.ts';
 import type { InstalledGuest } from './types.ts';
 
 /**
@@ -27,17 +28,24 @@ export const useGuestDialogStore = create<GuestDialogState>((set) => ({
 /**
  * Open a guest with an item as `ready.item`: the attach window when the
  * manifest declared `attach: "dialog"`, otherwise the rail panel through the
- * item hand-off store. Same routing the composer chip uses.
+ * item hand-off store. Same routing the composer chip uses. The panel only
+ * ever opens here, never toggles closed, and nothing is parked when there is
+ * no folder to open it in, so a later rail click cannot receive a stale item.
+ * False when it could not open.
  */
 export const openGuestWithItem = (
   guest: Pick<InstalledGuest, 'id' | 'attach'>,
   item: GuestItem,
   directory: string | null | undefined,
-): void => {
+): boolean => {
   if (resolveAttachMode(guest.attach) === 'dialog') {
     useGuestDialogStore.getState().open(guest.id, item);
-    return;
+    return true;
   }
+  const key = directory ? normalizeContextPanelDirectoryKey(directory) : '';
+  if (!key) return false;
   useGuestItemStore.getState().setPendingItem(guest.id, item);
-  useUIStore.getState().openContextSurface(directory || '', pluginModeFromId(guest.id));
+  const opened = openGuestSurface({ mode: pluginModeFromId(guest.id), directory: key, supported: true });
+  if (!opened.ok) useGuestItemStore.getState().takePendingItem(guest.id);
+  return opened.ok;
 };

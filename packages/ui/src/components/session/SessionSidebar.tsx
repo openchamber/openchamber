@@ -60,6 +60,7 @@ import {
   type RawWorktreesByProjectScope,
   type StartSessionWorktreeMenuLoadArgs,
 } from './sidebar/sessionWorktreeMenu';
+import { publishSessionWorktreeMenuLoader } from './sidebar/sessionWorktreeMenuLoader';
 import { resolveProjectRef } from '@/lib/worktreeSessionCreator';
 
 const PROJECT_ACTIVE_SESSION_STORAGE_KEY = 'oc.sessions.activeSessionByProject';
@@ -656,6 +657,7 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
       projectRootBranch: resolvedProject ? (projectRootBranches.get(resolvedProject.id) ?? null) : null,
     });
   }, [projectRootBranches, projects, worktreeRefreshDependencies]);
+  React.useEffect(() => publishSessionWorktreeMenuLoader(handleSessionWorktreeMenuLoad), [handleSessionWorktreeMenuLoad]);
 
   React.useEffect(() => {
     if (isVSCode) return;

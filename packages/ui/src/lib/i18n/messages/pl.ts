@@ -27,6 +27,7 @@ import { compactionSettingsI18n } from './compaction-settings.i18n';
 import { heapSnapshotI18n } from './heap-snapshot.i18n';
 import { consoleBudgetsI18n } from './console-budgets.i18n';
 import { imageToolI18n } from './image-tool.i18n';
+import { memoryDreamingI18n } from './memory-dreaming.i18n';
 import { usageToolI18n } from './usage-tool.i18n';
 import { openchamberToolsLayoutI18n } from './openchamber-tools-layout.i18n';
 import { openchamberToolOutputI18n } from './openchamber-tool-output.i18n';
@@ -208,6 +209,7 @@ export const dict: Record<I18nKey, string> = {
   ...heapSnapshotI18n.pl,
   ...consoleBudgetsI18n.pl,
   ...imageToolI18n.pl,
+  ...memoryDreamingI18n.pl,
   ...usageToolI18n.pl,
   ...openchamberToolsLayoutI18n.pl,
   ...openchamberToolOutputI18n.pl,
@@ -588,7 +590,6 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.project.actions.newDraftSession': 'Nowa sesja robocza',
   'sessions.sidebar.session.menu.rename': 'Zmień nazwę',
   'sessions.sidebar.session.menu.copyId': 'Kopiuj ID sesji',
-  'sessions.sidebar.session.menu.openInMiniChat': 'Otwórz w Mini Chat',
   'sessions.sidebar.session.copyId.success': 'Skopiowano ID sesji',
   'sessions.sidebar.session.copyId.error': 'Nie udało się skopiować ID sesji',
   'header.sessionActions.openAria': 'Otwórz działania sesji',
@@ -622,8 +623,6 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.session.menu.copyLink': 'Kopiuj link',
   'sessions.sidebar.session.menu.unshare': 'Cofnij udostępnienie',
   'sessions.sidebar.session.menu.exportMarkdown': 'Eksportuj Markdown',
-  'sessions.sidebar.session.menu.moveToWorktree': 'Przenieś do nowego worktree',
-  'sessions.sidebar.session.menu.moveToWorktreeTargets': 'Przenieś do worktree',
   'sessions.sidebar.session.menu.newWorktree': 'Nowy worktree...',
   'sessions.sidebar.session.moveToWorktree.success': 'Sesja została przeniesiona do nowego worktree',
   'sessions.sidebar.session.moveToWorktree.failed': 'Nie udało się przenieść sesji do nowego worktree',
@@ -633,7 +632,6 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.session.moveToWorktree.current': 'Bieżący worktree',
   'sessions.sidebar.session.moveToWorktree.existingSuccess': 'Sesję przeniesiono do worktree',
   'sessions.sidebar.session.moveToWorktree.existingFailed': 'Nie udało się przenieść sesji do worktree',
-  'sessions.sidebar.session.moveToWorktree.tooltip': 'Tworzy nowy worktree z bieżącej gałęzi i przenosi tam tę sesję wraz z podsesjami. Niezacommitowane zmiany pozostają w źródłowym worktree.',
   'sessions.sidebar.session.moveToWorktree.tooltipBusy': 'Dostępne, gdy sesja jest bezczynna. Zatrzymaj bieżącą aktywność lub poczekaj na jej zakończenie.',
   'sessions.sidebar.session.moveToWorktree.tooltipMoving': 'Ta sesja jest już przenoszona do nowego worktree.',
   'sessions.sidebar.session.menu.openInSidePanel': 'Otwórz w panelu bocznym',
@@ -987,6 +985,7 @@ export const dict: Record<I18nKey, string> = {
   'session.githubIntegration.validation.failed': 'Walidacja nie powiodła się',
   'chat.fileAttachment.toast.attachFailed': 'Nie udało się dołączyć pliku',
   'chat.fileAttachment.toast.tooLarge': 'Plik {name} jest za duży, aby go załączyć (ponad {size}). Jeśli jest w projekcie, wspomnij go przez @.',
+  'chat.fileAttachment.toast.heicConversionFailed': 'Nie udało się przekonwertować pliku {name} z HEIC do JPEG, więc go nie załączono. Zapisz zdjęcie jako JPEG i załącz je ponownie.',
   'chat.fileAttachment.toast.overSendLimit': 'Plik {name} jest za duży, aby go załączyć (ponad {size}).',
   'chat.fileAttachment.toast.someFilesSkipped': 'Niektóre pliki zostały pominięte:\n{summary}',
   'chat.fileAttachment.toast.vscodePickFailed': 'Nie udało się wybrać plików w VS Code',
@@ -1145,6 +1144,8 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.group.empty.loadingSessions': 'Wczytywanie sesji…',
   'sessions.sidebar.group.empty.loadFailed': 'Nie udało się odświeżyć sesji.',
   'sessions.sidebar.group.empty.initializationFailed': 'Nie udało się zainicjować obszaru roboczego.',
+  'sessions.sidebar.group.empty.trustPaused': 'Agenci są wstrzymani, dopóki nie zaufasz temu folderowi.',
+  'sessions.sidebar.group.empty.reviewTrust': 'Sprawdź i zaufaj',
   'sessions.search.submitHint': 'Naciśnij Enter, aby wyszukać',
   'sessions.sidebar.group.empty.retry': 'Spróbuj ponownie',
   'sessions.sidebar.group.empty.permissionDenied': 'Wymagany jest dostęp do folderu.',
@@ -2316,6 +2317,7 @@ export const dict: Record<I18nKey, string> = {
   'directoryExplorerDialog.actions.openInFinder': 'Otwórz w Finderze',
   'directoryExplorerDialog.actions.openingFinder': 'Otwieranie...',
   'directoryExplorerDialog.browse.addedBadge': 'Dodano',
+  'directoryExplorerDialog.browse.linkTarget': 'Dowiązanie do {path}',
   'directoryExplorerDialog.browse.quickAdd': 'Dodaj',
   'directoryExplorerDialog.browse.selectForAdd': 'Zaznacz do dodania',
   'directoryExplorerDialog.browse.empty': 'Brak pasujących katalogów.',
@@ -3204,8 +3206,6 @@ export const dict: Record<I18nKey, string> = {
   'rightSidebar.contextNotesTodo.toast.sentToNewSession': 'Zadanie wysłane do nowej sesji',
   'rightSidebar.contextNotesTodo.toast.sentToNewWorktreeSession': 'Zadanie wysłane do nowej sesji drzewa pracy',
   'rightSidebar.contextNotesTodo.toast.worktreeRequiresGitRepo': 'Akcje drzewa pracy są dostępne tylko dla repozytoriów Git',
-  'rightSidebar.contextNotesTodo.todo.actions.collapse': 'Zwiń zadanie „{text}”',
-  'rightSidebar.contextNotesTodo.todo.actions.expand': 'Rozwiń zadanie „{text}”',
   'rightSidebar.contextNotesTodo.todo.actions.markComplete': 'Oznacz „{text}” jako ukończone',
   'rightSidebar.contextNotesTodo.todo.actions.send': 'Wyślij „{text}”',
   'rightSidebar.contextNotesTodo.todo.actions.reorder': 'Zmień kolejność "{text}"',
@@ -3992,6 +3992,8 @@ export const dict: Record<I18nKey, string> = {
   'sessions.moveSession.failed': 'Nie udało się przenieść sesji',
   'chat.folderMissing.text': 'Folder {name} już nie istnieje',
   'chat.folderMissing.action': 'Przenieś sesję',
+  'chat.trustPaused.text': 'Agenci nie mogą pracować w {name}, dopóki nie zaufasz jego wtyczkom i poleceniom.',
+  'chat.trustPaused.action': 'Sprawdź i zaufaj',
   'chat.worktreeSetup.running': 'Przygotowywanie worktree: uruchamianie poleceń konfiguracyjnych projektu…',
   'chat.draft.creatingSession': 'Tworzenie sesji…',
   'desktopHostSwitcher.startup.fellBackToLocal': 'Nie udało się nawiązać połączenia, więc OpenChamber uruchomił się na Local. Połącz się z przełącznika instancji, gdy będzie dostępna.',

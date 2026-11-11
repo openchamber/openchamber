@@ -623,6 +623,9 @@ export const registerFsRoutes = (app, dependencies) => {
     managedChatsRoot,
     cloneRepository,
     environmentRuntime = null,
+    // The realpath settings store projects under (Node's JS `fs.realpath`): the
+    // native one also resolves Windows `subst` and mapped drives, which settings keep.
+    projectRealpath = fsPromises.realpath.bind(fsPromises),
   } = dependencies;
   // Chat worktrees may live outside every project workspace; both managed
   // roots stay valid filesystem targets.
@@ -1174,7 +1177,12 @@ export const registerFsRoutes = (app, dependencies) => {
         if (!stats.isDirectory()) {
           return { path: directoryPath, isDirectory: false, reason: 'not-directory' };
         }
-        return { path: directoryPath, isDirectory: true };
+        // The path settings store a project under, so a link to an added
+        // project can be recognised before adding it again.
+        const realPath = await projectRealpath(resolvedPath).catch(() => null);
+        const result = { path: directoryPath, isDirectory: true };
+        if (realPath) result.realPath = realPath;
+        return result;
       } catch (error) {
         if (error.code === 'ENOENT' || error.code === 'ENOTDIR') {
           return { path: directoryPath, isDirectory: false, reason: error.code === 'ENOENT' ? 'not-found' : 'not-directory' };

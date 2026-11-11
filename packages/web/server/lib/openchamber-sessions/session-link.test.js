@@ -164,3 +164,58 @@ describe('session.link', () => {
     expect(store.writes).toBe(0);
   });
 });
+
+describe('session.unlink', () => {
+  // As the UI and earlier agent links stored them.
+  const pull = { id: 'acme/app#7', number: 7, title: 'Add search', url: 'https://github.com/acme/app/pull/7', kind: 'pull', author: 'dev', linkedAt: 1 };
+  const otherPull = { id: 'acme/web#7', number: 7, title: 'Fix nav', url: 'https://github.com/acme/web/pull/7', kind: 'pull', linkedAt: 2 };
+  const mr = { id: 'link:https://gitlab.com/a/b/-/merge_requests/600', kind: 'external', thread: 'change', identifier: '!600', title: 'MR', url: 'https://gitlab.com/a/b/-/merge_requests/600/diffs', linkedAt: 3 };
+  const linear = { id: 'linear:ENG-3', kind: 'linear', provider: 'linear', identifier: 'ENG-3', title: 'Spec', url: 'https://linear.app/acme/issue/ENG-3/spec', linkedAt: 4 };
+  const page = { id: 'link:https://docs.example.com/guide', kind: 'external', thread: 'issue', identifier: 'docs.example.com', title: 'Guide', url: 'https://docs.example.com/guide', linkedAt: 5 };
+  const all = [pull, otherPull, mr, linear, page];
+  const ids = (store) => store.metadata.openchamber.linked_issues.map((entry) => entry.id);
+
+  test('a url removes its thread however the address was written, and keeps everything else', async () => {
+    const { linker, store } = createLinker({ openchamber: { linked_issues: all, goal: { text: 'g' } } });
+    const result = await linker.unlink({ sessionId: 's1', target: { url: 'https://github.com/acme/app/pull/7/files' } });
+    expect(result).toMatchObject({ changed: true, unlinked: [{ id: 'acme/app#7', title: 'Add search', url: pull.url, kind: 'pull', number: 7 }] });
+    expect(ids(store)).toEqual(['acme/web#7', mr.id, linear.id, page.id]);
+    expect(store.metadata.openchamber.goal).toEqual({ text: 'g' });
+
+    await linker.unlink({ sessionId: 's1', target: { url: 'https://gitlab.com/a/b/-/merge_requests/600' } });
+    await linker.unlink({ sessionId: 's1', target: { url: 'https://linear.app/acme/issue/eng-3' } });
+    await linker.unlink({ sessionId: 's1', target: { url: 'https://docs.example.com/guide/#intro' } });
+    expect(ids(store)).toEqual(['acme/web#7']);
+  });
+
+  test('an identifier removes the one link it names, in any case', async () => {
+    const { linker, store } = createLinker({ openchamber: { linked_issues: all } });
+    await linker.unlink({ sessionId: 's1', target: { identifier: 'eng-3' } });
+    await linker.unlink({ sessionId: 's1', target: { identifier: '!600' } });
+    await linker.unlink({ sessionId: 's1', target: { identifier: 'acme/web#7' } });
+    expect(ids(store)).toEqual(['acme/app#7', page.id]);
+  });
+
+  test('an identifier that names several links removes none and asks for the url', async () => {
+    const { linker, store } = createLinker({ openchamber: { linked_issues: all } });
+    await expect(linker.unlink({ sessionId: 's1', target: { identifier: '#7' } })).rejects.toMatchObject({ status: 409 });
+    expect(store.writes).toBe(0);
+  });
+
+  test('#N names GitHub threads only, never a GitLab merge request the composer stored', async () => {
+    const gitlabMr = { id: 'gitlab.com:a/b#7', number: 7, title: 'MR', url: 'https://gitlab.com/a/b/-/merge_requests/7', kind: 'pull', linkedAt: 6 };
+    const { linker, store } = createLinker({ openchamber: { linked_issues: [pull, gitlabMr] } });
+    await linker.unlink({ sessionId: 's1', target: { identifier: '#7' } });
+    expect(ids(store)).toEqual(['gitlab.com:a/b#7']);
+  });
+
+  test('nothing to remove is an error that lists what is linked', async () => {
+    const { linker, store } = createLinker({ openchamber: { linked_issues: [pull] } });
+    const missing = linker.unlink({ sessionId: 's1', target: { url: 'https://github.com/acme/app/pull/8' } });
+    await expect(missing).rejects.toMatchObject({ status: 404 });
+    await expect(missing).rejects.toThrow(pull.url);
+    await expect(linker.unlink({ sessionId: 's1', target: {} })).rejects.toMatchObject({ status: 400 });
+    await expect(linker.unlink({ sessionId: null, target: { identifier: '#7' } })).rejects.toMatchObject({ status: 400 });
+    expect(store.writes).toBe(0);
+  });
+});

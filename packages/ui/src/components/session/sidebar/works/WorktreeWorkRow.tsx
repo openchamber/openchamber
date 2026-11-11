@@ -28,10 +28,10 @@ import { handleSessionRenameKeyDown } from '@/components/session/sessionRenameKe
 import { useOpenTrackerItem } from '@/components/sourceBoard/openTrackerItem';
 import { useShiftKeyHeld } from '@/hooks/useShiftKeyHeld';
 import { useI18n } from '@/lib/i18n';
+import { SessionReadShortcut } from '@/components/session/SessionReadMenuItem';
 import { sessionEvents } from '@/lib/sessionEvents';
 import { refTintStyle } from '@/lib/source-control/prVisualState';
 import { cn, formatDirectoryName } from '@/lib/utils';
-import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { useSessionFoldersStore } from '@/stores/useSessionFoldersStore';
 import { DirectoryActionIndicator } from '../sessions/DirectoryActionIndicator';
 import { CollapsedActivityIndicator } from '../sessions/collapsedActivityIndicator';
@@ -84,6 +84,8 @@ type Props = {
   detailed: boolean;
   /** Listed among other projects' works (In work, the list by time), so it names its project. */
   mixed: boolean;
+  /** Listed in the Pinned section, whose header already says it is pinned. */
+  inPinnedZone: boolean;
   collapsed: boolean;
   forceExpanded: boolean;
   empty: boolean;
@@ -116,6 +118,7 @@ export function WorktreeWorkRow(props: Props): React.ReactNode {
     depth,
     detailed,
     mixed,
+    inPinnedZone,
     collapsed,
     forceExpanded,
     empty,
@@ -141,11 +144,10 @@ export function WorktreeWorkRow(props: Props): React.ReactNode {
     title, branch, label, secondName, finishing, canArchive, canRename, canNewChat, pinned, canPin, workAction, inWork, activityState,
     runningSessionId, durationSessionId,
   } = work;
-  // With the Pinned section shown a pinned work is listed there, whose header
-  // already says so; otherwise the row carries the mark, as a session's does.
-  const pinnedSectionShown = useSessionDisplayStore((state) => state.showPinnedSection);
+  // The Pinned section's header already says its works are pinned; anywhere
+  // else the row carries the mark, as a session's does.
   const pinnedLabel = t('sessions.sidebar.session.status.pinned');
-  const pinnedMark = pinned && !pinnedSectionShown ? (
+  const pinnedMark = pinned && !inPinnedZone ? (
     <RowMarkTooltip label={pinnedLabel}>
       <span className="inline-flex flex-shrink-0 items-center" aria-label={pinnedLabel}>
         <Icon name="pushpin" className="h-3 w-3 text-muted-foreground" />
@@ -179,8 +181,13 @@ export function WorktreeWorkRow(props: Props): React.ReactNode {
   const expandable = !empty;
   const expanded = forceExpanded || !collapsed;
 
-  const openWork = (): void => {
-    if (!renaming) work.open();
+  const openWork = (event?: React.MouseEvent): void => {
+    if (renaming) return;
+    if (event?.altKey && work.canMarkUnread) {
+      work.toggleRead();
+      return;
+    }
+    work.open();
   };
   const newChat = (event: React.MouseEvent): void => {
     event.stopPropagation();
@@ -351,6 +358,13 @@ export function WorktreeWorkRow(props: Props): React.ReactNode {
           <span>{t('sessions.sidebar.work.menu.rename')}</span>
         </Slots.Item>
       ) : null}
+      {work.canMarkUnread ? (
+        <Slots.Item onClick={work.toggleRead}>
+          <Icon name={work.hasUnread ? 'chat-check' : 'checkbox-circle'} className="h-4 w-4" />
+          <span>{work.hasUnread ? t('sessions.sidebar.session.menu.markRead') : t('sessions.sidebar.session.menu.markUnread')}</span>
+          {alwaysShowActions ? null : <SessionReadShortcut />}
+        </Slots.Item>
+      ) : null}
       {canPin ? (
         <PinToMenu
           slots={Slots}
@@ -475,7 +489,7 @@ export function WorktreeWorkRow(props: Props): React.ReactNode {
         style={{ paddingInlineStart: detailed ? sessionDetailedRowPaddingLeft(depth) : sessionTreeRowPaddingLeft(depth) }}
         // The whole box opens the work, its second line and paddings too.
         onClick={(event) => {
-          if (isRowBoxClick(event)) openWork();
+          if (isRowBoxClick(event)) openWork(event);
         }}
         className={cn(
           // The same box as a session row in the same place: zone rows are a

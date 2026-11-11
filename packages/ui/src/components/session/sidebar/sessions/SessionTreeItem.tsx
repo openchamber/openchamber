@@ -176,7 +176,6 @@ function SessionTreeItemComponent({
       toggleParent={toggleParent}
        handleSessionSelect={sessionActions.handleSessionSelect}
        handleSessionDoubleClick={sessionActions.handleSessionDoubleClick}
-       handleCopySessionId={sessionActions.handleCopySessionId}
       openSidebarMenuKey={openSidebarMenuKey}
       setOpenSidebarMenuKey={setOpenSidebarMenuKey}
       createFolderAndStartRename={createFolderAndStartRename}

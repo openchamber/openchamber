@@ -26,6 +26,7 @@ import { compactionSettingsI18n } from './compaction-settings.i18n';
 import { heapSnapshotI18n } from './heap-snapshot.i18n';
 import { consoleBudgetsI18n } from './console-budgets.i18n';
 import { imageToolI18n } from './image-tool.i18n';
+import { memoryDreamingI18n } from './memory-dreaming.i18n';
 import { usageToolI18n } from './usage-tool.i18n';
 import { openchamberToolsLayoutI18n } from './openchamber-tools-layout.i18n';
 import { openchamberToolOutputI18n } from './openchamber-tool-output.i18n';
@@ -207,6 +208,7 @@ export const dict = {
   ...heapSnapshotI18n.nl,
   ...consoleBudgetsI18n.nl,
   ...imageToolI18n.nl,
+  ...memoryDreamingI18n.nl,
   ...usageToolI18n.nl,
   ...openchamberToolsLayoutI18n.nl,
   ...openchamberToolOutputI18n.nl,
@@ -762,7 +764,6 @@ export const dict = {
   'sessions.sidebar.project.actions.newDraftSession': 'Nieuwe concept-sessie',
   'sessions.sidebar.session.menu.rename': 'Naam wijzigen',
   'sessions.sidebar.session.menu.copyId': 'Sessie-ID kopiëren',
-  'sessions.sidebar.session.menu.openInMiniChat': 'Openen in Mini Chat-venster',
   'sessions.sidebar.session.copyId.success': 'Sessie-ID gekopieerd',
   'sessions.sidebar.session.copyId.error': 'Kan het sessie-ID niet kopiëren',
   'header.sessionActions.openAria': 'Sessieacties openen',
@@ -796,8 +797,6 @@ export const dict = {
   'sessions.sidebar.session.menu.copyLink': 'Link kopiëren',
   'sessions.sidebar.session.menu.unshare': 'Delen stoppen',
   'sessions.sidebar.session.menu.exportMarkdown': 'Markdown exporteren',
-  'sessions.sidebar.session.menu.moveToWorktree': 'Naar nieuwe worktree verplaatsen',
-  'sessions.sidebar.session.menu.moveToWorktreeTargets': 'Naar worktree verplaatsen',
   'sessions.sidebar.session.menu.newWorktree': 'Nieuwe worktree...',
   'sessions.sidebar.session.moveToWorktree.success': 'Sessie verplaatst naar een nieuwe worktree',
   'sessions.sidebar.session.moveToWorktree.failed': 'Kan de sessie niet naar een nieuwe worktree verplaatsen',
@@ -807,7 +806,6 @@ export const dict = {
   'sessions.sidebar.session.moveToWorktree.current': 'Huidige worktree',
   'sessions.sidebar.session.moveToWorktree.existingSuccess': 'Sessie verplaatst naar worktree',
   'sessions.sidebar.session.moveToWorktree.existingFailed': 'Kan de sessie niet naar een worktree verplaatsen',
-  'sessions.sidebar.session.moveToWorktree.tooltip': 'Maakt een nieuwe worktree aan vanuit de huidige branch en verplaatst deze sessie en de bijbehorende subsessies daarheen. Niet-gecommitte wijzigingen blijven in de bron-worktree.',
   'sessions.sidebar.session.moveToWorktree.tooltipBusy': 'Beschikbaar wanneer de sessie inactief is. Stop de huidige activiteit of wacht tot die klaar is.',
   'sessions.sidebar.session.moveToWorktree.tooltipMoving': 'Deze sessie wordt al verplaatst naar een nieuwe worktree.',
   'sessions.sidebar.session.menu.openInSidePanel': 'In zijpaneel openen',
@@ -2063,8 +2061,6 @@ export const dict = {
   'rightSidebar.contextNotesTodo.todo.addAria': 'Taak toevoegen',
   'rightSidebar.contextNotesTodo.todo.empty': 'Nog geen taken. Voeg een kleine checklist toe voor dit project.',
   'rightSidebar.contextNotesTodo.todo.actions.markComplete': '"{text}" als afgerond markeren',
-  'rightSidebar.contextNotesTodo.todo.actions.collapse': 'Taak "{text}" samenvouwen',
-  'rightSidebar.contextNotesTodo.todo.actions.expand': 'Taak "{text}" uitvouwen',
   'rightSidebar.contextNotesTodo.todo.actions.send': '"{text}" sturen',
   'rightSidebar.contextNotesTodo.todo.actions.reorder': '"{text}" herordenen',
   'rightSidebar.contextNotesTodo.todo.sendMenu.currentSession': 'Naar huidige sessie sturen',
@@ -2267,6 +2263,7 @@ export const dict = {
   'directoryExplorerDialog.browse.retry': 'Probeer het opnieuw',
   'directoryExplorerDialog.browse.parentDirectory': 'Bovenliggende map',
   'directoryExplorerDialog.browse.addedBadge': 'Toegevoegd',
+  'directoryExplorerDialog.browse.linkTarget': 'Koppeling naar {path}',
   'directoryExplorerDialog.browse.quickAdd': 'Toevoegen',
   'directoryExplorerDialog.browse.selectForAdd': 'Selecteren om toe te voegen',
   'directoryExplorerDialog.footer.navigate': 'Navigeren',
@@ -2423,6 +2420,7 @@ export const dict = {
   'session.githubIntegration.validation.failed': 'Kan niet valideren',
   'chat.fileAttachment.toast.attachFailed': 'Kan het bestand niet toevoegen',
   'chat.fileAttachment.toast.tooLarge': '{name} is te groot om bij te voegen (meer dan {size}). Staat het bestand in het project, noem het dan met @.',
+  'chat.fileAttachment.toast.heicConversionFailed': '{name} kon niet van HEIC naar JPEG worden omgezet en is daarom niet bijgevoegd. Sla de foto op als JPEG en voeg hem opnieuw toe.',
   'chat.fileAttachment.toast.overSendLimit': '{name} is te groot om bij te voegen (meer dan {size}).',
   'chat.fileAttachment.toast.someFilesSkipped': 'Sommige bestanden zijn overgeslagen:\n{summary}',
   'chat.fileAttachment.toast.vscodePickFailed': 'Kan geen bestanden kiezen in VS Code',
@@ -2582,6 +2580,8 @@ export const dict = {
   'sessions.sidebar.group.empty.loadingSessions': 'Sessies laden…',
   'sessions.sidebar.group.empty.loadFailed': 'Kan de sessies niet vernieuwen.',
   'sessions.sidebar.group.empty.initializationFailed': 'Kan de werkruimte niet initialiseren.',
+  'sessions.sidebar.group.empty.trustPaused': 'Agents zijn gepauzeerd totdat je deze map vertrouwt.',
+  'sessions.sidebar.group.empty.reviewTrust': 'Bekijken en vertrouwen',
   'sessions.search.submitHint': 'Druk op Enter om te zoeken',
   'sessions.sidebar.group.empty.retry': 'Opnieuw proberen',
   'sessions.sidebar.group.empty.permissionDenied': 'Toegang tot de map is vereist.',
@@ -3987,6 +3987,8 @@ export const dict = {
   'sessions.moveSession.failed': 'Kan de sessie niet verplaatsen',
   'chat.folderMissing.text': 'Map {name} bestaat niet meer',
   'chat.folderMissing.action': 'Sessie verplaatsen',
+  'chat.trustPaused.text': 'Agents kunnen niet werken in {name} totdat je de plugins en opdrachten ervan vertrouwt.',
+  'chat.trustPaused.action': 'Bekijken en vertrouwen',
   'chat.worktreeSetup.running': 'Worktree wordt ingericht: de setupopdrachten van het project lopen…',
   'chat.draft.creatingSession': 'Sessie wordt aangemaakt…',
   'desktopHostSwitcher.startup.fellBackToLocal': 'De verbinding kwam niet tot stand, dus OpenChamber is op Local gestart. Verbind haar via de instantiekiezer zodra ze bereikbaar is.',

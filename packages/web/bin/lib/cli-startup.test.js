@@ -299,6 +299,40 @@ describe('startWindowsTaskAfterExit', () => {
 });
 
 describe('macOS startup service', () => {
+  it('leaves the enabling shell\'s PATH out of the service environment', () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-startup-'));
+    const platform = Object.getOwnPropertyDescriptor(process, 'platform');
+    const previous = { PATH: process.env.PATH, OPENCHAMBER_DATA_DIR: process.env.OPENCHAMBER_DATA_DIR };
+    const plistPath = path.join(home, 'Library', 'LaunchAgents', 'dev.openchamber.web.plist');
+    const writeFileSync = fs.writeFileSync;
+    const stopBeforeLaunchctl = new Error('Stop before activating launchd');
+
+    try {
+      Object.defineProperty(process, 'platform', { configurable: true, value: 'darwin' });
+      process.env.OPENCHAMBER_DATA_DIR = path.join(home, '.config', 'openchamber');
+      process.env.PATH = `/old/toolchain/bin${path.delimiter}${previous.PATH ?? ''}`;
+      vi.spyOn(os, 'homedir').mockReturnValue(home);
+      vi.spyOn(fs, 'writeFileSync').mockImplementation((file, ...args) => {
+        writeFileSync(file, ...args);
+        if (file === plistPath) throw stopBeforeLaunchctl;
+      });
+
+      expect(() => enableStartupService({})).toThrow(stopBeforeLaunchctl);
+      const plist = fs.readFileSync(plistPath, 'utf8');
+      expect(plist).toContain('<key>OPENCHAMBER_DATA_DIR</key>');
+      expect(plist).not.toContain('<key>PATH</key>');
+      expect(plist).not.toContain('/old/toolchain/bin');
+    } finally {
+      vi.restoreAllMocks();
+      Object.defineProperty(process, 'platform', platform);
+      for (const [key, value] of Object.entries(previous)) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+
   it('writes a launch agent without background process throttling', () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-startup-'));
     const platform = Object.getOwnPropertyDescriptor(process, 'platform');

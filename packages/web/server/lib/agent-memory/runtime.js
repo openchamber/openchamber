@@ -58,6 +58,27 @@ const MEMORY_TYPES = new Set(['fact', 'preference', 'reference']);
 import { asNonEmptyString, isRecord as isObjectRecord } from '../shared/guards.js';
 import { projectConfigFileStemOf } from '../projects/project-id.js';
 import { findThreatPattern } from './threat-patterns.js';
+import { z } from 'zod';
+
+const count = z.number().int().nonnegative().catch(0);
+
+/** The last pass's record in `memory-dream.json`; a field it cannot read falls back, never fails the file. */
+const dreamRecordSchema = z.object({
+  finishedAt: z.number().nonnegative(),
+  status: z.enum(['done', 'failed']).catch('done'),
+  merged: count,
+  removed: count,
+  rewritten: count,
+  undone: z.boolean().catch(false),
+  error: z.string().min(1).transform((value) => value.slice(0, 500)).nullable().catch(null),
+});
+
+const dreamStateSchema = z.object({
+  lastRunAt: z.number().nonnegative().nullable().catch(null),
+  record: dreamRecordSchema.nullable().catch(null),
+  snapshot: z.array(z.unknown()).nullable().catch(null),
+  after: z.array(z.object({ id: z.string().min(1), updatedAt: z.number() })).nullable().catch(null),
+});
 
 const PROJECT_ID_PATTERN = /^[a-zA-Z0-9._:-]+$/;
 
@@ -474,5 +495,98 @@ export const createAgentMemoryRuntime = (deps) => {
     };
   };
 
-  return { read, readAll, create, update, remove, resolveTarget };
+  /**
+   * The last dreaming pass of a scope, kept beside its store in
+   * `memory-dream.json`: when it ran, what it changed, and the entries as they
+   * were before it, which is all an undo needs. Only the last pass is kept, so
+   * the file stays one store's size.
+   */
+  const dreamStatePath = (resolved) => path.join(path.dirname(resolved.filePath), 'memory-dream.json');
+
+  /**
+   * Missing and malformed both read as "never dreamed": the state only decides
+   * when the next pass is due and offers an undo, so a lost file costs one
+   * early pass, never memory.
+   */
+  const readDreamState = async (target) => {
+    const resolved = resolveTarget(target);
+    const stored = await readJson(dreamStatePath(resolved)).catch(() => ({ missing: true, value: null }));
+    const parsed = dreamStateSchema.safeParse(stored.value);
+    if (!parsed.success) return { lastRunAt: null, record: null, snapshot: null, after: null };
+    const { lastRunAt, record, snapshot, after } = parsed.data;
+    return {
+      lastRunAt,
+      record,
+      snapshot: snapshot ? sanitizeEntries(snapshot, Date.now(), resolved.scope) : null,
+      after,
+    };
+  };
+
+  const writeDreamState = async (resolved, state) => {
+    await writeJsonAtomic(dreamStatePath(resolved), {
+      version: MEMORY_VERSION,
+      lastRunAt: state.lastRunAt,
+      record: state.record,
+      snapshot: state.snapshot,
+      after: state.after,
+    });
+  };
+
+  /**
+   * Records a finished pass. `snapshot` is the store as the pass found it and
+   * `after` the id and `updatedAt` of every entry it left; a pass that changed
+   * nothing passes `null` for both, so no undo is offered for it. Dreaming state
+   * is written under the store's own lock, so an undo can never interleave with
+   * a pass being recorded.
+   */
+  const recordDream = async (target, { lastRunAt, record, snapshot, after = null }) => {
+    const resolved = resolveTarget(target);
+    return withWriteLock(resolved.key, async () => {
+      const state = {
+        lastRunAt,
+        record: dreamRecordSchema.nullable().catch(null).parse(record ?? null),
+        snapshot: Array.isArray(snapshot) ? snapshot : null,
+        after: Array.isArray(snapshot) && Array.isArray(after) ? after : null,
+      };
+      await writeDreamState(resolved, state);
+      return state;
+    });
+  };
+
+  /**
+   * Takes back what the last pass changed, and only that: an entry it deleted
+   * comes back unless one with its id exists again, and an entry it rewrote
+   * returns to its old text unless someone changed it after the pass. An entry
+   * created since, an edit made since, and an entry deleted since all stay as
+   * they are, so undoing a pass never undoes the agent's or the user's own work.
+   * What the pass left is told apart by the `after` record: an entry still at
+   * the `updatedAt` the pass left it with is the pass's version.
+   */
+  const undoDream = async (target) => {
+    const resolved = resolveTarget(target);
+    return withWriteLock(resolved.key, async () => {
+      const state = await readDreamState(target);
+      if (!state.record || state.record.undone || !state.snapshot || !state.after) return null;
+      const current = await read(target);
+      const leftByPass = new Map(state.after.map((item) => [item.id, item.updatedAt]));
+      const beforeById = new Map(state.snapshot.map((entry) => [entry.id, entry]));
+      const currentIds = new Set(current.entries.map((entry) => entry.id));
+      const entries = current.entries.map((entry) => {
+        const before = beforeById.get(entry.id);
+        const passVersion = leftByPass.get(entry.id);
+        const rewrittenByPass = before && passVersion !== undefined && passVersion !== before.updatedAt;
+        return rewrittenByPass && entry.updatedAt === passVersion ? before : entry;
+      });
+      for (const before of state.snapshot) {
+        if (!leftByPass.has(before.id) && !currentIds.has(before.id)) entries.push(before);
+      }
+      const restored = entries.sort((a, b) => b.updatedAt - a.updatedAt).slice(0, limitForScope(resolved.scope));
+      await write(resolved, restored);
+      const record = { ...state.record, undone: true };
+      await writeDreamState(resolved, { lastRunAt: state.lastRunAt, record, snapshot: null, after: null });
+      return { entries: restored, record };
+    });
+  };
+
+  return { read, readAll, create, update, remove, resolveTarget, readDreamState, recordDream, undoDream };
 };

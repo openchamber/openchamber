@@ -5,6 +5,7 @@ import { HighlightStyle, defaultHighlightStyle, syntaxHighlighting } from '@code
 import { classHighlighter, tags as t } from '@lezer/highlight';
 
 import type { Theme } from '@/types/theme';
+import { editorCodeLineHeight } from '@/lib/editorCodeMetrics';
 import { resolveSyntaxTokens } from '../theme/syntax';
 
 export function createFlexokiCodeMirrorTheme(
@@ -21,6 +22,7 @@ export function createFlexokiCodeMirrorTheme(
   const tokens = resolveSyntaxTokens(theme.colors.syntax);
 
   const contentFontSize = options?.fontSize ? `${options.fontSize}px` : 'var(--text-code)';
+  const contentLineHeight = options?.fontSize ? `${editorCodeLineHeight(options.fontSize)}px` : '1.5';
   const backgroundColor = theme.colors.syntax.base.background;
 
   const ui = EditorView.theme({
@@ -28,11 +30,13 @@ export function createFlexokiCodeMirrorTheme(
       backgroundColor,
       color: theme.colors.syntax.base.foreground,
       fontSize: contentFontSize,
-      lineHeight: '1.5',
       position: 'relative' as const,
     },
     '.cm-scroller': {
       fontFamily: `var(--font-mono, ${monoFont})`,
+      // On the scroller: CodeMirror's base theme sets its 1.4 line height
+      // there, which beats one set on the editor root.
+      lineHeight: contentLineHeight,
       backgroundColor,
     },
 

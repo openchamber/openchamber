@@ -44,6 +44,7 @@ import {
   getWorktrees,
   setWorktreeTaskTitle,
   setWorktreePinned,
+  isWorktreeDirectoryPinned,
   seedBranchTaskTitle,
   markGeneratedBranchName,
   readRenameableGeneratedBranch,
@@ -1130,6 +1131,31 @@ describe('getStatus', () => {
     runGit(repo, ['commit', '-m', 'Initial commit']);
 
     await expect(getStatus(repo)).resolves.toMatchObject({ current: 'main' });
+  });
+
+  it.each(['OPENCHAMBER_GIT_BINARY', 'GIT_BINARY'])('runs Git through %s outside Windows', async (name) => {
+    if (process.platform === 'win32' || !canRunGit()) return;
+
+    const repo = createTempDir();
+    runGit(repo, ['init', '-b', 'main']);
+    const log = path.join(createTempDir(), 'calls.log');
+    const wrapper = path.join(createTempDir(), 'git-wrapper');
+    fs.writeFileSync(wrapper, `#!/bin/sh\nprintf '%s\\n' "$*" >> '${log}'\nexec git "$@"\n`, { mode: 0o755 });
+    const original = process.env[name];
+    process.env[name] = wrapper;
+    try {
+      await expect(getStatus(repo)).resolves.toMatchObject({ current: 'main' });
+      expect(fs.readFileSync(log, 'utf8')).toContain('status');
+
+      // An override that is not an executable file leaves Git to PATH.
+      fs.rmSync(log);
+      process.env[name] = path.join(repo, 'missing-git');
+      await expect(getStatus(repo)).resolves.toMatchObject({ current: 'main' });
+      expect(fs.existsSync(log)).toBe(false);
+    } finally {
+      if (original === undefined) delete process.env[name];
+      else process.env[name] = original;
+    }
   });
 
   it('reports a branch with no commit yet as unborn until the first commit (#4886)', async () => {
@@ -7195,6 +7221,19 @@ describe('worktree task titles', () => {
 
     expect(await setWorktreePinned(linked, false)).toEqual({ pinned: false, branch: 'feature/task' });
     expect((await entryOf())?.pinnedAt).toBeUndefined();
+  });
+
+  it('tells a pinned worktree\'s folders from the project checkout, whose branch config does not count', async () => {
+    const { repo, linked } = createLinkedWorktree();
+    expect(await isWorktreeDirectoryPinned(linked)).toBe(false);
+    await setWorktreePinned(linked, true, 'release', 1234);
+    expect(await isWorktreeDirectoryPinned(linked)).toBe(true);
+    fs.mkdirSync(path.join(linked, 'sub'), { recursive: true });
+    expect(await isWorktreeDirectoryPinned(path.join(linked, 'sub'))).toBe(true);
+    const rootBranch = String(runGit(repo, ['symbolic-ref', '--short', 'HEAD'])).trim();
+    runGit(repo, ['config', `branch.${rootBranch}.openchamberPinned`, '99']);
+    expect(await isWorktreeDirectoryPinned(repo)).toBe(false);
+    expect(await isWorktreeDirectoryPinned(path.join(repo, 'missing'))).toBe(false);
   });
 
   it('files a pinned worktree into a pin list and back, keeping the first pin time', async () => {

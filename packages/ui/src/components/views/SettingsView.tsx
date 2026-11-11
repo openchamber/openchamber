@@ -54,6 +54,7 @@ import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLay
 import { SettingsScrollbarTopClearanceContext } from '@/components/sections/shared/settingsScrollbarClearance';
 import {
   SETTINGS_SECTION_TITLE_CLASS,
+  SettingsAvailabilityProvider,
   SettingsBadge,
 } from '@/components/sections/shared/SettingsSection';
 import { useDeviceInfo } from '@/lib/device';
@@ -1095,6 +1096,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
   };
 
   return (
+    <SettingsAvailabilityProvider value={searchAvailabilityCtx}>
     <div ref={containerRef} data-settings-view="true" className={cn('relative flex h-full min-h-0 flex-col overflow-hidden bg-background')}>
       {isMobile ? (
         <div
@@ -1202,5 +1204,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
         )}
       </div>
     </div>
+    </SettingsAvailabilityProvider>
   );
 };

@@ -39,6 +39,7 @@ import { injectGuestDocumentStyles } from './html-styles.js';
 import { installGuest, installGuestFromZipBuffer, parseInstallRequest, uninstallGuest } from './install.js';
 import { enterpriseBlockedCapabilities } from './enterprise.js';
 import { resolveOpenCodePluginFolder } from './opencode-plugin.js';
+import { themedLogoSvg } from '../opencode/provider-logo-routes.js';
 import { guestUploadMaxBytes, readGuestUploadBody } from './upload.js';
 import { checkAllGuestUpdates, updateGuest, withGuestUpdate } from './updates.js';
 import { extensionsPersistPath, readExtensionStore, setCapabilityGrants } from './persist.js';
@@ -205,6 +206,9 @@ const sendInstallResult = (res, result) => {
     }
     if (conflict && result.id) {
       body.id = result.id;
+    }
+    if (result.code === 'invalid-manifest' && result.reason) {
+      body.reason = result.reason.slice(0, 1000);
     }
     return res.status(conflict ? 409 : 400).json(body);
   }
@@ -1092,8 +1096,9 @@ export const registerGuestRoutes = (app, {
 
   // One extension file, as a frame loads it. `token` is the legacy query
   // credential copied onto the page's relative URLs; `connectSource` is the
-  // one path the page may fetch from.
-  const sendGuestFile = async (res, guest, rawPath, { token = '', connectSource }) => {
+  // one path the page may fetch from; `theme` colours an SVG drawn as a
+  // provider logo, which an <img> cannot do from outside.
+  const sendGuestFile = async (res, guest, rawPath, { token = '', connectSource, theme }) => {
     let relativePath;
     try {
       relativePath = decodeURIComponent(Array.isArray(rawPath) ? rawPath.join('/') : (rawPath || ''));
@@ -1113,9 +1118,10 @@ export const registerGuestRoutes = (app, {
     } catch {
       return res.status(404).end();
     }
+    const themedSvg = contentType === 'image/svg+xml' ? themedLogoSvg(raw, theme) : null;
     const body = contentType.startsWith('text/html')
       ? injectGuestDocumentStyles(injectGuestAssetTokens(raw.toString('utf8'), token))
-      : raw;
+      : themedSvg ?? raw;
     res.setHeader('Content-Type', contentType);
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Cache-Control', 'no-store');
@@ -1197,6 +1203,7 @@ export const registerGuestRoutes = (app, {
       return await sendGuestFile(res, guest, req.params.filePath, {
         token: parseGuestUrlToken(req.query.oc_url_token),
         connectSource: connectSourceFor(req, `/api/guests/${guest.id}/`),
+        theme: req.query.theme,
       });
     } catch (error) {
       console.error('Failed to serve guest asset:', error);

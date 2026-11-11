@@ -1150,21 +1150,23 @@ html:not(.dark) .chat-scroll {
    view) renders into the shadow root of a `diffs-container`. Setting the font
    and line height on that host resolves `--text-code` where the instance sits, so local
    overrides such as the Files view's editor font size and the mobile code
-   size apply too. */
+   size apply too. Where code follows the Editor font size (the Files view and
+   the diffs on desktop), `useEditorCodeMetrics()` sets `--oc-code-line-height` so
+   the rows match the editor's. */
 diffs-container {
   --diffs-font-family: var(--font-mono, ui-monospace, monospace);
   --diffs-font-size: var(--text-code);
   /* 24px at the default 12px code size. Tool cards and the tool dialog wrap
      lines, so Pierre measures their rows and the height can scale. */
-  --diffs-line-height: calc(var(--text-code) * 2);
+  --diffs-line-height: var(--oc-code-line-height, calc(var(--text-code) * 2));
 }
 
-/* The Changes view and the walkthrough virtualize with fixed 24px rows
-   (`VIRTUAL_METRICS.lineHeight` in PierreDiffViewer.tsx). Without wrapping,
-   Pierre does not measure rows, so a taller row would make long diffs jump
-   while scrolling. */
+/* The Changes view and the walkthrough virtualize with fixed rows
+   (`lineHeight` in the diff's virtual metrics, PierreDiffViewer.tsx), so the
+   CSS row height must equal that number. Without wrapping, Pierre does not
+   measure rows, so a taller row would make long diffs jump while scrolling. */
 .pierre-diff-wrapper diffs-container {
-  --diffs-line-height: 24px;
+  --diffs-line-height: var(--oc-code-line-height, 24px);
 }
 
 /* Pierre diff viewer styling */
@@ -1984,6 +1986,13 @@ diffs-container {
   cursor: pointer;
   text-decoration: underline;
   text-underline-offset: 2px;
+  user-select: text !important;
+  -webkit-user-select: text !important;
+}
+
+/* An identifier an extension claims is a word in the sentence: a selection
+   across it keeps it, though its button role is unselectable app-wide. */
+.markdown-content [data-oc-guest-link] {
   user-select: text !important;
   -webkit-user-select: text !important;
 }

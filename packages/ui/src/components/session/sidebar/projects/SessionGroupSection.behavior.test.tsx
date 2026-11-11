@@ -51,7 +51,6 @@ mock.module('@/sync/sync-context', () => ({
   setActiveSession: () => undefined,
   useChildStoreManager: () => childStores,
   useDirectoryStore: () => null,
-  useGlobalSessionStatus: () => null,
   useSessionPermissions: () => null,
   useSessionBlockingRequests: () => ({ hasPermission: false, hasForm: false }),
   useSessionDirectory: () => undefined,

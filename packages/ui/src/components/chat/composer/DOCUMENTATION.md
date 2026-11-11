@@ -128,7 +128,8 @@ time; the reducer trims by creation time).
 
 The composer's top rows render inside the box and inside the mobile pill, so
 the surface stays one shape. Top to bottom: the session's folder being gone
-(`SessionFolderMissingRow`), worktree setup, the session still
+(`SessionFolderMissingRow`), a folder the user declined to trust
+(`SessionTrustPausedRow`), worktree setup, the session still
 being created from a draft's first message, and a message waiting for its
 space (`ComposerStatusStrip`; the creating line yields to the worktree line,
 so one wait shows one line, and appears only once the creation has taken
@@ -168,6 +169,17 @@ and a space's session cannot leave it. The move stays
 manual (*Missing worktree directories* in `sync/DOCUMENTATION.md`): only the user
 knows where the folder went. A running location outlives its folder and keeps
 answering, so no row shows while sends still work; the row comes once it unloads.
+
+### Why a folder the user declined to trust gets a row
+
+After "Not this time" in the folder trust prompt (`lib/opencodeTrust.ts`) the
+server refuses every OpenCode request for the folder, so the model and agent
+pickers stay on Loading and a send fails on the missing model before it could
+ask for trust again. `SessionTrustPausedRow` shows while the folder is paused and
+reopens the prompt; once trust is saved it reloads the folder's sessions and
+catalog (`useResumeOpenCodeFolder`). A paused folder stays paused when the user
+opens another folder, unlike the decline that only silences background reads,
+so the row and the sidebar line do not vanish while nothing changed.
 
 `RevertedMessagesStrip` lists the user messages a staged revert hides (see
 "Committing a revert" in `sync/DOCUMENTATION.md`). Its one action is Restore,
@@ -407,7 +419,11 @@ no `image` input gets only the link, since it could not read the attachment
 (#5087), and the modality toast says where the images went. Any other model,
 unknown metadata included, also gets the image attached under the link's name,
 with no second `[name]` citation (#5218). An image that could not be saved
-attaches as before, with an error toast. With the setting off nothing is
+attaches as before, with an error toast. A HEIC the bundled decoder cannot read
+(Apple's HDR gain-map photos) is saved unconverted under its own name and gets
+only its link in both cases: providers refuse HEIC image parts, and the store's
+own fallback for it (`sync/DOCUMENTATION.md`) would write a second copy and add
+a chip that repeats the link. With the setting off nothing is
 saved. One setting covers both cases: a split by model kind read as a puzzle of
 exceptions in Settings, and nobody needs the files for one kind of model only.
 The browser annotation screenshot and comment-field image pastes keep
@@ -1068,6 +1084,41 @@ goes as its own context part (`sessionReferences.ts`, kinds `session` and
 - VS Code keeps session links inert (its sessions live on its own OpenCode),
   so it offers neither the `@` sessions nor the chips.
 
+## Linked issues and PRs in the text
+
+A pasted link to an issue, change request or tracker item (`referenceLinks.ts`)
+is read the way the picker reads a chosen item (`resolveReferenceLink` in
+`components/references/resolveComposerReferences.ts`), through the project the
+picker uses, and then draws as a chip where it stands: its number and title.
+
+- The text decides what is sent, as with session links: each linked item once,
+  after the chips above the composer, as the same context part the picker
+  sends, and the session records it as a linked issue. An item a picker chip
+  already carries keeps the chip's version, so its diff choice stands. A link
+  deleted from the text is not sent. The model reads the link where the user
+  put it. A send waits for a paste still being read, so a quick Enter never
+  sends the link bare; a second Enter meanwhile does nothing.
+- Only a paste that lands in the text reads a link, afresh each time, as the
+  picker does; a large paste that goes as a file reads none. A link
+  typed by hand stays text: typing passes through `/issues/1` on the way to
+  `/issues/12`, and a read per keystroke would attach the wrong item. A link
+  this composer has read before draws as its chip again wherever it reappears
+  (typed or restored), with that read.
+- Editing a queued message puts each item its text links back as that link's
+  chip, the rest above the text.
+- A link on another host than the project's, or one no account can read, stays
+  text with the picker's attach-failed toast. A link past the project's fork
+  network is read again as a linked item, as the Tracker does. Discussions stay
+  text. A change request goes without its diff, the picker's default.
+- `/btw` and VS Code read no links, as they take no picker chips.
+
+### Why inline chips and not picker chips
+
+The picker's chips sit above the text, apart from the sentence. A pasted link
+is part of the sentence ("compare this with that"); turning it into a chip
+above the composer would cut the sentence apart. The maintainer chose the chip
+in place.
+
 ## Paste routing
 
 On Linux, a middle-click paste belongs to the editable field or terminal under
@@ -1235,7 +1286,13 @@ one app-wide composer state is split per column:
   prompt while the column still shows the previous session, and taking it then
   would save it into that session's draft. Preset
   submits, guest-issue attaches and pending composer references are main-chat
-  only.
+  only. The mode says how the text meets the draft: `replace`, `append` (a
+  block on its own lines), `append-inline`, or `slash-command`, where the text
+  is a command name the draft starts with and the rest of the draft becomes
+  its argument (`withLeadingSlashCommand`; the command palette's extension
+  commands). Taking one leaves shell mode. An expanded `/btw` fork leaves it
+  pending for the parent, because the fork does not route extension commands
+  and would send `/name` to its model as text.
 - **Focus.** `focusChatInput()` focuses the main chat's composer and skips
   pinned ones; a chat focuses its own through `useChatColumnActions().focusInput`.
   A pinned composer takes focus on session entry only when the focus is

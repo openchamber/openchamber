@@ -27,6 +27,7 @@ import { compactionSettingsI18n } from './compaction-settings.i18n';
 import { heapSnapshotI18n } from './heap-snapshot.i18n';
 import { consoleBudgetsI18n } from './console-budgets.i18n';
 import { imageToolI18n } from './image-tool.i18n';
+import { memoryDreamingI18n } from './memory-dreaming.i18n';
 import { usageToolI18n } from './usage-tool.i18n';
 import { openchamberToolsLayoutI18n } from './openchamber-tools-layout.i18n';
 import { openchamberToolOutputI18n } from './openchamber-tool-output.i18n';
@@ -208,6 +209,7 @@ export const dict: Record<I18nKey, string> = {
   ...heapSnapshotI18n['zh-CN'],
   ...consoleBudgetsI18n['zh-CN'],
   ...imageToolI18n['zh-CN'],
+  ...memoryDreamingI18n['zh-CN'],
   ...usageToolI18n['zh-CN'],
   ...openchamberToolsLayoutI18n['zh-CN'],
   ...openchamberToolOutputI18n['zh-CN'],
@@ -768,7 +770,6 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.project.actions.newDraftSession': '新建草稿会话',
   'sessions.sidebar.session.menu.rename': '重命名',
   'sessions.sidebar.session.menu.copyId': '复制会话 ID',
-  'sessions.sidebar.session.menu.openInMiniChat': '在 Mini Chat 中打开',
   'sessions.sidebar.session.copyId.success': '会话 ID 已复制',
   'sessions.sidebar.session.copyId.error': '无法复制会话 ID',
   'header.sessionActions.openAria': '打开会话操作',
@@ -802,8 +803,6 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.session.menu.copyLink': '复制链接',
   'sessions.sidebar.session.menu.unshare': '取消分享',
   'sessions.sidebar.session.menu.exportMarkdown': '导出 Markdown',
-  'sessions.sidebar.session.menu.moveToWorktree': '移至新工作树',
-  'sessions.sidebar.session.menu.moveToWorktreeTargets': '移至工作树',
   'sessions.sidebar.session.menu.newWorktree': '新建工作树...',
   'sessions.sidebar.session.moveToWorktree.success': '会话已移至新工作树',
   'sessions.sidebar.session.moveToWorktree.failed': '无法将会话移至新工作树',
@@ -813,7 +812,6 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.session.moveToWorktree.current': '当前工作树',
   'sessions.sidebar.session.moveToWorktree.existingSuccess': '会话已移至工作树',
   'sessions.sidebar.session.moveToWorktree.existingFailed': '无法将会话移至工作树',
-  'sessions.sidebar.session.moveToWorktree.tooltip': '从当前分支创建新工作树，并将此会话及其子会话移至其中。未提交的更改留在源工作树中。',
   'sessions.sidebar.session.moveToWorktree.tooltipBusy': '仅在会话空闲时可用。请停止当前活动或等待其完成。',
   'sessions.sidebar.session.moveToWorktree.tooltipMoving': '此会话已在移至新工作树。',
   'sessions.sidebar.session.menu.openInSidePanel': '在侧边面板中打开',
@@ -2034,8 +2032,6 @@ export const dict: Record<I18nKey, string> = {
   'rightSidebar.contextNotesTodo.todo.addAria': '添加待办',
   'rightSidebar.contextNotesTodo.todo.empty': '还没有待办。为此项目添加一个简短清单吧。',
   'rightSidebar.contextNotesTodo.todo.actions.markComplete': '将“{text}”标记为已完成',
-  'rightSidebar.contextNotesTodo.todo.actions.collapse': '折叠待办“{text}”',
-  'rightSidebar.contextNotesTodo.todo.actions.expand': '展开待办“{text}”',
   'rightSidebar.contextNotesTodo.todo.actions.send': '发送“{text}”',
   'rightSidebar.contextNotesTodo.todo.actions.reorder': '重新排序"{text}"',
   'rightSidebar.contextNotesTodo.todo.sendMenu.currentSession': '发送到当前会话',
@@ -2233,6 +2229,7 @@ export const dict: Record<I18nKey, string> = {
   'directoryExplorerDialog.browse.retry': '重试',
   'directoryExplorerDialog.browse.parentDirectory': '上级目录',
   'directoryExplorerDialog.browse.addedBadge': '已添加',
+  'directoryExplorerDialog.browse.linkTarget': '链接到 {path}',
   'directoryExplorerDialog.browse.quickAdd': '添加',
   'directoryExplorerDialog.browse.selectForAdd': '选择以添加',
   'directoryExplorerDialog.footer.navigate': '导航',
@@ -2389,6 +2386,7 @@ export const dict: Record<I18nKey, string> = {
   'session.githubIntegration.validation.failed': '校验失败',
   'chat.fileAttachment.toast.attachFailed': '附加文件失败',
   'chat.fileAttachment.toast.tooLarge': '{name} 过大，无法附加（超过 {size}）。如果它在项目中，请用 @ 提及。',
+  'chat.fileAttachment.toast.heicConversionFailed': '{name} 无法从 HEIC 转换为 JPEG，因此未附加。请将照片保存为 JPEG 后重试。',
   'chat.fileAttachment.toast.overSendLimit': '{name} 过大，无法附加（超过 {size}）。',
   'chat.fileAttachment.toast.someFilesSkipped': '以下文件被跳过：\n{summary}',
   'chat.fileAttachment.toast.vscodePickFailed': '在 VS Code 中选择文件失败',
@@ -2548,6 +2546,8 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.group.empty.loadingSessions': '正在加载会话…',
   'sessions.sidebar.group.empty.loadFailed': '无法刷新会话。',
   'sessions.sidebar.group.empty.initializationFailed': '无法初始化工作区。',
+  'sessions.sidebar.group.empty.trustPaused': '在你信任此文件夹之前，智能体处于暂停状态。',
+  'sessions.sidebar.group.empty.reviewTrust': '查看并信任',
   'sessions.search.submitHint': '按 Enter 键搜索',
   'sessions.sidebar.group.empty.retry': '重试',
   'sessions.sidebar.group.empty.permissionDenied': '需要文件夹访问权限。',
@@ -3988,6 +3988,8 @@ export const dict: Record<I18nKey, string> = {
   'sessions.moveSession.failed': '无法移动会话',
   'chat.folderMissing.text': '文件夹 {name} 已不存在',
   'chat.folderMissing.action': '移动会话',
+  'chat.trustPaused.text': '在你信任 {name} 的插件和命令之前，智能体无法在其中工作。',
+  'chat.trustPaused.action': '查看并信任',
   'chat.worktreeSetup.running': '正在设置 worktree：正在运行项目的设置命令…',
   'chat.draft.creatingSession': '正在创建会话…',
   'desktopHostSwitcher.startup.fellBackToLocal': '未能建立连接，因此 OpenChamber 以 Local 启动。待其可访问后，请在实例切换器中连接。',

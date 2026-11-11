@@ -8,6 +8,7 @@ import {
     getOrderedListContinuationEdit,
     shouldWrapSelectionAsLink,
     withInlineInsertionBoundaries,
+    withLeadingSlashCommand,
 } from '../text';
 
 describe('appendWithLineBreaks', () => {
@@ -51,6 +52,28 @@ describe('appendInlineText', () => {
 
     test('the addition is trimmed before joining', () => {
         expect(appendInlineText('hello', '  world  ')).toBe('hello world ');
+    });
+});
+
+describe('withLeadingSlashCommand', () => {
+    test('the draft becomes the argument', () => {
+        expect(withLeadingSlashCommand('DEMO-2', 'task')).toBe('/task DEMO-2');
+        expect(withLeadingSlashCommand('  DEMO-2', 'task')).toBe('/task DEMO-2');
+    });
+
+    test('an empty draft leaves room for the argument', () => {
+        expect(withLeadingSlashCommand('', 'task')).toBe('/task ');
+        expect(withLeadingSlashCommand('/task', 'task')).toBe('/task ');
+    });
+
+    test('a draft that already starts with the command keeps its text', () => {
+        expect(withLeadingSlashCommand('/task DEMO-2', 'task')).toBe('/task DEMO-2');
+        expect(withLeadingSlashCommand('/task\nnotes', 'task')).toBe('/task\nnotes');
+    });
+
+    test('another command or a longer name is part of the argument', () => {
+        expect(withLeadingSlashCommand('/tasks x', 'task')).toBe('/task /tasks x');
+        expect(withLeadingSlashCommand('/pr 12', 'task')).toBe('/task /pr 12');
     });
 });
 

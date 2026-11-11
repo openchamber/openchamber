@@ -286,23 +286,34 @@ const listWindowsGitInstallCandidates = () => {
   return candidates;
 };
 
-const resolveGitBinary = () => {
-  if (process.platform !== 'win32') {
-    return 'git';
-  }
-  if (resolvedGitBinary) {
-    return resolvedGitBinary;
-  }
-
+// GIT_BINARY or OPENCHAMBER_GIT_BINARY when it names an executable file, else null.
+const resolveExplicitGitBinary = () => {
   const explicit = [process.env.GIT_BINARY, process.env.OPENCHAMBER_GIT_BINARY]
     .map((value) => (typeof value === 'string' ? value.trim() : ''))
     .filter(Boolean);
   for (const candidate of explicit) {
     const normalized = normalizeGitExecutableCandidate(candidate);
     if (isExecutableFile(normalized)) {
-      resolvedGitBinary = normalized;
-      return resolvedGitBinary;
+      return normalized;
     }
+  }
+  return null;
+};
+
+const resolveGitBinary = () => {
+  // Outside Windows there is no install-folder search to cache; the override
+  // costs one stat per call, and without it Git comes from PATH.
+  if (process.platform !== 'win32') {
+    return resolveExplicitGitBinary() || 'git';
+  }
+  if (resolvedGitBinary) {
+    return resolvedGitBinary;
+  }
+
+  const explicit = resolveExplicitGitBinary();
+  if (explicit) {
+    resolvedGitBinary = explicit;
+    return resolvedGitBinary;
   }
 
   const pathDiscovered = [
@@ -5249,6 +5260,21 @@ export async function setWorktreePinned(directory, pinned, list = null, now = Da
     void publishWorktreeTopologyChange(directoryPath);
   }
   return { pinned, branch };
+}
+
+/**
+ * Whether `directory` is inside a linked worktree whose task the user pinned.
+ * The project's own checkout is never a pinned work, whatever its branch's
+ * config says. Any git failure reads as not pinned.
+ */
+export async function isWorktreeDirectoryPinned(directory) {
+  const directoryPath = normalizeDirectoryPath(directory);
+  if (!directoryPath || !fs.existsSync(directoryPath)) return false;
+  const result = await runGitCommand(directoryPath, ['rev-parse', '--path-format=absolute', '--git-dir', '--git-common-dir', '--abbrev-ref', 'HEAD']);
+  if (!result.success) return false;
+  const [gitDir, commonDir, branch] = String(result.stdout || '').split(/\r?\n/);
+  if (!gitDir || !commonDir || gitDir === commonDir || !branch || branch === 'HEAD') return false;
+  return parseBranchPin(await readGitConfigValue(directoryPath, `branch.${branch}.openchamberPinned`)) !== null;
 }
 
 const readGitConfigValue = async (directory, key) => {

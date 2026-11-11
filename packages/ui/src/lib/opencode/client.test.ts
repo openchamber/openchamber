@@ -1175,6 +1175,22 @@ describe("directory availability batching", () => {
   })
 })
 
+describe("directory real paths", () => {
+  test("maps each resolved directory to its real path and leaves the rest out", async () => {
+    responses.push(json({ results: [
+      { path: "/home/me/link", isDirectory: true, realPath: "/home/me/project" },
+      { path: "/home/me/gone", isDirectory: false, reason: "not-found" },
+    ] }))
+    const realPaths = await opencodeClient.getDirectoryRealPaths(["/home/me/link", "/home/me/gone"])
+    expect([...realPaths]).toEqual([["/home/me/link", "/home/me/project"]])
+  })
+
+  test("resolves nothing when the runtime refuses the probe (VS Code 501)", async () => {
+    responses.push(json({ error: "Directory availability probes are not supported in the VS Code runtime" }, 501))
+    expect((await opencodeClient.getDirectoryRealPaths(["/home/me/link"])).size).toBe(0)
+  })
+})
+
 describe("a subagent transcript showing a message its parent stores", () => {
   const messageID = "msg_parent_owned"
   const wire = {

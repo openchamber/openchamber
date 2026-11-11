@@ -18,6 +18,25 @@ bend one, raise it as a product question before building (root `AGENTS.md`).
 Tuned values (sheen, shadow, top line strength) were set by eye by the
 maintainer; keep them as they are unless asked.
 
+## Proposing a design
+
+- **Read the code first.** Before proposing how something should look or
+  behave, read the stores and components behind it: how the list is sorted,
+  what counts as active, what already groups it. A proposal guessed from a
+  screenshot rests on behavior the app does not have.
+- **Build variants from existing precedent.** Find the app's own pattern for
+  the job (the question tool's form fields, Settings chips, the Git and MCP
+  banners, the dotted leaders in the Keyboard Shortcuts dialog) and vary
+  that. An invented look hides the real flaws: a check inside a pill shifts
+  its layout, a segmented control reads as tabs.
+- **Draw variants with the real values.** Show them as an HTML page that uses
+  the exact values from our CSS (tile tone, radii, paddings, table borders).
+  A live screenshot works for one component that fits the viewport; crops of
+  the chat tend to miss the component. Image paths in such a page are whole
+  strings, never concatenated, or the images do not load.
+- **One component per question.** Ask about one component per page, never a
+  combined picker of several.
+
 ## Depth: controls stand up, layout lies flat
 
 The app has one rule for depth, and every surface follows from it:
@@ -118,7 +137,9 @@ Using a control must not shift anything the user did not touch.
   visible stays visible in that slot; visibility is never a reason to grow the
   container.
 - **Grow away from the user's focus.** A row a composer mode adds goes above
-  the input, so the field the user types into stays put.
+  the input, so the field the user types into stays put; a row added below
+  pushes the field up while they type. This holds for every composer or input
+  redesign.
 - **States keep their size.** Selected, hover, active and loading states change
   colour and fill, never width, weight-driven reflow, padding or borders that
   appear from nothing. A button showing a spinner keeps its width; a skeleton

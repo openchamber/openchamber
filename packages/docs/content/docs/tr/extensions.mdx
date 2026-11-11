@@ -55,6 +55,7 @@ Panel göstermek ve hangi proje ile oturumun açık olduğunu okumak izin gerekt
 - **Kendi başına oturum başlatma ve mesaj gönderme**: yerel servisi bunu açık bir pencere olmadan yapar, bu jeton harcar ve araç çalıştırabilir.
 - **Ajanların okuduklarına ekleme**: oturumlarınızın talimatlarındaki metin ve uzantı açıkken her ajana sunulan beceriler.
 - **OpenCode'a eklenti ekleme**: paketin eklentisi, uzantı açıkken OpenCode'unuza yüklenir. Eklenti kodu yerel bir servis gibi tüm erişiminizle OpenCode'un içinde çalışır; bu yüzden yalnızca yazara güveniyorsanız izin verin.
+- **Sohbetlerdeki bağlantılarını tanı**: `DEMO-12` gibi tanımlayıcılar ve uzantının sitesine giden bağlantılar sohbet mesajlarınızda tıklanabilir olur. İletişim kutusu hangilerinin tanındığını listeler ve tıklamanın bunları uzantıda mı açacağını yoksa mesajınıza mı iliştireceğini söyler. OpenChamber'ın zaten tanıdığı bağlantılar, örneğin GitHub pull request'leri ve Linear issue'ları, her zamanki gibi davranır.
 
 Yerel bir servis ayrıca OpenChamber çalıştığı sürece çalışmaya devam edebilir veya bir takvime göre uyanabilir. İletişim kutusu bunu **Yerel servis çalıştırma** altında söyler ve `@` işaretinden sonra yazdıklarınızın servise ne zaman gittiğini de belirtir. Bir uzantı `@` menüsüne kendi satırlarını, ajan yanıtlarına da kendi bloklarını ekleyebilir. Uzantıyı duraklatmak bunların hepsini kaldırır.
 
@@ -64,7 +65,7 @@ Daha yeni bir sürüm izin verdiğinizden fazlasını istediğinde kart **Onay g
 
 ## Nerede görünür
 
-Raydaki panelinin yanı sıra bir uzantı, zaten kullandığınız menülere girdiler ekleyebilir: bir sohbet mesajındaki eylemler, bir oturumun menüsü, sohbet kutusunun yanındaki + menüsü ve hiçbir şey açmadan bir şey iliştiren `/task ABC-12` gibi eğik çizgi komutları. Ayrıca kendi araçlarına, OpenChamber'ın yerleşik araçlarında olduğu gibi sohbette düzgün bir simge, başlık ve çıktı düzeni verebilir. Bunlardan hangilerini sunacağına uzantı karar verir; uzantıya izin verene kadar hepsi kapalıdır.
+Raydaki panelinin yanı sıra bir uzantı, zaten kullandığınız menülere girdiler ekleyebilir: bir sohbet mesajındaki eylemler, bir oturumun menüsü, sohbet kutusunun yanındaki + menüsü ve hiçbir şey açmadan bir şey iliştiren `/task ABC-12` gibi eğik çizgi komutları. Ayrıca kendi araçlarına, OpenChamber'ın yerleşik araçlarında olduğu gibi sohbette düzgün bir simge, başlık ve çıktı düzeni verebilir. Bunlardan hangilerini sunacağına uzantı karar verir; uzantıya izin verene kadar hepsi kapalıdır. Oturum eylemleri ve eğik çizgi komutları, adlarını ya da uzantının adını aradığınızda komut paletinde (⌘P veya Ctrl+P) de çıkar.
 
 Bazı uzantılar kendi paneli yerine canlı bir görüntü gösterir: bir ajanın sunucuda içinde çalıştığı şey, örneğin bir tarayıcı veya bir simülatör. Kontrolü almak için görüntüye tıklayın ya da yazın; durum satırı **Kontrol sizde** der ve **Ajana geri ver** düğmesine basana kadar ajanın tarayıcı eylemleri reddedilir. Kopyalama ve yapıştırma her zamanki gibi çalışır. Aynı anda bağlı başka bir cihaz kontrolün kimde olduğunu görür ve onu devralamaz. Böyle bir uzantı, görüntünün yanına kendi kontrollerini ekleyebilir, örneğin üstüne bir adres çubuğu veya yanına bir araç sütunu.
 

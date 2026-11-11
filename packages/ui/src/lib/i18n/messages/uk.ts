@@ -27,6 +27,7 @@ import { compactionSettingsI18n } from './compaction-settings.i18n';
 import { heapSnapshotI18n } from './heap-snapshot.i18n';
 import { consoleBudgetsI18n } from './console-budgets.i18n';
 import { imageToolI18n } from './image-tool.i18n';
+import { memoryDreamingI18n } from './memory-dreaming.i18n';
 import { usageToolI18n } from './usage-tool.i18n';
 import { openchamberToolsLayoutI18n } from './openchamber-tools-layout.i18n';
 import { openchamberToolOutputI18n } from './openchamber-tool-output.i18n';
@@ -218,6 +219,7 @@ export const dict: Record<I18nKey, string> = {
   ...heapSnapshotI18n.uk,
   ...consoleBudgetsI18n.uk,
   ...imageToolI18n.uk,
+  ...memoryDreamingI18n.uk,
   ...usageToolI18n.uk,
   ...openchamberToolsLayoutI18n.uk,
   ...openchamberToolOutputI18n.uk,
@@ -772,7 +774,6 @@ export const dict: Record<I18nKey, string> = {
   "sessions.sidebar.project.actions.newDraftSession": "Нова чернетка сесії",
   "sessions.sidebar.session.menu.rename": "Перейменувати",
   "sessions.sidebar.session.menu.copyId": "Копіювати ID сесії",
-  "sessions.sidebar.session.menu.openInMiniChat": "Відкрити в Mini Chat",
   "sessions.sidebar.session.copyId.success": "ID сесії скопійовано",
   "sessions.sidebar.session.copyId.error": "Не вдалося скопіювати ID сесії",
   "header.sessionActions.openAria": "Відкрити дії із сесією",
@@ -806,8 +807,6 @@ export const dict: Record<I18nKey, string> = {
   "sessions.sidebar.session.menu.copyLink": "Копіювати посилання",
   "sessions.sidebar.session.menu.unshare": "Скасувати спільний доступ",
   "sessions.sidebar.session.menu.exportMarkdown": "Експорт Markdown",
-  "sessions.sidebar.session.menu.moveToWorktree": "Перенести в новий worktree",
-  "sessions.sidebar.session.menu.moveToWorktreeTargets": "Перенести в worktree",
   "sessions.sidebar.session.menu.newWorktree": "Новий worktree...",
   "sessions.sidebar.session.moveToWorktree.success": "Сесію перенесено в новий worktree",
   "sessions.sidebar.session.moveToWorktree.failed": "Не вдалося перенести сесію в новий worktree",
@@ -817,7 +816,6 @@ export const dict: Record<I18nKey, string> = {
   "sessions.sidebar.session.moveToWorktree.current": "Поточний worktree",
   "sessions.sidebar.session.moveToWorktree.existingSuccess": "Сесію перенесено в worktree",
   "sessions.sidebar.session.moveToWorktree.existingFailed": "Не вдалося перенести сесію в worktree",
-  "sessions.sidebar.session.moveToWorktree.tooltip": 'Створює новий worktree з поточної гілки й переносить туди цю сесію та її підсесії. Незакомічені зміни лишаються у вихідному worktree.',
   "sessions.sidebar.session.moveToWorktree.tooltipBusy": "Доступно, коли сесія неактивна. Зупиніть поточну активність або дочекайтеся її завершення.",
   "sessions.sidebar.session.moveToWorktree.tooltipMoving": "Ця сесія вже переноситься в новий worktree.",
   "sessions.sidebar.session.menu.openInSidePanel": "Відкрити на бічній панелі",
@@ -2036,8 +2034,6 @@ export const dict: Record<I18nKey, string> = {
   "rightSidebar.contextNotesTodo.todo.addAria": "Додати завдання",
   "rightSidebar.contextNotesTodo.todo.empty": "Поки що немає завдань. Додайте короткий список для цього проєкту.",
   "rightSidebar.contextNotesTodo.todo.actions.markComplete": "Позначити \"{text}\" як завершене",
-  "rightSidebar.contextNotesTodo.todo.actions.collapse": "Згорнути завдання \"{text}\"",
-  "rightSidebar.contextNotesTodo.todo.actions.expand": "Розгорнути завдання \"{text}\"",
   "rightSidebar.contextNotesTodo.todo.actions.send": "Надіслати \"{text}\"",
   "rightSidebar.contextNotesTodo.todo.actions.reorder": "Змінити порядок \"{text}\"",
   "rightSidebar.contextNotesTodo.todo.sendMenu.currentSession": "Надіслати до поточної сесії",
@@ -2235,6 +2231,7 @@ export const dict: Record<I18nKey, string> = {
   "directoryExplorerDialog.browse.retry": "Спробувати знову",
   "directoryExplorerDialog.browse.parentDirectory": "Батьківський каталог",
   "directoryExplorerDialog.browse.addedBadge": "Додано",
+  "directoryExplorerDialog.browse.linkTarget": "Посилання на {path}",
   "directoryExplorerDialog.browse.quickAdd": "Додати",
   "directoryExplorerDialog.browse.selectForAdd": "Вибрати для додавання",
   "directoryExplorerDialog.footer.navigate": "Навігація",
@@ -2391,6 +2388,7 @@ export const dict: Record<I18nKey, string> = {
   "session.githubIntegration.validation.failed": "Помилка перевірки",
   "chat.fileAttachment.toast.attachFailed": "Не вдалося прикріпити файл",
   "chat.fileAttachment.toast.tooLarge": "{name} завеликий, щоб прикріпити (понад {size}). Якщо файл є в проєкті, згадайте його через @.",
+  "chat.fileAttachment.toast.heicConversionFailed": "Не вдалося конвертувати {name} з HEIC у JPEG, тому файл не додано. Збережіть фото як JPEG і додайте його знову.",
   "chat.fileAttachment.toast.overSendLimit": "{name} завеликий, щоб прикріпити (понад {size}).",
   "chat.fileAttachment.toast.someFilesSkipped": "Деякі файли були пропущені:\n{summary}",
   "chat.fileAttachment.toast.vscodePickFailed": "Не вдалося вибрати файли в VS Code",
@@ -2550,6 +2548,8 @@ export const dict: Record<I18nKey, string> = {
   "sessions.sidebar.group.empty.loadingSessions": "Завантаження сесій…",
   "sessions.sidebar.group.empty.loadFailed": "Не вдалося оновити сесії.",
   "sessions.sidebar.group.empty.initializationFailed": "Не вдалося підготувати робочий простір.",
+  "sessions.sidebar.group.empty.trustPaused": "Агенти на паузі, доки ви не довірите цій папці.",
+  "sessions.sidebar.group.empty.reviewTrust": "Переглянути й довірити",
   "sessions.search.submitHint": "Натисніть Enter для пошуку",
   "sessions.sidebar.group.empty.retry": "Спробувати знову",
   "sessions.sidebar.group.empty.permissionDenied": "Потрібен доступ до папки.",
@@ -3988,6 +3988,8 @@ export const dict: Record<I18nKey, string> = {
   'sessions.moveSession.failed': 'Не вдалося перенести сесію',
   'chat.folderMissing.text': 'Папки {name} більше немає',
   'chat.folderMissing.action': 'Перенести сесію',
+  'chat.trustPaused.text': 'Агенти не працюватимуть у {name}, доки ви не довірите її плагінам і командам.',
+  'chat.trustPaused.action': 'Переглянути й довірити',
   'chat.worktreeSetup.running': 'Налаштовуємо worktree: виконуються команди налаштування проєкту…',
   'chat.draft.creatingSession': 'Створюємо сесію…',
   'desktopHostSwitcher.startup.fellBackToLocal': 'З\'єднання не відкрилося, тож OpenChamber запустився на Local. Підключіть інстанс через перемикач, щойно він стане доступним.',

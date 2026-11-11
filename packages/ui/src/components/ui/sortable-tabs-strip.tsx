@@ -42,6 +42,8 @@ export type SortableTabsStripItem = {
   /** Dimmed folder shown before the label, telling apart files that share a
       name. Such a tab is never width-capped, so the folder stays whole. */
   labelFolder?: string;
+  /** A small mark after the label, such as a Settings "new" badge. */
+  accessory?: React.ReactNode;
 };
 
 const TabLabelText: React.FC<{ item: SortableTabsStripItem }> = ({ item }) => (
@@ -681,6 +683,7 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
                         </span>
                       ) : null}
                       {shouldShowLabel ? <span className={cn('animated-tabs__label truncate', item.preview && 'italic')}><TabLabelText item={item} /></span> : null}
+                      {shouldShowLabel ? item.accessory : null}
                     </>
                   ) : (
                     <span className={cn('flex min-w-0 flex-nowrap items-center gap-1.5', !isScrollable && 'justify-center')}>
@@ -696,6 +699,7 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
                         </span>
                       ) : null}
                       <span className={cn('truncate leading-[1.2]', item.preview && 'italic')}><TabLabelText item={item} /></span>
+                      {item.accessory}
                     </span>
                   )}
                 </button>

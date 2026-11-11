@@ -45,6 +45,9 @@ type SessionDisplayStore = {
   /** A work in the In work block also stays in its project or folder; off by default. */
   keepWorkInPlace: boolean;
   setKeepWorkInPlace: (keep: boolean) => void;
+  /** A work in the Pinned block also stays in its project or folder, and in In work; on by default. */
+  keepPinnedInPlace: boolean;
+  setKeepPinnedInPlace: (keep: boolean) => void;
   /** Local display preference; motion remains opt-in. */
   animatedActivityIndicators: boolean;
   setAnimatedActivityIndicators: (enabled: boolean) => void;
@@ -177,6 +180,8 @@ export const useSessionDisplayStore = create<SessionDisplayStore>()(
       setSidebarGrouping: (grouping) => set({ sidebarGrouping: grouping }),
       keepWorkInPlace: false,
       setKeepWorkInPlace: (keep) => set({ keepWorkInPlace: keep }),
+      keepPinnedInPlace: true,
+      setKeepPinnedInPlace: (keep) => set({ keepPinnedInPlace: keep }),
       showChatsSection: true,
       showWorkSection: true,
       // On for new installs: pinned work gets its own block on top. Stored

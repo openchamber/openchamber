@@ -55,6 +55,7 @@ Pokazywanie panelu i odczyt, który projekt i sesja są otwarte, nie wymaga upra
 - **Samodzielne uruchamianie sesji i wysyłanie wiadomości**: jego lokalna usługa robi to bez otwartego okna, co kosztuje tokeny i może uruchamiać narzędzia.
 - **Dodawanie do tego, co czytają agenci**: tekst w instrukcjach Twoich sesji i skille oferowane każdemu agentowi, gdy rozszerzenie jest włączone.
 - **Dodawanie pluginu do OpenCode**: plugin z pakietu jest ładowany do Twojego OpenCode, gdy rozszerzenie jest włączone. Kod pluginu działa wewnątrz OpenCode z Twoimi pełnymi uprawnieniami, jak lokalna usługa, więc zezwalaj tylko wtedy, gdy ufasz autorowi.
+- **Rozpoznawanie jego linków w czatach**: identyfikatory takie jak `DEMO-12` i linki do strony rozszerzenia stają się klikalne w Twoich wiadomościach na czacie. Okno wymienia, które to są, i mówi, czy kliknięcie otwiera je w rozszerzeniu, czy dołącza do Twojej wiadomości. Linki, które OpenChamber już zna, na przykład pull requesty z GitHub i zadania z Linear, działają jak zwykle.
 
 Lokalna usługa może też działać przez cały czas pracy OpenChamber albo budzić się według harmonogramu. Okno dialogowe mówi o tym pod **Uruchamianie lokalnej usługi** i informuje też, kiedy to, co wpisujesz po `@`, trafia do usługi. Rozszerzenie może dodać własne wiersze do menu `@` i własne bloki do odpowiedzi agenta. Wstrzymanie rozszerzenia to wszystko odbiera.
 
@@ -64,7 +65,7 @@ Gdy nowsza wersja prosi o więcej, niż pozwoliłeś, karta pokazuje **Wymaga zg
 
 ## Gdzie się pojawia
 
-Poza panelem na pasku bocznym rozszerzenie może dodawać pozycje do menu, z których już korzystasz: akcje na wiadomości w czacie, menu sesji, menu + obok pola czatu oraz polecenia z ukośnikiem, jak `/task ABC-12`, które dołączają coś bez otwierania czegokolwiek. Może też nadać własnym narzędziom porządną ikonę, tytuł i układ wyniku w czacie, tak jak mają wbudowane narzędzia OpenChamber. Rozszerzenie samo decyduje, które z nich oferuje; wszystkie są wyłączone, dopóki nie zezwolisz na rozszerzenie.
+Poza panelem na pasku bocznym rozszerzenie może dodawać pozycje do menu, z których już korzystasz: akcje na wiadomości w czacie, menu sesji, menu + obok pola czatu oraz polecenia z ukośnikiem, jak `/task ABC-12`, które dołączają coś bez otwierania czegokolwiek. Może też nadać własnym narzędziom porządną ikonę, tytuł i układ wyniku w czacie, tak jak mają wbudowane narzędzia OpenChamber. Rozszerzenie samo decyduje, które z nich oferuje; wszystkie są wyłączone, dopóki nie zezwolisz na rozszerzenie. Akcje sesji i polecenia z ukośnikiem znajdziesz też w palecie poleceń (⌘P lub Ctrl+P), gdy wyszukasz ich nazwę albo nazwę rozszerzenia.
 
 Niektóre rozszerzenia pokazują obraz na żywo zamiast własnego panelu: to, w czym agent pracuje na serwerze, na przykład przeglądarkę albo symulator. Kliknij w obraz lub wpisz coś, aby przejąć kontrolę; wiersz stanu pokaże **Masz kontrolę**, a działania agenta w przeglądarce będą odrzucane, dopóki nie naciśniesz **Oddaj agentowi**. Kopiowanie i wklejanie działają jak zwykle. Inne urządzenie połączone w tym samym czasie widzi, kto ma kontrolę, i nie może jej przejąć. Takie rozszerzenie może dodać własne kontrolki obok obrazu, na przykład pasek adresu nad nim albo kolumnę narzędzi z boku.
 

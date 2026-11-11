@@ -3,11 +3,12 @@ import { requestPinTo } from '@/components/session/sidebar/sections/sectionActio
 import { ArrowsMerge } from '@/components/icons/ArrowsMerge';
 import { Icon } from '@/components/icon/Icon';
 import { Spinner } from '@/components/ui/spinner';
+import { ContextMenuItem } from '@/components/ui/context-menu';
 import { CollapsedActivityIndicator } from '@/components/session/sidebar/sessions/collapsedActivityIndicator';
 import { useCollapsedSessionActivityState } from '@/components/session/sidebar/sessions/collapsedActivityState';
 import { DirectoryActionIndicator } from '@/components/session/sidebar/sessions/DirectoryActionIndicator';
 import { useRunWork } from '@/components/session/sidebar/sessions/useRunWork';
-import type { SessionSidebarRow } from '@/components/session/sidebar/sessionSidebarRowModel';
+import { isPinnedZoneRowKey, type SessionSidebarRow } from '@/components/session/sidebar/sessionSidebarRowModel';
 import { useSessionDraftRow } from '@/components/session/sidebar/works/useSessionDraftRow';
 import { useWorktreeWork } from '@/components/session/sidebar/works/useWorktreeWork';
 import { SessionActivityDuration } from '@/components/session/SessionActivityDuration';
@@ -18,12 +19,12 @@ import { refTintStyle } from '@/lib/source-control/prVisualState';
 import { cn } from '@/lib/utils';
 import { useGitBranchLabel } from '@/stores/useGitStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
-import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { MobileProjectIcon } from '../MobileProjectIcon';
 import { MobileRunProviderLogos } from '../MobileRunProviderLogos';
 import { MobileSessionRenameForm } from '../MobileSessionRenameForm';
 import { MobileSwipeActionsRow, ROW_ACTION_SLOT_WIDTH } from '../MobileSessionSwipe';
 import type { MobileTreeGeometry } from './mobileSidebarGeometry';
+import { MobileRowMenu } from './MobileRowMenu';
 import { useMobileRowSwipe, useMobileSidebarActions, useMobileSidebarRowsStore } from './mobileSidebarState';
 import { MOBILE_ACTIVE_ROW_CLASS, MOBILE_ACTIVE_TITLE_CLASS, MobileRowChevron, MobileSlotChevron, MobileSwipeAction, MobileTwoLineLayout } from './mobileRowParts';
 
@@ -142,10 +143,9 @@ export const MobileWorktreeRow: React.FC<{
     </span>
   ) : space ? <SpaceStatusMark spaceId={space.id} /> : null;
   const directoryIndicator = row.group.directory ? <DirectoryActionIndicator directory={row.group.directory} /> : null;
-  // With the Pinned section shown a pinned work is listed there, whose header
-  // already says so; otherwise the row carries the mark, as a session's does.
-  const pinnedSectionShown = useSessionDisplayStore((state) => state.showPinnedSection);
-  const pinMark = work.pinned && !pinnedSectionShown
+  // The Pinned section's header already says its works are pinned; anywhere
+  // else the row carries the mark, as a session's does.
+  const pinMark = work.pinned && !isPinnedZoneRowKey(row.key)
     ? <Icon name="pushpin" className="size-3 shrink-0 text-muted-foreground" aria-label={t('sessions.sidebar.session.status.pinned')} />
     : null;
 
@@ -195,7 +195,45 @@ export const MobileWorktreeRow: React.FC<{
   }
 
   const slots = (work.workAction ? 1 : 0) + (work.canRename ? 1 : 0) + (space ? 1 : 0) + (work.canPin ? 1 : 0) + (work.canArchive ? 1 : 0) + (worktree && !worktreeRemoving ? 1 : 0);
+  // The long press menu: what the swipe has no room for, then its own actions.
+  const pinWork = () => requestPinTo({ current: work.pinList, pin: (list) => { void work.setPin(true, list); }, unpin: () => { void work.setPin(false); } });
+  const menu = (
+    <>
+      {work.canMarkUnread ? (
+        <ContextMenuItem onClick={work.toggleRead}>
+          <Icon name={work.hasUnread ? 'chat-check' : 'checkbox-circle'} className="me-1 size-4" />
+          {work.hasUnread ? t('sessions.sidebar.session.menu.markRead') : t('sessions.sidebar.session.menu.markUnread')}
+        </ContextMenuItem>
+      ) : null}
+      {work.workAction ? (
+        <ContextMenuItem disabled={finishing || worktreeRemoving} onClick={work.toggleWork}>
+          <Icon name={inWork ? 'check' : 'eye'} className="me-1 size-4" />
+          {inWork ? t('sessions.sidebar.session.work.markDone') : t('sessions.sidebar.session.work.track')}
+        </ContextMenuItem>
+      ) : null}
+      {work.canRename ? (
+        <ContextMenuItem onClick={() => useMobileSidebarRowsStore.getState().startRename(row.key)}>
+          <Icon name="edit" className="me-1 size-4" />
+          {t('sessions.sidebar.work.menu.rename')}
+        </ContextMenuItem>
+      ) : null}
+      {work.canPin ? (
+        <ContextMenuItem onClick={pinWork}>
+          <Icon name={work.pinned ? 'unpin' : 'pushpin'} className="me-1 size-4" />
+          {work.pinned ? t('sessions.sidebar.work.menu.unpin') : t('sessions.sidebar.work.menu.pin')}
+        </ContextMenuItem>
+      ) : null}
+      {work.canArchive ? (
+        <ContextMenuItem disabled={finishing} onClick={() => { void work.finish(true); }}>
+          <Icon name="archive" className="me-1 size-4" />
+          {t('sessions.sidebar.work.menu.archive')}
+        </ContextMenuItem>
+      ) : null}
+    </>
+  );
+
   return (
+    <MobileRowMenu disabled={revealed || renaming || worktreeRemoving} menu={menu}>
     <MobileSwipeActionsRow
       actionsWidth={slots * ROW_ACTION_SLOT_WIDTH}
       revealed={revealed}
@@ -234,7 +272,7 @@ export const MobileWorktreeRow: React.FC<{
             icon={work.pinned ? 'unpin' : 'pushpin'}
             label={work.pinned ? t('sessions.sidebar.work.menu.unpin') : t('sessions.sidebar.work.menu.pin')}
             revealed={revealed}
-            onClick={after(() => requestPinTo({ current: work.pinList, pin: (list) => { void work.setPin(true, list); }, unpin: () => { void work.setPin(false); } }))}
+            onClick={after(pinWork)}
           />
         ) : null}
         {work.canArchive ? (
@@ -261,6 +299,7 @@ export const MobileWorktreeRow: React.FC<{
     >
       {content}
     </MobileSwipeActionsRow>
+    </MobileRowMenu>
   );
 };
 

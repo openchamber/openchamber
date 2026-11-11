@@ -20,6 +20,7 @@ const savedProvider: CustomProviderFormState = {
   providerID: 'campus-llm',
   name: 'Campus LLM',
   icon: null,
+  logo: null,
   protocol: 'openai-chat',
   baseURL: 'https://llm.example.edu/v1',
   apiKey: '',

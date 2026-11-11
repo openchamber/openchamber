@@ -15,7 +15,9 @@ import {
   AgentMemoryDisabledError,
   deleteAgentMemory,
   fetchAgentMemory,
+  undoAgentMemoryDream,
   updateAgentMemory,
+  type AgentMemoryDream,
   type AgentMemoryEntry,
   type AgentMemoryScope,
 } from '@/lib/agentMemoryApi';
@@ -33,6 +35,8 @@ interface AgentMemoryState {
   disabled: boolean;
   globalFailed: boolean;
   projectFailed: boolean;
+  /** The last dreaming pass of each scope, as the last load found it. */
+  dream: AgentMemoryDreams;
   error: string | null;
 
   /**
@@ -53,8 +57,17 @@ interface AgentMemoryState {
    * to another project must not go to that project or touch its list.
    */
   deleteEntry: (scope: AgentMemoryScope, memoryId: string, projectPath?: string | null) => Promise<boolean>;
+  /**
+   * Undoes the last dreaming pass of a scope, then re-reads the store.
+   * `projectPath` pins a project-scope undo to the project it was asked in.
+   */
+  undoDream: (scope: AgentMemoryScope, projectPath: string | null) => Promise<boolean>;
   reset: () => void;
 }
+
+type AgentMemoryDreams = { global: AgentMemoryDream | null; project: AgentMemoryDream | null };
+
+const NO_DREAMS: AgentMemoryDreams = { global: null, project: null };
 
 const EMPTY_STATE = {
   global: [] as AgentMemoryEntry[],
@@ -65,6 +78,7 @@ const EMPTY_STATE = {
   disabled: false,
   globalFailed: false,
   projectFailed: false,
+  dream: NO_DREAMS,
   error: null as string | null,
   loadedAt: null as number | null,
 };
@@ -125,7 +139,7 @@ export const useAgentMemoryStore = create<AgentMemoryState>((set, get) => ({
     }
     const requestId = ++loadSequence;
     if (ownerChanged) {
-      set({ loading: true, projectPath, project: [], projectFailed: false });
+      set({ loading: true, projectPath, project: [], projectFailed: false, dream: { ...previous.dream, project: null } });
     } else {
       set({ loading: true, projectPath });
     }
@@ -139,6 +153,7 @@ export const useAgentMemoryStore = create<AgentMemoryState>((set, get) => ({
         projectPath,
         globalFailed: snapshot.globalFailed,
         projectFailed: snapshot.projectFailed,
+        dream: snapshot.dream,
         loading: false,
         loaded: true,
         loadedAt: Date.now(),
@@ -194,6 +209,17 @@ export const useAgentMemoryStore = create<AgentMemoryState>((set, get) => ({
       set({ error: errorMessage(error, 'Failed to delete memory') });
       return false;
     }
+  }),
+
+  undoDream: async (scope, projectPath) => enqueueWrite(async () => {
+    try {
+      await undoAgentMemoryDream(scope, projectPath);
+    } catch (error) {
+      set({ error: errorMessage(error, 'Failed to undo the memory tidy-up') });
+      return false;
+    }
+    await get().refresh();
+    return true;
   }),
 
   reset: () => {

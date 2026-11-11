@@ -4,6 +4,9 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Radio } from '@/components/ui/radio';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { dropdownTriggerVariants } from '@/components/ui/dropdown-trigger';
+import { useI18n } from '@/lib/i18n';
+import { isNewSetting } from '@/lib/settings/newSettings';
+import { isSettingsAnchorAvailable, type SettingsSearchAvailabilityContext } from '@/lib/settings/search';
 import { cn } from '@/lib/utils';
 import { SettingsInfoHint } from './SettingsInfoHint';
 
@@ -102,6 +105,26 @@ export const SettingsBadge: React.FC<{ children: React.ReactNode }> = ({ childre
   </span>
 );
 
+/**
+ * The device context the Settings view tests availability with. A badge outside
+ * it (the project edit dialog) stays hidden, and an opener such as a tab never
+ * announces a control the device does not render.
+ */
+const SettingsAvailabilityContext = React.createContext<SettingsSearchAvailabilityContext | null>(null);
+export const SettingsAvailabilityProvider = SettingsAvailabilityContext.Provider;
+
+/**
+ * The "new" badge for one or more search anchors: shown when any of them is new
+ * to this client. The shared rows render it for their own `settingsItem`, so a
+ * page's nav badge always has a row on that page that says which control it means.
+ */
+export const SettingsNewBadge: React.FC<{ items: readonly (string | undefined)[] }> = ({ items }) => {
+  const { t } = useI18n();
+  const ctx = React.useContext(SettingsAvailabilityContext);
+  if (!ctx || !items.some((item) => item != null && isNewSetting(item) && isSettingsAnchorAvailable(item, ctx))) return null;
+  return <SettingsBadge>{t('settings.view.badge.new')}</SettingsBadge>;
+};
+
 interface SettingsSectionProps {
   /** Section title. Strings render as the shared h2 style. */
   title?: React.ReactNode;
@@ -161,6 +184,7 @@ export const SettingsSection: React.FC<SettingsSectionProps> = ({
                 ) : (
                   title
                 )}
+                <SettingsNewBadge items={[settingsItem]} />
                 {titleAccessory}
                 {info != null ? <SettingsInfoHint>{info}</SettingsInfoHint> : null}
               </div>
@@ -241,6 +265,7 @@ export const SettingsControlGroup: React.FC<SettingsControlGroupProps> = ({
           {title != null ? (
             <div className="flex items-center gap-1.5">
               <SettingsGroupTitle>{title}</SettingsGroupTitle>
+              <SettingsNewBadge items={[settingsItem]} />
               {info != null ? <SettingsInfoHint>{info}</SettingsInfoHint> : null}
             </div>
           ) : null}
@@ -291,6 +316,7 @@ export const SettingsStackedField: React.FC<SettingsStackedFieldProps> = ({
       <div className="space-y-0.5">
         <div className="flex items-center gap-1.5">
           <div className={SETTINGS_FIELD_LABEL_CLASS}>{label}</div>
+          <SettingsNewBadge items={[settingsItem]} />
           {info != null ? <SettingsInfoHint>{info}</SettingsInfoHint> : null}
         </div>
         {descriptionPlacement === 'before' ? descriptionNode : null}
@@ -346,6 +372,7 @@ export const SettingsFieldRow: React.FC<SettingsFieldRowProps> = ({
       <div className="min-w-0 @xl:w-56 @xl:shrink-0">
         <div className="flex min-w-0 items-center gap-1.5">
           <div className={cn('min-w-0 truncate', SETTINGS_FIELD_LABEL_CLASS)}>{label}</div>
+          <SettingsNewBadge items={[settingsItem]} />
           {labelAccessory}
           {info != null ? <SettingsInfoHint>{info}</SettingsInfoHint> : null}
         </div>
@@ -461,6 +488,7 @@ export const SettingsCheckboxRow: React.FC<SettingsCheckboxRowProps> = ({
       <div className="flex min-w-0 flex-col">
         <div className="flex min-w-0 items-center gap-1.5">
           <span className={cn(SETTINGS_FIELD_LABEL_CLASS, disabled && 'opacity-60')}>{label}</span>
+          <SettingsNewBadge items={[settingsItem]} />
           {labelAccessory}
           {info != null ? <SettingsInfoHint>{info}</SettingsInfoHint> : null}
         </div>

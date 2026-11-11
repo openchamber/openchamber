@@ -50,8 +50,8 @@ import {
 import { withContextObligatoryMessage, type ContextObligatoryMessage } from "@/lib/contextObligatoryMessages"
 import { getBtwOriginalSessionID, getBtwSessionID, isBtwSession, withoutBtwSessionLink } from "@/lib/sessionBtwMetadata"
 import { type LinkedIssue } from "@/lib/linkedIssues"
-import { withSessionWorkState, type SessionWork } from "@/lib/sessionWorkMetadata"
-import { withSessionPinned } from "@/lib/sessionPins"
+import { withSessionWorkClosed, withSessionWorkState, type SessionWork } from "@/lib/sessionWorkMetadata"
+import { isPinnedMetadata, withSessionPinned } from "@/lib/sessionPins"
 import { getImperativeSessionMessageLoader } from "./session-message-loader"
 import { cleanupPersistedSessionState } from "./session-deletion-cleanup"
 import { requestSessionArchiveBatch, requestSessionLinksUpdate, requestSessionMetadataUpdate, requestSessionUnarchiveBatch, type SessionArchiveStamp } from "./session-archive-batch"
@@ -1307,8 +1307,9 @@ export async function setSessionWorkState(
 ): Promise<Session | null> {
   const runtimeKeyAtClick = getRuntimeKey()
   try {
+    // A pinned session is never in work: Track on one writes nothing.
     return await patchSessionMetadata(sessionId, directory, (metadata) =>
-      withSessionWorkState(metadata, state, Date.now()), runtimeKeyAtClick)
+      state === "open" && isPinnedMetadata(metadata) ? metadata : withSessionWorkState(metadata, state, Date.now()), runtimeKeyAtClick)
   } catch (error) {
     if (isStaleRuntime(runtimeKeyAtClick)) return null
     throw error
@@ -1318,7 +1319,8 @@ export async function setSessionWorkState(
 /**
  * Pin or unpin a session for every client of the server. Bound to the server
  * it was clicked on, like the work state: a runtime switch mid-request writes
- * nothing to the new server and resolves null.
+ * nothing to the new server and resolves null. A pinned session is never in
+ * work, so pinning one that is closes its work in the same write.
  */
 export async function setSessionPinned(
   sessionId: string,
@@ -1328,8 +1330,11 @@ export async function setSessionPinned(
 ): Promise<Session | null> {
   const runtimeKeyAtClick = getRuntimeKey()
   try {
-    return await patchSessionMetadata(sessionId, directory, (metadata) =>
-      withSessionPinned(metadata, pinned, Date.now(), list), runtimeKeyAtClick)
+    return await patchSessionMetadata(sessionId, directory, (metadata) => {
+      const now = Date.now()
+      const next = withSessionPinned(metadata, pinned, now, list)
+      return pinned ? withSessionWorkClosed(next, now) : next
+    }, runtimeKeyAtClick)
   } catch (error) {
     if (isStaleRuntime(runtimeKeyAtClick)) return null
     throw error
@@ -2659,6 +2664,29 @@ async function applyFormSelection(sessionId: string, directory: string | undefin
     runtimeKey,
   )
   return () => settleModelPick?.()
+}
+
+/**
+ * Puts a model picked in a session's composer, and not sent yet, on the session
+ * while its turn waits for an automatic retry. OpenCode reloads the session's
+ * model before every attempt, so the next attempt runs on the pick and the turn
+ * goes on, as when the limit-failover plugin switches from its retry hook. A
+ * pick made while the turn generates waits for the next send, or for this, if
+ * the turn falls into a retry wait first. Auto has no prompt to route here, so
+ * it waits for the next send too.
+ *
+ * The switch is sent without comparing the pick with the synced record: a pick
+ * reverted before the previous switch reached the record would read as
+ * unchanged. OpenCode ignores a switch to the model the session already runs.
+ */
+export async function applyModelPickToRetry(sessionId: string, directory: string | undefined): Promise<void> {
+  const pick = useSelectionStore.getState().getSessionModelPick(sessionId)
+  if (!pick || isAutoModel(pick.providerId, pick.modelId)) return
+  const { model } = resolveFormSelection(sessionId, directory)
+  if (model?.providerID !== pick.providerId || model.modelID !== pick.modelId) return
+  const settleModelPick = useSelectionStore.getState().captureSessionModelPickSettlement(sessionId, model.providerID, model.modelID)
+  await opencodeClient.switchSessionModel(sessionId, { providerID: model.providerID, id: model.modelID, variant: model.variant }, directory)
+  settleModelPick()
 }
 
 export async function replyToForm(

@@ -79,6 +79,16 @@ direct-mode `aps.badge`) → relay (`pushSendSchema.badge` → `aps.badge`). It 
 `body`/`data`); the relay still only delivers to bound tokens. The set is server-global, so every
 device token of a server sees the same badge.
 
+## Clearing handled notifications
+
+When the cause of a notification is handled (the question answered, the session continued or
+viewed on another device), the server sends `POST /v1/push/clear` with the notification tags.
+The relay turns it into an APNs background push or an FCM data message, which shows nothing; the
+app removes the delivered notifications with those tags and sets the badge to the count that
+remains. A tag that is cleared also leaves `pendingPushTags`. Later visible pushes repeat the
+recently cleared tags in `data.clear`, for a phone that missed the clearing push. The design and
+the events that clear each tag are in `DOCUMENTATION.md`, *Clearing handled notifications*.
+
 ## Modes
 
 - **Relay (default):** server has no Apple key; `OPENCHAMBER_PUSH_RELAY_URL` defaults to
@@ -147,4 +157,7 @@ every phone shows only the scenario title.
 ## Android (FCM)
 
 The relay forwards Android tokens to FCM. A sealed push goes as a data message, so
-`SealedPushMessagingService` runs in the background and builds the notification itself.
+`SealedPushMessagingService` runs in the background and builds the notification itself. It posts
+one notification per tag, so a newer push about the same thing replaces the older one, as the
+collapse id does on iOS. A clear-text push carries the tag as its Android notification tag, so a
+clearing message can find it.

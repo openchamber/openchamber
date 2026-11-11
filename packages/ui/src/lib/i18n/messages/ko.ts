@@ -27,6 +27,7 @@ import { compactionSettingsI18n } from './compaction-settings.i18n';
 import { heapSnapshotI18n } from './heap-snapshot.i18n';
 import { consoleBudgetsI18n } from './console-budgets.i18n';
 import { imageToolI18n } from './image-tool.i18n';
+import { memoryDreamingI18n } from './memory-dreaming.i18n';
 import { usageToolI18n } from './usage-tool.i18n';
 import { openchamberToolsLayoutI18n } from './openchamber-tools-layout.i18n';
 import { openchamberToolOutputI18n } from './openchamber-tool-output.i18n';
@@ -208,6 +209,7 @@ export const dict: Record<I18nKey, string> = {
   ...heapSnapshotI18n.ko,
   ...consoleBudgetsI18n.ko,
   ...imageToolI18n.ko,
+  ...memoryDreamingI18n.ko,
   ...usageToolI18n.ko,
   ...openchamberToolsLayoutI18n.ko,
   ...openchamberToolOutputI18n.ko,
@@ -768,7 +770,6 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.project.actions.newDraftSession': '새 드래프트 세션',
   'sessions.sidebar.session.menu.rename': '이름 변경',
   'sessions.sidebar.session.menu.copyId': '세션 ID 복사',
-  'sessions.sidebar.session.menu.openInMiniChat': 'Mini Chat에서 열기',
   'sessions.sidebar.session.copyId.success': '세션 ID가 복사되었습니다',
   'sessions.sidebar.session.copyId.error': '세션 ID를 복사하지 못했습니다',
   'header.sessionActions.openAria': '세션 작업 열기',
@@ -802,8 +803,6 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.session.menu.copyLink': '링크 복사',
   'sessions.sidebar.session.menu.unshare': '공유 해제',
   'sessions.sidebar.session.menu.exportMarkdown': 'Markdown 내보내기',
-  'sessions.sidebar.session.menu.moveToWorktree': '새 worktree로 이동',
-  'sessions.sidebar.session.menu.moveToWorktreeTargets': 'worktree로 이동',
   'sessions.sidebar.session.menu.newWorktree': '새 worktree...',
   'sessions.sidebar.session.moveToWorktree.success': '세션을 새 worktree로 이동했습니다',
   'sessions.sidebar.session.moveToWorktree.failed': '세션을 새 worktree로 이동하지 못했습니다',
@@ -813,7 +812,6 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.session.moveToWorktree.current': '현재 worktree',
   'sessions.sidebar.session.moveToWorktree.existingSuccess': '세션을 worktree로 이동했습니다',
   'sessions.sidebar.session.moveToWorktree.existingFailed': '세션을 worktree로 이동하지 못했습니다',
-  'sessions.sidebar.session.moveToWorktree.tooltip': '현재 브랜치에서 새 worktree를 만들어 이 세션과 하위 세션을 그곳으로 이동합니다. 커밋되지 않은 변경 사항은 원본 worktree에 남습니다.',
   'sessions.sidebar.session.moveToWorktree.tooltipBusy': '세션이 유휴 상태일 때 사용할 수 있습니다. 현재 작업을 중지하거나 완료될 때까지 기다리세요.',
   'sessions.sidebar.session.moveToWorktree.tooltipMoving': '이 세션은 이미 새 worktree로 이동 중입니다.',
   'sessions.sidebar.session.menu.openInSidePanel': '사이드 패널에서 열기',
@@ -2068,8 +2066,6 @@ export const dict: Record<I18nKey, string> = {
   'rightSidebar.contextNotesTodo.todo.addAria': 'Todo 추가',
   'rightSidebar.contextNotesTodo.todo.empty': '아직 Todo가 없습니다. 이 프로젝트용 체크리스트를 추가해 보세요.',
   'rightSidebar.contextNotesTodo.todo.actions.markComplete': '"{text}" 완료로 표시',
-  'rightSidebar.contextNotesTodo.todo.actions.collapse': '접기 todo "{text}"',
-  'rightSidebar.contextNotesTodo.todo.actions.expand': '펼치기 todo "{text}"',
   'rightSidebar.contextNotesTodo.todo.actions.send': '보내기 "{text}"',
   'rightSidebar.contextNotesTodo.todo.actions.reorder': '재정렬 "{text}"',
   'rightSidebar.contextNotesTodo.todo.sendMenu.currentSession': '현재 세션으로 보내기',
@@ -2267,6 +2263,7 @@ export const dict: Record<I18nKey, string> = {
   'directoryExplorerDialog.browse.retry': '다시 시도',
   'directoryExplorerDialog.browse.parentDirectory': '상위 디렉터리',
   'directoryExplorerDialog.browse.addedBadge': '추가됨',
+  'directoryExplorerDialog.browse.linkTarget': '{path}(으)로 연결되는 링크',
   'directoryExplorerDialog.browse.quickAdd': '추가',
   'directoryExplorerDialog.browse.selectForAdd': '추가할 항목 선택',
   'directoryExplorerDialog.footer.navigate': '탐색',
@@ -2423,6 +2420,7 @@ export const dict: Record<I18nKey, string> = {
   'session.githubIntegration.validation.failed': '유효성 검사에 실패했습니다',
   'chat.fileAttachment.toast.attachFailed': '첨부 파일 실패',
   'chat.fileAttachment.toast.tooLarge': '{name}은(는) 너무 커서 첨부할 수 없습니다({size} 초과). 프로젝트에 있는 파일이면 @로 멘션하세요.',
+  'chat.fileAttachment.toast.heicConversionFailed': '{name} 파일을 HEIC에서 JPEG로 변환하지 못해 첨부되지 않았습니다. 사진을 JPEG로 저장한 뒤 다시 첨부하세요.',
   'chat.fileAttachment.toast.overSendLimit': '{name}은(는) 너무 커서 첨부할 수 없습니다({size} 초과).',
   'chat.fileAttachment.toast.someFilesSkipped': '일부 파일을 건너뛰었습니다:\n{summary}',
   'chat.fileAttachment.toast.vscodePickFailed': 'VS Code에서 파일 선택에 실패했습니다',
@@ -2582,6 +2580,8 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.group.empty.loadingSessions': '세션을 불러오는 중…',
   'sessions.sidebar.group.empty.loadFailed': '세션을 새로 고칠 수 없습니다.',
   'sessions.sidebar.group.empty.initializationFailed': '작업 공간을 초기화할 수 없습니다.',
+  'sessions.sidebar.group.empty.trustPaused': '이 폴더를 신뢰할 때까지 에이전트가 일시 중지됩니다.',
+  'sessions.sidebar.group.empty.reviewTrust': '검토 후 신뢰',
   'sessions.search.submitHint': 'Enter 키를 눌러 검색하세요',
   'sessions.sidebar.group.empty.retry': '다시 시도',
   'sessions.sidebar.group.empty.permissionDenied': '폴더 접근이 필요합니다.',
@@ -3987,6 +3987,8 @@ export const dict: Record<I18nKey, string> = {
   'sessions.moveSession.failed': '세션을 이동할 수 없습니다',
   'chat.folderMissing.text': '{name} 폴더가 더 이상 없습니다',
   'chat.folderMissing.action': '세션 이동',
+  'chat.trustPaused.text': '{name}의 플러그인과 명령을 신뢰할 때까지 에이전트가 그곳에서 작동할 수 없습니다.',
+  'chat.trustPaused.action': '검토 후 신뢰',
   'chat.worktreeSetup.running': 'worktree 준비 중: 프로젝트 설정 명령을 실행하고 있습니다…',
   'chat.draft.creatingSession': '세션을 만드는 중…',
   'desktopHostSwitcher.startup.fellBackToLocal': '연결을 열지 못해 OpenChamber가 Local로 시작했습니다. 접속할 수 있게 되면 인스턴스 전환기에서 연결하세요.',

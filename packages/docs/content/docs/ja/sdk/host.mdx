@@ -149,7 +149,9 @@ host.onSessionLifecycle((event) => {
 
 `await onProjects(listener)`、`await onWorktrees(projectId, listener)`、`await onSessions(projectId, listener)` は購読解除関数を返します。登録時の権限エラーを処理してください。初期スナップショットの後に変更が届きます。1フレーム最大32件で、`dispose()`、閉じる操作、一時停止、削除、サーバー切り替えで解除されます。`state` は `loading`、`ready`、`error` で、セッションにはディレクトリ別の `coverage` もあります。失敗時はデータを保持し、完全な空一覧を保証するのは `ready` だけです。
 
-`activity` は `unknown`、`idle`、`running`、`retrying`、`waiting-permission`、`waiting-question` です。`outcome` は観測済みの `completed`、`failed`、または `null` で、最大2,000セッション分をメモリだけに保持します。エラー後の idle は次の実行まで失敗を保持します。タスクの完了を意味しません。`openSession(sessionId)` でチャットを明示的に開けます。
+`activity` は `unknown`、`idle`、`running`、`retrying`、`waiting-permission`、`waiting-question` です。`outcome` は観測済みの `completed`、`failed`、または `null` で、最大2,000セッション分をメモリだけに保持します。エラー後の idle は次の実行まで失敗を保持します。タスクの完了を意味しません。`inWork` はセッションがサイドバーの作業中ブロックにあるとき `true` で、ユーザーが作業中をオフにしている間は常に `false` です。古いホストでは省略されます。`unread` は最後のターンが終わってから誰もセッションを開いていないとき `true` で、サイドバーに表示される印と同じです。再起動後も残り、どのデバイスでも消えます。`openSession(sessionId)` でチャットを明示的に開けます。
+
+`tool` は `activity` が `running` の間にセッションが扱っているものです。実行中のツール呼び出し、またはエージェントが結果を考えている間は最後に終わった呼び出しです。`name` は OpenCode での名前（`read`、`edit`、`bash`）、`target` は呼び出しが指すファイルまたはフォルダーで、セッションの `directory` からの相対パス（外側なら名前だけ）、指していなければ `null` です。シェルコマンドの本文がここに入ることはありません。`context` はセッションの最新ステップ後のコンテキストウィンドウの使用量です。`tokens` は保持していたトークン数、`limit` はモデルのウィンドウで、ホストが知らなければ `null` です。`tool` はセッションが実行中でない間は `null`、`context` はホストがステップをまだ見ていない間と、コンパクション後に次のステップが測るまでは `null` です。古いホストはどちらも省きます。
 
 `host.storage.get(key)`、`set(key, value)`、`delete(key)`、`keys()` は追加権限なしで独自 JSON を接続先サーバーに保存します。未保存は `undefined`、保存した null は null です。キーは1〜128文字、値は UTF-8 で64 KiB、全体は2 MiB・2,000キーまでです。プロジェクト別データにはキーにプロジェクト ID を含めます。書き込みは直列化されアトミックで、失敗時は既存データを保持します。アンインストールで削除されます。
 

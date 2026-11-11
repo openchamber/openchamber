@@ -55,6 +55,7 @@ Mostrar um painel e ler qual projeto e sessão estão abertos não precisa de pe
 - **Iniciar sessões e enviar mensagens por conta própria**: o serviço local dela faz isso sem nenhuma janela aberta, o que gasta tokens e pode executar ferramentas.
 - **Adicionar ao que os agentes leem**: texto nas instruções das suas sessões, e skills oferecidas a todos os agentes enquanto a extensão estiver ativa.
 - **Adicionar um plugin ao OpenCode**: o plugin do pacote é carregado no seu OpenCode enquanto a extensão estiver ativa. O código do plugin roda dentro do OpenCode com todo o seu acesso, como um serviço local, então permita só se você confia no autor.
+- **Reconhecer seus links nos chats**: identificadores como `DEMO-12` e links para o site da extensão ficam clicáveis nas suas mensagens do chat. O diálogo lista quais são e diz se um clique os abre na extensão ou os anexa à sua mensagem. Links que o OpenChamber já conhece, como pull requests do GitHub e issues do Linear, mantêm o comportamento de sempre.
 
 Um serviço local também pode continuar rodando enquanto o OpenChamber estiver em execução, ou despertar em um horário. O diálogo diz isso em **Executar um serviço local**, e diz quando o que você digita depois de `@` vai para o serviço. Uma extensão pode adicionar suas próprias linhas ao menu `@` e seus próprios blocos às respostas do agente. Pausar a extensão tira tudo isso.
 
@@ -64,7 +65,7 @@ Quando uma versão mais nova pede mais do que você permitiu, o card mostra **Pr
 
 ## Onde ela aparece
 
-Além do painel na barra lateral, uma extensão pode adicionar entradas a menus que você já usa: as ações de uma mensagem do chat, o menu de uma sessão, o menu + ao lado da caixa de chat e comandos de barra como `/task ABC-12`, que anexam algo sem abrir nada. Ela também pode dar às próprias ferramentas um ícone, um título e um layout de saída adequados no chat, como as ferramentas embutidas do OpenChamber têm. A extensão decide quais deles oferece; todos ficam desligados até você permitir a extensão.
+Além do painel na barra lateral, uma extensão pode adicionar entradas a menus que você já usa: as ações de uma mensagem do chat, o menu de uma sessão, o menu + ao lado da caixa de chat e comandos de barra como `/task ABC-12`, que anexam algo sem abrir nada. Ela também pode dar às próprias ferramentas um ícone, um título e um layout de saída adequados no chat, como as ferramentas embutidas do OpenChamber têm. A extensão decide quais deles oferece; todos ficam desligados até você permitir a extensão. Ações de sessão e comandos de barra também aparecem na paleta de comandos (⌘P ou Ctrl+P) quando você busca o nome deles ou o da extensão.
 
 Algumas extensões mostram uma imagem ao vivo em vez de um painel próprio: aquilo em que um agente está trabalhando no servidor, como um navegador ou um simulador. Clique na imagem ou digite para assumir o controle; a linha de status mostra **Você está no controle** e as ações de navegador do agente são recusadas até você pressionar **Devolver ao agente**. Copiar e colar funcionam normalmente. Outro dispositivo conectado ao mesmo tempo vê quem está no controle e não pode tomá-lo. Uma extensão assim pode adicionar seus próprios controles ao lado da imagem, por exemplo uma barra de endereço acima ou uma coluna de ferramentas ao lado.
 

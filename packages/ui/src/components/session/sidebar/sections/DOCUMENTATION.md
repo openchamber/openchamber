@@ -30,10 +30,10 @@ with its named pin lists. How the rows are drawn stays with the row model
 - A section of the user's own lists every work that matches its filter, so one
   work can show in several. Its one choice is about projects: with "Also show
   under projects" off (`claims`), its works leave their projects; on, they stay
-  there too and leave them only during a search. Pinned always takes its works
-  out of their projects; In work does unless "Also show in work under projects"
-  is on; between the two, the higher one lists a work that is both pinned and in
-  work, as before. Projects lists what no section took out and no group of
+  there too and leave them only during a search. Pinned and In work have the
+  same choice (`keepPinnedInPlace`, on by default; `keepWorkInPlace`, off by
+  default). They never share a work, since a pinned work is never in work, so
+  their order decides nothing. Projects lists what no section took out and no group of
   projects took, wherever it stands in the order.
 - A group of projects (`grouping: 'project'`) takes whole projects, and only
   projects: its filter keeps `projectIds` alone, and it always takes them, so

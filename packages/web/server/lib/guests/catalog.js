@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
-import { hasGuestPage, requestedGuestCapabilities, resolveAttachEntry, resolveAttachMode, resolvePageEntry, resolveStatusSectionEntry, resolveStatusSectionSource, toPublicNotifications,
+import { GUEST_PROVIDER_LOGO_BYTES_MAX, hasGuestPage, requestedGuestCapabilities, resolveAttachEntry, resolveAttachMode, resolvePageEntry, resolveStatusSectionEntry, resolveStatusSectionSource, toPublicNotifications,
   toPublicQuota, toPublicTracker, toPublicService, toPublicSessionEvents, toPublicSourceControl, toPublicIntegration, hostMeetsOpenChamberEngine, openChamberEngineMinimum } from '@openchamber/sdk';
 import { parseManifestJson } from '@openchamber/sdk/schemas';
 
@@ -13,6 +13,7 @@ import { ensureGuestStorageIds, onExtensionStoreWrite, readExtensionStore } from
 import { buildPublicSocketBindings } from './sockets.js';
 import { isReservedBuiltInId, readBuiltInRegistry } from './builtins.js';
 import { resolveOpenCodePluginFolder } from './opencode-plugin.js';
+import { toPublicLinks } from './links.js';
 
 const builtInsByStore = new Map();
 
@@ -96,7 +97,7 @@ const isGuestFrameContentType = (contentType) => (
 
 /**
  * A `.js` URL can be served from a sibling `.ts` that the host compiles.
- * `hasRuntime` means the guest declared panel.entry or background.entry.
+ * `hasRuntime` means the guest has a frame the host loads (`hasGuestFrame`).
  * Tools-only packages can serve assets, never HTML or JS.
  */
 export const resolveGuestServedFile = async (packageRoot, relativePath, { hasRuntime = true } = {}) => {
@@ -161,6 +162,14 @@ const guestBuiltScriptsReady = async (packageRoot, entry) => {
   return true;
 };
 
+// Every list in the app reads a provider's logo, so its size counts against each of them.
+const isDrawableProviderLogo = async (packageRoot, relativePath) => {
+  const resolved = await resolveGuestAssetPath(packageRoot, relativePath);
+  if (!resolved) return false;
+  const { size } = await fs.stat(resolved);
+  return size > 0 && size <= GUEST_PROVIDER_LOGO_BYTES_MAX;
+};
+
 export const inspectGuestPackage = async (packageRoot, { openchamberVersion, skipEngineCheck } = {}) => {
   let raw;
   try {
@@ -170,7 +179,8 @@ export const inspectGuestPackage = async (packageRoot, { openchamberVersion, ski
   }
   const parsed = parseManifestJson(raw);
   if (!parsed.ok) {
-    return { ok: false, code: 'invalid-manifest' };
+    // The parser names the field and the rule, so the author sees why.
+    return { ok: false, code: 'invalid-manifest', reason: parsed.message };
   }
   if (!skipEngineCheck && !parsed.version) {
     return { ok: false, code: 'invalid-manifest' };
@@ -330,6 +340,15 @@ export const inspectGuestPackage = async (packageRoot, { openchamberVersion, ski
   if (parsed.manifest.contributes.tools?.length) {
     guest.tools = parsed.manifest.contributes.tools.map((tool) => ({ ...tool }));
   }
+  const providerLogos = parsed.manifest.contributes.providerLogos;
+  if (providerLogos) {
+    for (const logo of new Set(Object.values(providerLogos))) {
+      if (!await isDrawableProviderLogo(packageRoot, logo)) {
+        return { ok: false, code: 'invalid-manifest' };
+      }
+    }
+    guest.providerLogos = { ...providerLogos };
+  }
   if (parsed.manifest.contributes.service) {
     const serviceEntry = await resolveGuestAssetPath(packageRoot, parsed.manifest.contributes.service.entry);
     if (!serviceEntry) {
@@ -367,6 +386,9 @@ export const inspectGuestPackage = async (packageRoot, { openchamberVersion, ski
   if (parsed.manifest.contributes.mentions) {
     guest.mentions = parsed.manifest.contributes.mentions;
   }
+  if (parsed.manifest.contributes.links) {
+    guest.links = parsed.manifest.contributes.links;
+  }
   // The package's skills folder; a declared folder that is not there fails the install.
   if (parsed.manifest.contributes.skills) {
     if (!await isGuestPackageFolder(packageRoot, parsed.manifest.contributes.skills)) {
@@ -395,9 +417,9 @@ const withSource = (guest, source, displayPath) => ({
   path: displayPath,
 });
 
-/** Whether the package has any page the host loads: panel, background, status section, or file editor. */
+/** Whether the package has any page the host loads: panel, background, full-screen page, status section, file editor, or block. */
 export const hasGuestFrame = (guest) => Boolean(
-  guest.entry || guest.backgroundEntry || guest.statusEntry
+  guest.entry || guest.backgroundEntry || guest.pageEntry || guest.statusEntry
     || (Array.isArray(guest.fileEditors) && guest.fileEditors.length > 0)
     || (Array.isArray(guest.blocks) && guest.blocks.length > 0),
 );
@@ -501,6 +523,9 @@ export const toPublicGuest = (guest) => {
   if (Array.isArray(guest.tools) && guest.tools.length > 0) {
     row.tools = guest.tools.map((tool) => ({ ...tool }));
   }
+  if (guest.providerLogos) {
+    row.providerLogos = { ...guest.providerLogos };
+  }
   const granted = Array.isArray(guest.capabilityGrants) ? guest.capabilityGrants : [];
   row.capabilities = {
     requested: requestedGuestCapabilities(guest),
@@ -552,6 +577,14 @@ export const toPublicGuest = (guest) => {
   }
   if (guest.mentions) {
     row.mentions = { label: guest.mentions.label };
+  }
+  if (guest.links) {
+    // A template the compiler refuses drops this row's links, never the catalog.
+    try {
+      row.links = toPublicLinks(guest.links);
+    } catch (error) {
+      console.warn(`[guests] links of ${guest.id} left out: ${error?.message ?? error}`);
+    }
   }
   const configurationNote = configurationNotes.get(guest.id);
   if (configurationNote) {

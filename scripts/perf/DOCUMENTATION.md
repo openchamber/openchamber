@@ -111,6 +111,55 @@ maintainer's own app and dev shell, on the same machine.
   heavy run, check for orphaned headless Chromes and `opencode serve`
   processes from earlier probes and report them.
 
+## A Real Session In The Stand
+
+The stand's synthetic sessions miss bugs that depend on the shape of a real
+history (scroll jumps in a collapsed long session, a freeze while one streams).
+Copy the user's session into `profile:serve`; export only reads their local
+OpenCode database.
+
+1. `opencode session export <ses_id> --standalone > tmp/real/session.json`
+2. Set `info.location.directory` in that JSON to `$PWD/tmp/perf-serve/project`.
+3. From `tmp/perf-serve/project`:
+   `HOME=$PWD/../state/home opencode session import ../../real/session.json --standalone`.
+   It can answer 409 or Bad Request and still have imported; check with
+   `opencode session list` under the same `HOME` and directory.
+
+To stream into it, register the fixture provider in
+`tmp/perf-serve/project/opencode.json` with a large `limit.context` and
+`compaction.auto: false`: an imported session usually sits past the fixture's
+context window and gets auto-compacted instead of answered. Then
+`bun run profile:session -- --url http://127.0.0.1:4799 --dir tmp/perf-serve/project --session <id> --model perf/stream-300cps`.
+A hand-driven probe switches the model first with
+`POST /api/session/:id/model` and body `{"model":{"providerID":"perf","id":"stream-300cps"}}`
+(204), because the prompt route ignores a model field. The fixture streams no
+reasoning; a reasoning-heavy report needs a fixture that sends
+`reasoning_content` deltas.
+
+A cold open loads only the tail of the history, so the page holds fewer rows
+than the user who watched the session live; wheel up until the whole history
+is loaded before measuring what scales with rows. Busy-time figures on such a
+session can flip between runs; render-probe counts are the stable proof.
+
+## OpenCode's Own Web UI Beside Ours
+
+To run the same probe against OpenCode's app on the stand's data, with
+`profile:serve` running (it keeps the fixture provider on 4798), from
+`tmp/perf-serve/project`:
+
+```bash
+HOME=$PWD/../state/home \
+OPENCODE_CONFIG_CONTENT="$(node ../../../scripts/perf/fixture-provider.mjs 4798 --print-config)" \
+/Applications/OpenChamber.app/Contents/Resources/opencode-cli/opencode serve --hostname 127.0.0.1 --port 4870
+```
+
+It serves its web app at `/` and prints a throwaway `server password` in its
+log. In the page choose "Use password", enter `http://127.0.0.1:4870` and that
+password, and connect; it lists the same sessions as `profile:serve`. Its
+controls carry `data-slot` and `data-component` attributes
+(`[data-slot=session-review-toggle] button`, `[data-component=resize-handle]`),
+which make stable probe selectors.
+
 ## When An Accessibility Client Is On
 
 Chrome builds no accessibility tree until a client asks for one: a screen

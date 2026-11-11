@@ -7,7 +7,8 @@ import { devtools, persist } from "zustand/middleware";
 import { findCatalogModel, type Provider, type Model, type Agent, type Config } from "@/lib/opencode/model";
 import type { DesktopSettings } from "@/lib/desktop";
 import type { CatalogKind } from "@/lib/opencode/events";
-import { opencodeClient, type OpencodeHealthProbe } from "@/lib/opencode/client";
+import { OpencodeApiError, opencodeClient, type OpencodeHealthProbe } from "@/lib/opencode/client";
+import { isOpenCodeTrustPending } from "@/lib/opencodeTrust";
 import { isLocationNotFoundError } from "@/lib/opencode/location-errors";
 import { isSameProjectConfigError, readProjectConfigError, type ProjectConfigError } from "@/lib/opencode/configError";
 import { scopeMatches, subscribeToConfigChanges } from "@/lib/configSync";
@@ -4521,10 +4522,18 @@ export const useConfigStore = create<ConfigStore>()(
                                 // any other failure keeps the startup retry loop going.
                                 // A project whose folder is gone (an unplugged drive) is the
                                 // same: the app opens and the other projects stay reachable.
+                                // So is a folder the user has not trusted ("Not this time"):
+                                // its files stay browsable, and a new message asks again.
                                 const configError = get().projectConfigErrors[configDirectoryKey];
+                                const agentsError = _agentsLoadErrors.get(configDirectoryKey);
+                                const awaitsTrust = !configError && agentsError instanceof OpencodeApiError && agentsError.status === 403
+                                    && await isOpenCodeTrustPending(configDirectory);
+                                if (!isConfigRuntimeContextCurrent(runtimeContext)) return;
                                 if (configError) {
                                     markStartupTrace('initializeApp:projectConfigInvalid', { configDirectoryKey, name: configError.name });
-                                } else if (isLocationNotFoundError(_agentsLoadErrors.get(configDirectoryKey))
+                                } else if (awaitsTrust) {
+                                    markStartupTrace('initializeApp:projectAwaitsTrust', { configDirectoryKey });
+                                } else if (isLocationNotFoundError(agentsError)
                                     || await opencodeClient.getDirectoryAvailability(configDirectory) === 'missing') {
                                     if (!isConfigRuntimeContextCurrent(runtimeContext)) return;
                                     markStartupTrace('initializeApp:projectDirectoryMissing', { configDirectoryKey });

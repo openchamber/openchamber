@@ -109,6 +109,9 @@ export const toggleWorkCurrentSession = (t: Translate): PaletteCommand => () => 
   if (!session || session.parentID) return false;
   const directory = resolveGlobalSessionDirectory(session) ?? useDirectoryStore.getState().currentDirectory;
   if (!directory || isChatDirectoryPath(directory)) return false;
+  // A pinned session, or one in a pinned worktree, is never in work.
+  if (isSessionPinned(useSessionPinnedStore.getState().ids, directory, sessionId)) return false;
+  if (useSessionUIStore.getState().worktreeMetadata.get(sessionId)?.pinnedAt !== undefined) return false;
   const next = isSessionInWork(session) ? 'done' : 'open';
   void setSessionWorkState(sessionId, directory, next)
     .catch(() => toast.error(t('sessions.sidebar.session.work.updateFailed')));
