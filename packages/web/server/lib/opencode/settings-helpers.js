@@ -663,6 +663,10 @@ export const createSettingsHelpers = (dependencies) => {
     if (candidate.sessionTabsPerWorkspace === true || candidate.sessionTabsPerWorkspace === false) {
       result.sessionTabsPerWorkspace = candidate.sessionTabsPerWorkspace;
     }
+    const commandPaletteShowArchivedSessions = z.boolean().safeParse(candidate.commandPaletteShowArchivedSessions);
+    if (commandPaletteShowArchivedSessions.success) {
+      result.commandPaletteShowArchivedSessions = commandPaletteShowArchivedSessions.data;
+    }
     if (candidate.terminalCloseOnExit === true || candidate.terminalCloseOnExit === false) {
       result.terminalCloseOnExit = candidate.terminalCloseOnExit;
     }

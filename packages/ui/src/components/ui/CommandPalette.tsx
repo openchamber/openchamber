@@ -71,8 +71,8 @@ import { buildCommandPaletteFileSearchKey, scoreCommandPaletteFiles } from './co
 import { fileRowMatchRanges, projectRowMatchRanges, splitRelativePath } from './commandPaletteMatches';
 import { openSessionLink } from '@/lib/router/openSessionFromRoute';
 import { useMessageSearch } from '@/hooks/useMessageSearch';
-import type { MessageSearchHit } from '@/lib/messageSearch';
-import { MessageHitItem, MessageSearchFilters, type MessageAuthor, type MessageScope } from './commandPaletteMessages';
+import { readMessageSearchStatus, type MessageSearchHit, type MessageSearchServerStatus } from '@/lib/messageSearch';
+import { MessageHitItem, type MessageAuthor } from './commandPaletteMessages';
 import { requestReasoningReveal } from '@/components/chat/search/reasoningReveal';
 import { useObserveProjectActionRuns, useProjectActions } from '@/components/layout/projectActionsRunnerContext';
 import { resolveProjectActionIconName } from '@/lib/projectActions';
@@ -90,6 +90,16 @@ import { reservedComposerCommandNames } from '@/components/chat/composer/submit/
 import { useInputStore } from '@/sync/input-store';
 import { useSessionMessageRecordsForExport } from '@/sync/use-sync';
 import { toast } from './toast';
+import { resolveProjectForSessionDirectory } from '@/lib/projectResolution';
+import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
+import { decodeOmniFlag, parseOmniQuery, tokenizeOmniQuery, type OmniFilters } from '@/lib/search/omniQuery';
+import { useOmniSearchState } from '@/lib/search/omniSearchState';
+import { SearchFilterChips } from '@/components/search/SearchFilterChips';
+import { searchFilterChipKeys } from '@/components/search/searchFilterChipKeys';
+import { rankConversationMetadata } from '@/lib/search/conversationSearch';
+import { matchesConversationProjectScope, matchesConversationWorktreeScope } from '@/lib/search/conversationScope';
+import { nextPaletteCategory, paletteLifecycle, shouldResetPaletteCategory } from './commandPaletteOmni';
+import { CommandPaletteSearchControls } from './CommandPaletteSearchControls';
 
 type CommandEntry = {
   id: string;
@@ -161,6 +171,11 @@ const normalizePath = (value: string): string => {
   return normalized;
 };
 
+const isInWorktreeScope = (directory: string | null, worktreePaths: readonly string[]): boolean => {
+  const normalized = directory ? normalizePath(directory) : '';
+  return Boolean(normalized) && worktreePaths.some((path) => normalized === path || normalized.startsWith(`${path}/`));
+};
+
 export const CommandPalette: React.FC = () => {
   const { t } = useI18n();
 
@@ -180,6 +195,10 @@ export const CommandPalette: React.FC = () => {
 
   const activeSessions = useGlobalSessionsStore(React.useCallback(
     (state) => isCommandPaletteOpen ? state.activeSessions : EMPTY_SESSIONS,
+    [isCommandPaletteOpen],
+  ));
+  const archivedSessions = useGlobalSessionsStore(React.useCallback(
+    (state) => isCommandPaletteOpen ? state.archivedSessions : EMPTY_SESSIONS,
     [isCommandPaletteOpen],
   ));
   const pinnedSessionIds = useSessionPinnedStore(React.useCallback(
@@ -207,23 +226,42 @@ export const CommandPalette: React.FC = () => {
     [effectiveDirectory],
   );
 
-  const [query, setQuery] = React.useState('');
+  const inputRef = React.useRef<HTMLInputElement>(null);
+  const filterButtonRef = React.useRef<HTMLButtonElement>(null);
+  const showArchivedSessions = useUIStore((state) => state.commandPaletteShowArchivedSessions);
+  const filterDefaults = {
+    lifecycle: showArchivedSessions ? 'all' : 'active',
+    searchIn: 'everything',
+    author: 'any',
+  } as const;
+  const omniSearchProjects = React.useMemo(
+    () => projects.map((project) => ({ value: normalizePath(project.path), label: project.label || project.path })),
+    [projects],
+  );
+  const { text, filters, query, setText, setFilter, removeFilter, clearText } = useOmniSearchState({
+    surface: 'palette',
+    defaults: filterDefaults,
+    projects: omniSearchProjects,
+  });
   const debouncedQuery = useDebouncedValue(query, 200);
-  const trimmedQuery = debouncedQuery.trim();
-  const liveTrimmed = query.trim();
-  // Messages mode: the palette lists only message hits, with filters.
-  const [messagesMode, setMessagesMode] = React.useState(false);
-  const [messageScope, setMessageScope] = React.useState<MessageScope>('all');
-  const [messageAuthor, setMessageAuthor] = React.useState<MessageAuthor>('any');
+  const parsedQuery = React.useMemo(() => parseOmniQuery(query), [query]);
+  const debouncedParsedQuery = React.useMemo(() => parseOmniQuery(debouncedQuery), [debouncedQuery]);
+  const category = parsedQuery.filters.category ?? 'all';
+  const debouncedCategory = debouncedParsedQuery.filters.category ?? 'all';
+  const trimmedQuery = debouncedParsedQuery.text.trim();
+  const liveTrimmed = parsedQuery.text.trim();
+  const lifecycle = paletteLifecycle(showArchivedSessions, debouncedParsedQuery.filters.lifecycle);
+  const liveLifecycle = paletteLifecycle(showArchivedSessions, parsedQuery.filters.lifecycle);
+  const liveSearchIn = parsedQuery.filters.searchIn;
 
   // Clear query on open (not close) so content stays visible through the
   // close animation instead of emptying mid-flight.
   React.useEffect(() => {
     if (isCommandPaletteOpen) {
-      setQuery('');
-      setMessagesMode(false);
+      clearText();
+      setFilter('category', null);
     }
-  }, [isCommandPaletteOpen]);
+  }, [isCommandPaletteOpen, clearText, setFilter]);
 
   // Lazy-load git status for every session directory we plan to display so that
   // branch labels become available across all projects, not only the active one.
@@ -233,7 +271,7 @@ export const CommandPalette: React.FC = () => {
     if (!isCommandPaletteOpen || !gitApi) return;
     const handle = setTimeout(() => {
       const seen = new Set<string>();
-      for (const session of activeSessions) {
+      for (const session of [...activeSessions, ...(showArchivedSessions ? archivedSessions : [])]) {
         const dir = resolveGlobalSessionDirectory(session);
         if (!dir || seen.has(dir)) continue;
         seen.add(dir);
@@ -241,7 +279,7 @@ export const CommandPalette: React.FC = () => {
       }
     }, 0);
     return () => clearTimeout(handle);
-  }, [isCommandPaletteOpen, activeSessions, gitApi, ensureGitStatus]);
+  }, [isCommandPaletteOpen, activeSessions, archivedSessions, showArchivedSessions, gitApi, ensureGitStatus]);
 
   const close = React.useCallback(() => setCommandPaletteOpen(false), [setCommandPaletteOpen]);
   const run = React.useCallback(
@@ -689,11 +727,19 @@ export const CommandPalette: React.FC = () => {
   // Sessions
   // ---------------------------------------------------------------------------
   const worktreesByProject = useSessionUIStore((state) => state.availableWorktreesByProject);
+  const archivedSessionIds = React.useMemo(() => new Set(archivedSessions.map((session) => session.id)), [archivedSessions]);
+  const activeSessionIds = React.useMemo(() => new Set(activeSessions.map((session) => session.id)), [activeSessions]);
   const orderedActiveSessions = React.useMemo(
     () => orderVisibleRootSessions(activeSessions.filter((session) => (
       isSessionDirectoryAdmitted(resolveGlobalSessionDirectory(session), projects, worktreesByProject)
     )), pinnedSessionIds, sessionOrderRanks),
     [activeSessions, pinnedSessionIds, projects, sessionOrderRanks, worktreesByProject],
+  );
+  const orderedArchivedSessions = React.useMemo(
+    () => orderVisibleRootSessions(archivedSessions.filter((session) => (
+      isSessionDirectoryAdmitted(resolveGlobalSessionDirectory(session), projects, worktreesByProject)
+    )), pinnedSessionIds, sessionOrderRanks),
+    [archivedSessions, pinnedSessionIds, projects, sessionOrderRanks, worktreesByProject],
   );
 
   const allBranches = useGitAllBranches();
@@ -707,6 +753,68 @@ export const CommandPalette: React.FC = () => {
       return null;
     },
     [worktreeMetadata, allBranches],
+  );
+
+  const registeredWorktreeText = React.useCallback((directory: string | null): string => {
+    if (!directory) return '';
+    const normalized = normalizePath(directory);
+    let best: { path: string; branch: string; label: string } | null = null;
+    for (const worktrees of worktreesByProject.values()) {
+      for (const worktree of worktrees) {
+        const path = normalizePath(worktree.path);
+        if (normalized !== path && !normalized.startsWith(`${path}/`)) continue;
+        if (best && best.path.length >= path.length) continue;
+        best = { path, branch: worktree.branch, label: worktree.label };
+      }
+    }
+    return best ? `${best.branch} ${best.label}` : '';
+  }, [worktreesByProject]);
+
+  const projectLabelForDirectory = React.useCallback((directory: string | null): string | null => {
+    if (!directory) return null;
+    const normalized = normalizePath(directory);
+    const project = resolveProjectForSessionDirectory(projects, worktreesByProject, normalized);
+    if (!project) return null;
+    const root = normalizePath(project.path);
+    return project.label || root.split('/').pop() || root;
+  }, [projects, worktreesByProject]);
+
+  // The registered worktrees a worktree filter names; a directory is in scope at
+  // one of them or below it, the same rule message hits follow.
+  const worktreeScopePaths = React.useCallback((scope: string): string[] => [...worktreesByProject.values()]
+    .flat()
+    .filter((worktree) => matchesConversationWorktreeScope(scope, worktree))
+    .map((worktree) => normalizePath(worktree.path)), [worktreesByProject]);
+
+  const paletteSessions = React.useMemo(() => {
+    const candidates = showArchivedSessions ? [...orderedActiveSessions, ...orderedArchivedSessions] : orderedActiveSessions;
+    const worktreePaths = parsedQuery.filters.worktree ? worktreeScopePaths(parsedQuery.filters.worktree) : null;
+    return candidates.filter((session) => {
+      const directory = resolveGlobalSessionDirectory(session);
+      if (!isSessionDirectoryAdmitted(directory, projects, worktreesByProject)) return false;
+      const archived = archivedSessionIds.has(session.id);
+      if (liveLifecycle === 'active' && archived) return false;
+      if (liveLifecycle === 'archived' && !archived) return false;
+      const project = resolveProjectForSessionDirectory(projects, worktreesByProject, directory);
+      if (parsedQuery.filters.project && (!project || !matchesConversationProjectScope(parsedQuery.filters.project, project.path, project.label))) return false;
+      if (worktreePaths && !isInWorktreeScope(directory, worktreePaths)) return false;
+      return true;
+    });
+  }, [showArchivedSessions, orderedActiveSessions, orderedArchivedSessions, archivedSessionIds, projects, worktreesByProject, liveLifecycle, worktreeScopePaths, parsedQuery.filters.project, parsedQuery.filters.worktree]);
+  const paletteSessionMetadata = React.useMemo(() => new Map(paletteSessions.map((session) => {
+    const directory = resolveGlobalSessionDirectory(session);
+    return [session.id, {
+      sessionId: session.id,
+      title: session.title ?? '',
+      projectLabel: projectLabelForDirectory(directory),
+      worktreeLabel: branchForSession(session.id, directory) ?? registeredWorktreeText(directory),
+      directory,
+      archived: archivedSessionIds.has(session.id),
+    }] as const;
+  })), [paletteSessions, projectLabelForDirectory, branchForSession, registeredWorktreeText, archivedSessionIds]);
+  const paletteSessionsById = React.useMemo(
+    () => new Map(paletteSessions.map((session) => [session.id, session])),
+    [paletteSessions],
   );
 
   // ---------------------------------------------------------------------------
@@ -742,22 +850,103 @@ export const CommandPalette: React.FC = () => {
   const reasoningIndexed = useUIStore((state) => state.messageSearchReasoningEnabled);
   const showReasoningTraces = useUIStore((state) => state.showReasoningTraces);
   const reasoningSearchable = reasoningIndexed && showReasoningTraces;
-  const effectiveAuthor: MessageAuthor = messageAuthor === 'reasoning' && !reasoningSearchable ? 'any' : messageAuthor;
-  // "This project" covers the project folder and its worktrees, wherever they live.
-  const projectDirectories = React.useMemo(() => {
-    if (!activeProject?.path) return [];
-    return [...new Set([normalizePath(activeProject.path), ...availableWorktrees.map((worktree) => normalizePath(worktree.path))])];
-  }, [activeProject?.path, availableWorktrees]);
-  const projectScoped = messagesMode && messageScope === 'project' && projectDirectories.length > 0;
+  const requestedAuthor = debouncedParsedQuery.filters.author ?? 'any';
+  const effectiveAuthor: MessageAuthor = requestedAuthor === 'reasoning' && !reasoningSearchable ? 'any' : requestedAuthor;
+  const messageScopeForFilters = React.useCallback((filters: OmniFilters) => {
+    const projectFilter = filters.project?.toLocaleLowerCase();
+    const worktreeFilter = filters.worktree?.toLocaleLowerCase();
+    const matchingProjects = new Set(projects.filter((project) => (
+      !projectFilter || matchesConversationProjectScope(projectFilter, project.path, project.label)
+    )).map((project) => project.id));
+    const matchingWorktreePaths: string[] = [];
+    const registeredDirectories = new Set<string>();
+    if (!worktreeFilter) {
+      for (const project of projects) {
+        if (!projectFilter || matchingProjects.has(project.id)) registeredDirectories.add(normalizePath(project.path));
+      }
+    }
+    for (const [projectPath, worktrees] of worktreesByProject) {
+      for (const worktree of worktrees) {
+        const path = normalizePath(worktree.path);
+        const project = resolveProjectForSessionDirectory(projects, worktreesByProject, projectPath);
+        const projectMatches = !projectFilter || Boolean(project && matchingProjects.has(project.id));
+        const worktreeMatches = !worktreeFilter || matchesConversationWorktreeScope(worktreeFilter, worktree);
+        if (projectMatches && worktreeMatches) {
+          matchingWorktreePaths.push(path);
+          registeredDirectories.add(path);
+        }
+      }
+    }
+    const hasExplicitScope = Boolean(projectFilter || worktreeFilter);
+    const hasMatches = (!projectFilter || matchingProjects.size > 0) && (!worktreeFilter || matchingWorktreePaths.length > 0);
+    const includesDirectory = (directory: string | null): boolean => {
+      if (!directory || !isSessionDirectoryAdmitted(directory, projects, worktreesByProject)) return false;
+      const project = resolveProjectForSessionDirectory(projects, worktreesByProject, directory);
+      if (projectFilter && (!project || !matchingProjects.has(project.id))) return false;
+      return !worktreeFilter || isInWorktreeScope(directory, matchingWorktreePaths);
+    };
+    return { enabled: !hasExplicitScope || hasMatches, includesDirectory, registeredDirectories };
+  }, [projects, worktreesByProject]);
+  const messageScope = React.useMemo(() => messageScopeForFilters(debouncedParsedQuery.filters), [messageScopeForFilters, debouncedParsedQuery.filters]);
+  const liveMessageScope = React.useMemo(() => messageScopeForFilters(parsedQuery.filters), [messageScopeForFilters, parsedQuery.filters]);
+  const messageDirectories = React.useMemo(() => {
+    if (!messageScope.enabled) return undefined;
+    if (!debouncedParsedQuery.filters.project && !debouncedParsedQuery.filters.worktree) return undefined;
+    const directories = new Set(messageScope.registeredDirectories);
+    for (const directory of [...orderedActiveSessions, ...orderedArchivedSessions]
+      .map((session) => resolveGlobalSessionDirectory(session))
+      .filter((directory): directory is string => messageScope.includesDirectory(directory))) directories.add(directory);
+    return [...directories];
+  }, [messageScope, debouncedParsedQuery.filters.project, debouncedParsedQuery.filters.worktree, orderedActiveSessions, orderedArchivedSessions]);
   const { state: messageSearch, loadMore: loadMoreMessages } = useMessageSearch({
     query: trimmedQuery,
-    enabled: isCommandPaletteOpen && messageSearchSupported,
-    limit: messagesMode ? MESSAGE_PAGE_SIZE : MESSAGE_PREVIEW_LIMIT,
-    directories: projectScoped ? projectDirectories : undefined,
-    role: messagesMode && effectiveAuthor !== 'any' ? effectiveAuthor : null,
+    enabled: isCommandPaletteOpen && messageSearchSupported && messageScope.enabled && debouncedParsedQuery.filters.searchIn !== 'titles',
+    limit: debouncedCategory === 'messages' ? MESSAGE_PAGE_SIZE : MESSAGE_PREVIEW_LIMIT,
+    directories: messageDirectories,
+    role: effectiveAuthor !== 'any' ? effectiveAuthor : null,
     includeReasoning: showReasoningTraces,
+    lifecycle,
   });
-  const messageHits = 'hits' in messageSearch ? messageSearch.hits : [];
+  const [unavailableStatus, setUnavailableStatus] = React.useState<MessageSearchServerStatus['state'] | null>(null);
+  const [runtimeGeneration, setRuntimeGeneration] = React.useState(0);
+  React.useEffect(() => subscribeRuntimeEndpointChanged(() => setRuntimeGeneration((generation) => generation + 1)), []);
+  const runtimeKey = getRuntimeKey();
+  const unavailableProbeKey = `${runtimeKey}\u0000${runtimeGeneration}\u0000${debouncedQuery}\u0000${messageScope.enabled}\u0000${messageDirectories?.join('\n') ?? ''}\u0000${lifecycle}\u0000${effectiveAuthor}\u0000${showReasoningTraces}`;
+  const unavailableProbeKeyRef = React.useRef(unavailableProbeKey);
+  unavailableProbeKeyRef.current = unavailableProbeKey;
+  React.useEffect(() => {
+    if (!isCommandPaletteOpen || !messageSearchSupported || messageSearch.status !== 'unavailable') {
+      setUnavailableStatus(null);
+      return;
+    }
+    const controller = new AbortController();
+    const probeKey = unavailableProbeKey;
+    setUnavailableStatus(null);
+    void readMessageSearchStatus(controller.signal)
+      .then((status) => {
+        if (!controller.signal.aborted && unavailableProbeKeyRef.current === probeKey) setUnavailableStatus(status.state);
+      })
+      .catch(() => {
+        if (!controller.signal.aborted && unavailableProbeKeyRef.current === probeKey) setUnavailableStatus('unsupported');
+      });
+    return () => controller.abort();
+  }, [isCommandPaletteOpen, messageSearch.status, messageSearchSupported, unavailableProbeKey]);
+  const liveRequestedAuthor = parsedQuery.filters.author ?? 'any';
+  const liveAuthor: MessageAuthor = liveRequestedAuthor === 'reasoning' && !reasoningSearchable ? 'any' : liveRequestedAuthor;
+  const messageHits = ('hits' in messageSearch ? messageSearch.hits : []).map((hit) => {
+    if (archivedSessionIds.has(hit.sessionId)) return { ...hit, archived: true };
+    if (activeSessionIds.has(hit.sessionId)) return { ...hit, archived: false };
+    return hit;
+  }).filter((hit) => {
+    if (!liveMessageScope.enabled || !liveMessageScope.includesDirectory(hit.directory)) return false;
+    if (parsedQuery.filters.searchIn === 'titles') return false;
+    if (hit.role === 'reasoning' && !reasoningSearchable) return false;
+    if (liveAuthor !== 'any' && hit.role !== liveAuthor) return false;
+    if (activeSessionIds.has(hit.sessionId)) return liveLifecycle !== 'archived';
+    if (archivedSessionIds.has(hit.sessionId)) return showArchivedSessions && liveLifecycle !== 'active';
+    if (hit.archived === true) return showArchivedSessions && liveLifecycle !== 'active';
+    return hit.archived === false && liveLifecycle !== 'archived';
+  });
 
   React.useEffect(() => {
     if (!isCommandPaletteOpen) {
@@ -834,9 +1023,14 @@ export const CommandPalette: React.FC = () => {
   }, [settingsEntries, liveTrimmed, hasQuery]);
 
   const scoredSessions = React.useMemo(() => {
-    if (!hasQuery) return orderedActiveSessions.slice(0, 5).map((item) => ({ item, score: 0, ranges: NO_RANGES }));
-    return rankBySubsequence(orderedActiveSessions, liveTrimmed, (s) => s.title || '', { limit: 7 });
-  }, [orderedActiveSessions, liveTrimmed, hasQuery]);
+    if (!hasQuery) return paletteSessions.slice(0, 5).map((item) => ({ item, score: 0, ranges: NO_RANGES }));
+    return rankConversationMetadata([...paletteSessionMetadata.values()], liveTrimmed, { limit: 7, titlesOnly: liveSearchIn === 'titles' }).flatMap((match) => {
+      const item = paletteSessionsById.get(match.sessionId);
+      // Metadata ranks lower-is-better; the groups compare higher-is-better
+      // scores, and a project or folder hit stays below every name hit.
+      return item ? [{ item, score: -match.score, ranges: match.titleRanges }] : [];
+    });
+  }, [paletteSessions, paletteSessionMetadata, paletteSessionsById, liveTrimmed, liveSearchIn, hasQuery]);
 
   const scoredFiles = React.useMemo(() => {
     if (!isCommandPaletteOpen) return [];
@@ -875,19 +1069,6 @@ export const CommandPalette: React.FC = () => {
         return [{ path, name: splitRelativePath(relativePath).name, relativePath }];
       });
   }, [contextTabs, currentRoot]);
-
-  const projectLabelForDirectory = React.useCallback((directory: string | null): string | null => {
-    if (!directory) return null;
-    const normalized = normalizePath(directory);
-    let best: { label: string; length: number } | null = null;
-    for (const project of projects) {
-      const root = normalizePath(project.path);
-      if (normalized !== root && !normalized.startsWith(`${root}/`)) continue;
-      if (best && best.length >= root.length) continue;
-      best = { label: project.label || root.split('/').pop() || root, length: root.length };
-    }
-    return best?.label ?? null;
-  }, [projects]);
 
   const visibleFiles = hasQuery ? scoredFiles : [];
   const visibleProjects = hasQuery ? scoredProjects : [];
@@ -975,14 +1156,55 @@ export const CommandPalette: React.FC = () => {
     );
   };
 
+  const resetCategory = React.useCallback(() => setFilter('category', null), [setFilter]);
+  const archivedHidden = !showArchivedSessions && (parsedQuery.filters.lifecycle === 'archived' || parsedQuery.filters.lifecycle === 'all');
+  const messageStatus = messageSearch.status === 'ready' && messageSearch.index?.lifecycleComplete === false && messageHits.length === 0
+    ? t('search.omni.status.lifecycleIncomplete')
+    : !messageSearchEnabled
+      ? t('search.omni.status.off')
+      : isVSCodeRuntime()
+        ? t('search.omni.status.unsupported')
+        : !messageScope.enabled
+          ? t('search.omni.empty')
+        : debouncedParsedQuery.filters.searchIn === 'titles'
+          ? t('search.omni.searchIn.titles')
+          : messageSearch.status === 'idle' || messageSearch.status === 'too-short'
+      ? t('search.omni.status.tooShort')
+      : messageSearch.status === 'loading' && messageHits.length === 0
+        ? t('search.omni.status.searching')
+      : messageSearch.status === 'error'
+        ? t('search.omni.status.error')
+        : messageSearch.status === 'ready' && messageSearch.pageError
+          ? t('search.omni.status.error')
+          : messageSearch.status === 'unavailable'
+            ? unavailableStatus === 'off'
+              ? t('search.omni.status.off')
+              : unavailableStatus === 'failed'
+                ? t('search.omni.status.failed')
+                : t('search.omni.status.unsupported')
+            : messageSearch.status === 'ready' && messageHits.length === 0
+              ? t('search.omni.empty')
+              : null;
+  const messageContentBlocksGlobalEmpty = category === 'all'
+    && hasQuery
+    && parsedQuery.filters.searchIn !== 'titles'
+    && (!messageSearchEnabled
+      || isVSCodeRuntime()
+      || messageSearch.status === 'loading'
+      || messageSearch.status === 'error'
+      || messageSearch.status === 'unavailable'
+      || (messageSearch.status === 'ready' && (
+        messageSearch.index?.backfill.state === 'running'
+        || messageSearch.index?.lifecycleComplete === false
+      )));
+
   return (
     <Dialog
       open={isCommandPaletteOpen}
       onOpenChange={(nextOpen, details) => {
-        // Esc leaves messages mode first; a second Esc closes the palette.
-        if (!nextOpen && messagesMode && details.reason === 'escape-key') {
+        if (!nextOpen && category !== 'all' && details.reason === 'escape-key') {
           details.cancel();
-          setMessagesMode(false);
+          resetCategory();
           return;
         }
         setCommandPaletteOpen(nextOpen);
@@ -1005,30 +1227,64 @@ export const CommandPalette: React.FC = () => {
           className="[&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:pt-2 [&_[cmdk-group-heading]]:pb-1 [&_[cmdk-group-heading]]:!text-[0.6875rem] [&_[cmdk-group-heading]]:!leading-4 [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group]]:px-2 [&_[cmdk-input-wrapper]_svg]:h-4 [&_[cmdk-input-wrapper]_svg]:w-4 [&_[cmdk-item]]:px-2 [&_[cmdk-item]]:py-1.5 [&_[cmdk-item]_svg]:h-4 [&_[cmdk-item]_svg]:w-4 [&_[cmdk-item]]:typography-meta"
         >
           <CommandInput
-            value={query}
-            onValueChange={setQuery}
-            placeholder={messagesMode ? t('commandPalette.messages.placeholder') : t('commandPalette.input.placeholder')}
+            ref={inputRef}
+            value={text}
+            onValueChange={setText}
+            leading={searchFilterChipKeys(filters, filterDefaults).length > 0 ? <SearchFilterChips
+              filters={filters}
+              defaults={filterDefaults}
+              projectOptions={projects.map((project) => ({ ...project, value: normalizePath(project.path), label: project.label || project.path }))}
+              worktreeOptions={[...worktreesByProject.values()].flatMap((worktrees) => worktrees.map((worktree) => ({ value: worktree.path, label: worktree.label || worktree.branch || worktree.path })))}
+              mobile={isMobile}
+              onRemove={(key) => { removeFilter(key); inputRef.current?.focus(); }}
+            /> : undefined}
+            placeholder={category === 'messages' ? t('commandPalette.messages.placeholder') : t('commandPalette.input.placeholder')}
+            onBlur={() => setText(text, { commit: true })}
             onKeyDown={(event) => {
-              if (messagesMode && event.key === 'Backspace' && query.length === 0) {
+              if (event.nativeEvent.isComposing) return;
+              if (event.altKey && event.key === 'ArrowDown') {
                 event.preventDefault();
-                setMessagesMode(false);
+                filterButtonRef.current?.click();
+                return;
+              }
+              if (event.key === 'Tab') {
+                event.preventDefault();
+                setFilter('category', nextPaletteCategory(category, event.shiftKey ? -1 : 1));
+                return;
+              }
+               if (event.key === 'Enter' && decodeOmniFlag(tokenizeOmniQuery(text).at(-1) ?? '')) {
+                 event.preventDefault();
+                 event.stopPropagation();
+                 setText(text, { commit: true });
+                 return;
+              }
+              const chipKeys = searchFilterChipKeys(filters, filterDefaults);
+              if (event.key === 'Backspace' && event.currentTarget.selectionStart === 0 && event.currentTarget.selectionEnd === 0 && chipKeys.length > 0) {
+                event.preventDefault();
+                removeFilter(chipKeys.at(-1)!);
+                return;
+              }
+              if (shouldResetPaletteCategory(category, event.key, liveTrimmed)) {
+                event.preventDefault();
+                resetCategory();
               }
             }}
           />
-          {messagesMode ? (
-            <MessageSearchFilters
-              scope={messageScope}
-              onScopeChange={setMessageScope}
-              projectScopeAvailable={projectDirectories.length > 0}
-              author={effectiveAuthor}
-              onAuthorChange={setMessageAuthor}
-              reasoningAvailable={reasoningSearchable}
-              onBack={() => setMessagesMode(false)}
-            />
-          ) : null}
-          <div className={cn('min-h-0', messagesMode ? 'h-[min(403px,calc(60vh-37px))]' : 'h-[min(440px,60vh)]')}>
+          <CommandPaletteSearchControls
+            filters={filters}
+            category={category}
+            onFilterChange={setFilter}
+            projects={projects.map((project) => ({ value: normalizePath(project.path), label: project.label || project.path }))}
+            worktrees={[...worktreesByProject.values()].flatMap((worktrees) => worktrees.map((worktree) => ({ value: worktree.path, label: worktree.label || worktree.branch || worktree.path })))}
+            mobile={isMobile}
+            allowArchived={showArchivedSessions}
+            reasoningAvailable={reasoningSearchable}
+            onRefocus={() => inputRef.current?.focus()}
+            filterButtonRef={filterButtonRef}
+          />
+          <div className="min-h-0 h-[min(403px,calc(60vh-37px))]">
           <CommandList>
-            {messagesMode ? (
+            {category === 'messages' ? (
               <>
                 {messageHits.map((hit) => (
                   <MessageHitItem key={`${hit.role}:${hit.id}`} hit={hit} projectLabel={projectLabelForDirectory(hit.directory)} onSelect={handleOpenMessage} />
@@ -1040,42 +1296,41 @@ export const CommandPalette: React.FC = () => {
                   </CommandItem>
                 ) : null}
                 <div className="px-4 py-2 typography-meta text-muted-foreground" role="status">
-                  {messageSearch.status === 'idle' || messageSearch.status === 'too-short'
-                    ? t('commandPalette.messages.tooShort')
-                    : messageSearch.status === 'loading' && messageHits.length === 0
-                      ? t('commandPalette.messages.searching')
-                      : messageSearch.status === 'error'
-                        ? t('commandPalette.messages.error')
-                        : messageSearch.status === 'unavailable'
-                          ? t('commandPalette.messages.unavailable')
-                          : messageSearch.status === 'ready' && messageHits.length === 0
-                            ? t('commandPalette.messages.empty')
-                            : null}
+                  {messageStatus}
                   {messageSearch.status === 'ready' && messageSearch.index?.backfill.state === 'running'
                     ? ` ${t('commandPalette.messages.indexing', { done: messageSearch.index.backfill.done, total: messageSearch.index.backfill.total })}`
                     : null}
                 </div>
+                {archivedHidden ? <div className="px-4 py-2 typography-meta text-muted-foreground" role="status">{t('search.omni.palette.archivedHidden')}</div> : null}
               </>
             ) : (
             <>
-            <CommandEmpty>{t('commandPalette.empty.noResults')}</CommandEmpty>
+            {messageContentBlocksGlobalEmpty ? null : <CommandEmpty>{t('commandPalette.empty.noResults')}</CommandEmpty>}
 
             {groupOrder.map((groupKey) => {
               if (groupKey === 'messages') {
-                if (!hasQuery || messageHits.length === 0) return null;
+                if (category !== 'all' || !hasQuery) return null;
                 return (
                   <CommandGroup key="messages" heading={t('commandPalette.group.messages')}>
                     {messageHits.map((hit) => (
                       <MessageHitItem key={`${hit.role}:${hit.id}`} hit={hit} projectLabel={projectLabelForDirectory(hit.directory)} onSelect={handleOpenMessage} />
                     ))}
-                    <CommandItem value="message:show-all" onSelect={() => setMessagesMode(true)}>
+                    {messageHits.length > 0 || (messageSearch.status === 'ready' && messageSearch.next) ? <CommandItem value="message:show-all" onSelect={() => setFilter('category', 'messages')}>
                       <Icon name="search" className="me-2 h-4 w-4" />
                       <span className="truncate text-muted-foreground">{t('commandPalette.messages.showAll')}</span>
-                    </CommandItem>
+                    </CommandItem> : null}
+                    <div className="px-2 py-1 typography-meta text-muted-foreground" role="status">
+                      {messageStatus}
+                      {messageSearch.status === 'ready' && messageSearch.index?.backfill.state === 'running'
+                        ? ` ${t('commandPalette.messages.indexing', { done: messageSearch.index.backfill.done, total: messageSearch.index.backfill.total })}`
+                        : null}
+                    </div>
+                    {archivedHidden ? <div className="px-2 py-1 typography-meta text-muted-foreground" role="status">{t('search.omni.palette.archivedHidden')}</div> : null}
                   </CommandGroup>
                 );
               }
               if (groupKey === 'openFiles' && visibleOpenFiles.length > 0) {
+                if (category !== 'all' && category !== 'files') return null;
                 return (
                   <CommandGroup key="openFiles" heading={t('commandPalette.group.openFiles')}>
                     {visibleOpenFiles.map((file) => renderFileItem(file, 'open-file', NO_RANGES))}
@@ -1083,6 +1338,7 @@ export const CommandPalette: React.FC = () => {
                 );
               }
               if (groupKey === 'commands' && scoredCommands.length > 0) {
+                if (category !== 'all' && category !== 'commands') return null;
                 return (
                   <CommandGroup key="commands" heading={t('commandPalette.group.commands')}>
                     {scoredCommands.map(({ item: cmd, ranges }) => (
@@ -1101,6 +1357,7 @@ export const CommandPalette: React.FC = () => {
                 );
               }
               if (groupKey === 'settings' && scoredSettings.length > 0) {
+                if (category !== 'all' && category !== 'commands') return null;
                 return (
                   <CommandGroup key="settings" heading={t('commandPalette.group.settings')}>
                     {/* The matcher ran on "<title> <group> <keywords>"; a match
@@ -1115,6 +1372,7 @@ export const CommandPalette: React.FC = () => {
                 );
               }
               if (groupKey === 'sessions' && scoredSessions.length > 0) {
+                if (category !== 'all' && category !== 'sessions') return null;
                 return (
                   <CommandGroup key="sessions" heading={t('commandPalette.group.sessions')}>
                     {scoredSessions.map(({ item: session, ranges }) => {
@@ -1122,7 +1380,8 @@ export const CommandPalette: React.FC = () => {
                       const title = session.title || t('commandPalette.session.untitled');
                       const dir = resolveGlobalSessionDirectory(session);
                       const branch = branchForSession(session.id, dir);
-                      const projectLabel = projectLabelForDirectory(dir);
+                       const projectLabel = projectLabelForDirectory(dir);
+                       const archived = archivedSessionIds.has(session.id);
                       return (
                         <CommandItem
                           key={session.id}
@@ -1134,12 +1393,13 @@ export const CommandPalette: React.FC = () => {
                           {projectLabel ? (
                             <span dir="auto" className="max-w-[180px] shrink-0 truncate text-muted-foreground typography-meta">{projectLabel}</span>
                           ) : null}
-                          {branch ? (
+                           {branch ? (
                             <span className="inline-flex max-w-[160px] shrink-0 items-center gap-1 text-muted-foreground typography-meta">
                               <Icon name="git-branch" className="h-3 w-3" />
                               <span dir="ltr" className="truncate">{branch}</span>
                             </span>
-                          ) : null}
+                           ) : null}
+                           {archived ? <span className="shrink-0 text-muted-foreground typography-micro">{t('search.omni.result.archivedTag')}</span> : null}
                         </CommandItem>
                       );
                     })}
@@ -1147,6 +1407,7 @@ export const CommandPalette: React.FC = () => {
                 );
               }
               if (groupKey === 'files' && visibleFiles.length > 0) {
+                if (category !== 'all' && category !== 'files') return null;
                 return (
                   <CommandGroup key="files" heading={t('commandPalette.group.files')}>
                     {visibleFiles.map(({ item, ranges }) => renderFileItem(item, 'file', ranges))}
@@ -1154,6 +1415,7 @@ export const CommandPalette: React.FC = () => {
                 );
               }
               if (groupKey === 'projects' && visibleProjects.length > 0) {
+                if (category !== 'all') return null;
                 return (
                   <CommandGroup key="projects" heading={t('commandPalette.group.projects')}>
                     {visibleProjects.map(({ item: project, nameRanges, pathRanges }) => (
@@ -1178,6 +1440,7 @@ export const CommandPalette: React.FC = () => {
                 {t('commandPalette.empty.searchingFiles')}
               </div>
             ) : null}
+            {archivedHidden ? <div className="px-4 py-2 typography-meta text-muted-foreground" role="status">{t('search.omni.palette.archivedHidden')}</div> : null}
             </>
             )}
           </CommandList>

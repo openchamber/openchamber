@@ -38,6 +38,7 @@ import { snippetsI18n } from './snippets.i18n';
 import { sidebarWorkI18n } from './sidebar-work.i18n';
 import { sidebarSectionsI18n } from './sidebar-sections.i18n';
 import { worktreeArchiveI18n } from './worktree-archive.i18n';
+import { omniSearchI18n } from './omni-search.i18n';
 import { overviewI18n } from './overview.i18n';
 import { isolatedSpacesI18n } from './isolated-spaces.i18n';
 import { sourceBoardI18n } from './source-board.i18n';
@@ -229,6 +230,7 @@ export const dict: Record<I18nKey, string> = {
   ...sidebarWorkI18n.uk,
   ...sidebarSectionsI18n.uk,
   ...worktreeArchiveI18n.uk,
+  ...omniSearchI18n.uk,
   ...overviewI18n.uk,
   ...isolatedSpacesI18n.uk,
   ...sourceBoardI18n.uk,
@@ -2938,21 +2940,7 @@ export const dict: Record<I18nKey, string> = {
   "commandPalette.group.messages": "Повідомлення",
   "commandPalette.messages.showAll": "Показати всі результати в повідомленнях",
   "commandPalette.messages.placeholder": "Шукати в повідомленнях…",
-  "commandPalette.messages.back": "Назад",
-  "commandPalette.messages.filter.scopeLabel": "Де",
-  "commandPalette.messages.filter.allProjects": "Усі проєкти",
-  "commandPalette.messages.filter.thisProject": "Цей проєкт",
-  "commandPalette.messages.filter.authorLabel": "Автор",
-  "commandPalette.messages.filter.anyone": "Будь-хто",
-  "commandPalette.messages.filter.you": "Ви",
-  "commandPalette.messages.filter.agent": "Агент",
-  "commandPalette.messages.filter.reasoning": "Міркування",
   "commandPalette.messages.inReasoning": "Міркування",
-  "commandPalette.messages.tooShort": "Введіть щонайменше 3 символи, щоб шукати в повідомленнях",
-  "commandPalette.messages.searching": "Шукаю в повідомленнях…",
-  "commandPalette.messages.error": "Не вдалося виконати пошук у повідомленнях",
-  "commandPalette.messages.unavailable": "Пошук у повідомленнях недоступний на цьому сервері",
-  "commandPalette.messages.empty": "Повідомлень не знайдено",
   "commandPalette.messages.indexing": "Старі розмови ще індексуються: {done} з {total}.",
   "commandPalette.messages.loadMore": "Завантажити ще",
   "commandPalette.messages.byYou": "Ваше повідомлення",

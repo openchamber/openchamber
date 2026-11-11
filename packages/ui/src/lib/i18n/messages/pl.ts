@@ -38,6 +38,7 @@ import { snippetsI18n } from './snippets.i18n';
 import { sidebarWorkI18n } from './sidebar-work.i18n';
 import { sidebarSectionsI18n } from './sidebar-sections.i18n';
 import { worktreeArchiveI18n } from './worktree-archive.i18n';
+import { omniSearchI18n } from './omni-search.i18n';
 import { overviewI18n } from './overview.i18n';
 import { isolatedSpacesI18n } from './isolated-spaces.i18n';
 import { sourceBoardI18n } from './source-board.i18n';
@@ -219,6 +220,7 @@ export const dict: Record<I18nKey, string> = {
   ...sidebarWorkI18n.pl,
   ...sidebarSectionsI18n.pl,
   ...worktreeArchiveI18n.pl,
+  ...omniSearchI18n.pl,
   ...overviewI18n.pl,
   ...isolatedSpacesI18n.pl,
   ...sourceBoardI18n.pl,
@@ -1761,21 +1763,7 @@ export const dict: Record<I18nKey, string> = {
   'commandPalette.group.messages': 'Wiadomości',
   'commandPalette.messages.showAll': 'Pokaż wszystkie wyniki w wiadomościach',
   'commandPalette.messages.placeholder': 'Szukaj w wiadomościach…',
-  'commandPalette.messages.back': 'Wstecz',
-  'commandPalette.messages.filter.scopeLabel': 'Gdzie',
-  'commandPalette.messages.filter.allProjects': 'Wszystkie projekty',
-  'commandPalette.messages.filter.thisProject': 'Ten projekt',
-  'commandPalette.messages.filter.authorLabel': 'Autor',
-  'commandPalette.messages.filter.anyone': 'Każdy',
-  'commandPalette.messages.filter.you': 'Ty',
-  'commandPalette.messages.filter.agent': 'Agent',
-  'commandPalette.messages.filter.reasoning': 'Myślenie',
   'commandPalette.messages.inReasoning': 'Myślenie',
-  'commandPalette.messages.tooShort': 'Wpisz co najmniej 3 znaki, aby szukać w wiadomościach',
-  'commandPalette.messages.searching': 'Szukanie w wiadomościach…',
-  'commandPalette.messages.error': 'Nie udało się przeszukać wiadomości',
-  'commandPalette.messages.unavailable': 'Wyszukiwanie wiadomości nie jest dostępne na tym serwerze',
-  'commandPalette.messages.empty': 'Nie znaleziono wiadomości',
   'commandPalette.messages.indexing': 'Trwa indeksowanie starszych rozmów: {done} z {total}.',
   'commandPalette.messages.loadMore': 'Wczytaj więcej',
   'commandPalette.messages.byYou': 'Twoja wiadomość',

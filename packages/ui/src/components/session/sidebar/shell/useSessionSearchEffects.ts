@@ -52,7 +52,16 @@ export const useSessionSearchEffects = ({
       if (!sessionSearchContainerRef.current) {
         return;
       }
-      if (!sessionSearchContainerRef.current.contains(event.target as Node)) {
+      const target = event.target;
+      if (!(target instanceof Element)) {
+        return;
+      }
+      const scopePopupId = target.closest('[data-slot="dropdown-menu-content"]')?.id;
+      const ownsScopePopup = scopePopupId
+        ? [...sessionSearchContainerRef.current.querySelectorAll('[aria-controls]')]
+          .some((trigger) => trigger.getAttribute('aria-controls') === scopePopupId)
+        : false;
+      if (!sessionSearchContainerRef.current.contains(target) && !ownsScopePopup) {
         closeSessionSearch();
       }
     };

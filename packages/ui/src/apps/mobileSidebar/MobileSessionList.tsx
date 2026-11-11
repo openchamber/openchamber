@@ -23,6 +23,7 @@ import { MOBILE_TREE_GEOMETRY } from './mobileSidebarGeometry';
 import { useMobileSidebarActions, useMobileSidebarRowsStore } from './mobileSidebarState';
 import { MobileShowControl } from './mobileRowParts';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
+import { SidebarConversationRow, SidebarSearchMore } from '@/components/session/sidebar/SidebarConversationRow';
 
 // Rows that line up with gutterless two-line rows start this far in.
 const FLAT_TEXT_INSET_PX = 12;
@@ -130,7 +131,12 @@ export const MobileSessionList: React.FC<SessionProjectListProps> = ({ model, vi
       case 'folder-header':
         return <MobileFolderRow row={row} geometry={geometry} />;
       case 'session':
+        if (row.searchResult && row.context) return <SidebarConversationRow result={row.searchResult} context={row.context} depth={row.depth} mobile search={model.search} onOpened={phone.close} />;
         return <MobileSessionRow row={row} geometry={geometry} toggleParent={model.groupProps.toggleParent} />;
+      case 'search-result':
+        return <SidebarConversationRow result={row.result} context={row.context} mobile search={model.search} onOpened={phone.close} />;
+      case 'search-more':
+        return <SidebarSearchMore mobile onLoadMore={model.search?.loadMore} />;
       case 'run':
         return <MobileRunRow row={row} geometry={geometry} toggleParent={model.groupProps.toggleParent} />;
       case 'draft':

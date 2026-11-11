@@ -37,6 +37,7 @@ import { snippetsI18n } from './snippets.i18n';
 import { sidebarWorkI18n } from './sidebar-work.i18n';
 import { sidebarSectionsI18n } from './sidebar-sections.i18n';
 import { worktreeArchiveI18n } from './worktree-archive.i18n';
+import { omniSearchI18n } from './omni-search.i18n';
 import { overviewI18n } from './overview.i18n';
 import { isolatedSpacesI18n } from './isolated-spaces.i18n';
 import { sourceBoardI18n } from './source-board.i18n';
@@ -218,6 +219,7 @@ export const dict = {
   ...sidebarWorkI18n.fr,
   ...sidebarSectionsI18n.fr,
   ...worktreeArchiveI18n.fr,
+  ...omniSearchI18n.fr,
   ...overviewI18n.fr,
   ...isolatedSpacesI18n.fr,
   ...sourceBoardI18n.fr,
@@ -2668,21 +2670,7 @@ export const dict = {
   'commandPalette.group.messages': 'Messages',
   'commandPalette.messages.showAll': 'Afficher tous les résultats dans les messages',
   'commandPalette.messages.placeholder': 'Rechercher dans les messages…',
-  'commandPalette.messages.back': 'Retour',
-  'commandPalette.messages.filter.scopeLabel': 'Où',
-  'commandPalette.messages.filter.allProjects': 'Tous les projets',
-  'commandPalette.messages.filter.thisProject': 'Ce projet',
-  'commandPalette.messages.filter.authorLabel': 'Écrit par',
-  'commandPalette.messages.filter.anyone': 'N\'importe qui',
-  'commandPalette.messages.filter.you': 'Vous',
-  'commandPalette.messages.filter.agent': 'Agent',
-  'commandPalette.messages.filter.reasoning': 'Pensée',
   'commandPalette.messages.inReasoning': 'Pensée',
-  'commandPalette.messages.tooShort': 'Saisissez au moins 3 caractères pour rechercher des messages',
-  'commandPalette.messages.searching': 'Recherche dans les messages…',
-  'commandPalette.messages.error': 'Impossible de rechercher les messages',
-  'commandPalette.messages.unavailable': 'La recherche de messages n\'est pas disponible sur ce serveur',
-  'commandPalette.messages.empty': 'Aucun message trouvé',
   'commandPalette.messages.indexing': 'Indexation des anciennes conversations en cours : {done} sur {total}.',
   'commandPalette.messages.loadMore': 'Charger plus',
   'commandPalette.messages.byYou': 'Votre message',

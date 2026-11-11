@@ -37,6 +37,7 @@ type SectionSpacing = keyof typeof SECTION_SPACING_ESTIMATE;
  * user's scroll gesture.
  */
 export const sessionSidebarRowSizeKey = (row: SessionSidebarRow): string => {
+  if (row.kind === 'search-result' || row.searchResult) return `search:${row.key}:${row.kind === 'search-result' ? Boolean(row.result.excerpt) : Boolean(row.searchResult?.excerpt)}`;
   const context = 'renderContext' in row ? row.renderContext : '';
   const detailed = 'detailed' in row && row.detailed;
   const variableHeight = (row.kind === 'session' && (detailed || context === 'timeline-mixed'))

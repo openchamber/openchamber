@@ -12,10 +12,20 @@ export type SessionRowOrderEntry = {
   descendantRange?: readonly [start: number, end: number];
 };
 
+export type SessionRowLifecycle = { time?: { archived?: number | null }; archived?: boolean };
+
+export function mergeSessionRowLifecycle(entries: readonly SessionRowOrderEntry[], sessions: ReadonlyMap<string, SessionRowLifecycle>): ReadonlyMap<string, SessionRowLifecycle> {
+  const lifecycle = new Map(sessions);
+  for (const entry of entries) if (!lifecycle.has(entry.id)) lifecycle.set(entry.id, { archived: entry.archived });
+  return lifecycle;
+}
+
 type SessionRowOrderRegistry = {
   getEntries: () => readonly SessionRowOrderEntry[];
   getDescendantIds: () => readonly string[];
   getSessionsById: () => ReadonlyMap<string, Session>;
+  /** Every selectable id's lifecycle: listed sessions, plus search results the tree does not hold. */
+  getLifecycleById: () => ReadonlyMap<string, SessionRowLifecycle>;
   getWorks: () => readonly SessionRowOrderWork[];
 };
 
@@ -36,17 +46,21 @@ export const SessionRowOrderProvider: React.FC<{
   const entriesRef = React.useRef(entries);
   const descendantIdsRef = React.useRef(descendantIds);
   const sessionsByIdRef = React.useRef(sessionsById);
+  const lifecycleById = React.useMemo(() => mergeSessionRowLifecycle(entries, sessionsById), [entries, sessionsById]);
+  const lifecycleByIdRef = React.useRef(lifecycleById);
   const worksRef = React.useRef(works);
   worksRef.current = works;
   entriesRef.current = entries;
   descendantIdsRef.current = descendantIds;
   sessionsByIdRef.current = sessionsById;
+  lifecycleByIdRef.current = lifecycleById;
   const registryRef = React.useRef<SessionRowOrderRegistry | null>(null);
   if (registryRef.current === null) {
     registryRef.current = {
       getEntries: () => entriesRef.current,
       getDescendantIds: () => descendantIdsRef.current,
       getSessionsById: () => sessionsByIdRef.current,
+      getLifecycleById: () => lifecycleByIdRef.current,
       getWorks: () => worksRef.current,
     };
   }
@@ -82,11 +96,12 @@ export const deriveSessionRowBulkSelectAll = (
 
 export const deriveSessionRowSelectionArchived = (
   selectedIds: ReadonlySet<string>,
-  sessionsById: ReadonlyMap<string, { time?: { archived?: number | null } }>,
+  sessionsById: ReadonlyMap<string, SessionRowLifecycle>,
 ): boolean => {
   if (selectedIds.size === 0) return false;
   for (const id of selectedIds) {
-    if (!sessionsById.get(id)?.time?.archived) return false;
+    const session = sessionsById.get(id);
+    if (!(session?.archived ?? Boolean(session?.time?.archived))) return false;
   }
   return true;
 };

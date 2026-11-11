@@ -37,6 +37,7 @@ import { snippetsI18n } from './snippets.i18n';
 import { sidebarWorkI18n } from './sidebar-work.i18n';
 import { sidebarSectionsI18n } from './sidebar-sections.i18n';
 import { worktreeArchiveI18n } from './worktree-archive.i18n';
+import { omniSearchI18n } from './omni-search.i18n';
 import { overviewI18n } from './overview.i18n';
 import { isolatedSpacesI18n } from './isolated-spaces.i18n';
 import { sourceBoardI18n } from './source-board.i18n';
@@ -218,6 +219,7 @@ export const dict = {
   ...sidebarWorkI18n.de,
   ...sidebarSectionsI18n.de,
   ...worktreeArchiveI18n.de,
+  ...omniSearchI18n.de,
   ...overviewI18n.de,
   ...isolatedSpacesI18n.de,
   ...sourceBoardI18n.de,
@@ -2692,21 +2694,7 @@ export const dict = {
   'commandPalette.group.messages': 'Nachrichten',
   'commandPalette.messages.showAll': 'Alle Nachrichtentreffer anzeigen',
   'commandPalette.messages.placeholder': 'Nachrichten durchsuchen…',
-  'commandPalette.messages.back': 'Zurück',
-  'commandPalette.messages.filter.scopeLabel': 'Wo',
-  'commandPalette.messages.filter.allProjects': 'Alle Projekte',
-  'commandPalette.messages.filter.thisProject': 'Dieses Projekt',
-  'commandPalette.messages.filter.authorLabel': 'Geschrieben von',
-  'commandPalette.messages.filter.anyone': 'Alle',
-  'commandPalette.messages.filter.you': 'Du',
-  'commandPalette.messages.filter.agent': 'Agent',
-  'commandPalette.messages.filter.reasoning': 'Denken',
   'commandPalette.messages.inReasoning': 'Denken',
-  'commandPalette.messages.tooShort': 'Mindestens 3 Zeichen eingeben, um Nachrichten zu durchsuchen',
-  'commandPalette.messages.searching': 'Nachrichten werden durchsucht…',
-  'commandPalette.messages.error': 'Nachrichten konnten nicht durchsucht werden',
-  'commandPalette.messages.unavailable': 'Die Nachrichtensuche ist auf diesem Server nicht verfügbar',
-  'commandPalette.messages.empty': 'Keine Nachrichten gefunden',
   'commandPalette.messages.indexing': 'Ältere Unterhaltungen werden noch indexiert: {done} von {total}.',
   'commandPalette.messages.loadMore': 'Mehr laden',
   'commandPalette.messages.byYou': 'Deine Nachricht',

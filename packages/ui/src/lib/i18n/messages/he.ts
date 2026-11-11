@@ -37,6 +37,7 @@ import { snippetsI18n } from './snippets.i18n';
 import { sidebarWorkI18n } from './sidebar-work.i18n';
 import { sidebarSectionsI18n } from './sidebar-sections.i18n';
 import { worktreeArchiveI18n } from './worktree-archive.i18n';
+import { omniSearchI18n } from './omni-search.i18n';
 import { overviewI18n } from './overview.i18n';
 import { isolatedSpacesI18n } from './isolated-spaces.i18n';
 import { sourceBoardI18n } from './source-board.i18n';
@@ -2892,21 +2893,7 @@ export const dict = {
   'commandPalette.group.messages': 'הודעות',
   'commandPalette.messages.showAll': 'הצג את כל תוצאות ההודעות',
   'commandPalette.messages.placeholder': 'חיפוש הודעות…',
-  'commandPalette.messages.back': 'חזרה',
-  'commandPalette.messages.filter.scopeLabel': 'היכן',
-  'commandPalette.messages.filter.allProjects': 'כל הפרויקטים',
-  'commandPalette.messages.filter.thisProject': 'פרויקט זה',
-  'commandPalette.messages.filter.authorLabel': 'נכתב על ידי',
-  'commandPalette.messages.filter.anyone': 'כל אחד',
-  'commandPalette.messages.filter.you': 'אני',
-  'commandPalette.messages.filter.agent': 'סוכן',
-  'commandPalette.messages.filter.reasoning': 'חשיבה',
   'commandPalette.messages.inReasoning': 'חשיבה',
-  'commandPalette.messages.tooShort': 'יש להקליד 3 תווים לפחות כדי לחפש הודעות',
-  'commandPalette.messages.searching': 'מחפש הודעות…',
-  'commandPalette.messages.error': 'לא ניתן היה לחפש הודעות',
-  'commandPalette.messages.unavailable': 'חיפוש הודעות אינו זמין בשרת זה',
-  'commandPalette.messages.empty': 'לא נמצאו הודעות',
   'commandPalette.messages.indexing': 'עדיין מתבצע אינדוקס של שיחות ישנות: {done} מתוך {total}.',
   'commandPalette.messages.loadMore': 'טען עוד',
   'commandPalette.messages.byYou': 'ההודעה שלי',
@@ -3943,6 +3930,7 @@ export const dict = {
   ...sidebarWorkI18n.he,
   ...sidebarSectionsI18n.he,
   ...worktreeArchiveI18n.he,
+  ...omniSearchI18n.he,
   ...overviewI18n.he,
   ...isolatedSpacesI18n.he,
   ...sourceBoardI18n.he,

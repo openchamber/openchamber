@@ -8,12 +8,13 @@ import { takeSessionActionFailure } from '@/sync/session-action-failures';
 import { describeSessionActionError } from '../sessions/sessionActionError';
 import { useSessionMultiSelectStore } from '@/stores/useSessionMultiSelectStore';
 import type { SessionFolder } from '@/stores/useSessionFoldersStore';
-import { deriveSessionRowBulkSelectAll, deriveSessionRowSelectionArchived, useSessionRowOrderRegistry, type SessionRowOrderWork } from '../sessions/sessionRowOrder';
+import { deriveSessionRowBulkSelectAll, deriveSessionRowSelectionArchived, useSessionRowOrderRegistry, type SessionRowLifecycle, type SessionRowOrderWork } from '../sessions/sessionRowOrder';
 import { bulkDoneWorkLabel, selectFinishedWorks, type FinishWorktreeWorkOutcome } from '../works/workActions';
 import { toastFinishWorkOutcome } from '../works/useWorktreeWork';
 import type { BulkDeleteSessionsConfirmState } from '../shell/ConfirmDialogs';
 
 const EMPTY_SESSIONS_BY_ID: ReadonlyMap<string, Session> = new Map();
+const EMPTY_LIFECYCLE_BY_ID: ReadonlyMap<string, SessionRowLifecycle> = new Map();
 
 type Args = {
   isInlineEditing: boolean;
@@ -88,7 +89,7 @@ export const selectSessionsToMarkDone = (
 
 export const resolveBulkDeleteConfirmation = (
   value: NonNullable<BulkDeleteSessionsConfirmState>,
-  sessionsById: ReadonlyMap<string, { time?: { archived?: number | null } }>,
+  sessionsById: ReadonlyMap<string, SessionRowLifecycle>,
 ): { ready: true; value: NonNullable<BulkDeleteSessionsConfirmState> }
   | { ready: false; value: NonNullable<BulkDeleteSessionsConfirmState> | null } => {
   const sessionIds = value.sessionIds.filter((id) => sessionsById.has(id));
@@ -160,7 +161,7 @@ export const useSidebarBulkActions = (args: Args) => {
 
   const bulkScopeIsArchived = hasSelection && deriveSessionRowSelectionArchived(
     selectedIds,
-    rowOrderRegistry?.getSessionsById() ?? EMPTY_SESSIONS_BY_ID,
+    rowOrderRegistry?.getLifecycleById() ?? EMPTY_LIFECYCLE_BY_ID,
   );
 
   const bulkShowsMarkDone = sessionWorkEnabled && !bulkScopeIsArchived;
@@ -348,7 +349,7 @@ export const useSidebarBulkActions = (args: Args) => {
 
   const confirmBulkDelete = React.useCallback(async () => {
     if (!bulkDeleteConfirm) return;
-    const sessionsById = rowOrderRegistry?.getSessionsById() ?? EMPTY_SESSIONS_BY_ID;
+    const sessionsById = rowOrderRegistry?.getLifecycleById() ?? EMPTY_LIFECYCLE_BY_ID;
     const resolution = resolveBulkDeleteConfirmation(bulkDeleteConfirm, sessionsById);
     if (!resolution.ready) {
       setBulkDeleteConfirm(resolution.value);

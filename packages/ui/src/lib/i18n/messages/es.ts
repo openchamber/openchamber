@@ -38,6 +38,7 @@ import { snippetsI18n } from './snippets.i18n';
 import { sidebarWorkI18n } from './sidebar-work.i18n';
 import { sidebarSectionsI18n } from './sidebar-sections.i18n';
 import { worktreeArchiveI18n } from './worktree-archive.i18n';
+import { omniSearchI18n } from './omni-search.i18n';
 import { overviewI18n } from './overview.i18n';
 import { isolatedSpacesI18n } from './isolated-spaces.i18n';
 import { sourceBoardI18n } from './source-board.i18n';
@@ -229,6 +230,7 @@ export const dict: Record<I18nKey, string> = {
   ...sidebarWorkI18n.es,
   ...sidebarSectionsI18n.es,
   ...worktreeArchiveI18n.es,
+  ...omniSearchI18n.es,
   ...overviewI18n.es,
   ...isolatedSpacesI18n.es,
   ...sourceBoardI18n.es,
@@ -2938,21 +2940,7 @@ export const dict: Record<I18nKey, string> = {
   "commandPalette.group.messages": "Mensajes",
   "commandPalette.messages.showAll": "Mostrar todos los resultados en mensajes",
   "commandPalette.messages.placeholder": "Buscar mensajes…",
-  "commandPalette.messages.back": "Atrás",
-  "commandPalette.messages.filter.scopeLabel": "Dónde",
-  "commandPalette.messages.filter.allProjects": "Todos los proyectos",
-  "commandPalette.messages.filter.thisProject": "Este proyecto",
-  "commandPalette.messages.filter.authorLabel": "Escrito por",
-  "commandPalette.messages.filter.anyone": "Cualquiera",
-  "commandPalette.messages.filter.you": "Tú",
-  "commandPalette.messages.filter.agent": "Agente",
-  "commandPalette.messages.filter.reasoning": "Pensando",
   "commandPalette.messages.inReasoning": "Pensando",
-  "commandPalette.messages.tooShort": "Escribe al menos 3 caracteres para buscar mensajes",
-  "commandPalette.messages.searching": "Buscando mensajes…",
-  "commandPalette.messages.error": "No se pudieron buscar los mensajes",
-  "commandPalette.messages.unavailable": "La búsqueda de mensajes no está disponible en este servidor",
-  "commandPalette.messages.empty": "No se encontraron mensajes",
   "commandPalette.messages.indexing": "Aún se están indexando conversaciones antiguas: {done} de {total}.",
   "commandPalette.messages.loadMore": "Cargar más",
   "commandPalette.messages.byYou": "Tu mensaje",

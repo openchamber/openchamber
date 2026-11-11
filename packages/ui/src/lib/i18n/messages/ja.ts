@@ -38,6 +38,7 @@ import { snippetsI18n } from './snippets.i18n';
 import { sidebarWorkI18n } from './sidebar-work.i18n';
 import { sidebarSectionsI18n } from './sidebar-sections.i18n';
 import { worktreeArchiveI18n } from './worktree-archive.i18n';
+import { omniSearchI18n } from './omni-search.i18n';
 import { overviewI18n } from './overview.i18n';
 import { isolatedSpacesI18n } from './isolated-spaces.i18n';
 import { sourceBoardI18n } from './source-board.i18n';
@@ -219,6 +220,7 @@ export const dict: Record<I18nKey, string> = {
   ...sidebarWorkI18n.ja,
   ...sidebarSectionsI18n.ja,
   ...worktreeArchiveI18n.ja,
+  ...omniSearchI18n.ja,
   ...overviewI18n.ja,
   ...isolatedSpacesI18n.ja,
   ...sourceBoardI18n.ja,
@@ -2981,21 +2983,7 @@ export const dict: Record<I18nKey, string> = {
   'commandPalette.group.messages': 'メッセージ',
   'commandPalette.messages.showAll': 'メッセージの結果をすべて表示',
   'commandPalette.messages.placeholder': 'メッセージを検索…',
-  'commandPalette.messages.back': '戻る',
-  'commandPalette.messages.filter.scopeLabel': '場所',
-  'commandPalette.messages.filter.allProjects': 'すべてのプロジェクト',
-  'commandPalette.messages.filter.thisProject': 'このプロジェクト',
-  'commandPalette.messages.filter.authorLabel': '作成者',
-  'commandPalette.messages.filter.anyone': 'すべて',
-  'commandPalette.messages.filter.you': '自分',
-  'commandPalette.messages.filter.agent': 'エージェント',
-  'commandPalette.messages.filter.reasoning': '思考',
   'commandPalette.messages.inReasoning': '思考',
-  'commandPalette.messages.tooShort': 'メッセージを検索するには 3 文字以上入力してください',
-  'commandPalette.messages.searching': 'メッセージを検索中…',
-  'commandPalette.messages.error': 'メッセージを検索できませんでした',
-  'commandPalette.messages.unavailable': 'このサーバーではメッセージ検索を利用できません',
-  'commandPalette.messages.empty': 'メッセージが見つかりません',
   'commandPalette.messages.indexing': '古い会話をインデックス中: {total} 件中 {done} 件。',
   'commandPalette.messages.loadMore': 'さらに読み込む',
   'commandPalette.messages.byYou': 'あなたのメッセージ',

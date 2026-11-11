@@ -34,6 +34,7 @@ import type { SessionGroup } from '../types';
 import { SessionSidebarRows, type SessionSidebarHeldRow } from '../SessionSidebarRows';
 import { copyDragSource, keepRowInList, ROW_DRAG_AUTO_SCROLL, useRowDragSensors } from '../rowDrag';
 import { RowDragPreview } from '../RowDragPreview';
+import { SidebarConversationRow, SidebarSearchMore, type SidebarSearchPresentation } from '../SidebarConversationRow';
 import { setSidebarBlockDrag, useSidebarBlockDragStore } from '../list/blockDrag';
 import { removeFolderFromSections, saveSidebarSections, useSidebarSectionsUiStore } from '../sections/sectionActions';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
@@ -95,6 +96,7 @@ type GroupActions = Pick<SessionGroupSectionProps,
 >;
 
 export type SessionProjectScrollerModel = {
+  search?: SidebarSearchPresentation;
   rowModel: SessionSidebarRowModel;
   sectionsForRender: ProjectSection[];
   projectSections: ProjectSection[];
@@ -488,6 +490,7 @@ function SessionProjectScrollerComponent({ model, view, actions }: SessionProjec
       </DroppableFolderWrapper>;
     }
     if (row.kind === 'session') {
+      if (row.searchResult && row.context) return <SidebarConversationRow result={row.searchResult} context={row.context} depth={row.depth} search={model.search} />;
       const subtreeContainsEditing = new Set<string>();
       if (nodeContainsSessionId(row.node, model.state.editingId)) subtreeContainsEditing.add(row.node.session.id);
       return <div onFocusCapture={() => setFocusedRowKey(row.key)} onBlurCapture={() => setFocusedRowKey((current) => current === row.key ? null : current)}>
@@ -511,6 +514,10 @@ function SessionProjectScrollerComponent({ model, view, actions }: SessionProjec
         />
       </div>;
     }
+    if (row.kind === 'search-result') {
+      return <SidebarConversationRow result={row.result} context={row.context} search={model.search} />;
+    }
+    if (row.kind === 'search-more') return <SidebarSearchMore onLoadMore={model.search?.loadMore} />;
     if (row.kind === 'draft') {
       return <SessionDraftRow
         draft={row.draft} depth={row.depth} detailed={row.detailed} mixed={row.mixed}

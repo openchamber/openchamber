@@ -1,7 +1,6 @@
 import React from 'react';
 
 import { CommandItem } from '@/components/ui/command';
-import { Button } from '@/components/ui/button';
 import { MatchHighlight } from '@/components/ui/MatchHighlight';
 import { Icon } from '@/components/icon/Icon';
 import { getCurrentIntlLocale, useI18n } from '@/lib/i18n';
@@ -14,7 +13,6 @@ const ROLE_ICON: Record<MessageSearchRole, IconName> = {
   reasoning: 'brain-ai-3',
 };
 
-export type MessageScope = 'all' | 'project';
 export type MessageAuthor = 'any' | 'user' | 'assistant' | 'reasoning';
 
 const formatHitDate = (createdAt: number): string => {
@@ -52,77 +50,10 @@ export const MessageHitItem: React.FC<{
           {hit.role === 'reasoning' ? <span className="shrink-0">{t('commandPalette.messages.inReasoning')} ·</span> : null}
           <span className="min-w-0 truncate">{title}</span>
           {projectLabel ? <span className="max-w-[40%] shrink-0 truncate">· {projectLabel}</span> : null}
+          {hit.archived ? <span className="shrink-0">· {t('search.omni.result.archivedTag')}</span> : null}
           <span className="shrink-0">· {formatHitDate(hit.createdAt)}</span>
         </span>
       </span>
     </CommandItem>
-  );
-};
-
-type ChipOption<T extends string> = { value: T; label: string };
-
-const ChipRow = <T extends string>({ options, value, onChange, label }: {
-  options: ChipOption<T>[];
-  value: T;
-  onChange: (value: T) => void;
-  label: string;
-}) => (
-  <div className="flex items-center gap-1" role="group" aria-label={label}>
-    {options.map((option) => (
-      <Button
-        key={option.value}
-        type="button"
-        variant="chip"
-        size="xs"
-        aria-pressed={value === option.value}
-        onClick={() => onChange(option.value)}
-      >
-        {option.label}
-      </Button>
-    ))}
-  </div>
-);
-
-/** The messages mode's header: back to everything, then where and who. */
-export const MessageSearchFilters: React.FC<{
-  scope: MessageScope;
-  onScopeChange: (scope: MessageScope) => void;
-  projectScopeAvailable: boolean;
-  author: MessageAuthor;
-  onAuthorChange: (author: MessageAuthor) => void;
-  /** Reasoning is indexed and shown in the chat. */
-  reasoningAvailable: boolean;
-  onBack: () => void;
-}> = ({ scope, onScopeChange, projectScopeAvailable, author, onAuthorChange, reasoningAvailable, onBack }) => {
-  const { t } = useI18n();
-  return (
-    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-border px-2 py-1.5">
-      <Button type="button" variant="ghost" size="xs" onClick={onBack}>
-        <Icon name="arrow-left" className="h-3.5 w-3.5" />
-        {t('commandPalette.messages.back')}
-      </Button>
-      {projectScopeAvailable ? (
-        <ChipRow
-          label={t('commandPalette.messages.filter.scopeLabel')}
-          value={scope}
-          onChange={onScopeChange}
-          options={[
-            { value: 'all', label: t('commandPalette.messages.filter.allProjects') },
-            { value: 'project', label: t('commandPalette.messages.filter.thisProject') },
-          ]}
-        />
-      ) : null}
-      <ChipRow
-        label={t('commandPalette.messages.filter.authorLabel')}
-        value={author}
-        onChange={onAuthorChange}
-        options={[
-          { value: 'any', label: t('commandPalette.messages.filter.anyone') },
-          { value: 'user', label: t('commandPalette.messages.filter.you') },
-          { value: 'assistant', label: t('commandPalette.messages.filter.agent') },
-          ...(reasoningAvailable ? [{ value: 'reasoning' as const, label: t('commandPalette.messages.filter.reasoning') }] : []),
-        ]}
-      />
-    </div>
   );
 };

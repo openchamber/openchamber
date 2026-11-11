@@ -33,6 +33,10 @@ const { createRoot } = await import('react-dom/client');
 const { I18nProvider } = await import('@/lib/i18n');
 const { TooltipProvider } = await import('@/components/ui/tooltip');
 const { SidebarHeader } = await import('./SidebarHeader');
+const { closeSectionsManager, useSidebarSectionsUiStore } = await import('../sections/sectionActions');
+const { useSessionDisplayStore } = await import('@/stores/useSessionDisplayStore');
+const { SearchScopeMenu } = await import('@/components/search/SearchScopeMenu');
+const { sidebarSearchScopeOptions } = await import('../sidebarConversationSearch');
 
 const baseProps = {
   hideDirectoryControls: false,
@@ -74,6 +78,7 @@ let host: HTMLDivElement;
 let root: Root;
 
 beforeEach(() => {
+  closeSectionsManager();
   host = document.createElement('div');
   document.body.append(host);
   root = createRoot(host);
@@ -93,6 +98,40 @@ afterAll(async () => {
 });
 
 describe('SidebarHeader', () => {
+  for (const query of ['token', 'another topic']) test(`save as section seeds the search words from ${query}`, async () => {
+    let closed = 0;
+    await act(async () => root.render(<I18nProvider><TooltipProvider><SidebarHeader {...baseProps} isSessionSearchOpen hasSessionSearchQuery sessionSearchQuery={query} closeSessionSearch={() => { closed += 1; }} /></TooltipProvider></I18nProvider>));
+    expect(document.querySelector('input')?.value).toBe(query);
+    const savedSections = useSessionDisplayStore.getState().sections;
+    const save = [...document.querySelectorAll('button')].find((button) => button.textContent === 'Save as section');
+    expect(save).toBeDefined();
+    await act(async () => {
+      save!.click();
+      const editor = useSidebarSectionsUiStore.getState();
+      expect(editor.managerOpen).toBe(true);
+      expect(editor.draftIsNew).toBe(true);
+      expect(editor.draft?.name).toBe(query);
+      expect(editor.draft?.filter.text).toEqual([query]);
+      expect(useSessionDisplayStore.getState().sections).toBe(savedSections);
+      closeSectionsManager();
+    });
+    expect(closed).toBe(1);
+  });
+
+  for (const query of ['', 'ses_123']) test(`a non-topic query cannot seed a section: ${query}`, async () => {
+    await act(async () => root.render(<I18nProvider><TooltipProvider><SidebarHeader {...baseProps} isSessionSearchOpen hasSessionSearchQuery sessionSearchQuery={query} /></TooltipProvider></I18nProvider>));
+    expect([...document.querySelectorAll('button')].some((button) => button.textContent === 'Save as section')).toBe(false);
+    expect(useSidebarSectionsUiStore.getState().draft).toBeNull();
+  });
+
+  test('unknown totals omit the count hint while an exact zero remains visible', async () => {
+    const render = (count: number | null) => act(async () => root.render(<I18nProvider><TooltipProvider><SidebarHeader {...baseProps} isSessionSearchOpen hasSessionSearchQuery searchMatchCount={count} /></TooltipProvider></I18nProvider>));
+    await render(null);
+    const hint = () => document.getElementById(document.querySelector('input')!.getAttribute('aria-describedby')!);
+    expect(hint()?.textContent).toBe('');
+    await render(0);
+    expect(hint()?.textContent).toContain('0');
+  });
   test('compact variant renders a persistent search input and no directory controls', async () => {
     await act(async () => root.render(
       <I18nProvider>
@@ -262,5 +301,18 @@ describe('SidebarHeader', () => {
     expect(button().getAttribute('aria-expanded')).toBe('true');
     await act(async () => button().click());
     expect([opened, closed]).toEqual([1, 1]);
+  });
+
+  for (const isVSCode of [true, false]) test(`the ${isVSCode ? 'compact' : 'full'} header renders the Filters menu its runtime supports`, async () => {
+    const options = sidebarSearchScopeOptions({ isVSCode, currentProjectAvailable: true });
+    // VS Code has one workspace and no message search; elsewhere Project and Author join.
+    expect(options).toEqual(isVSCode
+      ? { lifecycle: true, project: null, searchIn: true, author: false }
+      : { lifecycle: true, project: { currentAvailable: true }, searchIn: true, author: true });
+    const scope = <SearchScopeMenu filters={{}} defaults={{ lifecycle: 'active', searchIn: 'everything', author: 'any' }} options={options} onChange={() => undefined} resultCount={null} layout="sidebar" />;
+    await act(async () => root.render(<I18nProvider><TooltipProvider><SidebarHeader {...baseProps} hideDirectoryControls={isVSCode} isSessionSearchOpen={!isVSCode} searchScope={scope} /></TooltipProvider></I18nProvider>));
+    expect(document.querySelectorAll('[data-search-scope-trigger]')).toHaveLength(1);
+    expect(document.querySelectorAll('input')).toHaveLength(1);
+    // Opening the menu is Base UI interaction, which needs a browser check.
   });
 });

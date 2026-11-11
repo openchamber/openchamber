@@ -3,6 +3,7 @@ import React, { act } from 'react';
 import type { Root } from 'react-dom/client';
 import { Window } from 'happy-dom';
 import type { Session } from '@/lib/opencode/model';
+import type { DesktopSettings } from '@/lib/settings/registry';
 import type { SpaceArchive } from '@/lib/spaces/spaces-api';
 import { createProjectIdFromPath } from '@/lib/projectId';
 const browser = new Window({ url: 'http://localhost' });
@@ -17,9 +18,29 @@ for (const [key, value] of Object.entries({ window: browser, document: browser.d
 }
 const PROJECT = { id: createProjectIdFromPath('/workspace'), path: '/workspace' };
 let spaceArchives: SpaceArchive[] = [];
+// A settings save made while the stores load lands on a real timer, possibly mid-test. Its reply must
+// carry the projects the test registered, as a real server's would, or it replaces them with the fixture's.
+let registeredSettings = (): DesktopSettings => ({ projects: [PROJECT] });
+let messageSearchRequests: URL[] = [];
+let messageSearchResponse: ((url: URL) => object) | null = null;
+let expandedRequests: URL[] = [];
+let expandedResponse: ((url: URL) => Response | Promise<Response>) | null = null;
 const fetchSpy = spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
-  const path = new URL(input instanceof Request ? input.url : String(input), 'http://localhost').pathname;
-  if (path === '/api/config/settings') return Response.json({ projects: [PROJECT] });
+  const url = new URL(input instanceof Request ? input.url : String(input), 'http://localhost');
+  const { pathname: path } = url;
+  if (path === '/api/openchamber/message-search/sessions') {
+    messageSearchRequests.push(url);
+    if (messageSearchResponse) {
+      const response = await messageSearchResponse(url);
+      return response instanceof Response ? response : Response.json(response);
+    }
+    return Response.json({ status: 'ok', hits: [], next: null, totals: { sessions: 0, byDirectory: {} }, index: { backfill: { state: 'done', total: 0, done: 0 }, sessions: 0, messages: 0, lifecycleComplete: true } });
+  }
+  if (path === '/api/openchamber/message-search') {
+    expandedRequests.push(url);
+    if (expandedResponse) return expandedResponse(url);
+  }
+  if (path === '/api/config/settings') return Response.json(registeredSettings());
   if (path.endsWith('/fs/home')) return Response.json({ home: '/home/test' });
   if (path.endsWith('/fs/directory-stats')) return Response.json({ results: [{ path: '/gone/worktree', reason: 'not-found' }, { path: '/untrusted/clone', isDirectory: true }] });
   if (path === '/api/openchamber/spaces/archives') return Response.json({ archives: spaceArchives });
@@ -35,10 +56,15 @@ const { I18nProvider } = await import('@/lib/i18n');
 const { useUIStore } = await import('@/stores/useUIStore');
 const { useGlobalSessionsStore } = await import('@/stores/useGlobalSessionsStore');
 const { useProjectsStore } = await import('@/stores/useProjectsStore');
+registeredSettings = () => ({ projects: useProjectsStore.getState().projects });
 const { useGlobalSyncStore } = await import('@/sync/global-sync-store');
 const { ArchiveSessionsView, ArchiveView } = await import('./ArchiveView');
 const { refreshSpaceArchives, useSpaceArchivesStore } = await import('@/lib/spaces/space-archives');
 const { updateDesktopSettings } = await import('@/lib/persistence');
+const navigation = await import('@/lib/router/openSessionFromRoute');
+const { useSessionUIStore } = await import('@/sync/session-ui-store');
+const initialSessionUI = useSessionUIStore.getState();
+const testRestorers: Array<() => void> = [];
 const initialUI = useUIStore.getState();
 const initialSessions = useGlobalSessionsStore.getState();
 const initialProjects = useProjectsStore.getState();
@@ -52,6 +78,11 @@ beforeEach(() => {
   document.body.append(host);
   root = createRoot(host);
   spaceArchives = [];
+  messageSearchRequests = [];
+  messageSearchResponse = null;
+  expandedRequests = [];
+  expandedResponse = null;
+  browser.localStorage.clear();
   useSpaceArchivesStore.getState().resetForRuntimeSwitch();
   useUIStore.setState({ isArchivePageOpen: true });
   useProjectsStore.setState({ projects: [PROJECT] });
@@ -59,6 +90,8 @@ beforeEach(() => {
 
 afterEach(async () => {
   await act(async () => root.unmount());
+  for (const restore of testRestorers.splice(0)) restore();
+  useSessionUIStore.setState(initialSessionUI);
   useUIStore.setState(initialUI);
   useGlobalSessionsStore.setState(initialSessions);
   useProjectsStore.setState(initialProjects);
@@ -94,7 +127,7 @@ test('archive search uses exact IDs and preserves title search and archive membe
     await act(async () => {
       input.dispatchEvent(new browser.KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
     });
-    return [...document.querySelectorAll('[role="button"] > span:first-child')].map((row) => row.textContent);
+    return [...document.querySelectorAll('[data-conversation-title], [role="button"] > span:first-child')].map((row) => row.textContent);
   };
   expect(await search(id)).toEqual(['Release notes']);
   expect(await search(`  ${id.toUpperCase()}  `)).toEqual(['Release notes']);
@@ -102,8 +135,74 @@ test('archive search uses exact IDs and preserves title search and archive membe
     expect(await search(query)).toEqual([]);
   }
   expect(await search('release')).toEqual(['Release notes']);
-  expect(await search('releaze')).toEqual(['Release notes']);
+  expect(await search('releaze')).toEqual([]);
   expect(await search('')).toHaveLength(2);
+});
+
+test('a filter-only active project query searches active metadata', async () => {
+  useGlobalSessionsStore.setState({
+    archivedSessions: [session('ses_archived', 'Archived chat')],
+    activeSessions: [session('ses_active', 'Active project chat', 0)],
+    status: 'ready',
+  });
+  await act(async () => root.render(<I18nProvider><ArchiveView /></I18nProvider>));
+  const input = browser.document.querySelector('input');
+  if (!input) throw new Error('Archive search input missing');
+  const setValue = Object.getOwnPropertyDescriptor(browser.HTMLInputElement.prototype, 'value')?.set;
+  if (!setValue) throw new Error('Input value setter missing');
+  await act(async () => {
+    setValue.call(input, 'in:active project:workspace');
+    input.dispatchEvent(new browser.Event('input', { bubbles: true }));
+    input.dispatchEvent(new browser.KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+  });
+  expect(document.querySelector('[data-search-filter-chip="lifecycle"]')).not.toBeNull();
+  expect(document.querySelector('[data-search-filter-chip="project"]')).not.toBeNull();
+  expect(input.value).toBe('');
+  expect(document.querySelector('[data-conversation-result="ses_active"]')).not.toBeNull();
+  expect(document.querySelector('[data-conversation-result="ses_archived"]')).toBeNull();
+});
+
+test('a typed project filter narrows the content request and deleting a clicked flag releases it', async () => {
+  const advance = searchClock();
+  const otherProject = { id: createProjectIdFromPath('/other'), path: '/other' };
+  useProjectsStore.setState({ projects: [PROJECT, otherProject] });
+  useUIStore.setState({ messageSearchEnabled: true });
+  useGlobalSessionsStore.setState({
+    archivedSessions: [session('ses_workspace', 'Workspace chat'), { ...session('ses_other', 'Other chat'), directory: '/other' }],
+    activeSessions: [],
+    status: 'ready',
+  });
+  await act(async () => root.render(<I18nProvider><ArchiveView /></I18nProvider>));
+  const search = async (value: string) => {
+    await typeSearch(value);
+    await advance(250);
+  };
+  await search('needle project:workspace ');
+  expect(messageSearchRequests.at(-1)?.searchParams.getAll('directory')).toEqual(['/workspace']);
+  const allButton = [...document.querySelectorAll<HTMLButtonElement>('.group\\/dir button')].find((button) => button.textContent?.startsWith('All'));
+  if (!allButton) throw new Error('All archive groups button missing');
+  await act(async () => allButton.click());
+  expect(browser.document.querySelector('input')?.value).toBe('needle ');
+  expect(document.querySelector('[data-search-filter-chip="project"]')).toBeNull();
+  await search('needle');
+  expect(messageSearchRequests.at(-1)?.searchParams.getAll('directory')).toEqual(['/workspace', '/other']);
+});
+
+test('search project counts use known totals and omit capped totals', async () => {
+  const advance = searchClock();
+  useUIStore.setState({ messageSearchEnabled: true });
+  useGlobalSessionsStore.setState({ archivedSessions: [session('ses_count', 'Needle archive')], activeSessions: [], status: 'ready' });
+  messageSearchResponse = () => ({ status: 'ok', hits: [], next: null, totals: { sessions: 4, byDirectory: { '/workspace': 4 } }, index: { backfill: { state: 'done', total: 0, done: 0 }, sessions: 0, messages: 0, lifecycleComplete: true } });
+  await act(async () => root.render(<I18nProvider><ArchiveView /></I18nProvider>));
+  const search = async (query: string) => {
+    await typeSearch(query);
+    await advance(250);
+  };
+  await search('needle');
+  expect([...document.querySelectorAll('.group\\/dir button')].find((button) => button.textContent?.startsWith('workspace'))?.textContent).toContain('5');
+  messageSearchResponse = () => ({ status: 'ok', hits: [], next: null, totals: null, index: { backfill: { state: 'done', total: 0, done: 0 }, sessions: 0, messages: 0, lifecycleComplete: true } });
+  await search('needles');
+  expect([...document.querySelectorAll('.group\\/dir button')].find((button) => button.textContent?.startsWith('workspace'))?.textContent).toBe('workspace');
 });
 
 test('archive rows hide unregistered destinations while preserving raw archived records', async () => {
@@ -197,7 +296,7 @@ test('the page opens with the query the sidebar handed over, and a plain open st
     activeSessions: [],
     status: 'ready',
   });
-  const titles = () => [...document.querySelectorAll('[role="button"] > span:first-child')].map((row) => row.textContent);
+  const titles = () => [...document.querySelectorAll('[data-conversation-title], [role="button"] > span:first-child')].map((row) => row.textContent);
   useUIStore.getState().setArchivePageOpen(true, 'release');
   await act(async () => root.render(<I18nProvider><ArchiveView /></I18nProvider>));
   expect(browser.document.querySelector('input')?.value).toBe('release');
@@ -213,6 +312,30 @@ test('the page opens with the query the sidebar handed over, and a plain open st
   await act(async () => { useUIStore.getState().setArchivePageOpen(true); });
   expect(browser.document.querySelector('input')?.value).toBe('');
   expect(titles()).toHaveLength(2);
+});
+
+test('remembered archive project and lifecycle filters render as chips', async () => {
+  browser.localStorage.setItem('openchamber.search.filters.v1.archive', 'project:/workspace in:all');
+  await act(async () => root.render(<I18nProvider><ArchiveView /></I18nProvider>));
+  expect(document.querySelector('[data-search-filter-chip="project"]')?.textContent).toContain('workspace');
+  expect(document.querySelector('[data-search-filter-chip="lifecycle"]')?.textContent).toContain('Active and archived');
+});
+
+test('removing an archive filter chip updates remembered filters', async () => {
+  browser.localStorage.setItem('openchamber.search.filters.v1.archive', 'project:/workspace');
+  await act(async () => root.render(<I18nProvider><ArchiveView /></I18nProvider>));
+  const remove = document.querySelector<HTMLButtonElement>('[data-search-filter-chip-remove="project"]');
+  if (!remove) throw new Error('Archive project filter chip missing');
+  await act(async () => remove.click());
+  expect(document.querySelector('[data-search-filter-chip="project"]')).toBeNull();
+  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+  expect(browser.localStorage.getItem('openchamber.search.filters.v1.archive') ?? '').not.toContain('project:');
+});
+
+test('the default archived lifecycle does not render as an archive chip', async () => {
+  browser.localStorage.setItem('openchamber.search.filters.v1.archive', 'in:archived');
+  await act(async () => root.render(<I18nProvider><ArchiveView /></I18nProvider>));
+  expect(document.querySelector('[data-search-filter-chip="lifecycle"]')).toBeNull();
 });
 
 test('a subsession archived while its parent stays active is listed under the parent\'s title', async () => {
@@ -253,4 +376,346 @@ test('an empty archive is not reported before the session list has loaded, or af
   expect(emptyText()).toBe('Could not refresh sessions.');
   await act(async () => { useGlobalSessionsStore.setState({ status: 'ready' }); });
   expect(emptyText()).toBe('No archived sessions');
+});
+
+// These tests keep the view, input, search hooks and response parsing real.
+// Only the network, navigation boundary and debounce clock are controlled.
+function searchClock() {
+  let now = 0;
+  let nextId = 1;
+  const timers = new Map<number, { at: number; run: () => void }>();
+  // SAFETY: the fake records only `run` and `delay`; the code under test never reads `setTimeout.__promisify__`.
+  const set = spyOn(window, 'setTimeout').mockImplementation(((run: () => void, delay = 0) => {
+    const id = nextId++;
+    timers.set(id, { at: now + delay, run });
+    return id;
+  }) as typeof window.setTimeout);
+  const clear = spyOn(window, 'clearTimeout').mockImplementation((id) => { timers.delete(Number(id)); });
+  testRestorers.push(() => { set.mockRestore(); clear.mockRestore(); });
+  return async (milliseconds: number) => {
+    const end = now + milliseconds;
+    while (true) {
+      const next = [...timers].filter(([, timer]) => timer.at <= end).sort((a, b) => a[1].at - b[1].at)[0];
+      if (!next) break;
+      now = next[1].at;
+      timers.delete(next[0]);
+      await act(async () => { next[1].run(); });
+    }
+    now = end;
+  };
+}
+
+async function typeSearch(value: string) {
+  const input = browser.document.querySelector('input');
+  const setter = Object.getOwnPropertyDescriptor(browser.HTMLInputElement.prototype, 'value')?.set;
+  if (!input || !setter) throw new Error('Archive input missing');
+  await act(async () => {
+    setter.call(input, value);
+    input.dispatchEvent(new browser.Event('input', { bubbles: true }));
+  });
+}
+
+async function clickSearch(selector: string) {
+  const button = document.querySelector<HTMLButtonElement>(selector);
+  if (!button) throw new Error(`Missing search action ${selector}`);
+  await act(async () => { button.click(); });
+}
+
+const contentHit = (id: string) => ({
+  sessionId: id, sessionTitle: `Conversation ${id}`, directory: '/workspace', archived: true,
+  messageId: `msg_${id}`, role: 'user', createdAt: 1, snippet: 'A \uE000needle\uE001 in content', matchCount: 3,
+});
+const searchIndex = { backfill: { state: 'done', total: 0, done: 0 }, sessions: 2, messages: 4, lifecycleComplete: true };
+const contentPage = (ids: string[], next: string | null = null) => ({
+  status: 'ok', hits: ids.map(contentHit), next, totals: { sessions: 2, byDirectory: { '/workspace': 2 } }, index: searchIndex,
+});
+const expandedHit = (id: string) => ({
+  id, sessionId: 'ses_content', sessionTitle: 'Ordinary title', directory: '/workspace',
+  role: 'user', createdAt: 2, snippet: `${id} has \uE000needle\uE001 text`,
+});
+
+async function renderSearch(layout: 'page' | 'mobile' = 'page', onLeave: () => void = () => undefined) {
+  useUIStore.setState({ messageSearchEnabled: true, messageSearchReasoningEnabled: false, showReasoningTraces: true });
+  useGlobalSessionsStore.setState({ archivedSessions: [session('ses_content', 'Ordinary title')], activeSessions: [], status: 'ready' });
+  await act(async () => root.render(<I18nProvider><ArchiveSessionsView layout={layout} onLeave={onLeave} /></I18nProvider>));
+}
+
+test('live archive content search debounces without Enter and renders the next conversation page', async () => {
+  const advance = searchClock();
+  let resolveNext: ((response: Response) => void) | undefined;
+  const nextPage = new Promise<Response>((resolve) => { resolveNext = resolve; });
+  messageSearchResponse = (url) => url.searchParams.has('before') ? nextPage : contentPage(['ses_content'], 'conversation-page-2');
+  await renderSearch();
+  await typeSearch('needle');
+  await advance(99);
+  expect(messageSearchRequests).toHaveLength(0);
+  await advance(1);
+  expect(document.querySelector('[data-conversation-result]')).toBeNull();
+  await advance(149);
+  expect(messageSearchRequests).toHaveLength(0);
+  await advance(1);
+  expect(document.querySelector('[data-conversation-title]')?.textContent).toBe('Conversation ses_content');
+  expect(document.querySelector('[data-conversation-excerpt-action] mark')?.textContent).toBe('needle');
+  const more = [...document.querySelectorAll<HTMLButtonElement>('[data-archive-search-results] button')].find((button) => button.textContent === 'Show more');
+  if (!more) throw new Error('Conversation pager missing');
+  await act(async () => more.click());
+  expect(messageSearchRequests.at(-1)?.searchParams.get('before')).toBe('conversation-page-2');
+  expect(document.querySelector('[data-conversation-result="ses_content"]')).not.toBeNull();
+  expect(document.querySelector('[data-conversation-result="ses_second"]')).toBeNull();
+  await act(async () => { resolveNext?.(Response.json(contentPage(['ses_second']))); });
+  expect([...document.querySelectorAll('[data-conversation-title]')].map((title) => title.textContent)).toEqual(['Conversation ses_content', 'Conversation ses_second']);
+});
+
+test('excerpt and expanded message activation focus their message and leave without restoring', async () => {
+  const advance = searchClock();
+  const open = spyOn(navigation, 'openSessionLink').mockResolvedValue(undefined);
+  const restore = spyOn(useSessionUIStore.getState(), 'unarchiveSession').mockResolvedValue(true);
+  testRestorers.push(() => { open.mockRestore(); restore.mockRestore(); });
+  let left = 0;
+  messageSearchResponse = () => contentPage(['ses_content']);
+  expandedResponse = () => Response.json({ status: 'ok', hits: [{ ...expandedHit('msg_expanded'), role: 'reasoning' }], next: null, index: searchIndex });
+  const { isReasoningRevealTarget } = await import('@/components/chat/search/reasoningReveal');
+  await renderSearch('page', () => { left += 1; });
+  await typeSearch('needle');
+  await advance(250);
+  await clickSearch('[data-conversation-excerpt-action]');
+  expect(open.mock.calls).toEqual([['ses_content', 'msg_ses_content']]);
+  expect(left).toBe(1);
+  await clickSearch('[data-conversation-more-matches]');
+  await clickSearch('[data-archive-other-matches] button');
+  expect(open.mock.calls.at(-1)).toEqual(['ses_content', 'msg_expanded']);
+  // A reasoning hit asks its collapsed turn and reasoning block to open.
+  expect(isReasoningRevealTarget('msg_expanded')).toBe(true);
+  expect(left).toBe(2);
+  expect(restore).not.toHaveBeenCalled();
+});
+
+test('expanded archive matches retain author policy, highlight snippets and fetch the next message page', async () => {
+  const advance = searchClock();
+  messageSearchResponse = () => contentPage(['ses_content']);
+  expandedResponse = (url) => Response.json({ status: 'ok', hits: [expandedHit(url.searchParams.has('before') ? 'msg_next' : 'msg_first')], next: url.searchParams.has('before') ? null : 'message-page-2', index: searchIndex });
+  await renderSearch();
+  await typeSearch('needle author:user ');
+  await advance(250);
+  await clickSearch('[data-conversation-more-matches]');
+  expect(expandedRequests[0]?.searchParams.get('session')).toBe('ses_content');
+  expect(expandedRequests[0]?.searchParams.get('role')).toBe('user');
+  expect(expandedRequests[0]?.searchParams.get('reasoning')).toBe('0');
+  expect(expandedRequests[0]?.searchParams.get('lifecycle')).toBe('archived');
+  expect(document.querySelector('[data-archive-other-matches] mark')?.textContent).toBe('needle');
+  expect(/[\uE000\uE001]/.test(document.querySelector('[data-archive-other-matches]')?.textContent ?? '')).toBe(false);
+  await clickSearch('[data-archive-other-matches] button:last-child');
+  expect(expandedRequests.at(-1)?.searchParams.get('before')).toBe('message-page-2');
+  expect(document.querySelector('[data-archive-other-matches]')?.textContent).toContain('msg_first');
+  expect(document.querySelector('[data-archive-other-matches]')?.textContent).toContain('msg_next');
+});
+
+test('expanded message paging failure preserves hits and displays failure feedback', async () => {
+  const advance = searchClock();
+  messageSearchResponse = () => contentPage(['ses_content']);
+  expandedResponse = (url) => url.searchParams.has('before')
+    ? new Response('unavailable', { status: 500 })
+    : Response.json({ status: 'ok', hits: [expandedHit('msg_kept')], next: 'failed-page', index: searchIndex });
+  await renderSearch();
+  await typeSearch('needle');
+  await advance(250);
+  await clickSearch('[data-conversation-more-matches]');
+  await clickSearch('[data-archive-other-matches] button:last-child');
+  const matches = document.querySelector('[data-archive-other-matches]');
+  expect(expandedRequests.at(-1)?.searchParams.get('before')).toBe('failed-page');
+  expect(matches?.textContent).toContain('msg_kept');
+  expect(document.querySelector('[data-conversation-result="ses_content"]')).not.toBeNull();
+  expect(matches?.querySelector('span.typography-micro')?.textContent?.trim().length ?? 0).toBeGreaterThan(0);
+});
+
+test('phone search reports off, request error and indexing states while keeping metadata visible', async () => {
+  const advance = searchClock();
+  await renderSearch('mobile');
+  await act(async () => useUIStore.setState({ messageSearchEnabled: false }));
+  await typeSearch('ordinary');
+  await advance(250);
+  const statusText = () => document.querySelector('[data-search-status-line] span:last-child')?.textContent;
+  const off = statusText();
+  expect(off?.length).toBeGreaterThan(0);
+  expect(document.querySelector('[role="status"]')).not.toBeNull();
+  expect(document.querySelector('[data-conversation-result="ses_content"]')).not.toBeNull();
+  messageSearchResponse = () => new Response('failed', { status: 500 });
+  await act(async () => useUIStore.setState({ messageSearchEnabled: true }));
+  await advance(150);
+  const error = statusText();
+  expect(error?.length).toBeGreaterThan(0);
+  expect(error).not.toBe(off);
+  messageSearchResponse = () => ({ ...contentPage([]), index: { ...searchIndex, backfill: { state: 'running', done: 3, total: 10 } } });
+  await typeSearch('ordinary title');
+  await advance(250);
+  expect(statusText()?.length).toBeGreaterThan(0);
+  expect(statusText()).not.toBe(error);
+  expect(document.querySelector('[data-conversation-result="ses_content"]')).not.toBeNull();
+});
+
+test('phone search exposes project and worktree sheet choices that update the raw query', async () => {
+  const advance = searchClock();
+  await renderSearch('mobile');
+  await act(async () => {
+    useSessionUIStore.setState({ availableWorktreesByProject: new Map([
+      ['/workspace', [{ path: '/worktrees/feature', projectDirectory: '/workspace', branch: 'feature', label: 'feature' }]],
+    ]) });
+    useGlobalSessionsStore.setState({ archivedSessions: [
+      session('ses_content', 'Ordinary title'),
+      { ...session('ses_feature', 'Ordinary worktree'), directory: '/worktrees/feature' },
+    ] });
+  });
+  await typeSearch('ordinary');
+  await advance(250);
+  await clickSearch('[data-search-scope-trigger]');
+  expect(document.querySelector('[data-search-scope-panel="mobile"]')).not.toBeNull();
+  const project = [...document.querySelectorAll<HTMLButtonElement>('[data-search-scope-control="project"] button')].find((button) => button.textContent === 'workspace');
+  if (!project) throw new Error('Phone project choice missing');
+  await act(async () => project.click());
+  expect(browser.document.querySelector('input')?.value).toBe('ordinary');
+  expect(document.querySelector('[data-search-filter-chip="project"]')).not.toBeNull();
+  expect(project.getAttribute('aria-checked') ?? project.getAttribute('aria-pressed')).toBe('true');
+  const worktree = [...document.querySelectorAll<HTMLButtonElement>('[data-search-scope-control="worktree"] button')].find((button) => button.textContent === 'feature');
+  if (!worktree) throw new Error('Phone worktree choice missing');
+  await act(async () => worktree.click());
+  expect(browser.document.querySelector('input')?.value).toBe('ordinary');
+  expect(document.querySelector('[data-search-filter-chip="worktree"]')).not.toBeNull();
+  expect(worktree.getAttribute('aria-checked') ?? worktree.getAttribute('aria-pressed')).toBe('true');
+  await advance(150);
+  expect(messageSearchRequests.at(-1)?.searchParams.getAll('directory')).toEqual(['/worktrees/feature']);
+  const result = document.querySelector('[data-conversation-result="ses_feature"]');
+  expect(result).not.toBeNull();
+  expect(result?.querySelector('[data-search-meta-item="project"]')?.textContent).toContain('workspace');
+  expect(result?.querySelector('[data-search-meta-item="branch"]')?.textContent).toBe('feature');
+  expect(result?.textContent).not.toContain('·');
+  expect(document.querySelector('[data-conversation-result="ses_content"]')).toBeNull();
+});
+
+test('phone search restores through its localized named action and active results offer no Restore', async () => {
+  const advance = searchClock();
+  const restore = spyOn(useSessionUIStore.getState(), 'unarchiveSession').mockResolvedValue(true);
+  testRestorers.push(() => restore.mockRestore());
+  await renderSearch('mobile');
+  await typeSearch('ordinary');
+  await advance(250);
+  await clickSearch('[data-conversation-result="ses_content"] button[aria-label="Restore Ordinary title"]');
+  expect(restore.mock.calls).toEqual([['ses_content']]);
+  await act(async () => useGlobalSessionsStore.setState({ activeSessions: [session('ses_active_result', 'Ordinary active', 0)] }));
+  await typeSearch('ordinary in:active ');
+  await advance(250);
+  const active = document.querySelector('[data-conversation-result="ses_active_result"]');
+  expect(active).not.toBeNull();
+  expect(active?.querySelector('[aria-label^="Restore"]')).toBeNull();
+});
+
+test('search metadata retains a standalone child parent title and an unmatched query has an explicit empty state', async () => {
+  const advance = searchClock();
+  await renderSearch();
+  await act(async () => useGlobalSessionsStore.getState().applySnapshot(
+    [session('ses_parent', 'Parent caption', 0)],
+    [{ ...session('ses_child', 'Child needle'), parentID: 'ses_parent' }], 'ready',
+  ));
+  await typeSearch('needle');
+  await advance(250);
+  const childMeta = [...document.querySelectorAll('[data-conversation-result="ses_child"] [data-search-meta-item]')];
+  expect(childMeta.map((item) => item.getAttribute('data-search-meta-item')).slice(-2)).toEqual(['parent', 'date']);
+  expect(childMeta.at(-2)?.textContent).toContain('Parent caption');
+  expect(childMeta.map((item) => item.textContent).join('')).not.toContain('·');
+  await typeSearch('unmatched query');
+  await advance(250);
+  expect(document.querySelector('[data-conversation-result]')).toBeNull();
+  expect(document.querySelector('[data-archive-search-results] p')?.textContent?.trim().length).toBeGreaterThan(0);
+});
+
+test('archive search renders project context, fallback folders, and ordered extras without dot separators', async () => {
+  const advance = searchClock();
+  const spaceDirectory = '/data/spaces/archive/a1b2c3d4e5f6';
+  spaceArchives = [{ spaceId: 'a1b2c3d4e5f6', name: 'Fix login', directory: spaceDirectory }];
+  await renderSearch();
+  await act(async () => {
+    useSessionUIStore.setState({ availableWorktreesByProject: new Map([
+      ['/workspace', [
+        { path: '/worktrees/feature', projectDirectory: '/workspace', branch: 'feature/archive', label: 'feature' },
+        { path: '/gone/worktree', projectDirectory: '/workspace', branch: '', label: 'gone' },
+      ]],
+    ]) });
+    useGlobalSessionsStore.getState().applySnapshot(
+      [session('ses_parent', 'Parent title', 0)],
+      [
+        { ...session('ses_branch', 'Branch result'), directory: '/worktrees/feature' },
+        { ...session('ses_gone', 'Gone result'), directory: '/gone/worktree' },
+        { ...session('ses_space', 'Space result'), directory: spaceDirectory },
+        { ...session('ses_child', 'Child result'), parentID: 'ses_parent' },
+      ],
+      'ready',
+    );
+  });
+  messageSearchResponse = () => ({
+    status: 'ok',
+    hits: [
+      { ...contentHit('ses_branch'), directory: '/worktrees/feature' },
+      { ...contentHit('ses_gone'), directory: '/gone/worktree' },
+      { ...contentHit('ses_space'), directory: spaceDirectory },
+      contentHit('ses_child'),
+    ],
+    next: null,
+    totals: { sessions: 4, byDirectory: {} },
+    index: searchIndex,
+  });
+  await typeSearch('needle');
+  await advance(250);
+
+  const branch = document.querySelector('[data-conversation-result="ses_branch"]');
+  expect(branch?.querySelector('[data-search-meta-item="project"]')?.textContent).toContain('workspace');
+  expect(branch?.querySelector('[data-search-meta-item="branch"]')?.textContent).toBe('feature/archive');
+  expect(document.querySelector('[data-conversation-result="ses_gone"] [data-search-meta-item="worktree-folder"]')?.textContent).toBe('worktree');
+  expect(document.querySelector('[data-conversation-result="ses_space"] [data-search-meta-item="folder"]')?.textContent).toBe('Fix login');
+  expect(document.querySelector('[data-conversation-result="ses_space"] [data-search-meta-item="project"]')).toBeNull();
+  const childItems = [...document.querySelectorAll('[data-conversation-result="ses_child"] [data-search-meta-item]')];
+  expect(childItems.map((item) => item.getAttribute('data-search-meta-item')).slice(-2)).toEqual(['parent', 'date']);
+  expect(childItems.map((item) => item.textContent).join('')).not.toContain('·');
+});
+
+test('an archived chat in the chats root shows no project or folder, only its date', async () => {
+  const advance = searchClock();
+  await renderSearch();
+  await act(async () => useGlobalSessionsStore.getState().applySnapshot(
+    [],
+    [{ ...session('ses_chat', 'Chat result'), directory: '/home/test/.config/openchamber/chats/ses_chat' }],
+    'ready',
+  ));
+  await typeSearch('chat result');
+  await advance(250);
+  const row = document.querySelector('[data-conversation-result="ses_chat"]');
+  expect(row).not.toBeNull();
+  expect([...row?.querySelectorAll('[data-search-meta-item]') ?? []].map((item) => item.getAttribute('data-search-meta-item'))).toEqual(['date']);
+  expect(row?.querySelector('[data-search-meta-icon]')).toBeNull();
+});
+
+test('archive search narrows a worktree scope to that worktree and titles only to titles', async () => {
+  const advance = searchClock();
+  await renderSearch();
+  await act(async () => {
+    useSessionUIStore.setState({ availableWorktreesByProject: new Map([
+      ['/workspace', [
+        { path: '/worktrees/task', projectDirectory: '/workspace', branch: 'quasar', label: 'task' },
+        { path: '/worktrees/task-old', projectDirectory: '/workspace', branch: 'task-old', label: 'task-old' },
+      ]],
+    ]) });
+    useGlobalSessionsStore.setState({ archivedSessions: [
+      { ...session('ses_task', 'Ordinary current'), directory: '/worktrees/task' },
+      { ...session('ses_task_old', 'Ordinary stale'), directory: '/worktrees/task-old' },
+    ] });
+  });
+  const shown = (id: string) => document.querySelector(`[data-conversation-result="${id}"]`) !== null;
+  await typeSearch('ordinary worktree:/worktrees/task ');
+  await advance(250);
+  expect(shown('ses_task')).toBe(true);
+  expect(shown('ses_task_old')).toBe(false);
+  await typeSearch('quasar');
+  await advance(250);
+  expect(shown('ses_task')).toBe(true);
+  await typeSearch('quasar search:titles ');
+  await advance(250);
+  expect(shown('ses_task')).toBe(false);
 });
