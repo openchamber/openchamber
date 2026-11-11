@@ -96,6 +96,7 @@ import { useBackgroundShellsStore } from '@/sync/background-shells';
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { opencodeClient } from '@/lib/opencode/client';
 import { useChatSessionSelection } from '@/components/chat/chatColumnSession';
+import { isForegroundShellStopping } from '@/components/chat/message/parts/foregroundShellStop';
 import { useSessionSelector, useSessionStatus } from '@/sync/sync-context';
 import type { Session } from '@/lib/opencode/model';
 import { GuestPopover } from './GuestPopover';
@@ -709,6 +710,8 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
           requireShells();
           const shell = useBackgroundShellsStore.getState().byId.get(shellId);
           if (!shell) throw new HostRequestError('NOT_FOUND', 'That shell is not running.');
+          // A Stop from the command's chat row owns its note and removal.
+          if (isForegroundShellStopping(shellId)) throw new HostRequestError('HOST_REJECTED', 'That shell is already being stopped.');
           const session = useGlobalSessionsStore.getState().entityById.get(shell.sessionID);
           await opencodeClient.stopBackgroundShells({
             sessionID: shell.sessionID,
