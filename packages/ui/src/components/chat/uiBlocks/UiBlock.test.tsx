@@ -1,7 +1,12 @@
-import { afterAll, describe, expect, test } from 'bun:test';
+import { afterAll, describe, expect, mock, test } from 'bun:test';
 import { Window } from 'happy-dom';
 import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
+
+// A block reads the directory itself, so a block's text needs the sync
+// runtime; these tests are about the block's structure, not where it lives.
+mock.module('@/hooks/useEffectiveDirectory', () => ({ useEffectiveDirectory: () => '/repo' }));
+mock.module('../MarkdownRenderer', () => ({ MarkdownContent: () => null }));
 
 const realFetch = globalThis.fetch;
 globalThis.fetch = async () => new Response('[]', { status: 200, headers: { 'content-type': 'application/json' } });
@@ -285,4 +290,29 @@ test("a reply's decision keeps its failure line after the choice is cleared, sin
   expect(host.textContent).toContain('Not sent. Try again.');
   await act(async () => go()?.click());
   expect(host.textContent).toContain('Not sent. Try again.');
+});
+
+describe('a Steps block', () => {
+  const classOf = (element: Element | undefined) => element?.getAttribute('class') ?? '';
+  // The title is the element carrying the weight, whatever wrapper holds it.
+  const titleOf = (title: string) => [...host.querySelectorAll('div')]
+    .find((element) => element.textContent === title && classOf(element).includes('font-medium'));
+  const markOf = (index: number) => [...host.querySelectorAll('span')]
+    .find((element) => element.textContent === String(index) && classOf(element).includes('rounded-full'));
+
+  test('a static flow reads at normal contrast instead of looking pending', async () => {
+    await drawReply('root = Stack([flow])\nflow = Steps([{title: "Sender"}, {title: "Router"}], "row")', async () => {});
+    expect(host.textContent).toContain('Sender');
+    const title = classOf(titleOf('Sender'));
+    expect(title).not.toContain('text-muted-foreground');
+    const mark = classOf(markOf(1));
+    expect(mark).toContain('text-foreground');
+    expect(mark).not.toContain('text-muted-foreground');
+  });
+
+  test('an explicit todo step still reads as not started', async () => {
+    await drawReply('root = Stack([flow])\nflow = Steps([{title: "Sender", status: "done"}, {title: "Router", status: "todo"}], "row")', async () => {});
+    expect(classOf(titleOf('Router'))).toContain('text-muted-foreground');
+    expect(classOf(markOf(2))).toContain('text-muted-foreground');
+  });
 });
