@@ -567,7 +567,11 @@ const dependsOnRevivalBlock = (parameters) => {
 };
 
 const multiActionSchema = (definitions) => ({
-  property: { type: 'string', oneOf: definitions.map((entry) => ({ const: entry.action, description: entry.description })), description: 'OpenChamber action to perform' },
+  property: {
+    type: 'string',
+    enum: definitions.map((entry) => entry.action),
+    description: `OpenChamber action to perform (${definitions.map((entry) => `${entry.action}: ${entry.description}`).join('; ')})`,
+  },
   required: ['action'],
   normalize: '',
 });
@@ -613,10 +617,12 @@ const singleActionSchema = (definition) => ({
  * entrypoint with a bare dynamic import and nothing resolves from the generated
  * directory.
  *
- * The action schema carries `oneOf` only. A node combining `enum` and `oneOf`
- * is valid JSON Schema, but some OpenAI-compatible gateways reject it and
- * answer with an empty completion instead of an error, and the `oneOf` branches
- * are what carry the per-action descriptions the model reads.
+ * The action schema validates with `enum` only, never together with `oneOf`.
+ * A node combining `enum` and `oneOf` is valid JSON Schema, but some
+ * OpenAI-compatible gateways reject it and answer with an empty completion
+ * instead of an error. `oneOf` is not used alone either: OpenAPI 3.0 / Gemini
+ * schema normalizers collapse it to its first branch. The per-action
+ * descriptions the model reads live in the `action` property's description.
  */
 /**
  * `answers` makes a tool's call wait for the user: `waitsWhen` is the JS
