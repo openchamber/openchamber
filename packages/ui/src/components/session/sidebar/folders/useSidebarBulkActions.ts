@@ -2,14 +2,18 @@ import React from 'react';
 import { toast } from '@/components/ui';
 import { useI18n } from '@/lib/i18n';
 import { useKeybinds } from '@/hooks/useKeybind';
+import type { Session } from '@/lib/opencode/model';
+import { isSessionInWork } from '@/lib/sessionWorkMetadata';
 import { takeSessionActionFailure } from '@/sync/session-action-failures';
 import { describeSessionActionError } from '../sessions/sessionActionError';
 import { useSessionMultiSelectStore } from '@/stores/useSessionMultiSelectStore';
 import type { SessionFolder } from '@/stores/useSessionFoldersStore';
-import { deriveSessionRowBulkSelectAll, deriveSessionRowSelectionArchived, useSessionRowOrderRegistry } from '../sessions/sessionRowOrder';
+import { deriveSessionRowBulkSelectAll, deriveSessionRowSelectionArchived, useSessionRowOrderRegistry, type SessionRowOrderWork } from '../sessions/sessionRowOrder';
+import { bulkDoneWorkLabel, selectFinishedWorks, type FinishWorktreeWorkOutcome } from '../works/workActions';
+import { toastFinishWorkOutcome } from '../works/useWorktreeWork';
 import type { BulkDeleteSessionsConfirmState } from '../shell/ConfirmDialogs';
 
-const EMPTY_SESSIONS_BY_ID = new Map<string, { time?: { archived?: number | null } }>();
+const EMPTY_SESSIONS_BY_ID: ReadonlyMap<string, Session> = new Map();
 
 type Args = {
   isInlineEditing: boolean;
@@ -28,6 +32,11 @@ type Args = {
   archiveSessions: (ids: string[]) => Promise<{ archivedIds: string[]; failedIds: string[] }>;
   unarchiveSessions: (ids: string[]) => Promise<{ restoredIds: string[]; failedIds: string[] }>;
   deleteSessions: (ids: string[]) => Promise<{ deletedIds: string[]; failedIds: string[] }>;
+  /** Null when the runtime changed during the batch: nothing to report. */
+  markSessionsDone: (sessions: Session[]) => Promise<{ doneIds: string[]; failedIds: string[] } | null>;
+  /** The work's own Done for a work the batch finished whole; null when it has none. */
+  finishWork: (work: SessionRowOrderWork, doneIds: ReadonlySet<string>) => Promise<FinishWorktreeWorkOutcome> | null;
+  sessionWorkEnabled: boolean;
   bulkDeleteConfirm: BulkDeleteSessionsConfirmState;
   setBulkDeleteConfirm: React.Dispatch<React.SetStateAction<BulkDeleteSessionsConfirmState>>;
 };
@@ -57,6 +66,24 @@ export const resolveSelectionFolderIds = (
     if (owner === ownerKey) ids.push(sessionId);
   }
   return ids;
+};
+
+/**
+ * What bulk Mark done closes: every selected root session in work, the rule
+ * the composer's Mark done applies to one. Selecting a work's row selects its
+ * subtree, so its btw and review sessions in work close with it; subagents
+ * never count, and archived sessions are left alone.
+ */
+export const selectSessionsToMarkDone = (
+  selectedIds: Iterable<string>,
+  sessionsById: ReadonlyMap<string, Session>,
+): Session[] => {
+  const sessions: Session[] = [];
+  for (const id of selectedIds) {
+    const session = sessionsById.get(id);
+    if (session && !session.parentID && !session.time?.archived && isSessionInWork(session)) sessions.push(session);
+  }
+  return sessions;
 };
 
 export const resolveBulkDeleteConfirmation = (
@@ -110,6 +137,9 @@ export const useSidebarBulkActions = (args: Args) => {
     archiveSessions,
     unarchiveSessions,
     deleteSessions,
+    markSessionsDone,
+    finishWork,
+    sessionWorkEnabled,
     bulkDeleteConfirm,
     setBulkDeleteConfirm,
   } = args;
@@ -132,6 +162,10 @@ export const useSidebarBulkActions = (args: Args) => {
     selectedIds,
     rowOrderRegistry?.getSessionsById() ?? EMPTY_SESSIONS_BY_ID,
   );
+
+  const bulkShowsMarkDone = sessionWorkEnabled && !bulkScopeIsArchived;
+  const bulkCanMarkDone = bulkShowsMarkDone && hasSelection
+    && selectSessionsToMarkDone(selectedIds, rowOrderRegistry?.getSessionsById() ?? EMPTY_SESSIONS_BY_ID).length > 0;
 
   const derivedSelectionScope = React.useMemo(() => {
     if (selectionScopeKey) return selectionScopeKey;
@@ -273,6 +307,45 @@ export const useSidebarBulkActions = (args: Args) => {
     useSessionMultiSelectStore.getState().removeMany(restoredIds);
   }, [bulkScopeIsArchived, failureDescription, hasSelection, selectedIds, t, unarchiveSessions]);
 
+  const markDoneRunningRef = React.useRef(false);
+  const handleBulkMarkDone = React.useCallback(async () => {
+    if (markDoneRunningRef.current) return;
+    const batchIds = Array.from(selectedIds);
+    const sessions = selectSessionsToMarkDone(batchIds, rowOrderRegistry?.getSessionsById() ?? EMPTY_SESSIONS_BY_ID);
+    if (sessions.length === 0) return;
+    // The works as listed before the writes: done sessions leave In work and
+    // the sidebar may rebuild mid-batch, dropping the works they finished.
+    const works = rowOrderRegistry?.getWorks() ?? [];
+    markDoneRunningRef.current = true;
+    try {
+      const result = await markSessionsDone(sessions);
+      if (!result) return;
+      const { doneIds, failedIds } = result;
+      if (doneIds.length > 0) {
+        toast.success(doneIds.length === 1
+          ? t('sessions.sidebar.bulkActions.markedDoneSingle', { count: doneIds.length })
+          : t('sessions.sidebar.bulkActions.markedDonePlural', { count: doneIds.length }));
+      }
+      if (failedIds.length > 0) {
+        toast.error(failedIds.length === 1
+          ? t('sessions.sidebar.bulkActions.failedMarkDoneSingle', { count: failedIds.length })
+          : t('sessions.sidebar.bulkActions.failedMarkDonePlural', { count: failedIds.length }), failureDescription(failedIds));
+      }
+      // Only what failed stays selected, ready for another try.
+      const failed = new Set(failedIds);
+      useSessionMultiSelectStore.getState().removeMany(batchIds.filter((id) => !failed.has(id)));
+      // A worktree or space work finished whole gets its own Done: archive
+      // on Done, the space stop, and what the row's Done tells the user.
+      const done = new Set(doneIds);
+      await Promise.all(selectFinishedWorks(works, done).map(async (work) => {
+        const pending = finishWork(work, done);
+        if (pending) toastFinishWorkOutcome(await pending, bulkDoneWorkLabel(work.group), t);
+      }));
+    } finally {
+      markDoneRunningRef.current = false;
+    }
+  }, [failureDescription, finishWork, markSessionsDone, rowOrderRegistry, selectedIds, t]);
+
   const confirmBulkDelete = React.useCallback(async () => {
     if (!bulkDeleteConfirm) return;
     const sessionsById = rowOrderRegistry?.getSessionsById() ?? EMPTY_SESSIONS_BY_ID;
@@ -328,6 +401,8 @@ export const useSidebarBulkActions = (args: Args) => {
     bulkScopeFolders,
     bulkCanMoveToFolder: folderSelectionIds.length > 0,
     bulkCanRemoveFromFolder,
+    bulkShowsMarkDone,
+    bulkCanMarkDone,
     handleToggleSelectionMode,
     handleExitSelectionMode,
     handleBulkMoveToFolder,
@@ -337,6 +412,7 @@ export const useSidebarBulkActions = (args: Args) => {
     handleBulkArchive,
     handleBulkHardDelete,
     handleBulkRestore,
+    handleBulkMarkDone,
     confirmBulkDelete,
   };
 };

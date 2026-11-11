@@ -5,6 +5,7 @@ import type { ProjectSection } from './projects/sessionProjectRender';
 import { getWorkFolderOwnerKey } from './sessions/sessionFolderIdentity';
 import { buildSessionSidebarRowModel, countSessionSearchMatches, resolveSessionSidebarStickyHeader, runExpansionKey, type SessionSidebarActivityItem, type SessionSidebarRowModelArgs, type SessionSidebarWorkEntry } from './sessionSidebarRowModel';
 import { countSessionTreeQueryMatches } from './recent/activitySections';
+import { deriveSessionRowBulkSelectAll } from './sessions/sessionRowOrder';
 import { buildMultiRunIndex } from '@/lib/multirun/runs';
 import { withMultiRunMembership } from '@/lib/multirun/identity';
 import { getPinnedSessionKey } from '@/lib/sessionPins';
@@ -1072,6 +1073,112 @@ describe('buildSessionSidebarRowModel', () => {
       expect(lanes).toEqual(['lane-1:mixed-compact', 'lane-2:mixed-compact']);
     });
 
+  });
+
+  describe('zone selection scope', () => {
+    const lane = (id: string): Session => ({
+      ...session(id),
+      metadata: withMultiRunMembership({}, {
+        version: 1, sessionID: id, group: { kind: 'id', id: '9f512893-6e63-4e49-a534-5de733ca103e' },
+        groupSlug: 'fix-auth', role: 'run', providerID: 'anthropic', modelID: 'claude', title: 'Fix auth',
+      }),
+    });
+
+    test('every row a zone lists selects within that zone, and select all stays inside it', () => {
+      const work = group([node('wt-1')], {
+        id: 'worktree:/wt', label: 'wt', branch: 'feature/wt', isMain: false, directory: '/wt', folderScopeKey: '/wt',
+        worktree: { path: '/wt', projectDirectory: '/repo', branch: 'feature/wt', label: 'wt' },
+      });
+      const input = args([project([group([node('other'), node('lane-1'), node('lane-2')]), work])]);
+      input.runIndex = buildMultiRunIndex([lane('lane-1'), lane('lane-2')], () => '/repo');
+      const runKey = [...input.runIndex.runs.keys()][0] ?? '';
+      input.pinnedItems = [timelineItem('pinned')];
+      input.workEntries = [
+        { kind: 'session', item: timelineItem('working', { node: node('working', [node('btw')]) }) },
+        { kind: 'session', item: timelineItem('lane-1') },
+        { kind: 'session', item: timelineItem('lane-2') },
+        { kind: 'group', groupKey: 'project-a:worktree:/wt', projectId: 'project-a', group: work },
+      ];
+      input.zoneSessionIds = new Set(['pinned', 'working', 'lane-1', 'lane-2']);
+      input.movedSessionIds = new Set(['pinned', 'working', 'lane-1', 'lane-2']);
+      input.movedGroupKeys = new Set(['project-a:worktree:/wt']);
+      input.expandedParents = new Set(['mixed-compact:active:working', runExpansionKey('mixed-compact', runKey)]);
+      input.sessionOwnerById = new Map([['wt-1', { projectId: 'project-a', projectRoot: '/repo', scopeDirectory: '/wt', kind: 'worktree' }]]);
+
+      const model = buildSessionSidebarRowModel(input);
+      const scopeOf = (id: string) => model.selectionEntries.find((entry) => entry.id === id)?.scopeKey;
+
+      expect(['working', 'btw', 'lane-1', 'lane-2', 'wt-1'].map(scopeOf)).toEqual(Array(5).fill('activity:work'));
+      expect(scopeOf('pinned')).toBe('activity:pinned');
+      expect(scopeOf('other')).toBeNull();
+      // Folder ownership stays the session's own.
+      expect(model.rows.find((row) => row.kind === 'session' && row.node.session.id === 'wt-1')).toMatchObject({ ownerKey: getWorkFolderOwnerKey('/wt') });
+
+      const all = deriveSessionRowBulkSelectAll(model.selectionEntries, model.selectionDescendantIds, 'activity:work');
+      expect([...(all?.ids ?? [])].sort()).toEqual(['btw', 'lane-1', 'lane-2', 'working', 'wt-1']);
+    });
+
+    test('select all takes the sessions of folded worktree works and runs in the zone without unfolding them', () => {
+      const work = group([node('wt-1', [node('wt-1-child', [])])], {
+        id: 'worktree:/wt', label: 'wt', branch: 'feature/wt', isMain: false, directory: '/wt', folderScopeKey: '/wt',
+        worktree: { path: '/wt', projectDirectory: '/repo', branch: 'feature/wt', label: 'wt' },
+      });
+      const input = args([project([group([node('other'), node('lane-1'), node('lane-2')]), work])]);
+      input.runIndex = buildMultiRunIndex([lane('lane-1'), lane('lane-2')], () => '/repo');
+      input.pinnedItems = [timelineItem('pinned')];
+      input.workEntries = [
+        { kind: 'session', item: timelineItem('working') },
+        { kind: 'session', item: timelineItem('lane-1') },
+        { kind: 'session', item: timelineItem('lane-2') },
+        { kind: 'group', groupKey: 'project-a:worktree:/wt', projectId: 'project-a', group: work },
+      ];
+      input.zoneSessionIds = new Set(['pinned', 'working', 'lane-1', 'lane-2']);
+      input.movedSessionIds = new Set(['pinned', 'working', 'lane-1', 'lane-2']);
+      input.movedGroupKeys = new Set(['project-a:worktree:/wt']);
+      input.collapsedGroups = new Set(['project-a:worktree:/wt']);
+
+      const model = buildSessionSidebarRowModel(input);
+      const sessionRows = model.rows.flatMap((row) => (row.kind === 'session' ? [row.node.session.id] : []));
+
+      // Folded: neither the run's lanes nor the worktree's sessions get rows.
+      expect(sessionRows.filter((id) => ['lane-1', 'lane-2', 'wt-1', 'wt-1-child'].includes(id))).toEqual([]);
+      const all = deriveSessionRowBulkSelectAll(model.selectionEntries, model.selectionDescendantIds, 'activity:work');
+      expect([...(all?.ids ?? [])].sort()).toEqual(['lane-1', 'lane-2', 'working', 'wt-1', 'wt-1-child']);
+      // Folded sessions have no row, so a Shift range never lands on them.
+      expect(model.selectionEntries.filter((entry) => entry.rowKey === null).map((entry) => entry.id).sort()).toEqual(['lane-1', 'lane-2', 'wt-1']);
+      expect(model.selectionWorks.map((entry) => entry.group.id)).toEqual(['worktree:/wt']);
+    });
+
+    test('select all in the zone takes what Show more and a folded folder hold back in an open worktree work', () => {
+      const ids = Array.from({ length: 12 }, (_, index) => `wt-${index}`);
+      const work = group(ids.map((id) => node(id)), {
+        id: 'worktree:/wt', label: 'wt', branch: 'feature/wt', isMain: false, directory: '/wt', folderScopeKey: '/wt',
+        worktree: { path: '/wt', projectDirectory: '/repo', branch: 'feature/wt', label: 'wt' },
+      });
+      const input = args([project([group([node('other')]), work])]);
+      input.workEntries = [{ kind: 'group', groupKey: 'project-a:worktree:/wt', projectId: 'project-a', group: work }];
+      input.movedGroupKeys = new Set(['project-a:worktree:/wt']);
+      input.foldersMap = { '/wt': [{ id: 'kept', name: 'Kept', createdAt: 1, sessionIds: ['wt-11'] }] };
+      input.collapsedFolders = new Set(['kept']);
+
+      const model = buildSessionSidebarRowModel(input);
+      const sessionRows = model.rows.flatMap((row) => (row.kind === 'session' ? [row.node.session.id] : []));
+      expect(sessionRows.filter((id) => id.startsWith('wt-')).length).toBeLessThan(11);
+      expect(sessionRows).not.toContain('wt-11');
+      const all = deriveSessionRowBulkSelectAll(model.selectionEntries, model.selectionDescendantIds, 'activity:work');
+      expect([...(all?.ids ?? [])].sort()).toEqual([...ids].sort());
+    });
+
+    test('the list by time is a zone of its own, apart from In work above it', () => {
+      const input = args([project([group([node('t1'), node('t2')])])]);
+      input.workEntries = sessionWorks([timelineItem('working')]);
+      input.timeEntries = sessionWorks([timelineItem('t1'), timelineItem('t2')]);
+      const model = buildSessionSidebarRowModel(input);
+
+      expect(model.selectionEntries.map((entry) => `${entry.id}:${entry.scopeKey}`))
+        .toEqual(['working:activity:work', 't1:activity:timeline', 't2:activity:timeline']);
+      expect(deriveSessionRowBulkSelectAll(model.selectionEntries, model.selectionDescendantIds, 'activity:timeline')?.ids).toEqual(['t1', 't2']);
+    });
   });
 
   test('retains current session authority when presentation filters the row out', () => {

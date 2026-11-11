@@ -648,6 +648,21 @@ under projects" is on; search lists every zone session once, in its zone,
 either way. VS Code always keeps them in place. Chats are never in work and
 offer no Track action. An empty zone is not rendered.
 
+The bulk bar's Mark done (shown while work tracking is on and the selection
+is not archived, enabled once a selected session is in work) applies the
+composer's per-session rule to the selection: every selected root session in
+work is marked done, four at a time (`markSessionsDone` in
+`works/workActions.ts`), and leaves the working set. A work's row selects its
+subtree, so its btw and review sessions in work close with it; subagents never
+count. A worktree or space work whose every such session the batch marked
+done gets the ordinary Done of its row afterwards (`finishBulkDoneWork`):
+archive on Done for a worktree, the stop for a space, and the same toasts. A
+work only partly selected keeps its other sessions in work and is not
+archived or stopped. Afterwards only the sessions that failed stay selected,
+and the failure toast quotes the server's answer, as bulk Archive does. Once
+the runtime changes, queued sessions are not sent and the batch reports
+nothing.
+
 Search in a zone keeps a root whose subsession matches, since the one-line
 rows open to it; with Detailed rows the root stays listed though its row
 cannot open (`matchZoneSessionsForSidebarQuery`). The zone counts only
@@ -1094,6 +1109,20 @@ matching and ordering. Search does not fetch sessions or broaden list membership
   snapshot; changed targets or archive authority require confirmation again.
   The current session map comes from unfiltered project sections, so collapsing
   a project or entering search cannot hide authority for an existing selection.
+- A selection has one scope: a project (its worktrees included) or a zone.
+  Every row Pinned, In work, a section or the list by time lists selects
+  within that zone (`activity:<key>`, the zone's container key), nested rows,
+  run lanes and the sessions of a worktree work listed there included, so
+  Shift ranges and Ctrl/Cmd+A stay inside it and an unselected row of another
+  scope starts a new selection. A folded worktree or space work or run in a
+  zone still belongs to its selection, and so do the sessions an open work
+  holds back behind Show more or a folded folder: they enter the selection
+  entries without rows (`rowKey` null), so Ctrl/Cmd+A takes them and leaves
+  the work folded, while a Shift range spans rows only. A selected session shown again in another
+  scope (its In work row and its project row) unchecks there and leaves the
+  rest selected. Zone rows carried no scope before, and Ctrl/Cmd+A from one
+  swept in every row of the sidebar. A zone scope owns no folders: Move to
+  folder is not offered for it, and folder ownership stays the session's own.
 - Rename drafts stay parent-owned, while editing and menu lifecycles are keyed
   by row occurrence. Duplicate In work, project, and folder rows never open a
   second rename input, and the owning occurrence remains mounted through menu
@@ -1112,8 +1141,8 @@ matching and ordering. Search does not fetch sessions or broaden list membership
   nowhere to land swallowed the click that started it when the mouse moved
   4 px during the press.
   A cross-project child keeps its display parent, while its folder menu, drag
-  payload, bulk-selection scope and Tracker links use the authoritative owner
-  of the child's own directory. The drop action resolves the current row
+  payload, bulk-selection scope (outside a zone, which keeps its own) and
+  Tracker links use the authoritative owner of the child's own directory. The drop action resolves the current row
   occurrence and checks that owner again before any folder write; a rejected
   cross-owner or stale-row drop changes no memberships. Bulk folder actions
   require a resolved owner for every selected session, including managed Chats

@@ -1,9 +1,12 @@
 /* oxlint-disable react/only-export-components -- Provider and hooks are one contract. */
 import React from 'react';
+import type { Session } from '@/lib/opencode/model';
+import type { SessionGroup } from '../types';
 
 export type SessionRowOrderEntry = {
   id: string;
-  rowKey: string;
+  /** Null for a session of a folded work: Ctrl/Cmd+A takes it, a Shift range does not. */
+  rowKey: string | null;
   scopeKey: string | null;
   archived: boolean;
   descendantRange?: readonly [start: number, end: number];
@@ -12,20 +15,29 @@ export type SessionRowOrderEntry = {
 type SessionRowOrderRegistry = {
   getEntries: () => readonly SessionRowOrderEntry[];
   getDescendantIds: () => readonly string[];
-  getSessionsById: () => ReadonlyMap<string, { time?: { archived?: number | null } }>;
+  getSessionsById: () => ReadonlyMap<string, Session>;
+  getWorks: () => readonly SessionRowOrderWork[];
 };
+
+/** A worktree or space work the sidebar lists, folded or not. */
+export type SessionRowOrderWork = { group: SessionGroup; projectId: string };
+
+const EMPTY_WORKS: readonly SessionRowOrderWork[] = [];
 
 const SessionRowOrderContext = React.createContext<SessionRowOrderRegistry | null>(null);
 
 export const SessionRowOrderProvider: React.FC<{
   entries: readonly SessionRowOrderEntry[];
   descendantIds: readonly string[];
-  sessionsById: ReadonlyMap<string, { time?: { archived?: number | null } }>;
+  sessionsById: ReadonlyMap<string, Session>;
+  works?: readonly SessionRowOrderWork[];
   children: React.ReactNode;
-}> = ({ entries, descendantIds, sessionsById, children }) => {
+}> = ({ entries, descendantIds, sessionsById, works = EMPTY_WORKS, children }) => {
   const entriesRef = React.useRef(entries);
   const descendantIdsRef = React.useRef(descendantIds);
   const sessionsByIdRef = React.useRef(sessionsById);
+  const worksRef = React.useRef(works);
+  worksRef.current = works;
   entriesRef.current = entries;
   descendantIdsRef.current = descendantIds;
   sessionsByIdRef.current = sessionsById;
@@ -35,6 +47,7 @@ export const SessionRowOrderProvider: React.FC<{
       getEntries: () => entriesRef.current,
       getDescendantIds: () => descendantIdsRef.current,
       getSessionsById: () => sessionsByIdRef.current,
+      getWorks: () => worksRef.current,
     };
   }
   return <SessionRowOrderContext.Provider value={registryRef.current}>{children}</SessionRowOrderContext.Provider>;
