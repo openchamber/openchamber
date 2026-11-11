@@ -1793,6 +1793,7 @@ export const settingsDict = {
   'settings.mcp.page.actions.clearAuth': '清除授權',
   'settings.mcp.page.actions.test': '測試',
   'settings.mcp.page.actions.testConnection': '測試連線',
+  'settings.mcp.page.actions.signIn': '登入',
   'settings.mcp.page.actions.signInAgain': '重新登入',
   'settings.mcp.page.actions.working': '處理中...',
   'settings.mcp.page.actions.starting': '啟動中...',

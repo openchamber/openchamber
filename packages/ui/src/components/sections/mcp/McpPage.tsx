@@ -1308,6 +1308,10 @@ export const McpPage: React.FC = () => {
                     onActiveChange={setOAuthSignInActive}
                     autoStart={signInAgainRun > 0}
                     showStartButton={signInAgainRun === 0 || getMcpOAuthMethods(oauthIntegration ?? undefined).length > 1}
+                    // On `needs_auth` the header's Connect only retries the
+                    // connection; this button signs in, so it must not read
+                    // "Connect" as well.
+                    connectLabel={signInAgainRun === 0 ? t('settings.mcp.page.actions.signIn') : undefined}
                   />
                 )}
 

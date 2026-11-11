@@ -1915,6 +1915,7 @@ export const settingsDict = {
   'settings.mcp.page.actions.clearAuth': '인증 지우기',
   'settings.mcp.page.actions.test': '테스트',
   'settings.mcp.page.actions.testConnection': '연결 테스트',
+  'settings.mcp.page.actions.signIn': '로그인',
   'settings.mcp.page.actions.signInAgain': '다시 로그인',
   'settings.mcp.page.actions.working': '작업 중...',
   'settings.mcp.page.actions.starting': '시작 중...',

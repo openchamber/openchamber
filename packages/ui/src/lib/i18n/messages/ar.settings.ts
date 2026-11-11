@@ -1936,6 +1936,7 @@ export const settingsDict = {
   'settings.mcp.page.actions.clearAuth': 'مسح التفويض',
   'settings.mcp.page.actions.test': 'اختبار',
   'settings.mcp.page.actions.testConnection': 'اختبار الاتصال',
+  'settings.mcp.page.actions.signIn': 'تسجيل الدخول',
   'settings.mcp.page.actions.signInAgain': 'تسجيل الدخول مرة أخرى',
   'settings.mcp.page.actions.working': 'جارٍ العمل…',
   'settings.mcp.page.actions.starting': 'جارٍ البدء…',
