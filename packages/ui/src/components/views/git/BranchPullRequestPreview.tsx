@@ -4,7 +4,7 @@ import { pullReferenceFromChangeRequest } from '@/components/references/listBack
 import { ReferencePreview } from '@/components/references/ReferencePreview';
 import { forgetRepositoryPullStatus, useRepositoryReferenceDetail } from '@/components/references/referenceSources';
 import { IDLE_PULL_STATUS } from '@/components/references/useReferenceBrowser';
-import { SourceBoardActions, SourceBoardPullLinks } from '@/components/sourceBoard/SourceBoardActions';
+import { SourceBoardActions, SourceBoardPullLinks, SourceBoardStateMenuItems } from '@/components/sourceBoard/SourceBoardActions';
 import { SourceBoardChecksDialog } from '@/components/sourceBoard/SourceBoardChecksDialog';
 import { SourceBoardLabels, SourceBoardReviewers } from '@/components/sourceBoard/SourceBoardMetaEditors';
 import { SourceBoardReply } from '@/components/sourceBoard/SourceBoardReply';
@@ -158,6 +158,7 @@ export const BranchPullRequestPreview: React.FC<{
                 onOpenStackLayer={(layer) => { showTrackerItem(layer.url, directory); }}
                 onOpenChecks={() => setChecksOpen(true)}
                 onRefresh={refreshFromHost}
+                stateMenu={reference.state !== 'merged' ? <SourceBoardStateMenuItems item={item} context={context} onChanged={refresh} /> : undefined}
                 commentAttachments={{ onAttach: attachments.attachComment, onAttachAll: attachments.attachComments }}
                 threadActions={threadActions}
                 labelsControl={<SourceBoardLabels reference={reference} context={context} onChanged={refresh} />}

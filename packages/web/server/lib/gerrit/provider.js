@@ -38,6 +38,10 @@ function mutationOperations() {
       perform: (service, _normalized, resolved) => service.ready(call(resolved)),
       reconcile: (service, resolved) => service.reconcileChangeRequestMutation(resolved.providerTarget, 'change-request-ready'),
     },
+    '/pr/draft': {
+      perform: (service, _normalized, resolved) => service.draft(call(resolved)),
+      reconcile: (service, resolved) => service.reconcileChangeRequestMutation(resolved.providerTarget, 'change-request-draft'),
+    },
     '/pr/review': {
       perform: (service, normalized, resolved) => service.vote(call(resolved, { votes: normalized.votes, body: normalized.body })),
       reconcile: unknownOutcome,

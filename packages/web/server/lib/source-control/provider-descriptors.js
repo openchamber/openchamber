@@ -44,6 +44,7 @@ function assertChangeCapabilities(descriptor) {
   if (methods.includes('submit') && methods.length !== 1) throw invalid('merge method list: submit must be the only method');
   if (capabilities.reviewModel !== undefined && !['verdict', 'votes'].includes(capabilities.reviewModel)) throw invalid('review model');
   if (capabilities.revisions !== undefined && capabilities.revisions !== true && capabilities.revisions !== false) throw invalid('revisions capability');
+  if (capabilities.draftConversion !== undefined && capabilities.draftConversion !== true && capabilities.draftConversion !== false) throw invalid('draft conversion capability');
   if (capabilities.createVia !== undefined && !['api', 'push'].includes(capabilities.createVia)) throw invalid('create method');
   if (capabilities.discussions !== undefined && capabilities.discussions !== true && capabilities.discussions !== false) throw invalid('discussions capability');
   // Discussions are listed by the reference picker and opened by their address.

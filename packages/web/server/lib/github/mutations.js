@@ -42,6 +42,7 @@ const ROUTE_OPERATIONS = Object.freeze({
   '/pr/update': 'update',
   '/pr/merge': 'merge',
   '/pr/ready': 'ready',
+  '/pr/draft': 'draft',
   '/pr/comment': 'comment',
   '/pr/review': 'review',
   '/pr/review/comment': 'review-comment',
@@ -194,7 +195,7 @@ function normalizeOperation(operation, body, context, actor, credential, limits)
       ? { input: { method, cancel: true }, digest: (target) => digestOf({ target, method, cancel: true }) }
       : { input: { method }, digest: (target) => digestOf({ target, method }) };
   }
-  if (operation === 'ready') return { input: {}, digest: (target) => digestOf({ target }) };
+  if (operation === 'ready' || operation === 'draft') return { input: {}, digest: (target) => digestOf({ target }) };
   if (operation === 'labels' || operation === 'issue-labels' || operation === 'discussion-labels') {
     const labels = nameList(body.labels, 'labels', limits.labelsMax);
     return { input: { labels }, digest: (target) => digestOf({ target, labels }) };
@@ -814,6 +815,9 @@ export function createGitHubMutations({ descriptor, octokitOf, resolveRepo, reso
     } else if (operation === 'ready') {
       if (pr.draft === false) return { state: 'succeeded', result: { ready: true } };
       if (pr.draft === true && pr.state === 'open') return definiteFailure('SOURCE_CONTROL_MUTATION_NOT_APPLIED');
+    } else if (operation === 'draft') {
+      if (pr.draft === true) return { state: 'succeeded', result: { draft: true } };
+      if (pr.draft === false && pr.state === 'open') return definiteFailure('SOURCE_CONTROL_MUTATION_NOT_APPLIED');
     }
     return unknownOutcome();
   };
@@ -911,11 +915,13 @@ export function createGitHubMutations({ descriptor, octokitOf, resolveRepo, reso
       }
       return { providerTarget: { pendingReviewId: pending?.id ?? null, pullRequestId: pr.node_id }, target };
     }
-    if (operation === 'ready') {
-      const alreadyReady = pr.draft === false;
+    if (operation === 'ready' || operation === 'draft') {
+      // Both transitions run through GraphQL with the node id; one already in
+      // the asked state is answered without a write.
+      const already = operation === 'ready' ? pr.draft === false : pr.draft === true;
       const nodeId = optionalText(pr.node_id, 'pull request node id', true);
-      if (!alreadyReady && !nodeId) throw invalidProviderPayload('GitHub returned an invalid pull request node id');
-      return { providerTarget: { alreadyReady, nodeId: nodeId ?? null }, target };
+      if (!already && !nodeId) throw invalidProviderPayload('GitHub returned an invalid pull request node id');
+      return { providerTarget: { already, nodeId: nodeId ?? null }, target };
     }
     return { providerTarget: {}, target };
   };
@@ -1026,7 +1032,7 @@ export function createGitHubMutations({ descriptor, octokitOf, resolveRepo, reso
         return { commented: input.body !== undefined };
       }
       case 'ready': {
-        if (!providerTarget.alreadyReady) {
+        if (!providerTarget.already) {
           const ready = await octokit.graphql(
             `mutation($pullRequestId: ID!) {\n  markPullRequestReadyForReview(input: { pullRequestId: $pullRequestId }) {\n    pullRequest {\n      id\n      isDraft\n    }\n  }\n}`,
             { pullRequestId: providerTarget.nodeId },
@@ -1037,6 +1043,19 @@ export function createGitHubMutations({ descriptor, octokitOf, resolveRepo, reso
           }
         }
         return { ready: true };
+      }
+      case 'draft': {
+        if (!providerTarget.already) {
+          const draft = await octokit.graphql(
+            `mutation($pullRequestId: ID!) {\n  convertPullRequestToDraft(input: { pullRequestId: $pullRequestId }) {\n    pullRequest {\n      id\n      isDraft\n    }\n  }\n}`,
+            { pullRequestId: providerTarget.nodeId },
+          );
+          const result = draft?.convertPullRequestToDraft?.pullRequest;
+          if (!isPlainObject(result) || result.id !== providerTarget.nodeId || result.isDraft !== true) {
+            throw invalidProviderPayload('GitHub returned an invalid convert-to-draft result');
+          }
+        }
+        return { draft: true };
       }
       default:
         throw mutationError('Mutation kind is invalid');

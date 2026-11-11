@@ -653,6 +653,11 @@ export type SourceControlCapabilities = {
   issues: boolean;
   changeRequests: boolean;
   draftChangeRequests: boolean;
+  /**
+   * The host turns an open change request into a draft (an extension an older
+   * service serves leaves it off). Absent means no.
+   */
+  draftConversion?: boolean;
   merge: false | { methods: SourceControlMergeMethod[] };
   ci: boolean;
   comments: boolean;
