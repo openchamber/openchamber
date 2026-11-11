@@ -380,6 +380,25 @@ describe('OpenCode Go quota provider — Console OAuth (VS Code parity)', () => 
     assert.equal(usage.usage!.windows['5h']!.resetAt, 1_786_000_000_000);
   });
 
+  test('reads a Go product without access as an absent subscription, not an unreadable response', async () => {
+    // A Console Go subscription that ended keeps the Go product and sends
+    // `access: null` (#6779); the web provider reports it as an absent
+    // subscription and the extension has to answer the same way.
+    stubFetchReturning(async () => mockResponse({
+      product: 'go',
+      cancelAtPeriodEnd: true,
+      renewalStopReason: 'cancelled_by_user',
+      access: null,
+    }));
+    const ended = await fetchQuotaForProvider('opencode-go');
+    assert.equal(ended.configured, true);
+    assert.equal(ended.error, 'No active OpenCode Go subscription on the selected Console account');
+
+    stubFetchReturning(async () => mockResponse({ product: 'go', access: { meters: {} } }));
+    const emptyMeters = await fetchQuotaForProvider('opencode-go');
+    assert.equal(emptyMeters.error, 'OpenCode Go usage data could not be parsed');
+  });
+
   test('falls back to the API key when the sign-in is not a Console sign-in', async () => {
     configureOpenCodeCredentials({ list: async () => [consoleOAuth({ server: 'https://example.com/console' }), key('opencode-go')] });
     let requestedUrl = '';
