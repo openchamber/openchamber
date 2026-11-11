@@ -107,7 +107,7 @@ import { createTrackerSessionStatus } from './lib/trackers/session-status.js';
 import { sourceControlProviderDescriptors } from './lib/source-control/provider-descriptors.js';
 import { createSessionKnowledgeRuntime, measureMemoryIndex } from './lib/session-knowledge/runtime.js';
 import { createMemoryDreaming } from './lib/agent-memory/dreaming.js';
-import { isAutoModel } from './lib/routing/defaults.js';
+import { isAutoModel, JEV_BACKGROUND_TIMEOUT_MS } from './lib/routing/defaults.js';
 import { createMessageSearchRuntime } from './lib/message-search/runtime.js';
 import { createScheduledTasksRuntime } from './lib/scheduled-tasks/runtime.js';
 import { resolveSessionDefaults } from './lib/scheduled-tasks/session-defaults.js';
@@ -1127,7 +1127,7 @@ const sessionGoalRuntime = createSessionGoalRuntime({
   getOpenCodeAuthHeaders,
   getSmallModelService: async () => import('./lib/small-model/index.js'),
   classifierEndpoint: () => routingRuntime.classifierEndpoint(),
-  jev: createJevClient(),
+  jev: createJevClient({ timeoutMs: JEV_BACKGROUND_TIMEOUT_MS }),
   readSessionMetadata: readStoredSessionMetadata,
   persistSessionGoal: async (sessionID, directory, goal, canWrite) => {
     if (!canWrite) return persistSessionMetadataPatch(sessionID, { openchamber: { goal } }, { directory });
@@ -1321,7 +1321,7 @@ const sessionWorkRuntime = createSessionWorkRuntime({
   buildOpenCodeUrl,
   getOpenCodeAuthHeaders,
   classifierEndpoint: () => routingRuntime.classifierEndpoint(),
-  jev: createJevClient(),
+  jev: createJevClient({ timeoutMs: JEV_BACKGROUND_TIMEOUT_MS }),
   readMetadata: (sessionID, directory) => sessionMetadataStore.get(sessionID, { directory }),
   updateMetadata: updateSessionMetadataWith,
   isSessionArchived: (sessionID) => openChamberSessionService.sessionArchive.isArchived(sessionID),

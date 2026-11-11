@@ -74,6 +74,14 @@ export const VERCEL_JEV_MODEL = 'typesafe-ai/jev';
 export const JEV_TIMEOUT_MS = 4000;
 
 /**
+ * The timeout for the checks that run after a turn (session work, goals),
+ * where nobody waits for the answer. Their request is larger than a routing
+ * one: the reporter of #6743 measured 5.7 to 6.6 s on a loaded local model,
+ * so 4 s failed the check on almost every turn.
+ */
+export const JEV_BACKGROUND_TIMEOUT_MS = 15_000;
+
+/**
  * How long one timed-out request per endpoint keeps running before it is
  * aborted. A local model loads on its first request and Ollama cancels the
  * load when the client disconnects, so a 4 s abort kept a 5-7 s cold load
