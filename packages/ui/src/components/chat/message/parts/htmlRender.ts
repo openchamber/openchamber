@@ -299,9 +299,17 @@ const SCROLLBAR_CSS = 'html::-webkit-scrollbar{width:0;height:10px;background:tr
     + `@media (pointer:coarse){html::-webkit-scrollbar-thumb{background-color:${SCROLLBAR_THUMB}}}`
     + `@supports not selector(::-webkit-scrollbar){html{scrollbar-width:thin;scrollbar-color:transparent transparent}html[data-oc-pointer]{scrollbar-color:${SCROLLBAR_THUMB} transparent}`
     + `@media (pointer:coarse){html{scrollbar-color:${SCROLLBAR_THUMB} transparent}}}`;
+// Media is border-box: with the default content box the `width:100%` a page
+// usually gives a picture resolves to the column width, and a page's own 1px
+// border then puts the last picture in a row 2px past the frame. That was
+// enough scroll to give a page that otherwise fits a horizontal bar nobody
+// asked for. The border now comes out of the picture's width instead. An
+// embedded frame keeps its user agent border, so the same holds for it, and
+// for an embed or object. A page's own box with padding or a border is still
+// the page's to size; this only keeps media inside the column.
 const BASE_CSS = 'html{background:transparent;color:var(--foreground);font-family:var(--font-sans);font-size:var(--oc-text,14px);line-height:1.5;-webkit-font-smoothing:antialiased;-webkit-text-size-adjust:100%;overflow-x:auto;overscroll-behavior-x:none}'
     + SCROLLBAR_CSS
-    + 'body{margin:0}a{color:var(--primary)}code,kbd,pre,samp{font-family:var(--font-mono)}img,svg,video,canvas{max-width:100%}'
+    + 'body{margin:0}a{color:var(--primary)}code,kbd,pre,samp{font-family:var(--font-mono)}img,svg,video,canvas,iframe,object,embed{max-width:100%;box-sizing:border-box}'
     + '::highlight(oc-chat-quote),::highlight(oc-chat-quote-focus),::highlight(oc-chat-quote-flash){background-color:var(--oc-quote-mark,rgba(127,127,127,.35))}'
     + OPTION_CSS
     + KIT_CSS;
