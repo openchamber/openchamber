@@ -112,6 +112,23 @@ describe('Claude quota provider', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
+  it('asks Anthropic again on the next refresh after Retry-After: 0', async () => {
+    const fresh = { limits: [{ kind: 'session', percent: 40, resets_at: '2026-08-14T19:10:00Z', scope: null }] };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse(PAYLOAD))
+      .mockResolvedValueOnce(errorResponse(429, { 'retry-after': '0' }))
+      .mockResolvedValueOnce(jsonResponse(fresh));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await fetchQuota();
+    const rateLimited = await fetchQuota();
+    const next = await fetchQuota();
+
+    expect(rateLimited.usage.windows['5h'].usedPercent).toBe(5);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(next.usage.windows['5h'].usedPercent).toBe(40);
+  });
+
   it('never shows one account cached values after the credential changes', async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse(PAYLOAD))

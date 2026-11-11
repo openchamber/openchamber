@@ -1530,6 +1530,34 @@ describe('Claude quota provider (VS Code parity)', () => {
     assert.equal(duringCooldown.usage?.windows['5h']?.usedPercent, 12);
     assert.equal(requestCount, 2);
   });
+
+  test('asks Anthropic again on the next refresh after Retry-After: 0', async () => {
+    configureOpenCodeCredentials({
+      list: async () => [{ ...oauth('anthropic'), value: { type: 'oauth', methodID: 'test', access: 'zero-wait-token', refresh: 'zero-wait-refresh', expires: Date.now() + 3_600_000 } }],
+    });
+    const responses = [
+      mockResponse({ five_hour: { utilization: 12, resets_at: '2026-08-20T12:00:00Z' } }),
+      new Response(null, { status: 429, headers: { 'retry-after': '0' } }),
+      mockResponse({ five_hour: { utilization: 40, resets_at: '2026-08-20T12:00:00Z' } }),
+    ];
+    let requestCount = 0;
+    stubFetchReturning(async () => {
+      const response = responses[requestCount];
+      requestCount += 1;
+      return response;
+    });
+    try {
+      await fetchQuotaForProvider('claude');
+      const rateLimited = await fetchQuotaForProvider('claude');
+      const next = await fetchQuotaForProvider('claude');
+
+      assert.equal(rateLimited.usage?.windows['5h']?.usedPercent, 12);
+      assert.equal(requestCount, 3);
+      assert.equal(next.usage?.windows['5h']?.usedPercent, 40);
+    } finally {
+      configureOpenCodeCredentials({ list: async () => baseCredentialList() });
+    }
+  });
 });
 
 describe('Z.ai quota provider (VS Code parity)', () => {

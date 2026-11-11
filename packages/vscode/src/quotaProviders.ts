@@ -1595,7 +1595,8 @@ let claudeCooldownUntil = 0;
 const claudeCooldownFromResponse = (response: Response): number => {
   const raw = response.headers.get('retry-after');
   const seconds = raw ? Number(raw) : Number.NaN;
-  if (Number.isFinite(seconds) && seconds > 0) {
+  // `Retry-After: 0` asks for an immediate retry, so it ends the cooldown.
+  if (Number.isFinite(seconds) && seconds >= 0) {
     return Math.min(seconds * 1000, CLAUDE_MAX_COOLDOWN_MS);
   }
   if (raw) {
