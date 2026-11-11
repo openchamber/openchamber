@@ -100,7 +100,7 @@
     "tw-animate-css": "^1.3.8",
     "typescript": "~7.0.2",
     "vite": "^7.3.2",
-    "vite-plugin-pwa": "^1.0.3",
+    "vite-plugin-pwa": "^2.0.0",
     "vitest": "^4.1.4",
     "workbox-window": "^7.4.0",
     "zustand": "^5.0.8"
