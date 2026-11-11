@@ -20,9 +20,35 @@ import { formatProjectLabel, isPathWithinProject, normalizePath } from '../utils
 import { refreshSpacesJourney, useSpaceTakesNoNewSession } from '@/lib/spaces/spaces-store';
 import { setSpaceTaskTitle } from '@/lib/spaces/spaces-api';
 import { spaceOfCreationRequest } from '@/lib/spaces/space-creation-requests';
-import { collectWorkSessions, finishSpaceWork, finishWorktreeWork, isWorkInWork, pickWorkSessionToOpen, trackWork } from './workActions';
+import { collectWorkSessions, finishSpaceWork, finishWorktreeWork, isWorkInWork, pickWorkSessionToOpen, trackWork, type FinishWorktreeWorkOutcome } from './workActions';
 
 const CURRENT_SESSION = '\u0000session';
+
+/** What a work's Done tells the user, from its row or from bulk Mark done. */
+export const toastFinishWorkOutcome = (
+  outcome: FinishWorktreeWorkOutcome,
+  label: string,
+  t: ReturnType<typeof useI18n>['t'],
+): void => {
+  switch (outcome.kind) {
+    case 'done':
+      break;
+    case 'archived':
+      toast.success(t('sessions.sidebar.work.archive.done'), { description: label });
+      break;
+    case 'busy':
+      toast.info(t('sessions.sidebar.work.archive.kept'), { description: t('sessions.sidebar.work.archive.keptRunning') });
+      break;
+    case 'unknown':
+      toast.info(t('sessions.sidebar.work.archive.kept'), { description: t('sessions.sidebar.work.archive.keptUnknown') });
+      break;
+    case 'failed':
+      toast.error(outcome.doneFailed > 0 ? t('sessions.sidebar.work.done.failed') : t('sessions.sidebar.work.archive.failed'), {
+        description: outcome.error.message,
+      });
+      break;
+  }
+};
 
 type Args = {
   group: SessionGroup;
@@ -171,25 +197,7 @@ export function useWorktreeWork({ group, projectId, collapsed, onNavigate }: Arg
     if (!pending) return;
     setFinishing(true);
     try {
-      const outcome = await pending;
-      switch (outcome.kind) {
-        case 'done':
-          break;
-        case 'archived':
-          toast.success(t('sessions.sidebar.work.archive.done'), { description: label });
-          break;
-        case 'busy':
-          toast.info(t('sessions.sidebar.work.archive.kept'), { description: t('sessions.sidebar.work.archive.keptRunning') });
-          break;
-        case 'unknown':
-          toast.info(t('sessions.sidebar.work.archive.kept'), { description: t('sessions.sidebar.work.archive.keptUnknown') });
-          break;
-        case 'failed':
-          toast.error(outcome.doneFailed > 0 ? t('sessions.sidebar.work.done.failed') : t('sessions.sidebar.work.archive.failed'), {
-            description: outcome.error.message,
-          });
-          break;
-      }
+      toastFinishWorkOutcome(await pending, label, t);
     } finally {
       setFinishing(false);
     }

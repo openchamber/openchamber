@@ -1393,6 +1393,7 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
       entries={sidebarRowModel.selectionEntries}
       descendantIds={sidebarRowModel.selectionDescendantIds}
       sessionsById={sidebarRowModel.sessionById}
+      works={sidebarRowModel.selectionWorks}
     >
       <SessionBulkActions
         getFolderScopesForProject={getFolderScopesForProject}
