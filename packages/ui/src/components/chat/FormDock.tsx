@@ -18,7 +18,7 @@ import { useScopedBlockingForms, useRecoveredQuestions, useSessions } from '@/sy
 import { useRequestReveal } from '@/sync/request-reveal';
 import { useChatSessionSelection } from './chatColumnSession';
 import * as sessionActions from '@/sync/session-actions';
-import { agentUnavailableFrom, isFormRequestNotFoundError } from '@/sync/form-request-error';
+import { agentUnavailableFrom, connectionLostMessage, isFormRequestNotFoundError } from '@/sync/form-request-error';
 import { useMobileAutocompleteMaxHeight } from './useMobileAutocompleteMaxHeight';
 import { FormFieldControl } from './FormFieldControl';
 import { WebSearchConsentDock } from './WebSearchConsent';
@@ -227,6 +227,14 @@ const FormDockPanel: React.FC<{
                 toast.error(t('chat.chatInput.toast.agentUnavailable', { agent: unavailableAgent }));
                 return;
             }
+            // The reply gate refused before anything was sent, so say that
+            // instead of implying the server rejected the answer. The
+            // answer stays in the draft, so the retry sends it as picked.
+            const connectionLost = connectionLostMessage(error instanceof Error ? error : null, t);
+            if (connectionLost) {
+                toast.error(connectionLost);
+                return;
+            }
             toast.error(t('chat.formCard.submitFailed'), { description: t('chat.formCard.tryAgain') });
         } finally {
             respondingRef.current = false;
@@ -248,6 +256,11 @@ const FormDockPanel: React.FC<{
         } catch (error) {
             if (!recovered && isFormRequestNotFoundError(error)) {
                 dropFormDraft(draftScope);
+                return;
+            }
+            const connectionLost = connectionLostMessage(error instanceof Error ? error : null, t);
+            if (connectionLost) {
+                toast.error(connectionLost);
                 return;
             }
             toast.error(t('chat.formCard.cancelFailed'), { description: t('chat.formCard.tryAgain') });
