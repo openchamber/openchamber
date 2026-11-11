@@ -100,6 +100,18 @@ test('tables, math, mermaid and file links read from what the renderer kept', ()
   ].join('\n\n'));
 });
 
+test('an svg figure copies as its fence source, not its data URL', () => {
+  const source = '<svg xmlns="http://www.w3.org/2000/svg"><text>a&b</text></svg>';
+  const html = `<div data-streamdown="svg-block" data-oc-svg-source="${source.replace(/&/g, '&amp;').replace(/"/g, '&quot;')}"><img alt="svg" src="data:image/svg+xml;charset=utf-8,x"></div>`;
+  expect(serializeRenderedMarkdown(render(html))).toBe('```svg\n' + source + '\n```');
+  expect(serializeRenderedMarkdown(render(html), 'plain')).toBe(source);
+  const copy = document.createElement('div');
+  copy.innerHTML = html;
+  normalizeMarkdownCopyContent(copy);
+  expect(copy.querySelector('pre code')?.textContent).toBe(source);
+  expect(copy.querySelector('img')).toBeNull();
+});
+
 test('a selection across list items stays a list', () => {
   const root = render('<p>Intro</p><ul><li>alpha one</li><li>beta two</li><li>gamma</li></ul>');
   const range = selectionOf(textIn(root, 'li:nth-child(1)'), 6, textIn(root, 'li:nth-child(2)'), 4);

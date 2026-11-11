@@ -5124,6 +5124,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
                       frontmatter="properties"
                       enableFileReferences={false}
                       allowRawHtml
+                      svgFences
                       windowed
                       tableWidthScope={selectedFile.path}
                     />
@@ -5450,6 +5451,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
                     frontmatter="properties"
                     enableFileReferences={false}
                     allowRawHtml
+                    svgFences
                     windowed
                     tableWidthScope={selectedFile.path}
                   />
