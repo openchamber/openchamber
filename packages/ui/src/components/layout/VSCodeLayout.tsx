@@ -614,6 +614,7 @@ export const VSCodeLayout: React.FC = () => {
               <VSCodeHeader
                 title={t('vscodeLayout.title.sessions')}
                 onArchiveAll={handleArchiveAll}
+                borderless
               />
               <div className="flex-1 overflow-hidden">
                 <SessionSidebar
@@ -664,10 +665,12 @@ interface VSCodeHeaderProps {
   showContextUsage?: boolean;
   showRateLimits?: boolean;
   enableSessionSwitcher?: boolean;
+  /** The sessions list has nothing to separate from the search field below it. */
+  borderless?: boolean;
 }
 
 
-const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, onArchiveAll, showArchiveToggle = Boolean(onArchiveAll), onNewSession, onSettings, showMcp, showContextUsage, showRateLimits, enableSessionSwitcher }) => {
+const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, onArchiveAll, showArchiveToggle = Boolean(onArchiveAll), onNewSession, onSettings, showMcp, showContextUsage, showRateLimits, enableSessionSwitcher, borderless }) => {
   const { t } = useI18n();
   const showArchivedSessions = useSessionDisplayStore((state) => state.showArchivedSessions);
   const toggleArchivedSessions = useSessionDisplayStore((state) => state.toggleArchivedSessions);
@@ -754,7 +757,7 @@ const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, on
   }, [setQuotaDisplayMode]);
 
   return (
-    <div className="flex items-center gap-1.5 ps-3 pe-2 py-1 border-b border-border bg-background shrink-0">
+    <div className={cn('flex items-center gap-1.5 ps-3 pe-2 py-1 bg-background shrink-0', !borderless && 'border-b border-border')}>
       {showBack && onBack && (
         <button
           onClick={onBack}

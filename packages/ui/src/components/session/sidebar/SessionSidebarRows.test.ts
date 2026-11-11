@@ -8,6 +8,7 @@ import {
   mergeSessionSidebarVirtualIndexes,
   resolveSessionSidebarScrollAnchor,
   sectionSpacingAfter,
+  sectionWrapperClass,
   isSessionSidebarUserChange,
   sessionSidebarRowVirtualKey,
   sessionSidebarRowSizeKey,
@@ -88,6 +89,15 @@ describe('SessionSidebarRows section spacing', () => {
     const closed = buildSessionSidebarRowModel({ ...input(true), projectsCaption: true, collapsedActivities: new Set(['projects']) }).rows;
     expect(closed.at(-1)?.kind).toBe('caption');
     expect(closed.some((row) => row.kind === 'project-header')).toBe(false);
+  });
+
+  test('the project divider is optional and the gap survives without it', () => {
+    const rows = buildSessionSidebarRowModel(input(true)).rows;
+    const index = rows.findIndex((row) => row.kind === 'project-header');
+    const previous = rows[index - 1];
+    const projectHeader = rows[index];
+    expect(sectionWrapperClass(previous, projectHeader)).toContain('after:h-px');
+    expect(sectionWrapperClass(previous, projectHeader, false)).toBe('pb-3');
   });
 
   test('a row that ends a section is estimated as its siblings plus its gap', () => {

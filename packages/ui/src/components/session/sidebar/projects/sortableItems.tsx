@@ -33,6 +33,11 @@ type ProjectIdentityProps = {
 type ProjectHeaderIdentityProps = ProjectIdentityProps & {
   isCollapsed?: boolean;
   alwaysShowActions?: boolean;
+  /**
+   * Touch-width sidebars (VS Code) keep the project's icon and put the chevron
+   * after its name, as a zone header does, instead of trading the icon for it.
+   */
+  keepIconWithCollapse?: boolean;
   labelClassName?: string;
   /** A project header in the list: its name a step larger than the rows under it. */
   header?: boolean;
@@ -49,6 +54,7 @@ const ProjectHeaderIdentity: React.FC<ProjectHeaderIdentityProps> = ({
   projectIconBackground,
   isCollapsed,
   alwaysShowActions = false,
+  keepIconWithCollapse = false,
   labelClassName,
   header = false,
 }) => {
@@ -56,15 +62,17 @@ const ProjectHeaderIdentity: React.FC<ProjectHeaderIdentityProps> = ({
   const projectIconName = projectIcon ? PROJECT_ICON_MAP[projectIcon] : null;
   const iconColor = resolveProjectColor(projectColor);
   const hasCollapseControl = isCollapsed !== undefined;
-  // The project icon swaps for the collapse chevron on hover.
-  const iconVisibilityClassName = hasCollapseControl
+  // The project icon swaps for the collapse chevron on hover; a touch-width
+  // header keeps the icon and shows the chevron after the label instead.
+  const chevronInSlot = hasCollapseControl && !keepIconWithCollapse;
+  const iconVisibilityClassName = chevronInSlot
     ? (alwaysShowActions ? 'hidden' : 'group-hover/project:opacity-0 group-has-[:focus-visible]/project:opacity-0')
     : undefined;
 
   return (
     <>
       <span className="relative inline-flex h-3.5 w-3.5 flex-shrink-0 items-center justify-center">
-        {hasCollapseControl ? (
+        {chevronInSlot ? (
           <span className={cn(
             'h-3.5 w-3.5 items-center justify-center text-muted-foreground',
             alwaysShowActions ? 'inline-flex' : 'absolute inset-0 inline-flex opacity-0 group-hover/project:opacity-100 group-has-[:focus-visible]/project:opacity-100',
@@ -76,7 +84,7 @@ const ProjectHeaderIdentity: React.FC<ProjectHeaderIdentityProps> = ({
           <span
             className={cn(
               'h-3.5 w-3.5 items-center justify-center overflow-hidden rounded-[3px]',
-              hasCollapseControl && alwaysShowActions ? 'hidden' : 'inline-flex',
+              chevronInSlot && alwaysShowActions ? 'hidden' : 'inline-flex',
               iconVisibilityClassName,
             )}
             style={projectIconBackground ? { backgroundColor: projectIconBackground } : undefined}
@@ -106,6 +114,12 @@ const ProjectHeaderIdentity: React.FC<ProjectHeaderIdentityProps> = ({
           project is an item of the list, and its icon, weight, size and the
           indent of its sessions set it apart from them. */}
       <span className={cn('truncate font-medium text-foreground', header ? 'typography-ui-section' : 'typography-ui-label', labelClassName)}>{projectLabel}</span>
+      {hasCollapseControl && keepIconWithCollapse ? (
+        <Icon
+          name={isCollapsed ? 'arrow-right-s' : 'arrow-down-s'}
+          className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground"
+        />
+      ) : null}
     </>
   );
 };
@@ -163,6 +177,7 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
   isCollapsed,
   isRepo,
   hideDirectoryControls,
+  mobileVariant,
   alwaysShowActions,
   onToggle,
   onNewSession,
@@ -354,7 +369,10 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
                 <CrossfadeZoneHeader
                   className={cn(
                     '-ms-2.5 -me-2 text-start group/project select-none',
-                    stickyZoneHeaders && 'sticky top-0 z-20 bg-sidebar',
+                    // The touch sidebar sits on the editor's background, so its
+                    // sticky header takes the list's own colour.
+                    stickyZoneHeaders && 'sticky top-0 z-20',
+                    stickyZoneHeaders && (mobileVariant ? 'bg-background' : 'bg-sidebar'),
                   )}
                   data-sidebar-sticky-header={stickyZoneHeaders ? 'true' : undefined}
                   onContextMenu={(event) => {
@@ -426,6 +444,7 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
                       projectIconBackground={projectIconBackground}
                       isCollapsed={isCollapsed}
                       alwaysShowActions={alwaysShowActions}
+                      keepIconWithCollapse={mobileVariant}
                       // The label starts past the 14px icon and the 6px gap.
                       header
                       labelClassName={cn('[--oc-actions-inset:1.25rem]', headerLabelMaskClass)}
