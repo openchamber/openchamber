@@ -1297,6 +1297,7 @@ export const dict: Record<I18nKey, string> = {
   'worktree.bootstrap.toast.lfsClientMissing': '서버에 Git LFS를 설치한 후 워크트리 설정을 다시 시도하세요.',
   'worktree.bootstrap.toast.invalidConfiguration': '저장소의 하위 모듈 및 Git LFS 설정을 검토한 후 다시 시도하세요.',
   'worktree.bootstrap.toast.repositoryTooManyFiles': '저장소에 파일이 너무 많습니다.',
+  'worktree.bootstrap.toast.branchNameConflict': '브랜치 이름이 기존 브랜치와 충돌합니다. 이름이 같거나 한쪽이 다른 쪽 안에 중첩되어 있습니다. 브랜치 이름을 바꾸고 워크트리를 다시 만드세요.',
   'worktree.bootstrap.toast.cancelled': '워크트리 설정이 취소되었습니다. 준비되면 다시 시도하세요.',
   'worktree.bootstrap.toast.transportFailed': '저장소 접근 권한과 네트워크 연결을 확인한 후 다시 시도하세요.',
   'worktree.bootstrap.toast.timeoutDescription': '워크트리는 생성되었지만 백그라운드 설정 시간이 초과되었습니다.',

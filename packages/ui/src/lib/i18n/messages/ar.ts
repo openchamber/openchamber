@@ -1224,6 +1224,7 @@ export const dict = {
   'worktree.bootstrap.toast.lfsClientMissing': 'ثبّت Git LFS على الخادم، ثم أعد محاولة إعداد شجرة العمل.',
   'worktree.bootstrap.toast.invalidConfiguration': 'راجع إعدادات الوحدات الفرعية وGit LFS في المستودع، ثم أعد المحاولة.',
   'worktree.bootstrap.toast.repositoryTooManyFiles': 'يحتوي المستودع على عدد كبير جدًا من الملفات.',
+  'worktree.bootstrap.toast.branchNameConflict': 'يتعارض اسم الفرع مع فرع موجود: الاسم نفسه، أو أحدهما متداخل داخل الآخر. أعد تسمية الفرع وأنشئ شجرة العمل مرة أخرى.',
   'worktree.bootstrap.toast.cancelled': 'أُلغي إعداد شجرة العمل. أعد المحاولة عندما تكون جاهزًا.',
   'worktree.bootstrap.toast.transportFailed': 'تحقق من الوصول إلى المستودع والاتصال بالشبكة، ثم أعد المحاولة.',
   'worktree.bootstrap.toast.timeoutDescription': 'أُنشئت شجرة العمل، لكن انتهت مهلة الإعداد في الخلفية.',

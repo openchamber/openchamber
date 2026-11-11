@@ -1291,6 +1291,7 @@ export const dict = {
   'worktree.bootstrap.toast.lfsClientMissing': 'Installeer Git LFS op de server en probeer de worktree-installatie opnieuw.',
   'worktree.bootstrap.toast.invalidConfiguration': 'Controleer de configuratie van de submodules en Git LFS van de repository en probeer het opnieuw.',
   'worktree.bootstrap.toast.repositoryTooManyFiles': 'De repository bevat te veel bestanden.',
+  'worktree.bootstrap.toast.branchNameConflict': 'De branchnaam botst met een bestaande branch: dezelfde naam, of de ene genest in de andere. Hernoem de branch en maak de worktree opnieuw aan.',
   'worktree.bootstrap.toast.cancelled': 'De worktree-installatie is geannuleerd. Probeer het opnieuw wanneer je klaar bent.',
   'worktree.bootstrap.toast.transportFailed': 'Controleer de toegang tot de repository en de netwerkverbinding en probeer het opnieuw.',
   'worktree.bootstrap.toast.timeoutDescription': 'De worktree is aangemaakt, maar de achtergrondinrichting heeft een time-out gehad.',

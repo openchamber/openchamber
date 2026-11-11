@@ -2598,6 +2598,178 @@ describe('createWorktree', () => {
     }
   });
 
+  it('records a branch name Git cannot create as that name conflict, not unknown (#6690)', async () => {
+    if (!canRunGit()) return;
+
+    const previousXdgDataHome = process.env.XDG_DATA_HOME;
+    const dataHome = createTempDir();
+    process.env.XDG_DATA_HOME = dataHome;
+
+    try {
+      const repo = createTempDir();
+      const baseWorktree = createTempDir();
+      runGit(repo, ['init', '-b', 'main']);
+      runGit(repo, ['config', 'user.email', 'test@example.com']);
+      runGit(repo, ['config', 'user.name', 'Test User']);
+      fs.writeFileSync(path.join(repo, 'README.md'), '# Test\n');
+      runGit(repo, ['add', 'README.md']);
+      runGit(repo, ['commit', '-m', 'Initial commit']);
+
+      // A branch that a new nested name cannot sit under: Git refuses to create
+      // `team/stable/feat` while `refs/heads/team/stable` exists.
+      fs.rmSync(baseWorktree, { recursive: true, force: true });
+      runGit(repo, ['worktree', 'add', '-b', 'team/stable', baseWorktree, 'HEAD']);
+
+      const bootstrapStore = createWorktreeBootstrapStore({
+        filePath: path.join(createTempDir(), 'bootstrap.json'),
+      });
+      const created = await createWorktree(repo, {
+        mode: 'new',
+        branchName: 'team/stable/feat/export',
+        worktreeName: 'export',
+        startRef: 'team/stable',
+        returnAfterDirectoryCreated: true,
+      }, { bootstrapStore });
+
+      await expect.poll(
+        async () => (await getWorktreeBootstrapStatus(created.path, { bootstrapStore })).status,
+        { timeout: 5_000 },
+      ).toBe('failed');
+      await waitForActiveWorktreeBootstrap(created.path);
+      await expect(getWorktreeBootstrapStatus(created.path, { bootstrapStore })).resolves.toMatchObject({
+        status: 'failed',
+        phase: 'directory-created',
+        errorCode: 'BRANCH_NAME_CONFLICT',
+        error: expect.stringContaining('clashes with an existing branch'),
+      });
+      await expect(bootstrapStore.read(created.path)).resolves.toMatchObject({
+        errorCode: 'BRANCH_NAME_CONFLICT',
+      });
+    } finally {
+      if (previousXdgDataHome === undefined) {
+        delete process.env.XDG_DATA_HOME;
+      } else {
+        process.env.XDG_DATA_HOME = previousXdgDataHome;
+      }
+    }
+  }, 30_000);
+
+  // Git translates its diagnostics with the user's locale, so the code comes
+  // from the refs: a Git whose `worktree add` fails in German still reads as a
+  // name conflict when one exists, and as unknown when none does.
+  it.each([
+    ['team/stable/feat/export', 'BRANCH_NAME_CONFLICT'],
+    ['standalone/export', 'UNKNOWN'],
+  ])('classifies a failed %s worktree from refs, not Git\'s translated message', async (branchName, errorCode) => {
+    if (process.platform === 'win32' || !canRunGit()) return;
+
+    const previousXdgDataHome = process.env.XDG_DATA_HOME;
+    const previousGitBinary = process.env.OPENCHAMBER_GIT_BINARY;
+    process.env.XDG_DATA_HOME = createTempDir();
+    const germanDiagnostic = 'fatal: Konnte Referenz nicht sperren: /geheim/pfad';
+    const wrapper = path.join(createTempDir(), 'git-de');
+    fs.writeFileSync(wrapper, [
+      '#!/bin/sh',
+      `if [ "$1" = worktree ] && [ "$2" = add ]; then echo '${germanDiagnostic}' >&2; exit 128; fi`,
+      'exec git "$@"',
+      '',
+    ].join('\n'), { mode: 0o755 });
+
+    try {
+      const repo = createTempDir();
+      runGit(repo, ['init', '-b', 'main']);
+      runGit(repo, ['config', 'user.email', 'test@example.com']);
+      runGit(repo, ['config', 'user.name', 'Test User']);
+      fs.writeFileSync(path.join(repo, 'README.md'), '# Test\n');
+      runGit(repo, ['add', 'README.md']);
+      runGit(repo, ['commit', '-m', 'Initial commit']);
+      runGit(repo, ['branch', 'team/stable']);
+      // A sibling under the same folder is no conflict.
+      runGit(repo, ['branch', 'standalone/other']);
+      process.env.OPENCHAMBER_GIT_BINARY = wrapper;
+
+      const bootstrapStore = createWorktreeBootstrapStore({
+        filePath: path.join(createTempDir(), 'bootstrap.json'),
+      });
+      const created = await createWorktree(repo, {
+        mode: 'new',
+        branchName,
+        worktreeName: 'export',
+        returnAfterDirectoryCreated: true,
+      }, { bootstrapStore });
+
+      await expect.poll(
+        async () => (await getWorktreeBootstrapStatus(created.path, { bootstrapStore })).status,
+        { timeout: 5_000 },
+      ).toBe('failed');
+      await waitForActiveWorktreeBootstrap(created.path);
+      const record = await bootstrapStore.read(created.path);
+      expect(record).toMatchObject({ errorCode });
+      expect(JSON.stringify(record)).not.toContain('geheim');
+    } finally {
+      if (previousGitBinary === undefined) delete process.env.OPENCHAMBER_GIT_BINARY;
+      else process.env.OPENCHAMBER_GIT_BINARY = previousGitBinary;
+      if (previousXdgDataHome === undefined) delete process.env.XDG_DATA_HOME;
+      else process.env.XDG_DATA_HOME = previousXdgDataHome;
+    }
+  }, 30_000);
+
+  // Real Git creates the new branch, then fails on the occupied directory and
+  // leaves that branch behind; the branch this attempt made is no conflict.
+  it('does not read the branch a failed worktree add created as a name conflict', async () => {
+    if (process.platform === 'win32' || !canRunGit()) return;
+
+    const previousXdgDataHome = process.env.XDG_DATA_HOME;
+    const previousGitBinary = process.env.OPENCHAMBER_GIT_BINARY;
+    process.env.XDG_DATA_HOME = createTempDir();
+    const wrapper = path.join(createTempDir(), 'git-occupy');
+    fs.writeFileSync(wrapper, [
+      '#!/bin/sh',
+      'if [ "$1" = worktree ] && [ "$2" = add ]; then',
+      '  seen=""; for arg in "$@"; do',
+      '    if [ "$seen" = name ]; then seen=dir; continue; fi',
+      '    if [ "$seen" = dir ]; then touch "$arg/occupied"; break; fi',
+      '    if [ "$arg" = -b ]; then seen=name; fi',
+      '  done',
+      'fi',
+      'exec git "$@"',
+      '',
+    ].join('\n'), { mode: 0o755 });
+
+    try {
+      const repo = createTempDir();
+      runGit(repo, ['init', '-b', 'main']);
+      runGit(repo, ['config', 'user.email', 'test@example.com']);
+      runGit(repo, ['config', 'user.name', 'Test User']);
+      fs.writeFileSync(path.join(repo, 'README.md'), '# Test\n');
+      runGit(repo, ['add', 'README.md']);
+      runGit(repo, ['commit', '-m', 'Initial commit']);
+      process.env.OPENCHAMBER_GIT_BINARY = wrapper;
+
+      const bootstrapStore = createWorktreeBootstrapStore({
+        filePath: path.join(createTempDir(), 'bootstrap.json'),
+      });
+      const created = await createWorktree(repo, {
+        mode: 'new',
+        branchName: 'feat/occupied',
+        worktreeName: 'occupied',
+        returnAfterDirectoryCreated: true,
+      }, { bootstrapStore });
+
+      await expect.poll(
+        async () => (await getWorktreeBootstrapStatus(created.path, { bootstrapStore })).status,
+        { timeout: 5_000 },
+      ).toBe('failed');
+      await waitForActiveWorktreeBootstrap(created.path);
+      await expect(bootstrapStore.read(created.path)).resolves.toMatchObject({ errorCode: 'UNKNOWN' });
+    } finally {
+      if (previousGitBinary === undefined) delete process.env.OPENCHAMBER_GIT_BINARY;
+      else process.env.OPENCHAMBER_GIT_BINARY = previousGitBinary;
+      if (previousXdgDataHome === undefined) delete process.env.XDG_DATA_HOME;
+      else process.env.XDG_DATA_HOME = previousXdgDataHome;
+    }
+  }, 30_000);
+
   it('does not auto-track the remote start ref when creating a new branch from it', async () => {
     if (!canRunGit()) return;
 

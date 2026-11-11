@@ -3745,6 +3745,7 @@ export const dict = {
   'worktree.bootstrap.toast.lfsClientMissing': 'Sunucuya Git LFS kurun, ardından worktree kurulumunu yeniden deneyin.',
   'worktree.bootstrap.toast.invalidConfiguration': 'Repository submodule ve Git LFS yapılandırmasını gözden geçirin, ardından yeniden deneyin.',
   'worktree.bootstrap.toast.repositoryTooManyFiles': 'Repository\'de çok fazla dosya var.',
+  'worktree.bootstrap.toast.branchNameConflict': 'Dal adı mevcut bir dalla çakışıyor: aynı ad ya da biri diğerinin içinde. Dalı yeniden adlandırın ve worktree\'yi yeniden oluşturun.',
   'worktree.bootstrap.toast.cancelled': 'Worktree kurulumu iptal edildi. Hazır olduğunuzda yeniden deneyin.',
   'worktree.bootstrap.toast.transportFailed': 'Repository erişimini ve ağ bağlantısını kontrol edin, ardından yeniden deneyin.',
   'gitView.pr.actions.openOnProvider': '{provider} üzerinde aç',

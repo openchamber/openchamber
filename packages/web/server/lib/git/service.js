@@ -16,6 +16,7 @@ import { normalizeGitOutputPath } from './output-path.js';
 import { overlayEnvironment } from '../environment/variables.js';
 import { primaryWorktreeRootFromGitDir, unsupportedRepositoryRootReason } from './repository-root.js';
 import { randomUUID } from 'crypto';
+import { worktreeBootstrapFailureMessage } from './worktree-bootstrap-storage.js';
 
 const fsp = fs.promises;
 const require = createRequire(import.meta.url);
@@ -2379,11 +2380,13 @@ const queueWorktreeBootstrap = (args) => {
       const recordedPhase = worktreeBootstrapState.get(await toCanonicalBootstrapStateKey(directory))?.phase;
       const pathLengthFailure = !error?.hydration
         && isFilenameTooLongError(error instanceof Error ? error.message : error);
+      const failureCode = bootstrapFailureCode(error, pathLengthFailure);
       const publicMessage = error?.hydration
         ? error instanceof Error ? error.message : 'Worktree checkout hydration did not complete'
         : pathLengthFailure
           ? formatWorktreePopulateError(error instanceof Error ? error.message : error)
-          : 'Worktree bootstrap failed. Inspect the checkout and repair it before use.';
+          : worktreeBootstrapFailureMessage(failureCode)
+            ?? 'Worktree bootstrap failed. Inspect the checkout and repair it before use.';
       await setWorktreeBootstrapState(
         directory,
         WORKTREE_BOOTSTRAP_FAILED,
@@ -2392,7 +2395,7 @@ const queueWorktreeBootstrap = (args) => {
           : WORKTREE_BOOTSTRAP_PHASE_DIRECTORY_CREATED,
         publicMessage,
         error?.hydration,
-        bootstrapFailureCode(error, pathLengthFailure),
+        failureCode,
         bootstrapStore,
       ).catch(() => {});
       console.warn('Worktree bootstrap task failed:', error instanceof Error ? error.message : String(error));
@@ -5899,6 +5902,23 @@ const prepareChangeRequestLocalBranch = async (primaryWorktree, input = {}) => {
   return { branch, tip, backupBranch };
 };
 
+// Whether a new branch cannot be created because of the refs that exist: the
+// same name, a branch its name sits inside (`a/b` blocks `a/b/c`), or a branch
+// inside its name (`a/b/c` blocks `a/b`). Read from refs, not from Git's
+// message, which is translated with the user's locale.
+const branchNameClashesWithExistingRef = async (primaryWorktree, branchName) => {
+  const segments = String(branchName || '').split('/').filter(Boolean);
+  if (segments.length === 0) return false;
+  const candidates = segments.map((_, index) => `refs/heads/${segments.slice(0, index + 1).join('/')}`);
+  const target = candidates[candidates.length - 1];
+  // A pattern matches its ref and every ref below it, so siblings are filtered out here.
+  const result = await runGitCommand(primaryWorktree, ['for-each-ref', '--format=%(refname)', ...candidates]);
+  if (!result.success) return false;
+  return String(result.stdout || '').split(/\r?\n/).map((line) => line.trim()).some((ref) => (
+    candidates.includes(ref) || ref.startsWith(`${target}/`)
+  ));
+};
+
 async function attachGitWorktreeToCandidateWithoutRemoteRollback(context, candidate, input = {}, serverOptions = {}) {
   const mode = input?.mode === 'existing' ? 'existing' : 'new';
   const startRef = normalizeStartRef(input?.startRef);
@@ -6005,7 +6025,18 @@ async function attachGitWorktreeToCandidateWithoutRemoteRollback(context, candid
     checkoutRemoteName = await resolveCheckoutRemoteName(context.primaryWorktree, mode === 'existing' ? localBranch : startRef);
   }
 
-  await runGitCommandOrThrow(context.primaryWorktree, worktreeAddArgs, 'Failed to create git worktree');
+  // Read before the attempt: a failed `worktree add -b` can leave behind the
+  // branch it just created, which is no conflict.
+  const branchNameConflict = (mode === 'new' || createdLocalBranch)
+    && await branchNameClashesWithExistingRef(context.primaryWorktree, localBranch);
+  try {
+    await runGitCommandOrThrow(context.primaryWorktree, worktreeAddArgs, 'Failed to create git worktree');
+  } catch (error) {
+    if (branchNameConflict) {
+      throw Object.assign(error, { code: 'BRANCH_NAME_CONFLICT' });
+    }
+    throw error;
+  }
   await publishWorktreeTopologyChange(context.primaryWorktree);
   // A new branch's parent is the branch it starts from, a lower layer of a
   // stack included; its pull request and comparisons default to it.
@@ -6343,13 +6374,18 @@ export async function createWorktree(directory, input = {}, serverOptions = {}) 
 
     const task = bootstrapStatus.status === WORKTREE_BOOTSTRAP_PENDING
       ? attachGitWorktreeToCandidate(context, candidate, preparedInput, attachOptions).catch(async (error) => {
+      const failureCode = bootstrapFailureCode(
+        error,
+        isFilenameTooLongError(error instanceof Error ? error.message : error),
+      );
       await setWorktreeBootstrapState(
         candidate.directory,
         WORKTREE_BOOTSTRAP_FAILED,
         WORKTREE_BOOTSTRAP_PHASE_DIRECTORY_CREATED,
-        'Worktree creation failed. Inspect the checkout and repair it before use.',
+        worktreeBootstrapFailureMessage(failureCode)
+          ?? 'Worktree creation failed. Inspect the checkout and repair it before use.',
         undefined,
-        'UNKNOWN',
+        failureCode,
         serverOptions.bootstrapStore,
       ).catch(() => {});
       await cleanupFailedFastWorktreeCreate(context, candidate);
@@ -6382,11 +6418,13 @@ export async function createWorktree(directory, input = {}, serverOptions = {}) 
 
 // The code a failed bootstrap is recorded with, which decides what the user is
 // told. A known cause is never recorded as unknown: a repository grant whose
-// account needs attention reads as the access problem it is.
+// account needs attention reads as the access problem it is, and a branch Git
+// refused to create reads as the name conflict it is.
 const bootstrapFailureCode = (error, pathLengthFailure) => {
   if (error?.hydration) return error.code;
   if (pathLengthFailure) return 'PATH_LENGTH_LIMIT';
   if (error?.reason === 'needs-attention' || error?.code === 'AUTHENTICATION_REQUIRED') return 'AUTHENTICATION_REQUIRED';
+  if (error?.code === 'BRANCH_NAME_CONFLICT') return 'BRANCH_NAME_CONFLICT';
   return 'UNKNOWN';
 };
 
