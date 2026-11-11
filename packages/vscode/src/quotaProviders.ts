@@ -1743,13 +1743,24 @@ const fetchClaudeQuota = async (): Promise<ProviderResult> => {
       return buildClaudeRateLimitResult();
     }
 
-    if (response.status === 401 || response.status === 403) {
+    if (response.status === 401) {
       return buildResult({
         providerId: 'claude',
         providerName: 'Claude',
         ok: false,
         configured: true,
         error: 'Claude session expired. Open Claude Code to sign in again.',
+      });
+    }
+
+    // A valid token without the `user:profile` scope (every `claude setup-token` token) gets 403.
+    if (response.status === 403) {
+      return buildResult({
+        providerId: 'claude',
+        providerName: 'Claude',
+        ok: false,
+        configured: true,
+        error: 'Anthropic does not let this Claude token read usage. A token from `claude setup-token` cannot; a Claude Code sign-in (`/login`) can.',
       });
     }
 

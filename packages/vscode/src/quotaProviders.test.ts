@@ -1503,6 +1503,21 @@ describe('Claude quota provider (VS Code parity)', () => {
     }
   });
 
+  test('tells a token without usage access apart from an expired session', async () => {
+    configureOpenCodeCredentials({
+      list: async () => [{ ...oauth('anthropic'), value: { type: 'oauth', methodID: 'test', access: 'no-profile-scope', refresh: 'no-profile-refresh', expires: 0 } }],
+    });
+    stubFetchReturning(async () => new Response('{"type":"error","error":{"type":"permission_error"}}', { status: 403 }));
+    try {
+      const result = await fetchQuotaForProvider('claude');
+      assert.equal(result.ok, false);
+      assert.equal(result.error?.includes('expired'), false);
+      assert.equal(result.error?.includes('claude setup-token'), true);
+    } finally {
+      configureOpenCodeCredentials({ list: async () => baseCredentialList() });
+    }
+  });
+
   test('keeps serving the last good values while Anthropic rate limits', async () => {
     const responses = [
       mockResponse({ five_hour: { utilization: 12, resets_at: '2026-08-20T12:00:00Z' } }),
