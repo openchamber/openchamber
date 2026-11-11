@@ -300,8 +300,13 @@ const countRenderedMessages = async (client) => {
   const raw = await evaluateValue(client, `JSON.stringify({
     messages: document.querySelectorAll("[data-message-id]").length,
     characters: document.body.innerText.length,
-    perMessage: Object.fromEntries([...document.querySelectorAll("[data-message-id]")]
-      .map((element) => [element.getAttribute("data-message-id"), element.innerText.length])),
+    // A long message is several rows with the same id; count all of them,
+    // whatever order the list keeps them in.
+    perMessage: [...document.querySelectorAll("[data-message-id]")].reduce((total, element) => {
+      const id = element.getAttribute("data-message-id");
+      total[id] = (total[id] ?? 0) + element.innerText.length;
+      return total;
+    }, {}),
   })`)
   try {
     return JSON.parse(raw ?? "{}")

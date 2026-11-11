@@ -492,16 +492,16 @@ keeps the reader's place. A 180 ms height transition across several rows would
 need its own choreography; the maintainer chose to start without one and add
 it back if it is missed.
 
-The virtualizer also adds temporary end padding while compensating prepended
-history. `@legendapp/list` stores that padding's CSSOM read-back value (built
-in since 3.3.11; it was a Bun patch before): Chromium rounds fractional pixel
-strings, so comparing the original input with `style.paddingBottom` could skip
-cleanup permanently and leave a phantom tail even when every Activity region is
-already zero-height. `scripts/legend-list-padding.test.mjs` checks the
-installed version for it. Chat padding and scroll policies do not compensate
-for it.
+When a correction for prepended history would scroll past the end of the
+content, the list makes room with a spacer element appended to its content
+node and removes it on the next frame (since 3.7.2; earlier versions wrote a
+temporary `padding-bottom`, whose CSSOM read-back Chromium rounds, which once
+left a phantom tail). A spacer left behind is the same phantom tail below the
+last row: `scripts/legend-list-scroll-adjust.test.mjs` runs the installed
+controller and checks that the spacer goes on the next frame and on unmount.
+Chat padding and scroll policies do not compensate for it.
 
-The Bun patch for `@legendapp/list@3.7.1` floors `roundSize` to the device
+The Bun patch for `@legendapp/list@3.7.2` floors `roundSize` to the device
 pixel grid instead of eighth pixels, mirroring upstream LegendApp/legend-list#536.
 Rows the list has not measured yet are placed at the average measured height;
 with eighth-pixel precision their positions are fractional, the browser rounds
@@ -511,22 +511,30 @@ pass. A history prepend then leaves the reader's row one to two pixels off
 happened to average to a whole pixel). The patch covers both web entry points
 in ESM and CJS. Drop it once upstream ships #536 or an equivalent, and verify
 with `bun packages/ui/tests/chat-history-scroll.browser.mjs`, which runs the
-prepend scenarios over several row-height profiles for this reason.
+prepend scenarios over several row-height profiles for this reason, each with
+the list's average estimate, a per-row estimate (`getEstimatedItemSize`), the
+touch layout and both. With the eighth-pixel rounding put back it reports a
+1.375 px shift on the third profile, so a run without the patch fails. The
+same harness scrolls steadily through rows whose estimate is 40 px too tall:
+without the touch layout the list corrects `scrollTop` mid-scroll, with it
+(`deferSizeWhileScrolling`) nothing moves until the scroll stops and the
+reader's row stays put through the one correction at rest; with the deferral
+forced off, that check fails.
 
 The same patch hands out containers in item order while the list's initial
 scroll is active, end-aligned included. Upstream reverses them for an
 end-aligned start (`renderPriority` in `findAvailableContainers`), so a
-freshly opened timeline was in reverse DOM order and the DOM-order pass
-(`useDOMOrder`) moved nearly every row about 300 ms after the reveal: each row
-restyled, and with an accessibility client on, the transcript re-serialized
-(about 40 ms on every session open and switch). Containers render in index
-order, so rows are now in DOM order (what screen readers and tab order follow)
-from the first paint, and the pass finds nothing to move. Scrolling up still
-recycles containers out of order; the pass corrects that as before. The patch
-also keeps the pass's own delay: it treats the list's mount as activity, so a
-pass that does have work waits for 500 ms of quiet instead of landing in the
-opening reveal. `scripts/legend-list-dom-order.test.mjs` runs the installed
-bundles' allocation and timer code for both.
+freshly opened timeline was in reverse DOM order, and putting the rows in DOM
+order then moved nearly every row: each row restyled, and with an accessibility
+client on, the transcript re-serialized (about 40 ms on every session open and
+switch). Containers render in index order, so rows are in DOM order (what
+screen readers and tab order follow) from the first paint, and the sort finds
+nothing to move. Since 3.7.2 the list sorts in the layout pass that reassigns
+a container (`sortContainerElements`), moving only the rows out of order;
+3.7.1 sorted after 500 ms without scrolling, and the patch kept that pass out
+of the opening reveal, which 3.7.2 no longer needs.
+`scripts/legend-list-dom-order.test.mjs` runs the installed bundles'
+allocation code for an end-aligned open.
 
 The header retains its report when expanded and has no hover background. Its
 left inset matches the tool rows. Diff deletions use the ASCII hyphen.

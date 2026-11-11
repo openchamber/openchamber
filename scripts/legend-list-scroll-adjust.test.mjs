@@ -13,34 +13,54 @@ const bundles = ['react.js', 'react.mjs', 'react-native.web.js', 'react-native.w
 // Only its external hooks, DOM geometry and frame scheduler are supplied here.
 // Keeping the controller in the package (rather than copying it into a test)
 // makes a regressed or changed upstream implementation fail this check.
-function controller(bundle, { horizontal = false, baseline = '' } = {}) {
+//
+// When a scroll correction would land past the end of the content (a history
+// prepend near the end), the controller makes room with a temporary spacer
+// appended to the content node and removes it on the next frame. A spacer
+// left behind is a phantom tail below the last row.
+function controller(bundle, { horizontal = false } = {}) {
     const source = readFileSync(join(packageDirectory, bundle), 'utf8');
     const start = source.indexOf('function ScrollAdjust() {');
     const end = source.indexOf('var SnapWrapper', start);
     assert.ok(start >= 0 && end > start, "Find the pinned package version's ScrollAdjust implementation");
 
-    const hooks = { useRef: (value) => ({ current: value }), useCallback: (callback) => callback };
+    const layoutEffects = [];
+    const hooks = {
+        useRef: (value) => ({ current: value }),
+        useCallback: (callback) => callback,
+        useLayoutEffect: (effect) => layoutEffects.push(effect),
+    };
     const signals = new Map([['scrollAdjust', 0], ['scrollAdjustUserOffset', 0]]);
     const listeners = new Map();
     const frames = new Map();
     let frameId = 0;
-    const paddingKey = horizontal ? 'paddingRight' : 'paddingBottom';
-    let padding = baseline;
-    const style = {};
-    Object.defineProperty(style, paddingKey, {
-        get: () => padding,
-        set(value) {
-            // Observed in Chromium: assigning 2123.1875px reads back as
-            // 2123.19px. This normalization is what a plain JS style mock misses.
-            padding = value.endsWith('px') ? `${Number(Number.parseFloat(value).toPrecision(6))}px` : value;
-        },
-    });
+    const sizeProp = horizontal ? 'width' : 'height';
+    const children = [];
     const contentNode = {
-        style,
-        get scrollHeight() { return 300 + (Number.parseFloat(padding) || 0); },
-        get scrollWidth() { return 300 + (Number.parseFloat(padding) || 0); },
-        get offsetHeight() { return this.scrollHeight; },
+        ownerDocument: {
+            createElement() {
+                const element = {
+                    style: {},
+                    parentElement: null,
+                    setAttribute() {},
+                    get offsetHeight() { return Number.parseFloat(element.style.height) || 0; },
+                    remove() {
+                        const index = children.indexOf(element);
+                        if (index >= 0) children.splice(index, 1);
+                        element.parentElement = null;
+                    },
+                };
+                return element;
+            },
+        },
+        appendChild(element) {
+            children.push(element);
+            element.parentElement = contentNode;
+        },
+        get scrollHeight() { return 300 + spacerSize(); },
+        get scrollWidth() { return 300 + spacerSize(); },
     };
+    const spacerSize = () => children.reduce((sum, child) => sum + (Number.parseFloat(child.style[sizeProp]) || 0), 0);
     const scrollElement = {
         scrollTop: 0, scrollLeft: 0, clientHeight: 300, clientWidth: 300,
         scrollBy({ left, top }) { this.scrollLeft += left; this.scrollTop += top; },
@@ -57,17 +77,18 @@ function controller(bundle, { horizontal = false, baseline = '' } = {}) {
             x: horizontal ? 1 : 0, y: horizontal ? 0 : 1,
             contentSizeKey: horizontal ? 'scrollWidth' : 'scrollHeight',
             viewportSizeKey: horizontal ? 'clientWidth' : 'clientHeight',
-            paddingEndProp: paddingKey,
+            sizeProp,
         }),
         scrollAdjustBy: (element, left, top) => element.scrollBy({ left, top }),
-        window: { getComputedStyle: () => style },
         requestAnimationFrame: (callback) => { frames.set(++frameId, callback); return frameId; },
         cancelAnimationFrame: (id) => frames.delete(id),
     });
     ScrollAdjust();
+    const cleanups = layoutEffects.map((effect) => effect()).filter(Boolean);
     return {
-        get padding() { return padding; },
-        set padding(value) { style[paddingKey] = value; },
+        children,
+        spacerSize,
+        get scroll() { return horizontal ? scrollElement.scrollLeft : scrollElement.scrollTop; },
         adjust(offset) {
             signals.set('scrollAdjustUserOffset', offset);
             listeners.get('scrollAdjustUserOffset')();
@@ -77,40 +98,47 @@ function controller(bundle, { horizontal = false, baseline = '' } = {}) {
             frames.clear();
             for (const callback of callbacks) callback();
         },
+        unmount() {
+            for (const cleanup of cleanups) cleanup();
+        },
     };
 }
 
 for (const bundle of bundles) {
-    describe(`LegendList temporary padding: ${bundle}`, () => {
-        it('removes browser-rounded fractional padding on the next frame', () => {
+    describe(`LegendList temporary end space: ${bundle}`, () => {
+        it('makes room for a correction past the end and removes it on the next frame', () => {
             const view = controller(bundle);
             view.adjust(1061.59375);
-            assert.equal(view.padding, '2123.19px');
+            assert.equal(view.scroll, 1061.59375);
+            assert.equal(view.children.length, 1);
+            assert.ok(view.spacerSize() >= 1061.59375);
             view.finishFrame();
-            assert.equal(view.padding, '');
+            assert.equal(view.children.length, 0);
         });
 
-        it('preserves the original baseline across overlapping adjustments', () => {
-            const view = controller(bundle, { baseline: '12px' });
+        it('grows one spacer across overlapping corrections and removes it once', () => {
+            const view = controller(bundle);
             view.adjust(1061.59375);
             view.adjust(5000.25);
+            assert.equal(view.children.length, 1);
             view.finishFrame();
-            assert.equal(view.padding, '12px');
+            assert.equal(view.children.length, 0);
+            assert.equal(view.spacerSize(), 0);
         });
 
         it('cleans up the horizontal web entry point too', () => {
             const view = controller(bundle, { horizontal: true });
             view.adjust(1061.59375);
+            assert.equal(view.children.length, 1);
             view.finishFrame();
-            assert.equal(view.padding, '');
+            assert.equal(view.children.length, 0);
         });
 
-        it('does not clear padding changed by another owner', () => {
+        it('removes the spacer when the list unmounts before the frame', () => {
             const view = controller(bundle);
             view.adjust(1061.59375);
-            view.padding = '28px';
-            view.finishFrame();
-            assert.equal(view.padding, '28px');
+            view.unmount();
+            assert.equal(view.children.length, 0);
         });
     });
 }
