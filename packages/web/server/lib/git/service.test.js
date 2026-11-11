@@ -3677,6 +3677,7 @@ describe('git remote arguments with option-like names', () => {
 
     const { remote, repository } = createRepositoryWithRemote();
     addOptionLikeRemote(repository, remote);
+    runGit(repository, ['symbolic-ref', 'refs/remotes/--mirror/HEAD', 'refs/remotes/--mirror/react']);
     const head = runGit(repository, ['rev-parse', 'HEAD']).trim();
     runGit(repository, ['update-ref', `refs/remotes/${OPTION_LIKE_REMOTE}/gone`, head]);
 

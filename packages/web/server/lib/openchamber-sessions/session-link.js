@@ -213,7 +213,7 @@ const storedLinks = (metadata) => linkMetadataSchema.parse(metadata ?? {}).openc
     return parsed.success ? [parsed.data] : [];
   });
 
-export const findLinkedEntries = (metadata, { url, identifier }, { matchTrackerUrl = () => null } = {}) => {
+const findLinkedEntries = (metadata, { url, identifier }, { matchTrackerUrl = () => null } = {}) => {
   const stored = storedLinks(metadata);
   if (url) {
     const id = buildLinkEntry({ url, title: 'unlink', kind: 'issue' }, 0, { matchTrackerUrl }).entry?.id;

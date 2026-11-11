@@ -349,13 +349,6 @@ const publishDirectoryEventBatch = (batch: DirectoryEventBatch): void => {
   for (const move of batch.sessionMoves) adoptSessionMove(move.sessionID, move.from, move.to)
 }
 
-/** Read status for a session across all directories */
-export function useGlobalSessionStatus(sessionId: string): SessionStatus | undefined {
-  return useGlobalSessionStatusStore(
-    useCallback((state) => state.statusById.get(sessionId)?.status, [sessionId]),
-  )
-}
-
 /** Read all session statuses (for sidebar) */
 export function useAllSessionStatuses(): Record<string, SessionStatus> {
   return useLiveSyncSelector(

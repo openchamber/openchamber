@@ -51,7 +51,7 @@ import { canShowSessionWorktreeMenu, getSessionWorktreeMenuDisabled } from './se
 import { collectSessionMoveDescendants } from './sessionSubtreeActions';
 
 /** Track / Done for a session that is a work of its own. */
-export type SessionMenuWork = {
+type SessionMenuWork = {
   inWork: boolean;
   toggle: () => void;
 };
