@@ -3,11 +3,11 @@ import React from 'react';
 import { Icon } from '@/components/icon/Icon';
 import { useClockBeat } from '@/hooks/useDurationTicker';
 import { useI18n } from '@/lib/i18n';
+import { isCapacitorApp } from '@/lib/platform';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { cn } from '@/lib/utils';
 
 import { HEARTBEAT_COLUMNS, HEARTBEAT_ROWS, buildHeartbeatTrace, type HeartbeatPing } from './connectionHeartbeatTrace';
-import { getActiveConnectionLabel } from './mobileConnections';
 
 // A ping every 16 beats leaves three to four heartbeats across the trace.
 const PING_INTERVAL_MS = 4_000;
@@ -18,9 +18,51 @@ const DOT_RADIUS = 3;
 // Unlit grid rows above and below the trace, where the grid fades out.
 const MARGIN_ROWS = 3;
 const DIGITS = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9'];
+// Stands in for the number while the latency message is split around it.
+const NUMBER_SLOT = '\u0000';
 
-/** Asks `/health` every few seconds while the page is visible; the round trip is the latency. */
-const useServerPings = (beat: number): readonly HeartbeatPing[] => {
+/**
+ * Whether the app is in the foreground. On Capacitor the native app state decides:
+ * the WebView's page visibility can stay "visible" while the app sits in the background.
+ */
+const useAppActive = (): boolean => {
+  const [active, setActive] = React.useState(() => document.visibilityState === 'visible');
+
+  React.useEffect(() => {
+    if (isCapacitorApp()) {
+      let disposed = false;
+      let removeListener: (() => void) | null = null;
+      void import('@capacitor/app')
+        .then(async ({ App }) => {
+          const handles = await Promise.all([
+            App.addListener('appStateChange', ({ isActive }) => setActive(isActive === true)),
+            // appStateChange can be missed after a long iOS suspend; resume still fires (see useNativeResume).
+            App.addListener('resume', () => setActive(true)),
+          ]);
+          if (disposed) {
+            handles.forEach((handle) => void handle.remove());
+            return;
+          }
+          removeListener = () => handles.forEach((handle) => void handle.remove());
+          const state = await App.getState().catch(() => null);
+          if (!disposed && state) setActive(state.isActive === true);
+        })
+        .catch(() => undefined);
+      return () => {
+        disposed = true;
+        removeListener?.();
+      };
+    }
+    const onVisibilityChange = () => setActive(document.visibilityState === 'visible');
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', onVisibilityChange);
+  }, []);
+
+  return active;
+};
+
+/** Asks `/health` every few seconds while the app is active; the round trip is the latency. */
+const useServerPings = (beat: number, active: boolean): readonly HeartbeatPing[] => {
   const beatRef = React.useRef(beat);
   React.useEffect(() => {
     beatRef.current = beat;
@@ -28,17 +70,17 @@ const useServerPings = (beat: number): readonly HeartbeatPing[] => {
   const [pings, setPings] = React.useState<readonly HeartbeatPing[]>([]);
 
   React.useEffect(() => {
+    if (!active) return;
     let disposed = false;
-    let inFlight = false;
     let timer: number | undefined;
+    let request: AbortController | null = null;
 
     const ping = async () => {
-      timer = undefined;
-      inFlight = true;
       const startedAt = performance.now();
       let latencyMs: number | null = null;
       // A controller, since the iOS 15 WebView has no AbortSignal.timeout.
       const controller = new AbortController();
+      request = controller;
       const timeout = window.setTimeout(() => controller.abort(), PING_TIMEOUT_MS);
       try {
         // The signal also keeps runtimeFetch from sharing an answer with another caller.
@@ -49,24 +91,22 @@ const useServerPings = (beat: number): readonly HeartbeatPing[] => {
         // A timeout or a dropped connection is a ping nobody answered.
       }
       window.clearTimeout(timeout);
-      inFlight = false;
+      request = null;
       if (disposed) return;
       setPings((current) => [...current.slice(1 - KEPT_PINGS), { beat: beatRef.current, latencyMs }]);
-      if (document.visibilityState === 'visible') timer = window.setTimeout(ping, PING_INTERVAL_MS);
-    };
-
-    const onVisibilityChange = () => {
-      if (document.visibilityState === 'visible' && !inFlight && timer === undefined) void ping();
+      timer = window.setTimeout(ping, PING_INTERVAL_MS);
     };
 
     void ping();
-    document.addEventListener('visibilitychange', onVisibilityChange);
     return () => {
       disposed = true;
       window.clearTimeout(timer);
-      document.removeEventListener('visibilitychange', onVisibilityChange);
+      request?.abort();
+      // The shared clock restarts its count once nothing listens, so stamps kept
+      // from before would come back later as beats that never happened.
+      setPings([]);
     };
-  }, []);
+  }, [active]);
 
   return pings;
 };
@@ -77,7 +117,9 @@ const RollingNumber: React.FC<{ value: number }> = ({ value }) => {
   return (
     <span dir="ltr" className="inline-flex tabular-nums" aria-hidden>
       {digits.map((digit, index) => (
-        <span key={digits.length - index} className="inline-block h-[1.25em] overflow-hidden leading-[1.25em]">
+        // Paint containment clips the other nine digits out of paint and scroll height. Not overflow-hidden:
+        // mobile.css turns that into a scroller with a scrollbar on touch devices. Not overflow-clip: missing before iOS 16.
+        <span key={digits.length - index} className="inline-block h-[1.25em] leading-[1.25em] [contain:paint]">
           <span
             className="flex flex-col transition-transform duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none"
             style={{ transform: `translateY(-${Number(digit) * 10}%)` }}
@@ -90,11 +132,16 @@ const RollingNumber: React.FC<{ value: number }> = ({ value }) => {
   );
 };
 
-export const MobileConnectionHeartbeat: React.FC = () => {
+/**
+ * The live connection's heartbeat on Instances: a dot trace with a beat per answer
+ * from the server, then `status` with the latency beside it. It pings only while
+ * mounted and the app is in the foreground.
+ */
+export const MobileConnectionHeartbeat: React.FC<{ status: React.ReactNode }> = ({ status }) => {
   const { t } = useI18n();
-  const beat = useClockBeat(true);
-  const pings = useServerPings(beat);
-  const [label] = React.useState(getActiveConnectionLabel);
+  const active = useAppActive();
+  const beat = useClockBeat(active);
+  const pings = useServerPings(beat, active);
   const svgId = React.useId().replace(/[^a-zA-Z0-9_-]/g, '');
 
   const latest = pings.at(-1) ?? null;
@@ -112,10 +159,14 @@ export const MobileConnectionHeartbeat: React.FC = () => {
   );
   const width = HEARTBEAT_COLUMNS * PITCH;
   const height = (HEARTBEAT_ROWS + MARGIN_ROWS * 2) * PITCH;
+  const latencyMs = latest?.latencyMs ?? null;
+  const [beforeNumber, afterNumber] = latencyMs === null
+    ? ['', '']
+    : t('mobile.instances.heartbeat.latency', { ms: NUMBER_SLOT }).split(NUMBER_SLOT);
 
   return (
-    <section className="oc-tile rounded-[18px] p-1.5">
-      <div className="oc-tile-inset overflow-hidden rounded-[13px]">
+    <>
+      <div className="oc-tile-inset mt-3 overflow-clip rounded-lg">
         <svg viewBox={`0 0 ${width} ${height}`} className="block h-auto w-full" aria-hidden>
           <defs>
             <pattern id={`${svgId}-grid`} width={PITCH} height={PITCH} patternUnits="userSpaceOnUse">
@@ -151,19 +202,20 @@ export const MobileConnectionHeartbeat: React.FC = () => {
           </g>
         </svg>
       </div>
-      <div className="flex items-center gap-3 px-3 pb-1.5 pt-2.5">
-        <span className="min-w-0 flex-1 truncate typography-ui-label font-semibold text-foreground">{label}</span>
-        <span className={cn('flex shrink-0 items-center gap-1.5 typography-ui-label', latest?.latencyMs === null ? 'text-[var(--status-error)]' : 'text-muted-foreground')}>
+      <div className="flex h-9 items-center gap-3 pt-3">
+        <span className="min-w-0 flex-1">{status}</span>
+        <span className={cn('flex shrink-0 items-center gap-1.5 typography-meta', latest !== null && latencyMs === null ? 'text-[var(--status-error-text)]' : 'text-muted-foreground')}>
           <Icon name="pulse" className="size-4" />
-          {latest === null ? null : latest.latencyMs === null ? t('settings.connectionHeartbeat.noAnswer') : (
+          {latest === null ? null : latencyMs === null ? t('mobile.instances.heartbeat.noAnswer') : (
             <>
-              <span className="text-foreground"><RollingNumber value={latest.latencyMs} /></span>
-              <span aria-hidden>ms</span>
-              <span className="sr-only">{t('settings.connectionHeartbeat.latencyAria', { ms: latest.latencyMs })}</span>
+              <span aria-hidden className="whitespace-pre">
+                {beforeNumber}<span className="text-foreground"><RollingNumber value={latencyMs} /></span>{afterNumber}
+              </span>
+              <span className="sr-only">{t('mobile.instances.heartbeat.latencyAria', { ms: latencyMs })}</span>
             </>
           )}
         </span>
       </div>
-    </section>
+    </>
   );
 };

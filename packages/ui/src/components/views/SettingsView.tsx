@@ -121,8 +121,6 @@ interface SettingsViewProps {
       shell then owns Back, so the stages write no history of their own. */
   registerBackHandler?: (handler: (() => boolean) | null) => void;
   initialMobileStage?: MobileStage;
-  /** Shown above the page list on the mobile root stage, hidden while searching. */
-  mobileNavHeader?: React.ReactNode;
 }
 
 const pageOrder: SettingsPageSlug[] = [
@@ -201,7 +199,7 @@ function getCurrentHistoryState(): SettingsHistoryState {
 }
 
 
-export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile, isWindowed, visiblePageSlugs, initialMobileStage = 'nav', registerBackHandler, mobileNavHeader }) => {
+export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile, isWindowed, visiblePageSlugs, initialMobileStage = 'nav', registerBackHandler }) => {
   const { t } = useI18n();
   const deviceInfo = useDeviceInfo();
   const isMobile = forceMobile ?? deviceInfo.isMobile;
@@ -899,9 +897,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
         {/* Scrollable nav items */}
         <ScrollableOverlay outerClassName="flex-1 min-h-0" disableHorizontal>
           <div className="flex flex-col gap-0.5 px-4 pt-4 pb-2">
-            {mobileNavHeader && isMobile && mobileStage === 'nav' && !hasSearchQuery ? (
-              <div className="pb-4">{mobileNavHeader}</div>
-            ) : null}
             {hasSearchQuery ? (
               settingsSearchResults.length > 0 ? (() => {
                 let resultIndex = 0;

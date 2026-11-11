@@ -8,7 +8,7 @@ export type HeartbeatPing = { beat: number; latencyMs: number | null };
 // Rows above the baseline, one entry per beat. The spike's height follows the latency.
 const WAVEFORM: ReadonlyArray<number | 'spike'> = [1, 0, -1, 'spike', -2, 0, 1, 1, 0];
 
-/** Log scale: 20 ms reads as a small blip, 400 ms and up reaches the top row. */
+/** Log scale: up to ~38 ms is a small blip, ~214 ms and up reaches the top row. */
 const spikeHeight = (latencyMs: number): number =>
   Math.min(BASELINE_ROW, Math.max(3, Math.round(Math.log2(Math.max(latencyMs, 1) / 5) * 1.2)));
 
