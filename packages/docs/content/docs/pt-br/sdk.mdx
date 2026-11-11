@@ -343,6 +343,8 @@ Quando o seu plugin do OpenCode ou servidor MCP adiciona uma ferramenta, o chat 
 
 `match` é o nome da ferramenta como o OpenCode o reporta; um `*` no final casa com um prefixo. `icon` é um nome do Remixicon ou um arquivo `.svg` no seu pacote, como `panel.icon`. `title` e `subtitle` são templates sobre `input`, `output` e `metadata` da chamada. `output` escolhe como o corpo é renderizado: `text`, `json` (uma árvore), `markdown`, `code` com um `language`, `table` com `columns` (as linhas vêm do array de saída ou de `output.items`) ou `auto` para o padrão. Um `match` exato vence um curinga, e em caso de empate vence a primeira extensão instalada. Nenhuma permissão é necessária: isso só muda como dados que já estão no chat são desenhados.
 
+Com o Code Mode do OpenCode ativado, o agente chama as ferramentas a partir de um script curto em vez de uma por uma. Um script que faz uma única chamada aparece como a linha dessa ferramenta, e `output` é o que o script retornou. Escreva `match` com `_` onde o script tem um ponto: `tools.github.list_issues` em um script é `github_list_issues`. Um script que faz várias chamadas mantém a própria linha.
+
 Uma extensão que só estiliza ferramentas não precisa de página nenhuma: deixe `panel.entry` de fora e ela não terá ícone na barra lateral, só um card em Configurações → Extensões. Sem página ela pode declarar `tools` e `providerLogos`, e nada mais. A outra exceção é uma seção do Work Status, um editor de arquivos ou uma página em tela cheia com `entry` próprio, veja acima.
 
 ## O logo do seu provedor

@@ -343,6 +343,8 @@ Quand votre plugin OpenCode ou serveur MCP ajoute un outil, le chat affiche ses 
 
 `match` est le nom de l'outil tel qu'OpenCode le rapporte ; un `*` final correspond à un préfixe. `icon` est un nom Remixicon ou un fichier `.svg` dans votre paquet, comme `panel.icon`. `title` et `subtitle` sont des gabarits sur `input`, `output` et `metadata` de l'appel. `output` choisit comment le corps est rendu : `text`, `json` (un arbre), `markdown`, `code` avec un `language`, `table` avec `columns` (les lignes viennent du tableau de sortie ou de `output.items`) ou `auto` pour le rendu par défaut. Un `match` exact l'emporte sur un joker, et en cas d'égalité la première extension installée gagne. Aucune permission n'est nécessaire : cela ne change que la façon dont des données déjà dans le chat sont dessinées.
 
+Quand le Code Mode d'OpenCode est activé, l'agent appelle les outils depuis un court script au lieu de les appeler un par un. Un script qui fait un seul appel s'affiche comme la ligne de cet outil, et `output` est ce que le script a renvoyé. Écrivez `match` avec `_` là où le script a un point : `tools.github.list_issues` dans un script devient `github_list_issues`. Un script qui fait plusieurs appels garde sa propre ligne.
+
 Une extension qui ne fait que styliser des outils n'a besoin d'aucune page : omettez `panel.entry` et elle n'aura pas d'icône dans la barre latérale, juste une carte dans Paramètres → Extensions. Sans page, elle peut déclarer `tools` et `providerLogos`, et rien d'autre. L'autre exception est une section Work Status, un éditeur de fichiers ou une page plein écran avec son propre `entry`, voir plus haut.
 
 ## Le logo de votre fournisseur

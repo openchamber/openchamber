@@ -343,6 +343,8 @@ Gdy Twoja wtyczka OpenCode lub serwer MCP dodaje narzędzie, czat pokazuje jego 
 
 `match` to nazwa narzędzia w takiej postaci, w jakiej zgłasza ją OpenCode; `*` na końcu dopasowuje prefiks. `icon` to nazwa ikony Remixicon albo plik `.svg` w Twoim pakiecie, tak jak `panel.icon`. `title` i `subtitle` to szablony nad `input`, `output` i `metadata` wywołania. `output` wybiera sposób renderowania treści: `text`, `json` (drzewo), `markdown`, `code` z `language`, `table` z `columns` (wiersze pochodzą z tablicy wyniku lub z `output.items`) albo `auto` dla domyślnego. Dokładny `match` wygrywa z symbolem wieloznacznym, a przy remisie wygrywa pierwsze zainstalowane rozszerzenie. Żadna zgoda nie jest potrzebna: to zmienia tylko sposób rysowania danych, które już są w czacie.
 
+Gdy Code Mode w OpenCode jest włączony, agent wywołuje narzędzia z krótkiego skryptu zamiast pojedynczo. Skrypt z jednym wywołaniem jest pokazywany jako wiersz tego narzędzia, a `output` to wynik zwrócony przez skrypt. W `match` wpisz `_` tam, gdzie w skrypcie jest kropka: `tools.github.list_issues` w skrypcie to `github_list_issues`. Skrypt z kilkoma wywołaniami zachowuje własny wiersz.
+
 Rozszerzenie, które tylko stylizuje narzędzia, nie potrzebuje żadnej strony: pomiń `panel.entry`, a nie będzie miało ikony na pasku bocznym, tylko kartę w Ustawienia → Rozszerzenia. Bez strony może deklarować `tools` i `providerLogos`, i nic więcej. Drugi wyjątek to sekcja Work Status, edytor plików lub strona na pełnym ekranie z własnym `entry`, patrz wyżej.
 
 ## Logo Twojego dostawcy

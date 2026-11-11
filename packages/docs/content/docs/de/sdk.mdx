@@ -343,6 +343,8 @@ Wenn dein OpenCode-Plugin oder MCP-Server ein Tool hinzufügt, zeigt der Chat de
 
 `match` ist der Tool-Name, wie OpenCode ihn meldet; ein `*` am Ende passt auf ein Präfix. `icon` ist ein Remixicon-Name oder eine `.svg`-Datei in deinem Paket, wie bei `panel.icon`. `title` und `subtitle` sind Vorlagen über `input`, `output` und `metadata` des Aufrufs. `output` bestimmt, wie der Inhalt dargestellt wird: `text`, `json` (als Baum), `markdown`, `code` mit einer `language`, `table` mit `columns` (die Zeilen kommen aus dem Ausgabe-Array oder aus `output.items`) oder `auto` für die Standarddarstellung. Ein exaktes `match` schlägt einen Platzhalter, und bei Gleichstand gewinnt die zuerst installierte Erweiterung. Eine Berechtigung ist nicht nötig: das ändert nur, wie Daten gezeichnet werden, die ohnehin schon im Chat sind.
 
+Ist der Code Mode von OpenCode aktiv, ruft der Agent Tools aus einem kurzen Skript auf statt einzeln. Ein Skript mit einem einzigen Aufruf erscheint als Zeile dieses Tools, und `output` ist das, was das Skript zurückgegeben hat. Schreibe in `match` ein `_`, wo im Skript ein Punkt steht: `tools.github.list_issues` im Skript ist `github_list_issues`. Ein Skript mit mehreren Aufrufen behält seine eigene Zeile.
+
 Eine Erweiterung, die nur Tools gestaltet, braucht gar keine Seite: lass `panel.entry` weg, dann hat sie kein Icon in der Leiste, nur eine Karte unter Einstellungen → Erweiterungen. Ohne Seite darf sie `tools` und `providerLogos` und sonst nichts deklarieren. Die andere Ausnahme ist ein Work-Status-Abschnitt, ein Datei-Editor oder eine Vollbildseite mit eigenem `entry`, siehe oben.
 
 ## Das Logo deines Anbieters

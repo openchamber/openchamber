@@ -18,12 +18,14 @@ A page-less extension that makes structured tool results readable in the convers
 }
 ```
 
-3. Reload OpenCode, then ask your agent: `Call the example findings tool with scope "Authentication", then the example checks tool with project "My project".`
+3. Reload OpenCode, then ask your agent: `Call the example findings tool with scope "Authentication".` When it answers, ask: `Call the example checks tool with project "My project".`
 4. Expand the results in chat. Disable Tool Gallery in Settings → Extensions to compare the normal rendering.
 
 These are labeled sample results. The fixture does not read files, run project commands, or contact a network service. Starting an MCP server is separate from installing an extension.
 
 The manifest matches the tool names `example_findings` and `example_checks`. If your MCP configuration uses another server name, update those exact matches to the names OpenCode reports. Columns read keys from each entry in the result's `items` array. Titles read tool inputs; subtitles read the result's summary.
+
+With Code Mode on, the agent calls tools from a script. A script that makes one call shows as that tool's row, and the rule reads what the script returned. A script that makes several calls keeps the script row, which is why step 3 asks for one tool at a time.
 
 ## Make it yours
 

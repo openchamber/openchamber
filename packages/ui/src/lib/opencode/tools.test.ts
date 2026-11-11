@@ -16,6 +16,8 @@ import {
   normalizeToolName,
   openChamberToolCall,
   soleNamedCall,
+  soleDirectCall,
+  directToolName,
   executeNamespace,
   renderedPage,
   requestedSecret,
@@ -590,5 +592,49 @@ describe("soleNamedCall", () => {
       .toEqual({ tool: "opencode.session_rename", input: { title: "Voice models" }, status: "completed" })
     expect(soleNamedCall({ toolCalls: [{ tool: "opencode_worktree_create", status: "error", input: { name: "fix" } }] }))
       .toEqual({ tool: "opencode.worktree_create", input: { name: "fix" }, status: "error" })
+  })
+})
+
+describe("directToolName", () => {
+  // Pairs read off OpenCode 2.2.6: the name in `metadata.toolCalls` of a Code
+  // Mode script, and the name of the same tool's direct call. The MCP servers
+  // were named `example`, `dash-srv`, `under_srv`, `dot.srv` and `space srv`.
+  test("is the name a direct call of the same tool has", () => {
+    expect(directToolName("example.findings")).toBe("example_findings")
+    expect(directToolName("dash-srv.findings")).toBe("dash-srv_findings")
+    expect(directToolName("under_srv.findings")).toBe("under_srv_findings")
+    expect(directToolName("dot_srv.findings")).toBe("dot_srv_findings")
+    expect(directToolName("space_srv.findings")).toBe("space_srv_findings")
+  })
+
+  test("joins every level of a nested namespace and leaves a bare name alone", () => {
+    expect(directToolName("acme.billing.list_invoices")).toBe("acme_billing_list_invoices")
+    expect(directToolName("custom_tool")).toBe("custom_tool")
+  })
+})
+
+describe("soleDirectCall", () => {
+  test("is the one call of a script under its direct name, with the call's arguments and status", () => {
+    expect(soleDirectCall({ toolCalls: [{ tool: "example.findings", status: "completed", input: { scope: "Billing" } }] }))
+      .toEqual({ tool: "example_findings", input: { scope: "Billing" }, status: "completed" })
+    expect(soleDirectCall({ toolCalls: [{ tool: "fx.boom", status: "error", input: { scope: "Fail" } }] }))
+      .toEqual({ tool: "fx_boom", input: { scope: "Fail" }, status: "error" })
+    expect(soleDirectCall({ toolCalls: [{ tool: "custom_tool", status: "running" }] }))
+      .toEqual({ tool: "custom_tool", input: {}, status: "running" })
+  })
+
+  test("counts arguments that are not an object as none", () => {
+    expect(soleDirectCall({ toolCalls: [{ tool: "example.findings", status: "completed", input: ["Billing"] }] })?.input).toEqual({})
+    expect(soleDirectCall({ toolCalls: [{ tool: "example.findings", status: "completed", input: "Billing" }] })?.input).toEqual({})
+  })
+
+  test("is nothing for a script that made several calls or none", () => {
+    const call = { tool: "example.findings", status: "completed" }
+    expect(soleDirectCall({ toolCalls: [call, call] })).toBeUndefined()
+    expect(soleDirectCall({ toolCalls: [call, { tool: "example.checks", status: "completed" }] })).toBeUndefined()
+    expect(soleDirectCall({ toolCalls: [] })).toBeUndefined()
+    expect(soleDirectCall({ toolCalls: [{ status: "completed" }] })).toBeUndefined()
+    expect(soleDirectCall({})).toBeUndefined()
+    expect(soleDirectCall(undefined)).toBeUndefined()
   })
 })

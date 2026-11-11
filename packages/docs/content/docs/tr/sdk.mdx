@@ -343,6 +343,8 @@ OpenCode eklentiniz veya MCP sunucunuz bir araç eklediğinde sohbet, çağrıla
 
 `match`, OpenCode'un bildirdiği haliyle aracın adıdır; sondaki `*` bir öneki eşleştirir. `icon`, `panel.icon` gibi bir Remixicon adı ya da paketinizdeki bir `.svg` dosyasıdır. `title` ve `subtitle`, çağrının `input`, `output` ve `metadata` değerleri üzerinde çalışan şablonlardır. `output`, gövdenin nasıl çizileceğini seçer: `text`, `json` (ağaç), `markdown`, `language` ile `code`, `columns` ile `table` (satırlar çıktı dizisinden veya `output.items` içinden gelir) ya da varsayılan için `auto`. Tam bir `match` joker karakteri yener; eşitlikte ilk yüklenen eklenti kazanır. İzin gerekmez: bu yalnızca sohbette zaten bulunan verilerin nasıl çizildiğini değiştirir.
 
+OpenCode'un Code Mode özelliği açıkken ajan, araçları tek tek değil kısa bir betikten çağırır. Tek bir çağrı yapan betik o aracın satırı olarak gösterilir ve `output`, betiğin döndürdüğü değerdir. `match` içinde, betikte nokta olan yere `_` yazın: betikteki `tools.github.list_issues`, `github_list_issues` olur. Birden fazla çağrı yapan betik kendi satırını korur.
+
 Yalnızca araçları biçimlendiren bir eklentinin sayfaya hiç ihtiyacı yoktur: `panel.entry` öğesini atlayın, şeritte simgesi olmaz, sadece Ayarlar → Uzantılar içinde bir kart görünür. Sayfası olmadan yalnızca `tools` ve `providerLogos` tanımlayabilir, başka bir şey tanımlamaz. Diğer istisna, kendi `entry` sayfası olan bir Work Status bölümü, dosya düzenleyicisi veya tam ekran sayfadır, yukarıya bakın.
 
 ## Sağlayıcınızın logosu

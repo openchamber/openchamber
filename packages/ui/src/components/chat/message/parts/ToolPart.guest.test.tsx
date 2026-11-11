@@ -79,7 +79,8 @@ const part: ToolPartData = {
   },
 };
 
-test('a declared tool rule sets the header, icon, and table body of a matching tool part', async () => {
+/** One mounted `ToolPart` in a fresh happy-dom window; `dispose` restores the globals. */
+const mountToolPart = () => {
   const happyWindow = new Window({ url: 'http://localhost' });
   const globals = {
     window: happyWindow,
@@ -113,23 +114,40 @@ test('a declared tool rule sets the header, icon, and table body of a matching t
     baseUrl: 'http://localhost',
     fetch: async () => new Response('[]', { headers: { 'Content-Type': 'application/json' } }),
   });
-  const render = async () => {
+  const render = async (shown: ToolPartData) => {
     await act(async () => {
       root.render(
         <SyncProvider sdk={sdk} directory="">
           <I18nProvider>
             <ThemeSystemContext.Provider value={themeContext}>
-              <ToolPart part={part} isExpanded isMobile={false} onToggle={() => {}} />
+              <ToolPart part={shown} isExpanded isMobile={false} onToggle={() => {}} />
             </ThemeSystemContext.Provider>
           </I18nProvider>
         </SyncProvider>,
       );
     });
   };
+  const dispose = async () => {
+    await act(async () => { root.unmount(); });
+    await happyWindow.happyDOM.abort();
+    for (const [name, descriptor] of previous) {
+      if (descriptor) Object.defineProperty(globalThis, name, descriptor);
+      else Reflect.deleteProperty(globalThis, name);
+    }
+  };
+  return { container, render, dispose };
+};
+
+const tableRows = (container: HTMLElement) => Array.from(container.querySelectorAll('tbody tr')).map((row) => (
+  Array.from(row.querySelectorAll('td')).map((cell) => cell.textContent)
+));
+
+test('a declared tool rule sets the header, icon, and table body of a matching tool part', async () => {
+  const { container, render, dispose } = mountToolPart();
 
   try {
     useGuestsStore.setState({ status: 'ready', guests: [], runtimeKey: 'test' });
-    await render();
+    await render(part);
     // Without a rule the built-in path runs: generic wrench, formatted tool name, JSON views.
     expect(container.querySelector('table')).toBeNull();
     expect(container.querySelector('use[href="#oc-checkbox-circle"]')).toBeNull();
@@ -143,10 +161,7 @@ test('a declared tool rule sets the header, icon, and table body of a matching t
     expect(container.querySelector('use[href="#oc-checkbox-circle"]')).not.toBeNull();
     const headers = Array.from(container.querySelectorAll('th')).map((cell) => cell.textContent);
     expect(headers).toEqual(['id', 'title', 'assignee.name']);
-    const rows = Array.from(container.querySelectorAll('tbody tr')).map((row) => (
-      Array.from(row.querySelectorAll('td')).map((cell) => cell.textContent)
-    ));
-    expect(rows).toEqual([
+    expect(tableRows(container)).toEqual([
       ['DEMO-1', 'Write docs', 'Ada'],
       ['DEMO-2', 'Ship it', ''],
     ]);
@@ -158,11 +173,90 @@ test('a declared tool rule sets the header, icon, and table body of a matching t
     expect(container.querySelector('table')).toBeNull();
     expect(container.textContent).not.toContain('Tasks for DEMO');
   } finally {
-    await act(async () => { root.unmount(); });
-    await happyWindow.happyDOM.abort();
-    for (const [name, descriptor] of previous) {
-      if (descriptor) Object.defineProperty(globalThis, name, descriptor);
-      else Reflect.deleteProperty(globalThis, name);
-    }
+    await dispose();
+  }
+});
+
+// Code Mode hands every MCP call over as one `execute` part; the rule is
+// written for the name a direct call has (`tasks_list`), the script calls
+// `tasks.list`.
+const directRuleGuest: InstalledGuest = {
+  ...tasksGuest,
+  tools: [{ ...tasksGuest.tools![0], match: 'tasks_list' }],
+};
+
+const tasksOutput = { total: 2, items: [
+  { id: 'DEMO-1', title: 'Write docs', assignee: { name: 'Ada' } },
+  { id: 'DEMO-2', title: 'Ship it' },
+] };
+
+type ScriptCall = { tool: string; status: string; input?: { [key: string]: string } };
+
+const script = (calls: ScriptCall[], output: string, status: 'completed' | 'running' = 'completed'): ToolPartData => ({
+  id: 'prt_script', sessionID: 'ses_tasks', messageID: 'msg_tasks',
+  type: 'tool', tool: 'execute', callID: 'call_script',
+  state: status === 'running'
+    ? { status, input: { code: 'return await tools.tasks.list({ project: "DEMO" })' }, metadata: { toolCalls: calls }, time: { start: 1 } }
+    : { status, input: { code: 'return await tools.tasks.list({ project: "DEMO" })' }, output, metadata: { toolCalls: calls }, time: { start: 1, end: 2 } },
+});
+
+const listCall: ScriptCall = { tool: 'tasks.list', status: 'completed', input: { project: 'DEMO' } };
+
+test('a Code Mode script that made one call shows as the row of that tool\'s rule', async () => {
+  const { container, render, dispose } = mountToolPart();
+  const ruleShows = () => container.textContent?.includes('Tasks for DEMO') === true;
+
+  try {
+    useGuestsStore.setState({ status: 'ready', guests: [], runtimeKey: 'test' });
+    // Without a rule the script row stays: the namespace as the title, the script and its call list.
+    await render(script([listCall], JSON.stringify(tasksOutput, null, 2)));
+    expect(ruleShows()).toBe(false);
+    expect(container.querySelector('table')).toBeNull();
+    expect(container.textContent).toContain('tools.tasks.list');
+
+    await act(async () => {
+      useGuestsStore.getState().replaceCatalog([directRuleGuest], 'test');
+    });
+    expect(ruleShows()).toBe(true);
+    expect(container.textContent).toContain('2 open');
+    expect(container.querySelector('use[href="#oc-checkbox-circle"]')).not.toBeNull();
+    expect(tableRows(container)).toEqual([
+      ['DEMO-1', 'Write docs', 'Ada'],
+      ['DEMO-2', 'Ship it', ''],
+    ]);
+
+    // A running call already carries its arguments, so the title is there before the result.
+    await render(script([{ ...listCall, status: 'running' }], '', 'running'));
+    expect(ruleShows()).toBe(true);
+
+    // The script returned something other than the tool's answer: the row keeps its title and shows what came back.
+    await render(script([listCall], '2'));
+    expect(ruleShows()).toBe(true);
+    expect(container.textContent).not.toContain('2 open');
+    expect(container.querySelector('table')).toBeNull();
+    await render(script([listCall], `${JSON.stringify(tasksOutput, null, 2)}\n\nLogs:\nfetched`));
+    expect(ruleShows()).toBe(true);
+    expect(container.querySelector('table')).toBeNull();
+    expect(container.textContent).toContain('fetched');
+
+    // Several calls, a call without a rule, and a failed call stay script rows.
+    await render(script([listCall, { ...listCall, input: { project: 'OTHER' } }], '[]'));
+    expect(ruleShows()).toBe(false);
+    await render(script([{ ...listCall, tool: 'tasks.remove' }], '{}'));
+    expect(ruleShows()).toBe(false);
+    await render(script([{ ...listCall, status: 'error' }], 'The backend is down.'));
+    expect(ruleShows()).toBe(false);
+    expect(container.textContent).toContain('tools.tasks.list');
+
+    // Pausing the extension gives the script row back.
+    await render(script([listCall], JSON.stringify(tasksOutput, null, 2)));
+    expect(ruleShows()).toBe(true);
+    await act(async () => {
+      useGuestsStore.getState().replaceCatalog([{ ...directRuleGuest, enabled: false }], 'test');
+    });
+    expect(ruleShows()).toBe(false);
+    expect(container.querySelector('table')).toBeNull();
+  } finally {
+    await dispose();
   }
 });
