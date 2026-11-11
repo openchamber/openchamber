@@ -61,6 +61,7 @@ import { captureRuntimeInstance, getRuntimeKey } from "@/lib/runtime-switch"
 import { isRelayModeActive } from "@/lib/relay/runtime-tunnel"
 import { getErrorStatus, isAmbiguousSendFailure } from "./send-failure-classification"
 import { isFormRequestNotFoundError } from "./form-request-error"
+import { ConnectionLostError } from "./connection-lost-error"
 import { getStaleRunningToolMessageID } from "./materialization"
 import { promoteRestoredSessionOrdering } from "./session-ordering"
 import { normalizePath } from "@/lib/pathNormalization"
@@ -433,14 +434,9 @@ function dir() {
   return _getDirectory() || undefined
 }
 
-function connectionLostError(): Error {
+function connectionLostError(): ConnectionLostError {
   const { hasEverConnected, lastDisconnectReason } = useConfigStore.getState()
-  const suffix = lastDisconnectReason
-    ? ` (${lastDisconnectReason})`
-    : hasEverConnected
-      ? ""
-      : " (never connected)"
-  return new Error(`Connection lost${suffix}. Please wait for reconnection.`)
+  return new ConnectionLostError({ reason: lastDisconnectReason || null, everConnected: hasEverConnected })
 }
 
 // Wait briefly for the pipeline to re-establish connection before failing a
