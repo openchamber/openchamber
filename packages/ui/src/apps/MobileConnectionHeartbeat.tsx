@@ -36,7 +36,7 @@ const useAppActive = (): boolean => {
         .then(async ({ App }) => {
           const handles = await Promise.all([
             App.addListener('appStateChange', ({ isActive }) => setActive(isActive === true)),
-            // appStateChange can be missed after a long iOS suspend; resume still fires (see useNativeResume).
+            // appStateChange can be missed after a long iOS suspend; resume still fires (see useNativeMobileLifecycle).
             App.addListener('resume', () => setActive(true)),
           ]);
           if (disposed) {
