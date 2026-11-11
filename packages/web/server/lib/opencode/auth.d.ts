@@ -1,8 +1,8 @@
 import type { CredentialCreateInput, CredentialEntry, IntegrationInfo, JsonValue, UsageLimitsInfo } from '@opencode/client';
 
 export type LegacyAuthEntry =
-  | { type: 'api'; key: string; metadata?: { [key: string]: JsonValue } }
-  | { type: 'oauth'; access: string; refresh: string; expires: number; accountId?: string; enterpriseUrl?: string; server?: string; orgID?: string };
+  | { type: 'api'; key: string; label?: string; metadata?: { [key: string]: JsonValue } }
+  | { type: 'oauth'; access: string; refresh: string; expires: number; label?: string; accountId?: string; enterpriseUrl?: string; server?: string; orgID?: string };
 export type LegacyAuthFile = Record<string, LegacyAuthEntry>;
 
 /** Where credentials come from: the running OpenCode in production, a fixture in tests. */

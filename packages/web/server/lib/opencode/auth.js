@@ -20,7 +20,9 @@
  * The answer keeps the legacy `auth.json` entry shape the consumers were
  * written against: `{ type: 'api', key }` / `{ type: 'oauth', access, refresh,
  * expires, accountId?, enterpriseUrl? }`, keyed by integration id, which for
- * providers is the provider id.
+ * providers is the provider id. Each entry also carries the credential's
+ * display `label` when OpenCode has one: usage results name the account with
+ * it (`accountLabel`), so the same switch is visible in the panel.
  *
  * One write exists, `renewStoredLogin`: an isolated space's gatekeeper holds
  * the host's short OpenAI token, and the host keeps it fresh itself, because
@@ -116,11 +118,19 @@ const projectCredentialValue = (value) => {
   return entry;
 };
 
-/** Each integration's selected credential; OpenCode marks exactly one `active` per integration. */
+/** The credential's display label (the name Providers shows), or null when OpenCode names it nothing. */
+const credentialLabel = (entry) => z.string().trim().min(1).safeParse(entry?.label).data ?? null;
+
+/** Each integration's selected credential; OpenCode marks exactly one `active` per integration.
+ *  The row's `label` rides along: quota providers name the account with it (`accountLabel`). */
 export const projectCredentialEntries = (entries) => {
   const result = {};
   for (const entry of entries) {
-    if (entry.active) result[entry.integrationID] = projectCredentialValue(entry.value);
+    if (entry.active) {
+      const label = credentialLabel(entry);
+      const projected = label ? { label } : {};
+      result[entry.integrationID] = { ...projected, ...projectCredentialValue(entry.value) };
+    }
   }
   return result;
 };

@@ -192,7 +192,7 @@ describe('credential read through the lifecycle default directory', () => {
   it('still reads credentials when the cached default directory has gone stale', async () => {
     // While the directory is valid, its env-var provider is reported.
     await expect(readOpenCodeCredentials()).resolves.toEqual({
-      deepseek: { type: 'api', key: 'ds' },
+      deepseek: { label: 'default', type: 'api', key: 'ds' },
       'zai-coding-plan': { type: 'api', key: 'zk' },
     });
 

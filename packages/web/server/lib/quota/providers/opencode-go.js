@@ -252,23 +252,25 @@ const readKey = (entry) => asNonEmptyString(entry?.key) ?? asNonEmptyString(entr
  * API key on the shared `opencode` integration serves Go too: OpenCode loads
  * the Console workspace's providers with it and binds OpenCode Go to that
  * integration when the workspace has Go. Providers lists it under OpenCode Go
- * too.
+ * too. `label` is the credential's display label, so the result can name the
+ * account the key belongs to.
  */
 const getApiKey = (auth) => {
-  const own = readKey(normalizeAuthEntry(getAuthEntry(auth, aliases)));
-  if (own) return { key: own, consoleKey: false };
+  const own = normalizeAuthEntry(getAuthEntry(auth, aliases));
+  const ownKey = readKey(own);
+  if (ownKey) return { key: ownKey, consoleKey: false, label: asNonEmptyString(own.label) };
   const consoleEntry = normalizeAuthEntry(getAuthEntry(auth, [CONSOLE_INTEGRATION_ID]));
   if (!consoleEntry || consoleEntry.type === 'oauth') return null;
   const key = readKey(consoleEntry);
-  return key ? { key, consoleKey: true } : null;
+  return key ? { key, consoleKey: true, label: asNonEmptyString(consoleEntry.label) } : null;
 };
-
 /**
  * The active OpenCode Console OAuth credential, only when it is a Console
  * sign-in (`server` is the Console origin and an organization is selected).
  * OpenCode marks exactly one credential active per integration and credentials
  * are global, so this is the selected account and organization; reading it per
- * call follows a switch instead of caching the previous account.
+ * call follows a switch instead of caching the previous account. `label` names
+ * that account.
  */
 const getConsoleCredential = (auth) => {
   const entry = normalizeAuthEntry(getAuthEntry(auth, [CONSOLE_INTEGRATION_ID]));
@@ -277,7 +279,7 @@ const getConsoleCredential = (auth) => {
   const orgID = asNonEmptyString(entry.orgID);
   if (!access || entry.server !== CONSOLE_SERVER || !orgID || !ORGANIZATION_ID_PATTERN.test(orgID)) return null;
   const expires = toNumber(entry.expires);
-  return { access, orgID, expires };
+  return { access, orgID, expires, label: asNonEmptyString(entry.label) };
 };
 
 export const isConfigured = (auth) => Boolean(getConsoleCredential(auth) || getApiKey(auth));
@@ -312,7 +314,7 @@ const fetchGoQuota = async ({ readAuth = readOpenCodeCredentials, fetchImpl = fe
                 valueLabel: `$${formatMoney(balance)}`,
               }),
             };
-        return buildResult({ providerId, providerName, ok: true, configured: true, usage: { windows: usageWindows } });
+        return buildResult({ providerId, providerName, ok: true, configured: true, usage: { windows: usageWindows }, accountLabel: consoleCredential.label });
       } catch (consoleError) {
         if (!apiKey) throw consoleError;
         consoleFailure = consoleError;
@@ -325,7 +327,7 @@ const fetchGoQuota = async ({ readAuth = readOpenCodeCredentials, fetchImpl = fe
         // already connected, its own failure is the actionable error.
         throw consoleFailure && keyError.message === API_KEY_EXPIRED ? consoleFailure : keyError;
       });
-    return buildResult({ providerId, providerName, ok: true, configured: true, usage: { windows } });
+    return buildResult({ providerId, providerName, ok: true, configured: true, usage: { windows }, accountLabel: apiKey.label });
   } catch (error) {
     return buildResult({ providerId, providerName, ok: false, configured: true, error: error instanceof Error ? error.message : 'Request failed' });
   }

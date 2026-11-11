@@ -144,6 +144,28 @@ describe('OpenCode Go quota provider — legacy API key', () => {
     expect(result.usage.windows.monthly.usedPercent).toBeCloseTo(26.896);
   });
 
+  it('names the account the active key belongs to, and no label for an unnamed key', async () => {
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify(consolePayload())));
+
+    const named = await fetchQuota({ readAuth: async () => ({ 'opencode-go': { key: 'test-key', label: 'outlook' } }), fetchImpl });
+    expect(named.ok).toBe(true);
+    expect(named.accountLabel).toBe('outlook');
+
+    const unnamed = await fetchQuota({ readAuth: async () => ({ 'opencode-go': { key: 'test-key' } }), fetchImpl });
+    expect(unnamed.ok).toBe(true);
+    expect(unnamed.accountLabel).toBeUndefined();
+  });
+
+  it('names a key of the Console integration with its own label', async () => {
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify(consolePayload())));
+    const result = await fetchQuota({
+      readAuth: async () => ({ opencode: { type: 'api', key: 'console-key', label: 'solar tool' } }),
+      fetchImpl,
+    });
+    expect(result.ok).toBe(true);
+    expect(result.accountLabel).toBe('solar tool');
+  });
+
   it('falls back to the usage API when the Console status gives the key no Go meters', async () => {
     const usage = { usage: { rolling: { percent: 25, resetsAt: '2026-08-12T12:00:00.000Z' } } };
     const consoleAnswers = [
@@ -238,6 +260,38 @@ describe('OpenCode Go quota provider — Console OAuth', () => {
     });
     expect(result.ok).toBe(true);
     expect(result.usage.windows['5h'].usedPercent).toBe(25);
+  });
+
+  it('names the account the active sign-in belongs to, and no label for an unnamed sign-in', async () => {
+    const fetchImpl = async () => new Response(JSON.stringify(consolePayload()));
+
+    const named = await fetchQuota({ readAuth: async () => consoleAuth({ label: 'outlook' }), fetchImpl });
+    expect(named.ok).toBe(true);
+    expect(named.accountLabel).toBe('outlook');
+
+    const unnamed = await fetchQuota({ readAuth: async () => consoleAuth(), fetchImpl });
+    expect(unnamed.ok).toBe(true);
+    expect(unnamed.accountLabel).toBeUndefined();
+  });
+
+  // The meters carry the key's account once the key answers: the sign-in's
+  // label would name an account the numbers do not come from.
+  it("names the fallback key's account when the sign-in read fails and the key answers", async () => {
+    let consoleCalls = 0;
+    // Call 1 is the sign-in's own read; call 2 is the key's Console read.
+    const fetchImpl = vi.fn(async (url) => {
+      if (url === CONSOLE_STATUS_URL) {
+        consoleCalls += 1;
+        return consoleCalls === 1 ? new Response('{}', { status: 500 }) : new Response(JSON.stringify(consolePayload()));
+      }
+      return new Response(JSON.stringify(consolePayload()));
+    });
+    const result = await fetchQuota({
+      readAuth: async () => ({ ...consoleAuth(), 'opencode-go': { key: 'test-key', label: 'outlook' } }),
+      fetchImpl,
+    });
+    expect(result.ok).toBe(true);
+    expect(result.accountLabel).toBe('outlook');
   });
 
   it('skips only the unusable meters and keeps the rest', () => {
