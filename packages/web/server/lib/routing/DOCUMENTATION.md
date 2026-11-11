@@ -90,8 +90,10 @@ Auto. There is no env gate — the feature shipped dark behind
 - Routing failures keep the user's own behaviour: a Jev error, timeout, unknown
   category or low confidence routes to the fallback model, and the decision
   carries the reason.
-- A Jev call fails as a timeout after `JEV_TIMEOUT_MS` (4 s) whatever the
-  endpoint does next. At most one timed-out request per endpoint URL and model
+- A Jev call fails as a timeout whatever the endpoint does next: after
+  `JEV_TIMEOUT_MS` (4 s) where a send or a permission waits for it, and after
+  `JEV_BACKGROUND_TIMEOUT_MS` (15 s) in the checks after a turn (session work,
+  goals). At most one timed-out request per endpoint URL and model
   stays open in the process, across routing, session work and goals, and it is
   aborted at `JEV_LINGER_MS` (5 minutes) from its start. Its answer is never
   used.
@@ -174,6 +176,17 @@ field per endpoint is one more setting. The one-per-endpoint limit and the
 It applies to every source, which keeps `jev.js` free of a per-source switch.
 A hosted source loads nothing, so there it only lets one slow request finish
 after its turn has moved on.
+
+### Why the checks after a turn wait 15 s and not 4
+
+Nobody waits for the turn-end check or a goal's progress check, and their
+request is larger than a routing one. The reporter of #6743 measured a loaded
+`d3:9b` on a laptop at 2 to 3 s for a routing request and 5.7 to 6.6 s for the
+check after a turn, so with
+4 s the "looks done" hint and the review offer never came and the recap filter
+never ran. A hung endpoint now delays the recap's quiet window, and each goal
+continuation before the small model takes over, by 15 s instead of 4. Routing and the safety net keep 4 s, and get no retry: that wait
+sits in front of every send and every permission.
 
 ## Where a Jev request goes
 
