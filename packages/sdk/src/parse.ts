@@ -309,6 +309,7 @@ const sourceControlCapabilitiesSchema = z.object({
   issues: z.boolean().default(false),
   changeRequests: z.boolean().default(false),
   draftChangeRequests: z.boolean().default(false),
+  draftConversion: z.boolean().optional(),
   merge: z.union([
     z.literal(false),
     z.object({

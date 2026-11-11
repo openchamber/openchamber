@@ -19,6 +19,7 @@ import type {
   PullRequestStack,
   ProjectUpstream,
   ReadyChangeRequestInput,
+  DraftChangeRequestInput,
   CommentInput,
   DiscussionCloseReason,
   DiscussionCommentInput,
@@ -45,6 +46,7 @@ import type {
   SourceControlMergeMutationResult,
   SourceControlMutationReceipt,
   SourceControlReadyMutationResult,
+  SourceControlDraftMutationResult,
   SourceControlReviewMutationResult,
   SourceControlStateMutationResult,
   SourceControlBindingRead,
@@ -1970,6 +1972,7 @@ export interface SourceControlAPI {
   changeRequestUpdate(payload: UpdateChangeRequestInput): Promise<SourceControlMutationReceipt<SourceControlEmptyMutationResult>>;
   changeRequestMerge(payload: MergeChangeRequestInput): Promise<SourceControlMutationReceipt<SourceControlMergeMutationResult>>;
   changeRequestReady(payload: ReadyChangeRequestInput): Promise<SourceControlMutationReceipt<SourceControlReadyMutationResult>>;
+  changeRequestDraft(payload: DraftChangeRequestInput): Promise<SourceControlMutationReceipt<SourceControlDraftMutationResult>>;
   changeRequestComment(payload: CommentInput): Promise<SourceControlMutationReceipt<SourceControlEmptyMutationResult>>;
   /** Opens a thread on a change request: a comment that waits to be resolved (GitLab). */
   changeRequestStartThread(payload: CommentInput): Promise<SourceControlMutationReceipt<SourceControlEmptyMutationResult>>;

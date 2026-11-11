@@ -86,6 +86,7 @@ export const createVSCodeSourceControlAPI = (): SourceControlAPI => ({
   referenceLabels: unsupported,
   referenceReviewers: unsupported,
   changeRequestReady: unsupported,
+  changeRequestDraft: unsupported,
   changeRequestsList: unsupported,
   changeRequestContext: unsupported,
   issuesList: unsupported,

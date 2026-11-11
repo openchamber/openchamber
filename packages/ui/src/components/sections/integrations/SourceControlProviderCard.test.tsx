@@ -166,7 +166,7 @@ describe('SourceControlProviderCard', () => {
       return { disabled };
     },
     changeRequestStatus: unexpected, changeRequestCreate: unexpected, changeRequestUpdate: unexpected,
-    changeRequestMerge: unexpected, changeRequestReady: unexpected, changeRequestComment: unexpected,
+    changeRequestMerge: unexpected, changeRequestReady: unexpected, changeRequestDraft: unexpected, changeRequestComment: unexpected,
     changeRequestStartThread: unexpected, changeRequestReplyToThread: unexpected, changeRequestResolveThread: unexpected,
     changeRequestReviewState: unexpected, changeRequestReviewComment: unexpected, changeRequestReviewCommentUpdate: unexpected,
     changeRequestReviewCommentDelete: unexpected, changeRequestReviewDiscard: unexpected,

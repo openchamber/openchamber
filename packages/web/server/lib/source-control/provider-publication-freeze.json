@@ -304,6 +304,7 @@
       "issues": true,
       "changeRequests": true,
       "draftChangeRequests": true,
+      "draftConversion": true,
       "mergeChangeRequests": true,
       "mergeMethods": [
         "merge",
@@ -328,6 +329,7 @@
       "issues": true,
       "changeRequests": true,
       "draftChangeRequests": true,
+      "draftConversion": true,
       "mergeChangeRequests": true,
       "mergeMethods": [
         "merge",
@@ -351,6 +353,7 @@
       "issues": true,
       "changeRequests": true,
       "draftChangeRequests": true,
+      "draftConversion": true,
       "mergeChangeRequests": true,
       "mergeMethods": [
         "merge",
@@ -461,6 +464,7 @@
       "issues": false,
       "changeRequests": true,
       "draftChangeRequests": true,
+      "draftConversion": true,
       "mergeChangeRequests": true,
       "mergeMethods": [
         "submit"

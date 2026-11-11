@@ -425,6 +425,22 @@ describe('Gitea mutations', () => {
     });
   });
 
+  it('converts a pull request to a draft by adding the WIP prefix, and reconciles it from the title', async () => {
+    const draftPull = { ...fixtures.forkPull, title: 'WIP: Add feature' };
+    const { service, calls } = setup({
+      'GET /repos/alice/app/pulls/1': fixtures.forkPull,
+      'PATCH /repos/alice/app/pulls/1': draftPull,
+    });
+
+    await expect(service.draftChangeRequest({ providerTarget, expectedTarget: { number: 1, headSha: HEAD } }))
+      .resolves.toEqual({ draft: true });
+    expect(calls.find((call) => call.method === 'PATCH').body).toEqual({ title: 'WIP: Add feature' });
+
+    const drafted = setup({ 'GET /repos/alice/app/pulls/1': draftPull });
+    await expect(drafted.service.reconcileChangeRequestMutation(providerTarget, 'change-request-draft'))
+      .resolves.toMatchObject({ state: 'succeeded', result: { draft: true } });
+  });
+
   it('reconciles a ready mutation from the title prefix', async () => {
     const { service } = setup({ 'GET /repos/alice/app/pulls/1': { ...fixtures.forkPull, title: 'WIP: Add feature' } });
     await expect(service.reconcileChangeRequestMutation(providerTarget, 'change-request-ready'))

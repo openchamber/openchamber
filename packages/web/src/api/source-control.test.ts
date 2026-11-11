@@ -4,6 +4,7 @@ import type {
   CreateChangeRequestInput,
   MergeChangeRequestInput,
   ReadyChangeRequestInput,
+  DraftChangeRequestInput,
   SourceControlCreateMutationTarget,
   SourceControlExistingMutationTarget,
   SourceControlIdentity,
@@ -40,6 +41,7 @@ interface MutationTestResult {
   merged?: boolean | string;
   message?: string;
   ready?: boolean;
+  draft?: boolean | string;
   commented?: boolean | string;
   state?: string;
   unexpected?: boolean;
@@ -939,7 +941,8 @@ describe('createWebSourceControlAPI', () => {
       .mockResolvedValueOnce(Response.json(mutationReceipt()))
       .mockResolvedValueOnce(Response.json(mutationReceipt()))
       .mockResolvedValueOnce(Response.json(mutationReceipt({ merged: true, message: 'Merged' })))
-      .mockResolvedValueOnce(Response.json(mutationReceipt({ ready: true })));
+      .mockResolvedValueOnce(Response.json(mutationReceipt({ ready: true })))
+      .mockResolvedValueOnce(Response.json(mutationReceipt({ draft: true })));
     const api = createWebSourceControlAPI({ fetch: runtimeFetchMock });
     const createContext = createMutationContext;
 
@@ -955,6 +958,7 @@ describe('createWebSourceControlAPI', () => {
     await expect(api.changeRequestMerge({ ...mutationContext, method: 'squash' }))
       .resolves.toEqual(mutationReceipt({ merged: true, message: 'Merged' }));
     await expect(api.changeRequestReady(mutationContext)).resolves.toEqual(mutationReceipt({ ready: true }));
+    await expect(api.changeRequestDraft(mutationContext)).resolves.toEqual(mutationReceipt({ draft: true }));
 
     const authority = {
       provider: 'github', instance: 'github.com', directory: '/workspace/a b', repositoryId: 'repo_one',
@@ -973,6 +977,9 @@ describe('createWebSourceControlAPI', () => {
       body: JSON.stringify({ ...authority, method: 'squash' }),
     }));
     expect(runtimeFetchMock).toHaveBeenNthCalledWith(4, '/api/source-control/github/pr/ready', expect.objectContaining({
+      body: JSON.stringify(authority),
+    }));
+    expect(runtimeFetchMock).toHaveBeenNthCalledWith(5, '/api/source-control/github/pr/draft', expect.objectContaining({
       body: JSON.stringify(authority),
     }));
   });
@@ -1104,6 +1111,7 @@ describe('createWebSourceControlAPI', () => {
     ['update number', 'changeRequestUpdate', 'number'],
     ['merge number', 'changeRequestMerge', 'number'],
     ['ready number', 'changeRequestReady', 'number'],
+    ['draft number', 'changeRequestDraft', 'number'],
   ])('rejects a mutation missing its required %s target field', async (_label, method, field) => {
     const api = createWebSourceControlAPI({ fetch: runtimeFetchMock });
     let operation: Promise<unknown>;
@@ -1123,6 +1131,10 @@ describe('createWebSourceControlAPI', () => {
       const payload: MergeChangeRequestInput = { ...mutationContext, target: { ...mutationContext.target }, method: 'merge' };
       Object.defineProperty(payload.target, field, { value: undefined, enumerable: true });
       operation = api.changeRequestMerge(payload);
+    } else if (method === 'changeRequestDraft') {
+      const payload: DraftChangeRequestInput = { ...mutationContext, target: { ...mutationContext.target } };
+      Object.defineProperty(payload.target, field, { value: undefined, enumerable: true });
+      operation = api.changeRequestDraft(payload);
     } else {
       const payload: ReadyChangeRequestInput = { ...mutationContext, target: { ...mutationContext.target } };
       Object.defineProperty(payload.target, field, { value: undefined, enumerable: true });
@@ -1199,6 +1211,7 @@ describe('createWebSourceControlAPI', () => {
     ['an invalid operation result', mutationReceipt({ merged: 'yes' })],
     ['a non-empty create result', mutationReceipt({ unexpected: true })],
     ['an invalid ready result', mutationReceipt({ ready: false, unexpected: true })],
+    ['an invalid draft result', mutationReceipt({ draft: 'yes' })],
     ['an extra receipt field', { ...mutationReceipt(), providerPayload: { private: true } }],
   ])('rejects %s returned with HTTP success', async (_label, payload) => {
     runtimeFetchMock.mockResolvedValueOnce(Response.json(payload));
@@ -1207,6 +1220,8 @@ describe('createWebSourceControlAPI', () => {
       ? api.changeRequestMerge({ ...mutationContext, method: 'merge' })
       : _label === 'an invalid ready result'
         ? api.changeRequestReady(mutationContext)
+        : _label === 'an invalid draft result'
+          ? api.changeRequestDraft(mutationContext)
         : _label === 'a mismatched expected target'
           ? api.changeRequestUpdate({ ...mutationContext, title: 'Update' })
       : api.changeRequestCreate({ ...createMutationContext, title: 'Create' });
@@ -1370,6 +1385,7 @@ describe('GitHub Enterprise (GHE) auth flows', () => {
       issues: true,
       changeRequests: true,
       draftChangeRequests: true,
+      draftConversion: true,
       mergeChangeRequests: true,
       mergeMethods: ['merge', 'squash'],
       ci: true,
@@ -1377,6 +1393,7 @@ describe('GitHub Enterprise (GHE) auth flows', () => {
 
     const result = await createWebSourceControlAPI({ fetch: runtimeFetchMock }).capabilities(gheIdentity);
     expect(result.identity).toEqual({ provider: 'github', instance: 'ghe.example.com' });
+    expect(result.draftConversion).toBe(true);
     expect(result.authenticationMethods.pat).toEqual({ available: true });
     expect(runtimeFetchMock).toHaveBeenCalledWith('/api/source-control/github/capabilities', {
       query: new URLSearchParams({ instance: 'ghe.example.com' }),

@@ -34,6 +34,7 @@ import {
   isQuotaProviderMethod,
   readQuotaProviderRequest,
 } from './service-providers.ts';
+import type { SourceControlMutationResult, SourceControlReconcileData } from './service-providers.ts';
 
 describe('browser provider contract', () => {
   test('reads the body the host posts and refuses anything else', () => {
@@ -202,6 +203,14 @@ describe('source-control provider contract', () => {
     expect(schemas.data['mutation.perform'].safeParse({ number: 4, url: 'https://x' }).success).toBe(false);
     expect(schemas.data['mutation.reconcile'].safeParse({ state: 'succeeded', result: { number: 4 } }).success).toBe(true);
     expect(schemas.data['mutation.reconcile'].safeParse({ state: 'running' }).success).toBe(false);
+
+    const converted: SourceControlMutationResult = { number: 4, draft: true };
+    const reconciled: SourceControlReconcileData = { state: 'succeeded', result: { number: 4, draft: false } };
+    expect(schemas.data['mutation.perform'].parse(converted)).toEqual(converted);
+    expect(schemas.data['mutation.reconcile'].parse(reconciled)).toEqual(reconciled);
+    expect(schemas.mutationResult.safeParse({ number: 4, draft: true }).success).toBe(true);
+    expect(schemas.data['mutation.perform'].safeParse({ number: 4, draft: 'yes' }).success).toBe(false);
+    expect(schemas.data['mutation.reconcile'].safeParse({ state: 'succeeded', result: { number: 4, draft: 1 } }).success).toBe(false);
 
     expect(schemas.data.liveSummaries.safeParse({
       summaries: [{ owner: 'mona', repo: 'tea', number: 3, state: 'open', draft: false, title: 'T', mergeable: null, mergeableState: null, checks: null }],
