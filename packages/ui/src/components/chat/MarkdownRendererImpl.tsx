@@ -154,7 +154,7 @@ const components: Components = {
   video: ExportSafeVideo,
   p: MarkdownBodyParagraph,
   strong: ({ node: _node, ...props }) => <strong {...props} />,
-  li: ({ node: _node, ...props }) => <li {...props} dir="auto" />,
+  li: ({ node: _node, ...props }) => <li dir="auto" {...props} />,
   blockquote: MarkdownBlockquote,
   summary: ({ node: _node, children, ...props }) => (
     <summary {...props}>

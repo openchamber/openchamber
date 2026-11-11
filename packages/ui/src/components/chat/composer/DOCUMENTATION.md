@@ -563,9 +563,12 @@ found in the text.
 
 ## The editor
 
-`editor/bidi.ts` gives each rendered logical line native `dir="auto"` and
-enables CodeMirror's `perLineTextDirection`, so browser layout and cursor
-movement use the same direction. The content root stays LTR; automatic
+`editor/bidi.ts` gives each rendered logical line the direction most of its
+words run (`proseTextDirection` in `lib/i18n/textDirection.ts`, the count chat
+prose uses), so a Latin-first Arabic line runs right to left beside an English
+one; a line without letters gets `dir="auto"`. It enables CodeMirror's
+`perLineTextDirection`, so browser layout and cursor movement use the same
+direction. The content root stays LTR; automatic
 direction there would depend on which lines virtualization has mounted.
 Only visible lines get decorations, rebuilt on document or viewport changes.
 

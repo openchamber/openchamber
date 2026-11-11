@@ -130,17 +130,43 @@ height would cut a row in half.
 
 ### Bidirectional prose
 
-Shared chat CSS applies `unicode-bidi: plaintext` to prose blocks, including
-nested paragraphs, headings and table cells. Plain user text uses the same
-behavior across newlines. The message root does not select one direction for
-all its children. Code widgets, diagrams, math and technical references remain
-LTR isolates, including their controls.
+Every paragraph, heading, list item and quote takes the direction most of its
+own words run, so Arabic prose that opens with "React" or another Latin term
+reads right to left. `markdown/rehypeTextDirection.ts` sets that `dir` after
+sanitation, counting with `proseTextDirection` from `lib/i18n/textDirection.ts`;
+inline code, code blocks and URLs do not count, and a nested list or quote
+counts apart from its parent. Siblings resolve on their own, so an English item
+and a Latin-first Arabic item sit in one list each in its own direction. A list
+whose items all run one way takes that direction too, which puts its gutter and
+markers on their side; a mixed list keeps the direction around it. A block
+without letters keeps `dir="auto"` and `unicode-bidi: plaintext`, and table
+cells and summaries keep plaintext. The message root does not select one
+direction for all its children. Code widgets, diagrams, math and technical
+references remain LTR isolates, including their controls.
 
-The Streamdown component map and shared CSS own direction without a DOM
-annotation pass. Each list item owns its logical gutter, allowing adjacent
-Arabic and English items. Inline code and code widgets remain LTR isolates.
-Direction changes must preserve source and copy text. Disclosures use native
-`details` and `summary` with a React-owned chevron that follows the open state.
+Plain-text user messages resolve each line on its own: the container keeps
+`unicode-bidi: plaintext`, and `plainTextLineDirection.tsx` opens each line with
+an empty mark whose CSS-generated LRM or RLM gives the line its majority
+direction. Chips do not count. Direction changes must preserve source and copy
+text. Disclosures use native `details` and `summary` with a React-owned chevron
+that follows the open state.
+
+### Why word majority and not the first letter
+
+`dir="auto"` and `unicode-bidi: plaintext` go by the first strong letter, which
+misreads Arabic that opens with a product name. Counting words per block keeps
+the first-letter rule's independence of siblings and lines while reading the
+block's language. The count is the one `dominantTextDirection` uses for
+assembled UI text, a tie going right to left, so chat and interface agree. A
+direction for a whole list or message was rejected: it flips English items and
+lines in mixed-language content.
+
+### Why plain-text lines get a CSS mark and not a dir per line
+
+A `dir` needs one element per line, and block wrappers change how a selection
+copies across lines. A mark drawn through `::before` steers the browser's own
+per-line plaintext resolution without adding characters to the text, the copy
+or the DOM text nodes.
 
 ### Turn footer copy and image
 
