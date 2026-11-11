@@ -748,6 +748,17 @@ OPENCHAMBER_TEST_CHROME=/path/to/chrome node --test scripts/perf/chat-quote-popo
 
 It skips without Chrome and fails on an explicit invalid Chrome path, the same as the JSON tree test.
 
+## Rendered page layout regression
+
+`html-render-page-fit.browser.test.mjs` builds the real rendered-page document through `buildHtmlRenderDocument` in an isolated Vite fixture that has its own optimizer cache, and compares the document root's `scrollWidth` with its `clientWidth` inside frames 420, 720 and 960 px wide. A page whose pictures carry a `1px` border at `width: 100%`, and one with a bare embedded frame, must not scroll sideways; a page with a 1200 px block still must, because a page wider than its frame keeps its scrollbar (#4949). Like the two tests above, it stays on loopback and stops what it started.
+
+```bash
+node --test scripts/perf/html-render-page-fit.browser.test.mjs
+OPENCHAMBER_TEST_CHROME=/path/to/chrome node --test scripts/perf/html-render-page-fit.browser.test.mjs
+```
+
+It skips without Chrome and fails on an explicit invalid Chrome path, the same as the JSON tree test.
+
 ## profile:heap
 
 Reads the JS heap, DOM nodes and listeners three times, each after two forced
