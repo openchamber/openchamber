@@ -1364,7 +1364,7 @@ export const createOpenChamberControlService = (dependencies) => {
         const sessionID = asNonEmptyString(options.contextSessionId);
         if (!sessionID) throw new OpenChamberControlError(`${action} must be called from a session`, 400);
         try {
-          if (action === 'pr.unwatch') return await prWatch.unwatch(sessionID);
+          if (action === 'pr.unwatch') return await prWatch.unwatch(sessionID, input.url);
           const directory = (await resolveSessionDirectory(sessionID)) || asNonEmptyString(contextDirectory);
           return await prWatch.watch({ sessionID, directory, url: input.url });
         } catch (error) {
