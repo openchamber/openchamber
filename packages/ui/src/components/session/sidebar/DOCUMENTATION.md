@@ -576,7 +576,9 @@ the same Mark all as read.
   back only where an open project ends before the next one, in the middle of
   that 12px gap, from the headers' content edge (maintainer, 2026-11-01): long
   open projects ran together without it, and a run of collapsed ones keeps no
-  line.
+  line. Web, desktop and the grouped mobile list keep that line; VS Code's
+  narrow list omits it and separates open projects by the 12px gap and the
+  header alone (maintainer, #6534).
 - Rows of zones that mix projects (Pinned, In work, the list by time) are
   `'mixed-compact'`: one line with no project icon (the room goes to the
   title; the whole-row tooltip names the project, branch and model), the PR
@@ -899,6 +901,10 @@ do not submit. Escape clears text first, then closes the sidebar search when
 already empty. Session rows receive one stable reset action rather than transient
 search-open or draft state. Closing a retained mobile search discards unsubmitted
 text.
+
+VS Code's always-visible field (`compact`) has no Enter/Esc hint row: the match
+count sits on the field's own line, so applying or clearing a search keeps the
+header at one height and the list does not move.
 
 The desktop sidebar field and its query go together: whatever hides the field
 (the search button, Escape, a click outside the sidebar, opening a session)

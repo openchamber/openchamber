@@ -161,3 +161,45 @@ test('Escape clears the draft first, then closes; external resets replace unsent
     expect(view.input.value).toBe('');
   } finally { await view.cleanup(); }
 });
+
+async function renderVariant(props: Partial<React.ComponentProps<typeof SessionSearchInput>>) {
+  const host = document.createElement('div');
+  document.body.append(host);
+  const root = createRoot(host);
+  await act(async () => root.render(<I18nProvider>
+    <SessionSearchInput value="" onSearch={() => undefined} placeholder="Search sessions" clearLabel="Clear search" {...props} />
+  </I18nProvider>));
+  const input = host.querySelector('input');
+  if (!input) throw new Error('Input fixture missing');
+  const describedBy = input.getAttribute('aria-describedby');
+  const description = describedBy ? browser.document.getElementById(describedBy) : null;
+  return { host, input, describedBy, description, cleanup: async () => { await act(async () => root.unmount()); host.remove(); } };
+}
+
+test('every description the field names is rendered', async () => {
+  const cases: Array<[string, Partial<React.ComponentProps<typeof SessionSearchInput>>, string | null]> = [
+    ['default hints', {}, 'Enter'],
+    ['mobile', { mobile: true }, null],
+    ['mobile with a match count', { mobile: true, leadingHint: '3 matches' }, null],
+    ['compact without a query', { compact: true }, null],
+    ['compact with a match count', { compact: true, leadingHint: '3 matches' }, '3 matches'],
+  ];
+  for (const [name, props, text] of cases) {
+    const view = await renderVariant(props);
+    try {
+      // A named description resolves to a rendered element carrying the expected text.
+      expect({ name, describedBy: view.describedBy !== null, resolves: view.description !== null })
+        .toEqual({ name, describedBy: text !== null, resolves: text !== null });
+      if (text !== null) expect(view.description?.textContent).toContain(text);
+    } finally { await view.cleanup(); }
+  }
+});
+
+test('a compact field shows no shortcut hints and keeps the match count on its own line', async () => {
+  const view = await renderVariant({ compact: true, leadingHint: '3 matches', trailingHint: 'Esc to clear' });
+  try {
+    expect(view.host.textContent).not.toContain('Enter');
+    expect(view.host.textContent).not.toContain('Esc to clear');
+    expect(view.description?.parentElement).toBe(view.input.parentElement?.parentElement ?? null);
+  } finally { await view.cleanup(); }
+});

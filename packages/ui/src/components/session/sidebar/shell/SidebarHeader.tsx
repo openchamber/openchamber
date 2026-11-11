@@ -296,7 +296,7 @@ export function SidebarHeader(props: Props): React.ReactNode {
     // controls stay hidden, but session search is still useful. Show a compact,
     // always-visible search input at the top of the sessions list.
     return (
-      <div className="select-none flex-shrink-0 px-2.5 py-1.5">
+      <div className="select-none flex-shrink-0 px-2 py-1">
         <SessionSearchInput
           inputRef={sessionSearchInputRef}
           value={sessionSearchQuery}
@@ -304,12 +304,15 @@ export function SidebarHeader(props: Props): React.ReactNode {
           onClose={closeSessionSearch}
           placeholder={t('sessions.sidebar.header.search.placeholder')}
           clearLabel={t('sessions.sidebar.header.search.clear')}
+          // A narrow list has no room for the Enter/Esc row; the field's own
+          // clear button carries the feedback. The match count sits beside the
+          // field, so applying or clearing a search never moves the list.
           leadingHint={hasSessionSearchQuery
             ? (searchMatchCount === 1
               ? t('sessions.sidebar.header.search.matchCountSingle', { count: searchMatchCount })
               : t('sessions.sidebar.header.search.matchCountPlural', { count: searchMatchCount }))
             : undefined}
-          trailingHint={t('sessions.sidebar.header.search.escapeHint')}
+          compact
         />
       </div>
     );

@@ -19,13 +19,19 @@ type SessionSearchInputProps = {
   leadingHint?: React.ReactNode;
   /** Right-aligned hint on the same row as the Enter hint. */
   trailingHint?: React.ReactNode;
+  /**
+   * A narrow list: no hint row and no Enter/Esc hints. A leadingHint (the
+   * match count) sits on the field's own line, so the header keeps one height
+   * whether a search is applied or not.
+   */
+  compact?: boolean;
 };
 
 // Draft text stays here: typing must not invalidate the session tree or run its
 // search projection. Parents receive only submitted queries and explicit clears.
 export function SessionSearchInput({
   value, onSearch, placeholder, clearLabel, inputRef, onClose, active = true, mobile = false,
-  leadingHint, trailingHint,
+  leadingHint, trailingHint, compact = false,
 }: SessionSearchInputProps) {
   const { t } = useI18n();
   const [draft, setDraft] = React.useState(value);
@@ -33,6 +39,13 @@ export function SessionSearchInput({
   const ownRef = React.useRef<HTMLInputElement | null>(null);
   const ref = inputRef ?? ownRef;
   const hintId = React.useId();
+  // The phone keyboard's own search key explains itself, so mobile has no hints.
+  // A compact field keeps the match count, which is feedback about the search
+  // rather than a hint, beside it instead of on a row of its own.
+  const showHintRow = !mobile && !compact;
+  const inlineHint = !mobile && compact && leadingHint != null ? leadingHint : null;
+  // Only an element that is rendered may describe the field.
+  const describedBy = showHintRow || inlineHint != null ? hintId : undefined;
 
   React.useLayoutEffect(() => {
     setDraft(value);
@@ -46,14 +59,14 @@ export function SessionSearchInput({
   };
 
   return (
-    <div>
-      <div className={cn('relative', mobile && 'border-b border-edge-muted py-1')}>
+    <div className={inlineHint != null ? 'flex items-center gap-2' : undefined}>
+      <div className={cn('relative', mobile && 'border-b border-edge-muted py-1', inlineHint != null && 'min-w-0 flex-1')}>
         <Icon name="search" className={cn('pointer-events-none absolute top-1/2 -translate-y-1/2 text-muted-foreground', mobile ? 'inset-s-2.5 size-3.5' : 'inset-s-2 size-4')} />
         <Input
           ref={ref}
           value={draft}
           aria-label={placeholder}
-          aria-describedby={mobile ? undefined : hintId}
+          aria-describedby={describedBy}
           enterKeyHint="search"
           placeholder={placeholder}
           className={mobile ? cn(PICKER_SEARCH_INPUT_CLASS, 'pe-8') : 'h-8 w-full rounded-md border border-border bg-transparent ps-8 pe-8 typography-ui-label text-foreground'}
@@ -95,13 +108,15 @@ export function SessionSearchInput({
           </Button>
         ) : null}
       </div>
-      {/* The phone keyboard's own search key explains itself; the hint row is desktop-only. */}
-      {mobile ? null : (
+      {inlineHint != null ? (
+        <p id={hintId} className="shrink-0 typography-micro text-muted-foreground">{inlineHint}</p>
+      ) : null}
+      {showHintRow ? (
         <div className="mt-1 flex items-center justify-between gap-2 typography-micro text-muted-foreground">
           <p id={hintId} className="min-w-0 truncate">{leadingHint ?? t('sessions.search.submitHint')}</p>
           {trailingHint ? <span className="shrink-0">{trailingHint}</span> : null}
         </div>
-      )}
+      ) : null}
     </div>
   );
 }
