@@ -36,7 +36,9 @@ The Foundation-only factory lets the native regression test receive large snapsh
 
 ### Why native sockets and not browser WebSockets
 
-Browser WebSockets cannot attach proxy headers. OkHttp on Android and URLSessionWebSocketTask on iOS can send them without adding a local proxy server or changing feature callers. OkHttp 5.3.2 supports the app's Android compile SDK 35; newer 5.5 releases require SDK 37.
+Browser WebSockets cannot attach proxy headers. OkHttp on Android and URLSessionWebSocketTask on iOS can send them without adding a local proxy server or changing feature callers. OkHttp 5.5 requires compile SDK 37, which needs Android Gradle plugin 9.5 or later; the app compiles against 37 and still targets 35.
+
+The Android build leaves the Kotlin standard library to Gradle's resolution. A forced version applies to every configuration: a pin to 1.9 pulled OkHttp and AndroidX below the 2.x stdlib they are compiled against, and crashed AGP 9's lint.
 
 ### Why SSE stays in fetch and not a native stream plugin
 
