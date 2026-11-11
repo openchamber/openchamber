@@ -1948,6 +1948,7 @@ export const settingsDict = {
   'settings.mcp.page.actions.clearAuth': '認証をクリア',
   'settings.mcp.page.actions.test': 'テスト',
   'settings.mcp.page.actions.testConnection': '接続をテスト',
+  'settings.mcp.page.actions.signIn': 'サインイン',
   'settings.mcp.page.actions.signInAgain': '再度サインイン',
   'settings.mcp.page.actions.working': '処理中...',
   'settings.mcp.page.actions.starting': '起動中...',

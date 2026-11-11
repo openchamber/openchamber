@@ -43,12 +43,15 @@ afterAll(async () => {
   browser.close();
 });
 
-/** Renders the page for a failed `docs` server and returns the button labels on it. */
-const renderFailedServer = async (withOAuth: boolean): Promise<string[]> => {
+type ServerStatus = { status: 'failed'; error: string } | { status: 'needs_auth'; error: string };
+const failed: ServerStatus = { status: 'failed', error: 'Token refresh was rejected (access_denied)' };
+
+/** Renders the page for a `docs` server and returns the button labels on it. */
+const renderServer = async (withOAuth: boolean, status: ServerStatus = failed): Promise<string[]> => {
   // Leaving the page clears the selection, so the previous page goes first.
   await act(async () => root?.unmount());
   integrations = withOAuth ? [oauthIntegration] : [];
-  const statuses = { docs: { name: 'docs', status: { status: 'failed' as const, error: 'Token refresh was rejected (access_denied)' } } };
+  const statuses = { docs: { name: 'docs', status } };
   useMcpStore.setState({ refresh: async () => {}, getStatusForDirectory: () => statuses });
   useMcpConfigStore.setState({
     selectedMcpName: 'docs',
@@ -65,15 +68,21 @@ const renderFailedServer = async (withOAuth: boolean): Promise<string[]> => {
 };
 
 test('a failed server with a browser sign-in offers Sign in again in place of Connect', async () => {
-  const buttons = await renderFailedServer(true);
+  const buttons = await renderServer(true);
   expect(buttons).toContain('Sign in again');
   expect(buttons).not.toContain('Connect');
   expect(buttons).toContain('Test connection');
 });
 
 test('a failed server without a browser sign-in keeps Connect', async () => {
-  const buttons = await renderFailedServer(false);
+  const buttons = await renderServer(false);
   expect(buttons).toContain('Connect');
   expect(buttons).not.toContain('Sign in again');
   expect(buttons).toContain('Test connection');
+});
+
+test('a server waiting for sign-in tells its retry Connect apart from its Sign in', async () => {
+  const buttons = await renderServer(true, { status: 'needs_auth', error: 'Authorization required' });
+  expect(buttons.filter((label) => label === 'Connect')).toHaveLength(1);
+  expect(buttons).toContain('Sign in');
 });

@@ -690,10 +690,45 @@ Rows that name something the app can already show are buttons:
 | Subagent | that child session's chat tab, read-only |
 | Goal (row) | the composer's own `SessionGoalDialog` |
 | Goal (pause/resume) | `setSessionGoalStatus(sessionId, directory, status)` |
-| MCP switch | turns the server on or off in its config file (`useMcpStore.setEnabled`) |
-| MCP status | the state doubles as the button that reconnects |
+| MCP switch | turns the server on or off in its config file (`useMcpStore.setEnabled`); switching on a `needs_auth` server signs in instead |
+| MCP status | the state doubles as the button: "Sign in" starts the server's OAuth sign-in under the row, "Failed" reconnects |
 | Pinned (pin icon) | unpins the message |
 | Pinned (text) | jumps the transcript to that message |
+
+### Why the MCP sign-in runs under its row
+
+A `needs_auth` server cannot be connected into working order: `connect`
+repeats the attempt that produced `needs_auth`. The row's Sign in, and its
+switch turned on, mount the sign-in Settings uses (`McpOAuthSignIn` with
+`autoStart` and no start button) under that row, in the section's directory.
+Pointing at Settings instead was the alternative; it sent the user through
+four screens for one button. The attempt's progress stays visible because the
+browser tab can be blocked (it opens after an await), and a `code` attempt
+needs a field to paste into.
+
+The press is held as a request with its server, directory and a run number.
+The request is live only while the section is unfolded and shows the
+request's directory. Until its attempt starts, and once it fails, the server
+must also still report `needs_auth`; a started attempt (`onActiveChange`)
+keeps the request live whatever the status says until it completes or fails.
+A sign-in from another machine writes the server's redirect first
+(`packages/web/server/lib/opencode/mcp-oauth.js`) and OpenCode reports the
+server `pending` while it reconnects; dropping the request then unmounted the
+sign-in and cancelled the attempt the user was in. A request that stops being
+live is dropped for good, and nothing starts again without a press. That
+covers folding (which unmounts the sign-in and cancels an unfinished
+attempt), a project switch, and a server that leaves `needs_auth` after the
+attempt ended, so a later `needs_auth` never starts a sign-in on its own.
+OpenCode's own reconnect once the credential is stored can move the server
+out of `needs_auth` before the attempt reports back; the attempt still
+finishes and reconnects its directory. One sign-in runs
+at a time: a new press remounts it with a new run, which cancels the previous
+attempt upstream, and an attempt that finishes late cannot end a newer one.
+Unmounting the panel mid-attempt cancels the attempt, as leaving Settings
+does; a sign-in already finished in the browser keeps its credential. When
+the integration lookup gives up (its retries run out, or the server has no
+OAuth method), the request is dropped and a toast points at Settings → MCP,
+so a press never ends in silence.
 
 ### Project actions
 

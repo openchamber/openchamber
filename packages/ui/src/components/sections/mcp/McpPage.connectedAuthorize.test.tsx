@@ -201,9 +201,9 @@ test('a sign-in started on needs_auth survives the server reconnecting as pendin
   const cancel = spyOn(sdk.integration.oauth, 'cancel').mockImplementation(async () => {});
   try {
     const start = [...document.body.querySelectorAll('button')].find(
-      (button) => button.textContent?.trim() === 'Connect' && button.closest('.space-y-3'),
+      (button) => button.textContent?.trim() === 'Sign in' && button.closest('.space-y-3'),
     );
-    if (!start) throw new Error('sign-in Connect button missing');
+    if (!start) throw new Error('sign-in button missing');
     await act(async () => { start.click(); });
     // Starting from another machine writes the redirect, and OpenCode reconnects the server.
     const pending = { gmail: { name: 'gmail', status: { status: 'pending' as const } } };
