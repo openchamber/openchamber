@@ -8,12 +8,13 @@ import { SortableTabsStrip } from '@/components/ui/sortable-tabs-strip';
 import { DatePicker, TimePill } from '@/components/ui/date-time';
 import { Input as FieldInput } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
-import { useThemeSystem } from '@/contexts/useThemeSystem';
+import { useOptionalThemeSystem } from '@/contexts/useThemeSystem';
 import { useCalendarPreferences } from '@/components/ui/useCalendarPreferences';
 import { useI18n } from '@/lib/i18n';
 import { KIT_SHARED_CSS, kitVariables, seriesColor } from '../lib/visualKit';
 import { cn } from '@/lib/utils';
 import { MarkdownContent } from '../MarkdownRenderer';
+import { MarkdownPresentationContext } from '../markdown/MarkdownPresentationContext';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { axisTicks } from './axisTicks';
 import { ExtensionBlockFrame } from './ExtensionBlockFrame';
@@ -151,9 +152,20 @@ function useBlockProps<S extends z.ZodType>(schema: S, props: BlockValue): z.inf
   return last.current;
 }
 
+function Markdown({ source, className }: { source?: string; className?: string }) {
+  const presentation = React.useContext(MarkdownPresentationContext);
+  if (presentation?.purpose === 'image') {
+    return source ? <MarkdownContent content={source} purpose="image" theme={presentation.theme}
+      preparedHighlights={presentation.preparedHighlights} onExportCode={presentation.onExportCode}
+      className={cn('oc-ui-block-text', className)}
+    /> : null;
+  }
+  return <ScreenMarkdown source={source} className={className} />;
+}
+
 // A block draws in a reply and on a page an agent showed, so it reads the
 // directory itself instead of the reply's Markdown context.
-function Markdown({ source, className }: { source?: string; className?: string }) {
+function ScreenMarkdown({ source, className }: { source?: string; className?: string }) {
   const directory = useEffectiveDirectory() ?? '';
   if (!source) return null;
   return <MarkdownContent content={source} mode="static" settled directory={directory} className={cn('oc-ui-block-text', className)} />;
@@ -1475,7 +1487,8 @@ function Node({ value }: { value: BlockValue }) {
  */
 function NotDrawn({ source, errors, partial = false }: { source: string; errors: string[]; partial?: boolean }) {
   const { t } = useI18n();
-  const [open, setOpen] = React.useState(false);
+  const image = React.useContext(MarkdownPresentationContext)?.purpose === 'image';
+  const [open, setOpen] = React.useState(image);
   const panelId = React.useId();
   // An agent's block outlives the extension that drew it; the parser's wording is for the agent.
   const shown = errors.map((error) => (/Unknown component "[A-Z]/.test(error) ? t('chat.uiBlocks.extensionBlock.unavailable') : error));
@@ -1485,6 +1498,7 @@ function NotDrawn({ source, errors, partial = false }: { source: string; errors:
       {[...new Set(shown)].map((error) => <div key={error} className="text-muted-foreground">{error}</div>)}
       <button
         type="button"
+        data-export-ignore
         aria-expanded={open}
         aria-controls={panelId}
         onClick={() => setOpen((current) => !current)}
@@ -1545,11 +1559,15 @@ export function UiBlock({ source, complete, host = noHost, onNotDrawn, actions }
   onNotDrawn?: (errors: string[]) => void;
 }) {
   const { t } = useI18n();
-  const { currentTheme } = useThemeSystem();
+  const themeSystem = useOptionalThemeSystem();
+  const presentation = React.useContext(MarkdownPresentationContext);
+  const currentTheme = themeSystem?.currentTheme ?? presentation?.theme;
+  if (!currentTheme) throw new Error('useThemeSystem must be used within a ThemeSystemProvider');
   // A broken page goes back to the agent, which draws it again, so only a
   // reply, which has no such second try, draws what it can.
   const salvage = host.kind === 'reply';
-  const extensionBlocks = useExtensionBlocks();
+  const availableExtensions = useExtensionBlocks();
+  const extensionBlocks = presentation?.purpose === 'image' ? NO_EXTENSION_BLOCKS : availableExtensions;
   const parsed = React.useMemo(() => parseUiBlock(source, complete, salvage, extensionBlocks), [source, complete, salvage, extensionBlocks]);
   // The kit's variables (series colours, tones) land on the block's root before paint, and follow a theme switch.
   const blockRef = React.useRef<HTMLDivElement>(null);

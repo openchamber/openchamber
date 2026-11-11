@@ -23,3 +23,19 @@ A rotated phone's viewport and `screen.width` both report the long side, so a wi
 ### Why the short-side rule reads only `(pointer: coarse)` and not the wider touch check
 
 `hover: none` and touch points also match touch laptops driven by a mouse. On those the short side would keep the mobile shell at full width, so they stay on the viewport width rule.
+
+# On-demand imports
+
+## Ownership
+
+`chunkLoadRecovery.ts` owns import retries and recovery navigation; callers own their fallback.
+
+## Invariants
+
+Imports retry once by default. Browser failures can reload; VS Code never navigates. `reloadOnFailure: false` preserves retries and errors while leaving navigation to the caller.
+
+## Decisions
+
+### Why detached work can opt out of recovery navigation
+
+Image capture still needs the page after its source fallback succeeds, so detached loading preserves the page. Screen recovery stays unchanged.

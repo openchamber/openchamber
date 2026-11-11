@@ -1,4 +1,5 @@
 import React from 'react';
+import type { HighlightResult } from 'streamdown';
 import type { Theme } from '@/types/theme';
 import type { ToolPopupContent } from '../message/types';
 import type { MarkdownCodePlugin } from './streamdownCode';
@@ -38,6 +39,7 @@ export interface MarkdownPresentation {
   mermaidControls: MermaidControls;
   onShowPopup?: (content: ToolPopupContent) => void;
   onExportCode?: (source: string, language: string) => void;
+  preparedHighlights?: ReadonlyMap<string, ReadonlyMap<string, HighlightResult>>;
   confirmFile: (source: string, inputKind?: FileReferenceSource) => Promise<string | null>;
   code: MarkdownCodePlugin;
 }

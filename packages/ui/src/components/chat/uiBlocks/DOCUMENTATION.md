@@ -6,7 +6,7 @@ An assistant reply can carry fenced `openui-lang` blocks. This module owns the c
 
 ## Invariants
 
-- Only an assistant reply on screen draws blocks: `MarkdownRenderer` sets `uiBlocks` for the `assistant` variant, and a subagent call's expanded row draws the subagent's reply the same way (`ToolPart`). Copies and image exports keep the source. User messages, reasoning, other tool output and documents show the fence as code.
+- Assistant replies and their image exports draw blocks: `MarkdownRenderer` sets `uiBlocks` for the `assistant` variant, and a subagent call's expanded row draws the subagent's reply the same way (`ToolPart`). Copies keep the source. User messages, reasoning, other tool output and documents show the fence as code.
 - The catalog in `catalog.ts` is the one source for the parser, validation and the agent's signatures of the built-in components. An extension's component never takes a catalog name or one an earlier extension holds. After changing it, run `bun run --cwd packages/ui ui-blocks:generate`; `guidance.test.ts` fails while the server copy is stale.
 - A finished block that has any parser error, an undefined or unused name, state, a query or a mutation, or no `Stack` root draws nothing but its source and a short note. One exception: a reply's block with no fields, Buttons or expressions that is not cut short draws its sound parts and says what it lost, under the block. A block never shows with parts silently dropped.
 - While a block streams, a node keeps drawing its last props that parsed against its schema; a node that never parsed draws nothing.
@@ -18,6 +18,12 @@ An assistant reply can carry fenced `openui-lang` blocks. This module owns the c
 - `@openuidev/lang-core` is a dependency of this private package only, bundled at build time. It never goes into `packages/web`'s dependencies.
 
 ## Decisions
+
+### Why image exports draw an inert block
+
+Detached exports use `UiBlock` because they have no session provider. Nested Markdown inherits the image purpose, theme and highlighting. Both renderers load before capture; animations stop so bars retain their full size.
+
+Extension frames have no offscreen snapshot, so exports keep their source and diagnostic beside sound built-in parts. A failed chunk also keeps source. Export loading retries without navigation because a reload would cancel capture ([on-demand imports](../../../lib/DOCUMENTATION.md#on-demand-imports)).
 
 ### Why an extension's component is a frame in the block
 
