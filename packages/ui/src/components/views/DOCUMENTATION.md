@@ -583,9 +583,11 @@ away when it is shown. VS Code has neither tabs nor the setting and keeps the
 exited terminal.
 
 In the desktop app Cmd/Ctrl+W closes the shown terminal tab the same way,
-without asking, so a command still running in it ends. It reaches the terminal
-through `lib/closeTabTarget.ts` when the terminal's zone was the place clicked
-or focused last among the surfaces with a tab to close.
+without asking, so a command still running in it ends. The key goes through
+`lib/closeTabTarget.ts`: Settings or a full page covering the chat closes
+first, whatever was clicked last; otherwise the registered tab target whose
+zone was clicked or focused last closes, so the terminal gets the key when its
+zone was. With no target registered the window closes.
 
 ## A terminal that cannot connect
 
