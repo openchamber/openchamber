@@ -324,4 +324,13 @@ describe('settings search', () => {
     });
     expect(results.some((result) => result.id === 'integrations.guests')).toBe(false);
   });
+
+  test('offers the archived command palette results row only where the palette exists', () => {
+    const found = (context: typeof runtimeCtx) => buildSettingsSearchResults({ query: 'command palette', runtimeCtx: context, t, getPageTitle: (page) => page })
+      .some((result) => result.id === 'general.command-palette-show-archived-sessions');
+    expect(found(runtimeCtx)).toBe(true);
+    expect(found({ ...runtimeCtx, isDesktop: true })).toBe(true);
+    expect(found({ ...runtimeCtx, isVSCode: true })).toBe(false);
+    expect(found({ ...runtimeCtx, isMobile: true })).toBe(false);
+  });
 });

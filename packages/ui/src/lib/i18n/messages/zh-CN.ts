@@ -38,6 +38,7 @@ import { snippetsI18n } from './snippets.i18n';
 import { sidebarWorkI18n } from './sidebar-work.i18n';
 import { sidebarSectionsI18n } from './sidebar-sections.i18n';
 import { worktreeArchiveI18n } from './worktree-archive.i18n';
+import { omniSearchI18n } from './omni-search.i18n';
 import { overviewI18n } from './overview.i18n';
 import { isolatedSpacesI18n } from './isolated-spaces.i18n';
 import { sourceBoardI18n } from './source-board.i18n';
@@ -219,6 +220,7 @@ export const dict: Record<I18nKey, string> = {
   ...sidebarWorkI18n['zh-CN'],
   ...sidebarSectionsI18n['zh-CN'],
   ...worktreeArchiveI18n['zh-CN'],
+  ...omniSearchI18n['zh-CN'],
   ...overviewI18n['zh-CN'],
   ...isolatedSpacesI18n['zh-CN'],
   ...sourceBoardI18n['zh-CN'],
@@ -2948,21 +2950,7 @@ export const dict: Record<I18nKey, string> = {
   'commandPalette.group.messages': '消息',
   'commandPalette.messages.showAll': '显示所有消息结果',
   'commandPalette.messages.placeholder': '搜索消息…',
-  'commandPalette.messages.back': '返回',
-  'commandPalette.messages.filter.scopeLabel': '范围',
-  'commandPalette.messages.filter.allProjects': '所有项目',
-  'commandPalette.messages.filter.thisProject': '此项目',
-  'commandPalette.messages.filter.authorLabel': '作者',
-  'commandPalette.messages.filter.anyone': '任何人',
-  'commandPalette.messages.filter.you': '你',
-  'commandPalette.messages.filter.agent': '智能体',
-  'commandPalette.messages.filter.reasoning': '思考',
   'commandPalette.messages.inReasoning': '思考',
-  'commandPalette.messages.tooShort': '至少输入 3 个字符来搜索消息',
-  'commandPalette.messages.searching': '正在搜索消息…',
-  'commandPalette.messages.error': '无法搜索消息',
-  'commandPalette.messages.unavailable': '此服务器不支持消息搜索',
-  'commandPalette.messages.empty': '未找到消息',
   'commandPalette.messages.indexing': '仍在为较早的对话建立索引：{done} / {total}。',
   'commandPalette.messages.loadMore': '加载更多',
   'commandPalette.messages.byYou': '你的消息',

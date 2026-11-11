@@ -62,6 +62,12 @@ import {
 } from './sidebar/sessionWorktreeMenu';
 import { publishSessionWorktreeMenuLoader } from './sidebar/sessionWorktreeMenuLoader';
 import { resolveProjectRef } from '@/lib/worktreeSessionCreator';
+import { SearchScopeMenu } from '@/components/search/SearchScopeMenu';
+import { SearchFilterChips } from '@/components/search/SearchFilterChips';
+import { searchFilterChipKeys } from '@/components/search/searchFilterChipKeys';
+import { parseOmniQuery } from '@/lib/search/omniQuery';
+import { useOmniSearchState } from '@/lib/search/omniSearchState';
+import { isSidebarSearchActive, sidebarSearchScopeOptions } from './sidebar/sidebarConversationSearch';
 
 const PROJECT_ACTIVE_SESSION_STORAGE_KEY = 'oc.sessions.activeSessionByProject';
 const activeSessionByProjectSchema = z.record(z.string(), z.string().min(1).catch(''));
@@ -99,18 +105,8 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
   streamPerfCount(`ui.session_sidebar.render.${isVisible ? 'visible' : 'hidden'}`);
   const { t } = useI18n();
   const [isSessionSearchOpen, setIsSessionSearchOpen] = React.useState(false);
-  const [sessionSearchQuery, setSessionSearchQuery] = React.useState('');
-  const openSessionSearch = React.useCallback(() => setIsSessionSearchOpen(true), []);
-  // The field and its query go together: once the field is hidden, a query
-  // still filtering the list would have no place to be cleared from.
-  const clearPhoneSearch = phone?.clearSearch;
-  const resetSessionSearch = React.useCallback(() => {
-    setSessionSearchQuery('');
-    setIsSessionSearchOpen(false);
-    clearPhoneSearch?.();
-  }, [clearPhoneSearch]);
   // Reported by the session list below: the header cannot see what matched.
-  const [searchMatchCount, setSearchMatchCount] = React.useState(0);
+  const [searchMatchCount, setSearchMatchCount] = React.useState<number | null>(0);
   const sessionSearchContainerRef = React.useRef<HTMLDivElement | null>(null);
   const sessionSearchInputRef = React.useRef<HTMLInputElement | null>(null);
   const [editingProjectDialogId, setEditingProjectDialogId] = React.useState<string | null>(null);
@@ -153,17 +149,45 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
   const updateProjectMeta = useProjectsStore((state) => state.updateProjectMeta);
   const reorderProjects = useProjectsStore((state) => state.reorderProjects);
 
+  const omniSearchProjects = React.useMemo(() => projects.flatMap((project) => {
+    const value = normalizePath(project.path);
+    return value ? [{ value, label: project.label || value.split('/').pop() || value }] : [];
+  }), [projects]);
+  const {
+    text: sessionSearchText,
+    filters: sessionSearchFilters,
+    query: sessionSearchQuery,
+    setText: setSessionSearchText,
+    setFilter: setOmniSearchFilter,
+    removeFilter: removeSessionSearchFilter,
+    clearAll: clearSessionSearchFilters,
+    clearText: clearSessionSearchText,
+  } = useOmniSearchState({
+    surface: 'sidebar',
+    defaults: { lifecycle: 'active', searchIn: 'everything', author: 'any' },
+    projects: omniSearchProjects,
+  });
+  const openSessionSearch = React.useCallback(() => setIsSessionSearchOpen(true), []);
+  // The field and its query go together: once the field is hidden, its filters
+  // cannot keep affecting the list.
+  const clearPhoneSearch = phone?.clearSearch;
+  const resetSessionSearch = React.useCallback(() => {
+    clearSessionSearchText();
+    setIsSessionSearchOpen(false);
+    clearPhoneSearch?.();
+  }, [clearPhoneSearch, clearSessionSearchText]);
+
   const setSettingsDialogOpen = useUIStore((state) => state.setSettingsDialogOpen);
   const setSessionSwitcherOpen = useUIStore((state) => state.setSessionSwitcherOpen);
   const setWorktreesPageProjectId = useUIStore((state) => state.setWorktreesPageProjectId);
 
-  const searchQuery = phone ? phone.searchQuery : sessionSearchQuery;
-  const normalizedSessionSearchQuery = React.useMemo(
-    () => searchQuery.trim().toLowerCase(),
-    [searchQuery],
-  );
+  const searchQuery = phone ? phone.searchQuery : (hideDirectoryControls || isSessionSearchOpen) ? sessionSearchQuery : '';
+  const omniQuery = React.useMemo(() => parseOmniQuery(searchQuery), [searchQuery]);
+  const sidebarLifecycle = omniQuery.filters.lifecycle ?? 'active';
+  const sidebarSearchIn = omniQuery.filters.searchIn ?? 'everything';
+  const normalizedSessionSearchQuery = React.useMemo(() => omniQuery.text.trim().toLowerCase(), [omniQuery.text]);
 
-  const hasSessionSearchQuery = normalizedSessionSearchQuery.length > 0;
+  const hasSessionSearchQuery = isSidebarSearchActive(omniQuery);
 
 
   useSessionSearchEffects({
@@ -509,7 +533,7 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
     resolvedWorktreeTopologyKey,
     unresolvedWorktreeProjectPaths,
     isSessionSearchOpen,
-    sessionSearchQuery,
+    sessionSearchQuery: searchQuery,
     editingProjectDialogId,
     updateDialogOpen,
   };
@@ -726,6 +750,7 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
         isVisible,
         hasSessionSearchQuery,
         normalizedSessionSearchQuery,
+        omniSearch: { text: omniQuery.text, lifecycle: sidebarLifecycle, searchIn: sidebarSearchIn, author: omniQuery.filters.author ?? 'any', project: omniQuery.filters.project, worktree: omniQuery.filters.worktree },
         activeProjectId,
         showInlineArchived,
         useGroupedSections,
@@ -799,10 +824,35 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
         openSessionSearch={openSessionSearch}
         closeSessionSearch={resetSessionSearch}
         sessionSearchInputRef={sessionSearchInputRef}
-        sessionSearchQuery={sessionSearchQuery}
-        setSessionSearchQuery={setSessionSearchQuery}
+        sessionSearchQuery={sessionSearchText}
+        setSessionSearchQuery={setSessionSearchText}
+        searchChips={searchFilterChipKeys(sessionSearchFilters, { lifecycle: 'active', searchIn: 'everything', author: 'any' }).length > 0 ? <SearchFilterChips
+          filters={sessionSearchFilters}
+          defaults={{ lifecycle: 'active', searchIn: 'everything', author: 'any' }}
+          projectOptions={normalizedProjects.map((project) => ({ ...project, value: project.normalizedPath, label: project.label ?? project.normalizedPath.split('/').pop() ?? project.normalizedPath }))}
+          worktreeOptions={isVSCode ? undefined : [...availableWorktreesByProject.values()].flatMap((worktrees) => worktrees.map((worktree) => ({ value: worktree.path, label: worktree.branch || worktree.label || worktree.path.split('/').pop() || worktree.path })))}
+          onRemove={removeSessionSearchFilter}
+        /> : undefined}
+        onRemoveLastSearchChip={() => {
+          const keys = searchFilterChipKeys(sessionSearchFilters, { lifecycle: 'active', searchIn: 'everything', author: 'any' });
+          const key = keys.at(-1);
+          if (key) removeSessionSearchFilter(key);
+        }}
+        onClearSearchFilters={clearSessionSearchFilters}
+        onCommitSessionSearch={(text) => setSessionSearchText(text, { commit: true })}
         hasSessionSearchQuery={hasSessionSearchQuery}
         searchMatchCount={searchMatchCount}
+        // The compact header (VS Code) keeps its search field open, so its menu shows too.
+        searchScope={isSessionSearchOpen || hideDirectoryControls ? <SearchScopeMenu
+          filters={sessionSearchFilters}
+          defaults={{ lifecycle: 'active', searchIn: 'everything', author: 'any' }}
+          options={sidebarSearchScopeOptions({ isVSCode, currentProjectAvailable: Boolean(activeProjectId) })}
+          projectOptions={isVSCode ? undefined : normalizedProjects.map((project) => ({ value: project.normalizedPath, label: project.label ?? project.normalizedPath.split('/').pop() ?? project.normalizedPath }))}
+          worktreeOptions={isVSCode ? undefined : [...availableWorktreesByProject.values()].flatMap((worktrees) => worktrees.map((worktree) => ({ value: worktree.path, label: worktree.branch || worktree.label || worktree.path.split('/').pop() || worktree.path })))}
+          onChange={setOmniSearchFilter}
+          resultCount={searchMatchCount}
+          layout="sidebar"
+        /> : null}
         collapseAll={projectView.actions.collapseAll}
         expandAll={projectView.actions.expandAll}
         showStats={!isVSCode}

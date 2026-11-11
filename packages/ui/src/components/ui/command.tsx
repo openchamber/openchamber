@@ -33,19 +33,21 @@ function Command({
 
 const CommandInput = React.forwardRef<
   React.ComponentRef<typeof CommandPrimitive.Input>,
-  React.ComponentPropsWithoutRef<typeof CommandPrimitive.Input>
->(({ className, ...props }, ref) => {
+  React.ComponentPropsWithoutRef<typeof CommandPrimitive.Input> & { leading?: React.ReactNode }
+>(({ className, leading, ...props }, ref) => {
   return (
     <div
-       data-slot="command-input-wrapper"
-       className="flex h-8 items-center gap-2 border-b px-3"
-     >
-       <Icon name="search" className="size-4 shrink-0 opacity-50" />
-       <CommandPrimitive.Input
+      data-slot="command-input-wrapper"
+      className={cn("flex items-center gap-2 border-b px-3", leading ? 'min-h-8 flex-wrap gap-x-1.5 gap-y-1 py-0.5' : 'h-8')}
+    >
+      <Icon name="search" className="size-4 shrink-0 opacity-50" />
+      {leading}
+      <CommandPrimitive.Input
         ref={ref}
         data-slot="command-input"
         className={cn(
           "placeholder:text-muted-foreground flex h-8 w-full rounded-lg bg-transparent py-2 typography-meta outline-none focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50",
+          leading && 'h-6 w-auto min-w-20 flex-1 basis-20 py-0',
           className
         )}
         {...props}

@@ -37,6 +37,7 @@ import { snippetsI18n } from './snippets.i18n';
 import { sidebarWorkI18n } from './sidebar-work.i18n';
 import { sidebarSectionsI18n } from './sidebar-sections.i18n';
 import { worktreeArchiveI18n } from './worktree-archive.i18n';
+import { omniSearchI18n } from './omni-search.i18n';
 import { overviewI18n } from './overview.i18n';
 import { isolatedSpacesI18n } from './isolated-spaces.i18n';
 import { sourceBoardI18n } from './source-board.i18n';
@@ -2892,21 +2893,7 @@ export const dict = {
   'commandPalette.group.messages': 'الرسائل',
   'commandPalette.messages.showAll': 'إظهار كل نتائج الرسائل',
   'commandPalette.messages.placeholder': 'ابحث في الرسائل…',
-  'commandPalette.messages.back': 'رجوع',
-  'commandPalette.messages.filter.scopeLabel': 'أين',
-  'commandPalette.messages.filter.allProjects': 'كل المشاريع',
-  'commandPalette.messages.filter.thisProject': 'هذا المشروع',
-  'commandPalette.messages.filter.authorLabel': 'الكاتب',
-  'commandPalette.messages.filter.anyone': 'أي أحد',
-  'commandPalette.messages.filter.you': 'أنت',
-  'commandPalette.messages.filter.agent': 'الوكيل',
-  'commandPalette.messages.filter.reasoning': 'التفكير',
   'commandPalette.messages.inReasoning': 'التفكير',
-  'commandPalette.messages.tooShort': 'اكتب 3 أحرف على الأقل للبحث في الرسائل',
-  'commandPalette.messages.searching': 'جارٍ البحث في الرسائل…',
-  'commandPalette.messages.error': 'تعذّر البحث في الرسائل',
-  'commandPalette.messages.unavailable': 'البحث في الرسائل غير متاح على هذا الخادم',
-  'commandPalette.messages.empty': 'لم يتم العثور على رسائل',
   'commandPalette.messages.indexing': 'لا تزال فهرسة المحادثات الأقدم جارية: {done} من {total}.',
   'commandPalette.messages.loadMore': 'تحميل المزيد',
   'commandPalette.messages.byYou': 'رسالتك',
@@ -3943,6 +3930,7 @@ export const dict = {
   ...sidebarWorkI18n.ar,
   ...sidebarSectionsI18n.ar,
   ...worktreeArchiveI18n.ar,
+  ...omniSearchI18n.ar,
   ...overviewI18n.ar,
   ...isolatedSpacesI18n.ar,
   ...sourceBoardI18n.ar,

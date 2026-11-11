@@ -294,13 +294,17 @@ const TerminalSection: React.FC = () => {
 };
 
 /** How the window behaves: header tabs, panel motion, scrollbars, where links open. */
-const PanelsAndLinksSection: React.FC = () => {
+const PanelsAndLinksSection: React.FC<{ vscode: boolean }> = ({ vscode }) => {
   const { t } = useI18n();
+  // These rows need the desktop or web host.
+  const hostRows = !vscode;
   const { isMobile } = useDeviceInfo();
   const sessionTabsEnabled = useUIStore((state) => state.sessionTabsEnabled);
   const setSessionTabsEnabled = useUIStore((state) => state.setSessionTabsEnabled);
   const sessionTabsPerWorkspace = useUIStore((state) => state.sessionTabsPerWorkspace);
   const setSessionTabsPerWorkspace = useUIStore((state) => state.setSessionTabsPerWorkspace);
+  const commandPaletteShowArchivedSessions = useUIStore((state) => state.commandPaletteShowArchivedSessions);
+  const setCommandPaletteShowArchivedSessions = useUIStore((state) => state.setCommandPaletteShowArchivedSessions);
   const layoutAnimations = useUIStore((state) => state.layoutAnimations);
   const setLayoutAnimations = useUIStore((state) => state.setLayoutAnimations);
   const openLinksInBrowserPanel = useUIStore((state) => state.openLinksInBrowserPanel);
@@ -314,7 +318,7 @@ const PanelsAndLinksSection: React.FC = () => {
 
   return (
     <SettingsSection title={t('settings.layout.general.panels.title')} contentClassName={SETTINGS_OPTION_STACK_CLASS}>
-      {!isMobile ? (
+      {hostRows && !isMobile ? (
         <SettingsCheckboxRow
           checked={sessionTabsEnabled}
           onChange={setSessionTabsEnabled}
@@ -324,7 +328,7 @@ const PanelsAndLinksSection: React.FC = () => {
           settingsItem="appearance.session-tabs"
         />
       ) : null}
-      {!isMobile && sessionTabsEnabled ? (
+      {hostRows && !isMobile && sessionTabsEnabled ? (
         <SettingsCheckboxRow
           checked={sessionTabsPerWorkspace}
           onChange={setSessionTabsPerWorkspace}
@@ -334,7 +338,18 @@ const PanelsAndLinksSection: React.FC = () => {
           className="ps-6"
         />
       ) : null}
-      {!isMobile ? (
+      {/* Only the desktop and web layout has the command palette; VS Code and phones keep the synced value untouched. */}
+      {hostRows && !isMobile ? (
+        <SettingsCheckboxRow
+          checked={commandPaletteShowArchivedSessions}
+          onChange={setCommandPaletteShowArchivedSessions}
+          label={t('settings.openchamber.commandPalette.showArchived.label')}
+          ariaLabel={t('settings.openchamber.commandPalette.showArchived.label')}
+          info={t('settings.openchamber.commandPalette.showArchived.info')}
+          settingsItem="general.command-palette-show-archived-sessions"
+        />
+      ) : null}
+      {hostRows && !isMobile ? (
         <SettingsCheckboxRow
           checked={layoutAnimations}
           onChange={setLayoutAnimations}
@@ -344,7 +359,7 @@ const PanelsAndLinksSection: React.FC = () => {
           settingsItem="appearance.layout-animations"
         />
       ) : null}
-      {isDesktopShell() && !isMobile ? (
+      {hostRows && isDesktopShell() && !isMobile ? (
         <SettingsCheckboxRow
           checked={openLinksInBrowserPanel}
           onChange={setOpenLinksInBrowserPanel}
@@ -354,22 +369,26 @@ const PanelsAndLinksSection: React.FC = () => {
           settingsItem="appearance.open-links-in-browser-panel"
         />
       ) : null}
-      <SettingsCheckboxRow
-        checked={alwaysShowScrollbars}
-        onChange={setAlwaysShowScrollbars}
-        label={t('settings.openchamber.visual.field.alwaysShowScrollbars')}
-        info={t('settings.openchamber.visual.field.alwaysShowScrollbarsHint')}
-        settingsItem="appearance.scrollbars"
-      />
-      <SettingsCheckboxRow
-        checked={openTrackerLinksOnBoard}
-        onChange={setOpenTrackerLinksOnBoard}
-        label={t('settings.openchamber.visual.field.openTrackerLinksOnBoard')}
-        ariaLabel={t('settings.openchamber.visual.field.openTrackerLinksOnBoard')}
-        info={t('settings.openchamber.visual.field.openTrackerLinksOnBoardInfo')}
-        settingsItem="appearance.open-tracker-links-on-board"
-      />
-      {isDesktopShell() && !isMobile ? (
+      {hostRows ? (
+        <SettingsCheckboxRow
+          checked={alwaysShowScrollbars}
+          onChange={setAlwaysShowScrollbars}
+          label={t('settings.openchamber.visual.field.alwaysShowScrollbars')}
+          info={t('settings.openchamber.visual.field.alwaysShowScrollbarsHint')}
+          settingsItem="appearance.scrollbars"
+        />
+      ) : null}
+      {hostRows ? (
+        <SettingsCheckboxRow
+          checked={openTrackerLinksOnBoard}
+          onChange={setOpenTrackerLinksOnBoard}
+          label={t('settings.openchamber.visual.field.openTrackerLinksOnBoard')}
+          ariaLabel={t('settings.openchamber.visual.field.openTrackerLinksOnBoard')}
+          info={t('settings.openchamber.visual.field.openTrackerLinksOnBoardInfo')}
+          settingsItem="appearance.open-tracker-links-on-board"
+        />
+      ) : null}
+      {hostRows && isDesktopShell() && !isMobile ? (
         <SettingsFieldRow
           label={t('settings.openchamber.visual.field.liveBrowserTabs')}
           info={t('settings.openchamber.visual.field.liveBrowserTabsInfo')}
@@ -396,14 +415,14 @@ const PanelsAndLinksSection: React.FC = () => {
   );
 };
 
-/** How the window behaves, and the phone's workspace tabs. Not in VS Code. */
+/** How the window behaves, and the phone's workspace tabs. VS Code keeps only the command palette preference. */
 export const GeneralInterfaceSettings: React.FC = () => {
   const { isMobile } = useDeviceInfo();
-  if (isVSCodeRuntime()) return null;
+  const isVSCode = isVSCodeRuntime();
   return (
     <>
-      <PanelsAndLinksSection />
-      {isMobile ? <MobileWorkspaceTabsSettings /> : null}
+      <PanelsAndLinksSection vscode={isVSCode} />
+      {!isVSCode && isMobile ? <MobileWorkspaceTabsSettings /> : null}
     </>
   );
 };

@@ -38,6 +38,7 @@ import { snippetsI18n } from './snippets.i18n';
 import { sidebarWorkI18n } from './sidebar-work.i18n';
 import { sidebarSectionsI18n } from './sidebar-sections.i18n';
 import { worktreeArchiveI18n } from './worktree-archive.i18n';
+import { omniSearchI18n } from './omni-search.i18n';
 import { overviewI18n } from './overview.i18n';
 import { isolatedSpacesI18n } from './isolated-spaces.i18n';
 import { sourceBoardI18n } from './source-board.i18n';
@@ -229,6 +230,7 @@ export const dict: Record<I18nKey, string> = {
   ...sidebarWorkI18n['pt-BR'],
   ...sidebarSectionsI18n['pt-BR'],
   ...worktreeArchiveI18n['pt-BR'],
+  ...omniSearchI18n['pt-BR'],
   ...overviewI18n['pt-BR'],
   ...isolatedSpacesI18n['pt-BR'],
   ...sourceBoardI18n['pt-BR'],
@@ -2938,21 +2940,7 @@ export const dict: Record<I18nKey, string> = {
   "commandPalette.group.messages": "Mensagens",
   "commandPalette.messages.showAll": "Mostrar todos os resultados em mensagens",
   "commandPalette.messages.placeholder": "Pesquisar mensagens…",
-  "commandPalette.messages.back": "Voltar",
-  "commandPalette.messages.filter.scopeLabel": "Onde",
-  "commandPalette.messages.filter.allProjects": "Todos os projetos",
-  "commandPalette.messages.filter.thisProject": "Este projeto",
-  "commandPalette.messages.filter.authorLabel": "Escrito por",
-  "commandPalette.messages.filter.anyone": "Qualquer pessoa",
-  "commandPalette.messages.filter.you": "Você",
-  "commandPalette.messages.filter.agent": "Agente",
-  "commandPalette.messages.filter.reasoning": "Pensando",
   "commandPalette.messages.inReasoning": "Pensando",
-  "commandPalette.messages.tooShort": "Digite pelo menos 3 caracteres para pesquisar mensagens",
-  "commandPalette.messages.searching": "Pesquisando mensagens…",
-  "commandPalette.messages.error": "Não foi possível pesquisar as mensagens",
-  "commandPalette.messages.unavailable": "A pesquisa de mensagens não está disponível neste servidor",
-  "commandPalette.messages.empty": "Nenhuma mensagem encontrada",
   "commandPalette.messages.indexing": "Ainda indexando conversas antigas: {done} de {total}.",
   "commandPalette.messages.loadMore": "Carregar mais",
   "commandPalette.messages.byYou": "Sua mensagem",

@@ -37,6 +37,7 @@ import { snippetsI18n } from './snippets.i18n';
 import { sidebarWorkI18n } from './sidebar-work.i18n';
 import { sidebarSectionsI18n } from './sidebar-sections.i18n';
 import { worktreeArchiveI18n } from './worktree-archive.i18n';
+import { omniSearchI18n } from './omni-search.i18n';
 import { overviewI18n } from './overview.i18n';
 import { isolatedSpacesI18n } from './isolated-spaces.i18n';
 import { sourceBoardI18n } from './source-board.i18n';
@@ -218,6 +219,7 @@ export const dict = {
   ...sidebarWorkI18n.nl,
   ...sidebarSectionsI18n.nl,
   ...worktreeArchiveI18n.nl,
+  ...omniSearchI18n.nl,
   ...overviewI18n.nl,
   ...isolatedSpacesI18n.nl,
   ...sourceBoardI18n.nl,
@@ -2982,21 +2984,7 @@ export const dict = {
   'commandPalette.group.messages': 'Berichten',
   'commandPalette.messages.showAll': 'Alle berichtresultaten tonen',
   'commandPalette.messages.placeholder': 'Berichten zoeken…',
-  'commandPalette.messages.back': 'Terug',
-  'commandPalette.messages.filter.scopeLabel': 'Waar',
-  'commandPalette.messages.filter.allProjects': 'Alle projecten',
-  'commandPalette.messages.filter.thisProject': 'Dit project',
-  'commandPalette.messages.filter.authorLabel': 'Geschreven door',
-  'commandPalette.messages.filter.anyone': 'Iedereen',
-  'commandPalette.messages.filter.you': 'Jij',
-  'commandPalette.messages.filter.agent': 'Agent',
-  'commandPalette.messages.filter.reasoning': 'Denken',
   'commandPalette.messages.inReasoning': 'Denken',
-  'commandPalette.messages.tooShort': 'Typ minstens 3 tekens om berichten te zoeken',
-  'commandPalette.messages.searching': 'Berichten zoeken…',
-  'commandPalette.messages.error': 'Berichten konden niet worden doorzocht',
-  'commandPalette.messages.unavailable': 'Berichten zoeken is niet beschikbaar op deze server',
-  'commandPalette.messages.empty': 'Geen berichten gevonden',
   'commandPalette.messages.indexing': 'Oudere gesprekken worden nog geïndexeerd: {done} van {total}.',
   'commandPalette.messages.loadMore': 'Meer laden',
   'commandPalette.messages.byYou': 'Jouw bericht',

@@ -34,6 +34,7 @@ import { useUIStore } from '@/stores/useUIStore';
 import { useEnterpriseMode } from '@/stores/useEnterprisePolicyStore';
 import { markAllSessionsViewed } from '@/sync/notification-store';
 import { useHasUnreadSession } from '@/sync/session-unread';
+import { parseOmniQuery } from '@/lib/search/omniQuery';
 
 type Props = {
   hideDirectoryControls: boolean;
@@ -51,8 +52,13 @@ type Props = {
   sessionSearchInputRef: React.RefObject<HTMLInputElement | null>;
   sessionSearchQuery: string;
   setSessionSearchQuery: (value: string) => void;
+  searchChips?: React.ReactNode;
+  onRemoveLastSearchChip?: () => void;
+  onClearSearchFilters?: () => void;
+  onCommitSessionSearch?: (text: string) => void;
   hasSessionSearchQuery: boolean;
-  searchMatchCount: number;
+  searchMatchCount: number | null;
+  searchScope?: React.ReactNode;
   collapseAll: () => void;
   expandAll: () => void;
   /** The usage stats page, which the app's own runtimes offer. */
@@ -101,8 +107,13 @@ export function SidebarHeader(props: Props): React.ReactNode {
     sessionSearchInputRef,
     sessionSearchQuery,
     setSessionSearchQuery,
+    searchChips,
+    onRemoveLastSearchChip,
+    onClearSearchFilters,
+    onCommitSessionSearch,
     hasSessionSearchQuery,
     searchMatchCount,
+    searchScope,
     collapseAll,
     expandAll,
     showStats,
@@ -282,7 +293,7 @@ export function SidebarHeader(props: Props): React.ReactNode {
   // What the search found, kept as a section: the query becomes its words to
   // find and its name, in the editor, with the search closed so the sidebar
   // shows the section being made. An id lookup finds one session, not a topic.
-  const searchText = sessionSearchQuery.trim();
+  const searchText = parseOmniQuery(sessionSearchQuery).text.trim();
   const canSaveSearch = showSectionControls && searchText !== '' && !searchText.toLowerCase().startsWith('ses_')
     && canAddSidebarSection(sidebarSections);
   const saveSearchAsSection = () => {
@@ -304,16 +315,23 @@ export function SidebarHeader(props: Props): React.ReactNode {
           onClose={closeSessionSearch}
           placeholder={t('sessions.sidebar.header.search.placeholder')}
           clearLabel={t('sessions.sidebar.header.search.clear')}
+          mode="live"
+          chips={searchChips}
+          onRemoveLastChip={onRemoveLastSearchChip}
+          onClearFilters={onClearSearchFilters}
+          onCommit={onCommitSessionSearch}
           // A narrow list has no room for the Enter/Esc row; the field's own
           // clear button carries the feedback. The match count sits beside the
           // field, so applying or clearing a search never moves the list.
-          leadingHint={hasSessionSearchQuery
+          leadingHint={hasSessionSearchQuery && searchMatchCount !== null
             ? (searchMatchCount === 1
               ? t('sessions.sidebar.header.search.matchCountSingle', { count: searchMatchCount })
               : t('sessions.sidebar.header.search.matchCountPlural', { count: searchMatchCount }))
             : undefined}
           compact
         />
+        {/* The inline match count above already reports the total. */}
+        <div className="[&_[data-search-scope-count]]:hidden">{searchScope}</div>
       </div>
     );
   }
@@ -436,7 +454,12 @@ export function SidebarHeader(props: Props): React.ReactNode {
               onClose={closeSessionSearch}
               placeholder={t('sessions.sidebar.header.search.placeholder')}
               clearLabel={t('sessions.sidebar.header.search.clear')}
-              leadingHint={hasSessionSearchQuery
+              mode="live"
+              chips={searchChips}
+              onRemoveLastChip={onRemoveLastSearchChip}
+              onClearFilters={onClearSearchFilters}
+              onCommit={onCommitSessionSearch}
+              leadingHint={hasSessionSearchQuery && searchMatchCount !== null
                 ? (searchMatchCount === 1
                   ? t('sessions.sidebar.header.search.matchCountSingle', { count: searchMatchCount })
                   : t('sessions.sidebar.header.search.matchCountPlural', { count: searchMatchCount }))
@@ -447,6 +470,7 @@ export function SidebarHeader(props: Props): React.ReactNode {
                 </button>
               ) : t('sessions.sidebar.header.search.escapeHint')}
             />
+            {searchScope}
           </div>
         ) : null}
       </div>

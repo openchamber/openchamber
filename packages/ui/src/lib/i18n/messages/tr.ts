@@ -37,6 +37,7 @@ import { snippetsI18n } from './snippets.i18n';
 import { sidebarWorkI18n } from './sidebar-work.i18n';
 import { sidebarSectionsI18n } from './sidebar-sections.i18n';
 import { worktreeArchiveI18n } from './worktree-archive.i18n';
+import { omniSearchI18n } from './omni-search.i18n';
 import { overviewI18n } from './overview.i18n';
 import { isolatedSpacesI18n } from './isolated-spaces.i18n';
 import { sourceBoardI18n } from './source-board.i18n';
@@ -157,6 +158,7 @@ export const dict = {
   ...sidebarWorkI18n.tr,
   ...sidebarSectionsI18n.tr,
   ...worktreeArchiveI18n.tr,
+  ...omniSearchI18n.tr,
   ...overviewI18n.tr,
   ...isolatedSpacesI18n.tr,
   ...sourceBoardI18n.tr,
@@ -2799,21 +2801,7 @@ export const dict = {
   'commandPalette.group.messages': 'Mesajlar',
   'commandPalette.messages.showAll': 'Tüm mesaj sonuçlarını göster',
   'commandPalette.messages.placeholder': 'Mesajlarda ara…',
-  'commandPalette.messages.back': 'Geri',
-  'commandPalette.messages.filter.scopeLabel': 'Nerede',
-  'commandPalette.messages.filter.allProjects': 'Tüm projeler',
-  'commandPalette.messages.filter.thisProject': 'Bu proje',
-  'commandPalette.messages.filter.authorLabel': 'Yazan',
-  'commandPalette.messages.filter.anyone': 'Herkes',
-  'commandPalette.messages.filter.you': 'Sen',
-  'commandPalette.messages.filter.agent': 'Ajan',
-  'commandPalette.messages.filter.reasoning': 'Düşünme',
   'commandPalette.messages.inReasoning': 'Düşünme',
-  'commandPalette.messages.tooShort': 'Mesajlarda aramak için en az 3 karakter yazın',
-  'commandPalette.messages.searching': 'Mesajlarda aranıyor…',
-  'commandPalette.messages.error': 'Mesajlarda arama yapılamadı',
-  'commandPalette.messages.unavailable': 'Bu sunucuda mesaj araması kullanılamıyor',
-  'commandPalette.messages.empty': 'Mesaj bulunamadı',
   'commandPalette.messages.indexing': 'Eski konuşmalar hâlâ dizinleniyor: {done} / {total}.',
   'commandPalette.messages.loadMore': 'Daha fazla yükle',
   'commandPalette.messages.byYou': 'Senin mesajın',

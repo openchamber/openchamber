@@ -38,6 +38,7 @@ import { snippetsI18n } from './snippets.i18n';
 import { sidebarWorkI18n } from './sidebar-work.i18n';
 import { sidebarSectionsI18n } from './sidebar-sections.i18n';
 import { worktreeArchiveI18n } from './worktree-archive.i18n';
+import { omniSearchI18n } from './omni-search.i18n';
 import { overviewI18n } from './overview.i18n';
 import { isolatedSpacesI18n } from './isolated-spaces.i18n';
 import { sourceBoardI18n } from './source-board.i18n';
@@ -219,6 +220,7 @@ export const dict: Record<I18nKey, string> = {
   ...sidebarWorkI18n.ko,
   ...sidebarSectionsI18n.ko,
   ...worktreeArchiveI18n.ko,
+  ...omniSearchI18n.ko,
   ...overviewI18n.ko,
   ...isolatedSpacesI18n.ko,
   ...sourceBoardI18n.ko,
@@ -2982,21 +2984,7 @@ export const dict: Record<I18nKey, string> = {
   'commandPalette.group.messages': '메시지',
   'commandPalette.messages.showAll': '메시지 결과 모두 보기',
   'commandPalette.messages.placeholder': '메시지 검색…',
-  'commandPalette.messages.back': '뒤로',
-  'commandPalette.messages.filter.scopeLabel': '위치',
-  'commandPalette.messages.filter.allProjects': '모든 프로젝트',
-  'commandPalette.messages.filter.thisProject': '이 프로젝트',
-  'commandPalette.messages.filter.authorLabel': '작성자',
-  'commandPalette.messages.filter.anyone': '모두',
-  'commandPalette.messages.filter.you': '나',
-  'commandPalette.messages.filter.agent': '에이전트',
-  'commandPalette.messages.filter.reasoning': '추론',
   'commandPalette.messages.inReasoning': '추론',
-  'commandPalette.messages.tooShort': '메시지를 검색하려면 3자 이상 입력하세요',
-  'commandPalette.messages.searching': '메시지 검색 중…',
-  'commandPalette.messages.error': '메시지를 검색할 수 없습니다',
-  'commandPalette.messages.unavailable': '이 서버에서는 메시지 검색을 사용할 수 없습니다',
-  'commandPalette.messages.empty': '메시지를 찾을 수 없습니다',
   'commandPalette.messages.indexing': '이전 대화를 색인하는 중: {total}개 중 {done}개.',
   'commandPalette.messages.loadMore': '더 불러오기',
   'commandPalette.messages.byYou': '내 메시지',

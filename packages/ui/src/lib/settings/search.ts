@@ -303,6 +303,15 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     isAvailable: (ctx) => !ctx.isMobile && !ctx.isVSCode,
   },
   {
+    id: 'general.command-palette-show-archived-sessions',
+    page: 'general',
+    titleKey: 'settings.openchamber.commandPalette.showArchived.label',
+    descriptionKey: 'settings.openchamber.commandPalette.showArchived.info',
+    keywords: ['command palette', 'search', 'archive', 'archived', 'sessions', 'messages'],
+    // The command palette lives in the desktop and web layout only.
+    isAvailable: (ctx) => !ctx.isMobile && !ctx.isVSCode,
+  },
+  {
     id: 'appearance.terminal-quick-keys',
     page: 'general',
     titleKey: 'settings.openchamber.visual.field.terminalQuickKeys',

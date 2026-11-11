@@ -22,6 +22,13 @@ This folder owns runtime-independent controls and their Base UI integration, inc
   name, a command's description) find it too, ranked below entries the query
   matches by their own text, so "task" lists the command `/task` before an
   action of the Task Board extension, and the highlight stays on the title.
+- Message content search scopes results through registered project and worktree
+  ownership. An explicit unmatched scope makes no content request, and unknown
+  message lifecycle stays hidden until an authoritative cache or response proves it.
+- The palette's category is a query flag. Tab and Shift+Tab cycle categories from
+  the input. Backspace removes the last filter chip at an empty caret before it
+  resets a non-default category after parsed free text is empty. The Filters
+  control stays outside the category tablist.
 - Icon actions over a document (the Files editor, a plan, a page, image or diagram in the chat, diff headers) use `ToolbarButton` from `action-toolbar.tsx`: 24px, a 14px icon, colour-only hover, the selection fill while a toggle is on, faded while disabled. A toggle keeps one icon and one label naming the option; the fill says whether it is on.
 - `ActionToolbar` takes the actions a document has, which depend on what the document is and never on its mode, so a mode switch moves no button. Its groups sit apart by space; with `fold`, unpinned actions move into "More actions" from the end of the row while it does not fit, after `start` gave up its width.
 - `Textarea` offers emoji on `:` in both modes (`components/emoji/`, placed by `components/inline-picker/`); its forwarded ref is the textarea element itself.
@@ -52,6 +59,24 @@ so it cannot provide the same capture guarantee. Same-key updates do not capture
 ### Why hover dismissal follows the opening reason
 
 Base UI 1.4 has no opening DOM event when a caller changes the controlled `open` prop, so it treats that popup as hover-dismissible. Filtering can shrink it away from a stationary pointer and close it during typing. The shared dropdown root cancels that hover close unless a trigger-hover event opened the menu, preserving explicit hover menus without caller-specific workarounds.
+
+### Why message hits require known lifecycle
+
+Older servers can omit message lifecycle fields and ignore an active-only request. The palette reconciles hits with the authoritative active and archived session caches, and hides unknown lifecycle content until a response explicitly states it.
+
+### Why palette filter selection retains focus ownership through dismissal
+
+Selecting a filter returns focus to the palette input. Base UI evaluates its
+focus-manager cleanup after `onOpenChangeComplete`, so the selection's focus
+ownership must survive that callback even after the one-shot input refocus is
+consumed. The next opening clears this ownership; dismissal without selection
+keeps the normal return to the filter trigger.
+
+### Why palette filters live outside the input text
+
+The palette remembers filters between openings while clearing typed search text.
+It rebuilds the raw query for search consumers from the chips and text, so typed
+flags can become visible, removable filters without changing those consumers.
 
 ### Why a scrolling popup gets a sibling frame and not a wrapper
 

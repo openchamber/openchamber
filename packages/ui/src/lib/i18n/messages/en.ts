@@ -37,6 +37,7 @@ import { snippetsI18n } from './snippets.i18n';
 import { sidebarWorkI18n } from './sidebar-work.i18n';
 import { sidebarSectionsI18n } from './sidebar-sections.i18n';
 import { worktreeArchiveI18n } from './worktree-archive.i18n';
+import { omniSearchI18n } from './omni-search.i18n';
 import { overviewI18n } from './overview.i18n';
 import { isolatedSpacesI18n } from './isolated-spaces.i18n';
 import { sourceBoardI18n } from './source-board.i18n';
@@ -218,6 +219,7 @@ export const dict = {
   ...sidebarWorkI18n.en,
   ...sidebarSectionsI18n.en,
   ...worktreeArchiveI18n.en,
+  ...omniSearchI18n.en,
   ...overviewI18n.en,
   ...isolatedSpacesI18n.en,
   ...sourceBoardI18n.en,
@@ -2982,21 +2984,7 @@ export const dict = {
   'commandPalette.group.messages': 'Messages',
   'commandPalette.messages.showAll': 'Show all message results',
   'commandPalette.messages.placeholder': 'Search messages…',
-  'commandPalette.messages.back': 'Back',
-  'commandPalette.messages.filter.scopeLabel': 'Where',
-  'commandPalette.messages.filter.allProjects': 'All projects',
-  'commandPalette.messages.filter.thisProject': 'This project',
-  'commandPalette.messages.filter.authorLabel': 'Written by',
-  'commandPalette.messages.filter.anyone': 'Anyone',
-  'commandPalette.messages.filter.you': 'You',
-  'commandPalette.messages.filter.agent': 'Agent',
-  'commandPalette.messages.filter.reasoning': 'Thinking',
   'commandPalette.messages.inReasoning': 'Thinking',
-  'commandPalette.messages.tooShort': 'Type at least 3 characters to search messages',
-  'commandPalette.messages.searching': 'Searching messages…',
-  'commandPalette.messages.error': 'Couldn\'t search messages',
-  'commandPalette.messages.unavailable': 'Message search is not available on this server',
-  'commandPalette.messages.empty': 'No messages found',
   'commandPalette.messages.indexing': 'Still indexing older conversations: {done} of {total}.',
   'commandPalette.messages.loadMore': 'Load more',
   'commandPalette.messages.byYou': 'Your message',
