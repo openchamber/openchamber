@@ -2042,7 +2042,7 @@ export const settingsDict = {
   'settings.openchamber.defaults.field.defaultAgent': '默认智能体',
   'settings.openchamber.defaults.field.showDeletionDialogAria': '显示删除对话框',
   'settings.openchamber.defaults.field.sessionWarming': '保持空闲会话预热',
-  'settings.openchamber.defaults.field.sessionWarmingInfo': '有些提供商在对话静默几分钟后会丢弃缓存的上下文，导致下一条消息更慢、更贵。开启后，会话空闲期间 OpenCode 每 4 分钟发送一个很小的“OK”请求，最长持续到你最后一条消息后的 30 分钟。每次请求按小请求计费。对所有项目生效。',
+  'settings.openchamber.defaults.field.sessionWarmingInfo': '有些提供商在对话静默几分钟后会丢弃缓存的上下文，导致下一条消息更慢、更贵。开启后，会话空闲期间 OpenCode 每 4 分钟发送一条简短提示，最长持续到你最后一条消息后的 30 分钟。每次请求都会将完整的会话上下文发送给模型，可能产生费用或消耗订阅额度。对所有项目生效。',
   'settings.openchamber.defaults.smallModel.title': '小模型',
   'settings.openchamber.defaults.smallModel.description': '用于快速实用任务（如简短回顾和摘要）的廉价模型。',
   'settings.openchamber.defaults.smallModel.useDefault': '使用默认小模型',

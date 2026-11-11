@@ -2063,7 +2063,7 @@ export const settingsDict = {
   'settings.openchamber.defaults.field.defaultAgent': 'الوكيل الافتراضي',
   'settings.openchamber.defaults.field.showDeletionDialogAria': 'إظهار نافذة تأكيد الحذف',
   'settings.openchamber.defaults.field.sessionWarming': 'إبقاء الجلسات الخاملة نشطة',
-  'settings.openchamber.defaults.field.sessionWarmingInfo': "ينسى بعض الموفرين السياق المخزن مؤقتًا للمحادثة بعد بضع دقائق من الصمت، فتصبح الرسالة التالية أبطأ وأعلى تكلفة. عند تفعيل هذا الخيار، يرسل OpenCode طلب \"OK\" صغيرًا كل 4 دقائق أثناء خمول الجلسة، لمدة تصل إلى 30 دقيقة بعد آخر رسالة لك. يُحتسب كل طلب كطلب صغير مدفوع. ينطبق على جميع المشاريع.",
+  'settings.openchamber.defaults.field.sessionWarmingInfo': "ينسى بعض الموفرين سياق المحادثة المخزن مؤقتًا بعد بضع دقائق من الصمت، فتصبح الرسالة التالية أبطأ وأعلى تكلفة. عند تفعيل هذا الخيار، يرسل OpenCode تعليمة قصيرة كل 4 دقائق أثناء خمول الجلسة، لمدة تصل إلى 30 دقيقة بعد آخر رسالة لك. يرسل كل طلب سياق الجلسة كاملًا إلى النموذج وقد يترتب عليه تكلفة أو يُحتسب ضمن حصة اشتراكك. ينطبق على جميع المشاريع.",
   'settings.openchamber.defaults.field.showDeletionDialog': 'إظهار نافذة تأكيد الحذف',
   'settings.openchamber.defaults.smallModel.title': 'النموذج الصغير',
   'settings.openchamber.defaults.smallModel.description': 'نموذج منخفض التكلفة للمهام المساعدة السريعة مثل الملخصات القصيرة.',

@@ -2042,7 +2042,7 @@ export const settingsDict = {
   "settings.openchamber.defaults.field.defaultAgent": "Агент за замовчуванням",
   "settings.openchamber.defaults.field.showDeletionDialogAria": "Показати діалогове вікно видалення",
   "settings.openchamber.defaults.field.sessionWarming": "Тримати неактивні сесії «теплими»",
-  "settings.openchamber.defaults.field.sessionWarmingInfo": "Деякі провайдери забувають закешований контекст розмови після кількох хвилин тиші, тож наступне повідомлення йде повільніше й коштує дорожче. Коли це ввімкнено, OpenCode надсилає крихітний запит «OK» кожні 4 хвилини, поки сесія простоює, до 30 хвилин після вашого останнього повідомлення. Кожен такий пінг оплачується як маленький запит. Діє для всіх проєктів.",
+  "settings.openchamber.defaults.field.sessionWarmingInfo": "Деякі провайдери забувають закешований контекст розмови після кількох хвилин тиші, тому наступне повідомлення йде повільніше й коштує дорожче. Коли це ввімкнено, OpenCode надсилає коротку інструкцію кожні 4 хвилини під час простою сесії, до 30 хвилин після вашого останнього повідомлення. Кожен запит надсилає моделі весь контекст сесії та може коштувати грошей або витрачати квоту підписки. Діє для всіх проєктів.",
   "settings.openchamber.defaults.smallModel.title": "Мала модель",
   "settings.openchamber.defaults.smallModel.description": "Дешева модель для швидких службових задач — коротких підсумків і резюме.",
   "settings.openchamber.defaults.smallModel.useDefault": "Використовувати типову малу модель",
