@@ -204,6 +204,18 @@ The sherpa-onnx 2.0 release removed espeak-ng and piper-phonemize (k2-fsa/sherpa
 which the Kokoro and Piper voices of local read-aloud use to turn text into
 phonemes (`files.espeakData`). An upgrade has to bring those voices back first.
 
+### Why the platform package is resolved from `sherpa-onnx-node`'s own tree
+
+The platform package is an optional dependency of `sherpa-onnx-node`, so an
+isolated install (bun's default layout, pnpm) keeps it inside that package's
+`node_modules`, where resolving from `local/` fails. The fallback that loads
+`sherpa-onnx.node` directly runs only after `require('sherpa-onnx-node')`
+throws, so a resolver that gives up there leaves the fallback unable to find
+the addon. Resolving from the wrapper's own `createRequire` first, then from
+this module, keeps the hoisted npm layout working and makes the fallback
+reachable in the isolated one. The Electron `app.asar` to `app.asar.unpacked`
+rewrite applies to whichever directory comes back.
+
 ### Why native Windows decompression and not a JavaScript extractor
 
 Windows' bundled tar can delegate bzip2 to an external program that the OS does not ship. On Windows, bundled 7-Zip decodes to a temporary tar file inside staging, then system tar extracts it. This keeps decompression out of the server's main thread and avoids the MSYS bzip2-to-tar pipe. macOS and Linux keep direct system-tar extraction. The temporary tar needs additional disk space and disappears with staging.
