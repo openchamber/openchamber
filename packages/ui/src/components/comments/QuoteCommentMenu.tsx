@@ -1,8 +1,10 @@
 import React from 'react';
 
 import { focusChatInput } from '@/components/chat/composer/editor/dom';
+import { toast } from '@/components/ui';
 import { useComposerDraftTarget } from '@/hooks/useComposerAddress';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
+import { useI18n } from '@/lib/i18n';
 import { useInlineCommentDraftStore } from '@/stores/useInlineCommentDraftStore';
 import { InlineCommentInput } from './InlineCommentInput';
 import { SelectionCommentPopup } from './SelectionCommentPopup';
@@ -21,6 +23,7 @@ export function QuoteCommentMenu({ anchor, quote, fileLabel, onOpen, onClose }: 
   onOpen?: () => void;
   onClose: () => void;
 }) {
+  const { t } = useI18n();
   const directory = useEffectiveDirectory();
   const target = useComposerDraftTarget(directory);
   const addDraft = useInlineCommentDraftStore((state) => state.addDraft);
@@ -39,10 +42,14 @@ export function QuoteCommentMenu({ anchor, quote, fileLabel, onOpen, onClose }: 
 
   const save = (text: string) => {
     if (target) {
-      addDraft(target, { source: 'file-quote', fileLabel, startLine: 0, endLine: 0, code: quote, language: '', text: text.trim() });
+      if (!addDraft(target, { source: 'file-quote', fileLabel, startLine: 0, endLine: 0, code: quote, language: '', text: text.trim() })) {
+        toast.error(t('inlineComment.toast.noRoom'));
+        return false;
+      }
       queueMicrotask(() => focusChatInput());
     }
     onClose();
+    return true;
   };
 
   return (

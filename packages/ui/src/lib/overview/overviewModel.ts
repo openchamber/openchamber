@@ -14,7 +14,7 @@ export const OVERVIEW_STALE_WORKTREE_AFTER_MS = 14 * 24 * 60 * 60 * 1000;
 export const OVERVIEW_UNTRACKED_WINDOW_MS = 14 * 24 * 60 * 60 * 1000;
 
 /** What keeps a session's turn open (see `useSessionTurnActivity`). */
-export type OverviewActivity = 'running' | 'subagent' | 'shell' | 'pullRequest';
+export type OverviewActivity = 'running' | 'subagent' | 'shell' | 'image' | 'pullRequest';
 
 /** What a session waits on: a permission, or a question, form or page that needs an answer. */
 export type OverviewBlocking = 'permission' | 'question';

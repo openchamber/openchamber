@@ -17,6 +17,7 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Icon } from "@/components/icon/Icon";
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
+import { MobileSheetRow, MobileSheetSearch, MobileSheetSection } from '@/components/ui/MobileSheetList';
 import { rankByQuery } from '@/lib/search/fuzzySearch';
 import { useI18n } from '@/lib/i18n';
 import { useDeviceInfo } from '@/lib/device';
@@ -158,25 +159,19 @@ export const BranchSelector: React.FC<BranchSelectorProps> = ({
         ? t('gitView.branch.unpushedSingle')
         : t('gitView.branch.unpushedPlural', { count: ahead });
       return (
-        <button
+        <MobileSheetRow
           key={`${remote ? 'remote' : 'local'}-${branch}`}
-          type="button"
-          onClick={() => handleCheckout(branch)}
-          className="flex w-full items-center gap-2 rounded-lg px-2 py-2.5 text-start typography-ui-label hover:bg-interactive-hover"
-        >
-          <span className="min-w-0 flex-1 truncate">{branch}</span>
-          {ahead > 0 ? (
-            <span
-              className="inline-flex shrink-0 items-center gap-1 typography-micro text-muted-foreground"
-              title={aheadLabel}
-              aria-label={aheadLabel}
-            >
+          selected={currentBranch === branch}
+          meta={ahead > 0 ? (
+            <span className="inline-flex items-center gap-1 typography-micro" title={aheadLabel} aria-label={aheadLabel}>
               <Icon name="arrow-up" className="size-3" aria-hidden="true" />
               <span aria-hidden="true">{ahead}</span>
             </span>
-          ) : null}
-          {currentBranch === branch ? <Icon name="check" className="size-4 shrink-0 text-primary" /> : null}
-        </button>
+          ) : undefined}
+          onClick={() => handleCheckout(branch)}
+        >
+          {branch}
+        </MobileSheetRow>
       );
     };
 
@@ -189,7 +184,7 @@ export const BranchSelector: React.FC<BranchSelectorProps> = ({
           disabled={disabled}
           onClick={() => setIsOpen(true)}
         >
-          <Icon name="git-branch" className="size-4 text-primary" />
+          <Icon name="git-branch" className="size-4 text-muted-foreground" />
           <span className="min-w-0 truncate font-medium text-start">
             {currentBranch || t('gitView.branch.detachedHead')}
           </span>
@@ -200,37 +195,25 @@ export const BranchSelector: React.FC<BranchSelectorProps> = ({
           open={isOpen}
           title={t('gitView.branch.currentBranchTooltip')}
           onClose={() => setIsOpen(false)}
+          subheader={<MobileSheetSearch value={search} onChange={setSearch} placeholder={t('gitView.branch.searchPlaceholder')} />}
         >
-          <div className="flex flex-col gap-2 px-3 pb-4 pt-1">
-            {/* No autofocus: on a phone it would raise the keyboard over the
-                list the user came here to scan; typing is the rarer path. */}
-            <input
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-              placeholder={t('gitView.branch.searchPlaceholder')}
-              className="oc-surface-elevated oc-raised oc-field h-9 w-full rounded-lg bg-surface-elevated px-3 typography-meta outline-none placeholder:text-muted-foreground"
-            />
-            {switchBlockedNotice ? (
-              <div className="flex items-start gap-2 px-2 py-1">
-                <Icon name="alert" className="mt-0.5 size-3.5 shrink-0 text-[var(--status-warning)]" aria-hidden="true" />
-                <span className="typography-micro text-muted-foreground">{switchBlockedNotice}</span>
-              </div>
-            ) : null}
-            {recentLocalBranches.length > 0 ? (
-              <section>
-                <p className="px-2 pb-1 pt-2 typography-meta text-muted-foreground">{t('gitView.branch.recentBranches')}</p>
-                {recentLocalBranches.map((branch) => renderBranch(branch))}
-              </section>
-            ) : null}
-            <section>
-              <p className="px-2 pb-1 pt-2 typography-meta text-muted-foreground">{t('gitView.branch.localBranches')}</p>
-              {filteredLocal.map((branch) => renderBranch(branch))}
-            </section>
-            <section>
-              <p className="px-2 pb-1 pt-2 typography-meta text-muted-foreground">{t('gitView.branch.remoteBranches')}</p>
-              {filteredRemote.map((branch) => renderBranch(branch, true))}
-            </section>
-          </div>
+          {switchBlockedNotice ? (
+            <div className="flex items-start gap-2 px-2 py-1">
+              <Icon name="alert" className="mt-0.5 size-3.5 shrink-0 text-[var(--status-warning)]" aria-hidden="true" />
+              <span className="typography-micro text-muted-foreground">{switchBlockedNotice}</span>
+            </div>
+          ) : null}
+          {recentLocalBranches.length > 0 ? (
+            <MobileSheetSection title={t('gitView.branch.recentBranches')}>
+              {recentLocalBranches.map((branch) => renderBranch(branch))}
+            </MobileSheetSection>
+          ) : null}
+          <MobileSheetSection title={t('gitView.branch.localBranches')}>
+            {filteredLocal.map((branch) => renderBranch(branch))}
+          </MobileSheetSection>
+          <MobileSheetSection title={t('gitView.branch.remoteBranches')}>
+            {filteredRemote.map((branch) => renderBranch(branch, true))}
+          </MobileSheetSection>
         </MobileOverlayPanel>
       </>
     );
@@ -349,7 +332,7 @@ export const BranchSelector: React.FC<BranchSelectorProps> = ({
                   {recentBranches.filter((branch) => localBranches.includes(branch)).map((branch) => (
                     <CommandItem key={`recent-${branch}`} onSelect={() => handleCheckout(branch)}>
                       <span className="flex flex-1 items-center gap-2 min-w-0">
-                        <span className="typography-ui-label text-foreground truncate">{branch}</span>
+                        <span dir="ltr" className="typography-ui-label text-foreground truncate">{branch}</span>
                         {(() => {
                           const ahead = unpushedCounts[branch] ?? (branch === currentBranch ? currentBranchAhead : 0);
                           const aheadLabel = ahead === 1

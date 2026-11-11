@@ -66,7 +66,7 @@ Access tokens never appear here or in a `request` result.
 | `onResolve(handler)` | register the handler for your slash commands. It gets `{ command, args }` and returns an attach item or `null`. |
 | `setBadge(count)` | mark your rail icon with a dot and put the count (0 to 999) in its tooltip, or `null` to clear it |
 | `openCommit(sha)` | open the Diff view on that commit of the current project. `sha` is 7 to 64 hex characters; OpenChamber reads the commit itself. |
-| `setHeight(px)` | set the height of your Work Status section. OpenChamber keeps it between 24 and 320 pixels; taller content scrolls inside your page. Other places ignore it. |
+| `setHeight(px)` | set the height of your Work Status section. OpenChamber keeps it between 24 and 480 pixels; taller content scrolls inside your page. Other places ignore it. |
 | `onFileOpen(listener)` | file editors: get the file to edit, `{ path, name, readOnly }` plus `encoding: "text"` with `content`, or `encoding: "binary"` with `bytes`. Also makes Cmd/Ctrl+S in your page save. |
 | `onFileSnapshot(handler)` | file editors: return `{ content, version }` (or `{ bytes, version }` for a binary editor), the whole edited file. OpenChamber calls it to save and before switching to the source view or fullscreen. |
 | `onFileSaved(listener)` | file editors: the snapshot with that `version` is on disk. Answer with `reportFileChange`. |
@@ -164,7 +164,9 @@ if (projectId) {
 
 Snapshots have `state: "loading" | "ready" | "error"`. Loading/error may retain data; only ready establishes complete empty success. Session snapshots include per-directory `coverage` and known archived sessions. Projects expose ID, name, and directory; worktrees expose directory, name, branch, and availability. Sessions include their project/directory/worktree, timestamps, parent ID, and this extension's attached item IDs/data.
 
-Session `activity` is `unknown`, `idle`, `running`, `retrying`, `waiting-permission`, or `waiting-question`. `outcome` is an observed `completed`/`failed` turn or `null`. It is not reconstructed from history and is retained in memory for at most 2,000 observed sessions. Idle after an error keeps the failed outcome until another run starts. Neither idle nor completed marks your task Done. Use `host.openSession(sessionId)` for an explicit transition from a card to its chat.
+Session `activity` is `unknown`, `idle`, `running`, `retrying`, `waiting-permission`, or `waiting-question`. `outcome` is an observed `completed`/`failed` turn or `null`. It is not reconstructed from history and is retained in memory for at most 2,000 observed sessions. Idle after an error keeps the failed outcome until another run starts. Neither idle nor completed marks your task Done. `inWork` is `true` when the session sits in the sidebar's In work block, and always `false` while the user has In work turned off; older hosts leave it out. `unread` is `true` when the last turn ended and nobody has opened the session since, the mark the sidebar shows; it survives restarts and clears on every device. Use `host.openSession(sessionId)` for an explicit transition from a card to its chat.
+
+`tool` is what the session works with while `activity` is `running`, the tool call running now or the one that ended last while the agent thinks about its result: `name` as OpenCode calls it (`read`, `edit`, `bash`) and `target`, the file or folder the call names relative to the session's `directory` (the bare name for one outside it), or `null` when it names none. A shell command's text never appears in it. `context` is how full the context window was after the session's latest step: `tokens` it held and `limit`, the model's window, or `null` when the host doesn't know it. `tool` is `null` whenever the session doesn't run; `context` is `null` before the host has seen a step and after a compaction until the next step measures the window. Older hosts leave both out.
 
 ## Background shells
 
@@ -271,7 +273,11 @@ await host.setInstructions(directory, 'Deploys run through the release branch.')
 await host.emit('deploy-finished', { id: 42 });
 ```
 
-`sessions.start`, `sessions.send`, `sessions.retry` and `sessions.status` need `contributes.sessionControl`, which the user approves as its own line. `sessions.lastReply` needs `sessionControl: { content: true }`. `setInstructions` needs `contributes.instructions` and adds to what agents read, in one folder or, with `null`, everywhere.
+`sessions.start`, `sessions.send`, `sessions.retry`, `sessions.status` and `sessions.stop` need `contributes.sessionControl`, which the user approves as its own line. `sessions.lastReply` needs `sessionControl: { content: true }`. A message from `sessions.send` closes a form or page the agent waits on in that session, as a message typed in the chat does.
+
+To carry the agent's requests somewhere else, such as a chat app, add `answers: true`. The user approves it as one more line, and the service can then answer for them in any session: `sessions.answerPermission(sessionId, requestId, { decision: 'allow' })` (or `'deny'` with a `message` the agent reads) for a `permission-asked` event, and `sessions.answerForm(sessionId, formId, values)` for a `question-asked` event whose `event.question.kind` is `form`. The event's content lists the form's fields with their `key` and choices. `null` instead of values dismisses the form. An allow covers that one request.
+
+`setInstructions` needs `contributes.instructions` and adds to what agents read, in one folder or, with `null`, everywhere.
 
 `emit` reaches your open frames through `host.onServiceEvent`, so a panel stops polling. Nothing replays, so a frame that opens later reads the current state first. `readSettings` gives the service the integration's settings, `secret` fields included, and `needsConfiguration` shows a message on the extension's card.
 

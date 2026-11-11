@@ -77,9 +77,21 @@ the user can want independently:
   the control service refuses the action when it is not. Never behind Code
   Mode, like render: the chat draws the images in place of the call's row from
   its stored result, which an `execute` script would hide.
-- `openchamber_secret` — `secret.request`, a card in the chat where the user
-  types a secret the agent asked for (`label`, `reason`, optional
-  `placeholder`). Every call waits, with the same plugin machinery as a page
+- `openchamber_secret` — `secret.run`, `secret.request` and `secret.forget`.
+  `secret.run` asks OpenCode's shell permission for its command line in the
+  plugin, before the call reaches the server: `ctx.permission.assert` with
+  action `shell`, the line `secretRunCommandLine` draws as the resource and
+  `<program> *` as the pattern to save, so the session's shell rules apply as
+  to any command and a deny never shows a card. The plugin embeds the server's
+  `secretRunCommand` and `secretRunCommandLine` with `toString()`, so the line
+  the user approves is the one the card shows; a malformed call fails before
+  anything is asked. The refusal `assert` throws is rethrown, since a plain
+  rejection ends the agent's step. Only a call from this tool reaches the
+  server as `secretRunAuthorized`, and secret actions use the session OpenCode
+  reported, so no payload field can reach another session's remembered values.
+  `secret.request` is a
+  card where the user types one secret the agent asked for (`label`, `reason`,
+  optional `placeholder`). Both wait, with the same plugin machinery as a page
   with `awaitAnswer` (call id, `timeout: false`, the `session.prompt` hook
   that ends the wait when the user writes in the chat, and the inbox check
   for a message sent before the card appeared). The value never
@@ -89,6 +101,17 @@ the user can want independently:
   Mode, because the chat draws the card from the call. On by default:
   enabled while `agentSecretToolEnabled` is not `false`, and the control
   service refuses the action when it is, so a stale plugin cannot keep asking.
+- `openchamber_usage` — `usage.read`, the provider quotas Settings → Usage
+  shows (`../openchamber-control/usage-read.js`): every configured provider's
+  result as the page gets it, without `accountLabel`, or one with
+  `providerId`. Off by default:
+  enabled only while `agentUsageToolEnabled` is `true`, and the action reads
+  the setting on every call and refuses while it is not. Each call runs the
+  page's readers again, so the description tells agents to read once per
+  decision and that a rate-limited provider answers with its last sample. It
+  sits behind Code Mode like notify, since the chat draws nothing from its
+  call, and its catalog line says to read it when the user asks about limits
+  or a model choice depends on them, never before every task.
 - `openchamber_workflow` — `workflow.*`, scripts that fan a large task out to
   many agents, run by OpenChamber (`../workflows/DOCUMENTATION.md`). Off by
   default: enabled only while `agentWorkflowToolEnabled` is `true`, and the
@@ -113,16 +136,28 @@ from the schema rather than leaving them visible. The plugin is injected only
 when OpenChamber launches and owns the OpenCode process, and not at all when
 both settings are `false`.
 
-- Every tool is registered with `options: { codemode: false }`, so it is a
-  direct tool in the model's tool list. OpenCode 2 otherwise puts plugin tools
-  behind its Code Mode `execute` tool, where the model sees only a
-  size-limited catalog; with a few large MCP servers ours dropped out of it and
-  agents concluded the tool did not exist. `agentToolsCodeMode: true` (the
-  "Run through Code Mode" checkbox in the same section, off by default) flips
-  all of them to `codemode: true`, except `openchamber_render`: the chat draws
-  a page from that tool's own call (its input and stored result), and inside
-  an `execute` script the call is only an entry in `execute`'s list, so the
-  page never showed.
+- `openchamber`, `openchamber_schedule`, `openchamber_web`,
+  `openchamber_memory`, `openchamber_knowledge` and `openchamber_notify` are
+  registered with `codemode: true`, behind OpenCode's Code Mode `execute`
+  tool; there is no setting for it. On `scripts/tool-use-bench` with three
+  models this cut the first request of a session by about 30% with the same or
+  better use of the tools, and one provider's tool-call streaming stalled on
+  their direct schemas. `openchamber_render`, `openchamber_secret`,
+  `openchamber_image`, `openchamber_workflow` and
+  `openchamber_workflow_answer` stay direct (`codemode: false`): the chat
+  draws a page, a secret card, images or a run card from the tool's own call,
+  and inside an `execute` script that call is only an entry in `execute`'s
+  list.
+- Behind Code Mode each tool also registers a namespace of its own name with
+  a one-line description (`CODE_MODE_CATALOG_LINES`). The catalog always
+  lists namespaces with their descriptions but tools only within a small
+  budget, and with large MCP servers connected ours showed as bare rows such
+  as `openchamber_web (1 tool, none shown)`; agents asked to open a page in the
+  browser panel fetched it instead and said they had no browser
+  (`scripts/tool-use-bench`). Names and paths stay as they are: agents call
+  `tools.openchamber(...)` straight from the session guidance, and both a
+  control tool renamed into a shared namespace and one with the other tools
+  nested under it made them stop calling it.
 - The plugin accepts the action's inputs either inside `parameters` or beside
   `action`, because models produce both shapes; an explicit `parameters` object
   wins on a conflict. Rejecting the flattened shape turned a call that plainly

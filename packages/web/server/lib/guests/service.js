@@ -8,7 +8,9 @@ import {
   GUEST_REQUEST_RESPONSE_MAX,
   GUEST_REQUEST_TIMEOUT_MS,
   OPENCHAMBER_HOST_CALLBACK_URL,
+  OPENCHAMBER_SERVICE_DATA_DIR,
   isGuestRequestPath,
+  serviceProvides,
 } from '@openchamber/sdk';
 
 import { isGuestPackageUnloaded } from './catalog.js';
@@ -22,6 +24,7 @@ import {
   releaseGuestService,
 } from './service-registry.js';
 import { resolveServiceSocketEnv } from './sockets.js';
+import { guestDataDir } from './storage.js';
 
 const METHODS = new Set(['GET', 'POST', 'PUT', 'PATCH', 'DELETE']);
 const SERVICE_READY_TIMEOUT_MS = 15_000;
@@ -55,6 +58,14 @@ const stoppingByGuest = new Map();
 // cannot reopen admission for work that belonged to the previous host.
 let hostLifecycle = { accepting: true, registryDir: null, orphansReaped: Promise.resolve() };
 
+let openCodeProvider = null;
+
+/** One host-owned OpenCode transport for approved local services. */
+export const configureGuestOpenCodeProvider = (provider) => {
+  if (openCodeProvider) throw new Error('Stop the previous OpenCode provider before replacing it.');
+  openCodeProvider = provider;
+};
+
 /**
  * Opens service admission for a new host. With `registryDir` every spawn is
  * recorded there (`service-registry.js`), and the services a host that died
@@ -77,6 +88,7 @@ export const beginGuestServiceHost = ({ registryDir = null } = {}) => {
 
 export const beginGuestServiceShutdown = () => {
   hostLifecycle.accepting = false;
+  openCodeProvider?.revokeAll();
 };
 
 const assertGuestHostActive = (lifecycle) => {
@@ -315,6 +327,7 @@ const trackInflight = (guestId, delta) => {
  */
 export const stopGuestService = async (guestId) => {
   stopEpochs.set(guestId, stopEpochOf(guestId) + 1);
+  openCodeProvider?.revokeGuest(guestId);
   clearIdleStop(guestId);
   await discardRuntime(guestId);
 };
@@ -332,6 +345,7 @@ const discardRuntime = async (guestId) => {
   if (!runtime) {
     return;
   }
+  openCodeProvider?.revokeGuest(guestId);
   runtimes.delete(guestId);
   runtime.status = 'stopped';
   const { child } = runtime;
@@ -382,6 +396,9 @@ export const stopAllGuestServices = async () => {
   // Cancelled starts reject normally. Await their cleanup as well as children
   // already registered when shutdown began.
   await Promise.allSettled([...starts, ...stops]);
+  const provider = openCodeProvider;
+  openCodeProvider = null;
+  await provider?.stop();
 };
 
 /**
@@ -436,6 +453,7 @@ const collectProcessOutput = (child, maxChars = 2_000) => {
  *   entry: string,
  *   socketBindings?: Array<{ id: string, candidatesByPlatform?: Partial<Record<'linux' | 'darwin' | 'win32', string[]>> }>,
  *   socketOverrides?: Record<string, string>,
+ *   dataDir: string,
  * }} params
  */
 const startGuestService = async ({
@@ -444,6 +462,8 @@ const startGuestService = async ({
   entry,
   socketBindings = [],
   socketOverrides = {},
+  dataDir,
+  openCode = false,
   epoch,
   lifecycle,
 }) => {
@@ -489,6 +509,9 @@ const startGuestService = async ({
   const socketEnv = socketBindings.length > 0
     ? await resolveServiceSocketEnv(socketBindings, socketOverrides)
     : {};
+  await fs.mkdir(dataDir, { recursive: true, mode: 0o700 }).catch(() => {
+    throw new GuestServiceError('The service\'s data folder could not be created.', 'SERVICE_FAILED');
+  });
   if (cancelled()) {
     throw stoppedError();
   }
@@ -496,6 +519,7 @@ const startGuestService = async ({
     ...inheritedServiceEnv(process.env),
     OPENCHAMBER_SERVICE_PORT: String(port),
     [SERVICE_TOKEN_ENV]: token,
+    [OPENCHAMBER_SERVICE_DATA_DIR]: dataDir,
     ELECTRON_RUN_AS_NODE: '1',
   };
   if (Object.keys(socketEnv).length > 0) {
@@ -504,7 +528,12 @@ const startGuestService = async ({
   // How the service calls OpenChamber back (`host-callback.js`). The address
   // alone opens nothing: each route asks for a bearer of its own.
   env[OPENCHAMBER_HOST_CALLBACK_URL] = await hostCallbackUrl();
+  if (openCode) {
+    if (!openCodeProvider) throw new GuestServiceError('OpenCode access is unavailable on this host.', 'NO_SERVICE');
+    Object.assign(env, await openCodeProvider.environmentFor({ guestId, token }));
+  }
   if (cancelled()) {
+    openCodeProvider?.revokeGuest(guestId);
     throw stoppedError();
   }
   const child = spawn(process.execPath, [absoluteEntry], {
@@ -538,6 +567,7 @@ const startGuestService = async ({
         lastFailures.set(guestId, { at: Date.now(), output: detail });
       }
       runtime.status = runtime.status === 'starting' ? 'failed' : 'stopped';
+      openCodeProvider?.revokeGuest(guestId);
     }
   });
 
@@ -711,6 +741,8 @@ export const openGuestServiceRequest = async ({
       entry: service.entry,
       socketBindings,
       socketOverrides,
+      dataDir: guestDataDir(persistPath, guestId),
+      openCode: serviceProvides(service, 'opencode'),
       epoch,
       lifecycle,
     });

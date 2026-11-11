@@ -121,7 +121,7 @@ export const WalkthroughGenerateButton = ({
 }: {
   review: WalkthroughReview;
   hasView: boolean;
-  size?: 'sm' | 'lg';
+  size?: 'sm' | 'default' | 'lg';
   className?: string;
   /** Lets a tight toolbar drop the text and keep the icon. */
   labelClassName?: string;
@@ -359,11 +359,17 @@ export const WalkthroughEmptyState = ({ review, size = 'default' }: { review: Wa
       <Icon name="route" className="size-6 text-muted-foreground" />
       <h3 className="typography-ui-label font-semibold text-foreground">{t('walkthrough.empty.title')}</h3>
       <p className="typography-meta max-w-md text-muted-foreground">{t('walkthrough.empty.description')}</p>
-      <div className={cn('flex max-w-full gap-2 pt-1', size === 'mobile' ? 'w-full flex-col' : 'flex-wrap items-center justify-center')}>
-        <WalkthroughModelPicker review={review} className={size === 'mobile' ? undefined : 'max-w-48'} />
-        <WalkthroughLanguagePicker review={review} size={size} className={size === 'mobile' ? 'w-full' : 'max-w-40'} />
+      <div className={cn('flex max-w-full items-center gap-2 pt-1', size === 'mobile' ? 'w-full max-w-xs' : 'flex-wrap justify-center')}>
+        <WalkthroughModelPicker review={review} className={size === 'mobile' ? 'min-w-0 flex-1' : 'max-w-48'} />
+        <WalkthroughLanguagePicker review={review} size={size} className={size === 'mobile' ? 'min-w-0 flex-1' : 'max-w-40'} />
       </div>
-      <WalkthroughGenerateButton review={review} hasView={false} size={size === 'mobile' ? 'lg' : 'sm'} className={size === 'mobile' ? 'w-full' : undefined} />
+      <WalkthroughGenerateButton review={review} hasView={false} size={size === 'mobile' ? 'default' : 'sm'} />
+      {size === 'mobile' ? (
+        <Button type="button" variant="ghost" size="sm" onClick={() => openWalkthroughGuide()}>
+          <Icon name="question" className="size-4" />
+          {t('walkthrough.help.guide')}
+        </Button>
+      ) : null}
     </div>
   );
 };
@@ -397,9 +403,9 @@ export const WalkthroughOptions = ({
       </div>
       <div className="flex flex-col gap-1.5">
         <span className="typography-meta text-muted-foreground">{t('walkthrough.options.language')}</span>
-        <WalkthroughLanguagePicker review={review} size={size} className="w-full" />
+        <WalkthroughLanguagePicker review={review} size={size} className={size === 'mobile' ? undefined : 'w-full'} />
       </div>
-      <WalkthroughGenerateButton review={review} hasView={hasView} size={size === 'mobile' ? 'lg' : 'sm'} className="w-full" onActed={onActed} />
+      <WalkthroughGenerateButton review={review} hasView={hasView} size={size === 'mobile' ? 'default' : 'sm'} className="w-full" onActed={onActed} />
       {onOpenChanges && (
         <Button
           type="button"
@@ -418,7 +424,7 @@ export const WalkthroughOptions = ({
       <Button
         type="button"
         variant="ghost"
-        size={size === 'mobile' ? 'lg' : 'sm'}
+        size={size === 'mobile' ? 'default' : 'sm'}
         className="w-full"
         onClick={() => {
           openWalkthroughGuide();

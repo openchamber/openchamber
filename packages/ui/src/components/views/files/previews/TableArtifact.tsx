@@ -28,9 +28,9 @@ import { ArtifactMetaBar } from './ArtifactMetaBar';
 import { formatArtifactSize } from './artifactMeta';
 import { delimiterForPath, parseDelimitedText, setDelimitedField, shiftDelimitedColumn, shiftDelimitedRow } from './delimitedText';
 import { columnName } from '@/sync/document-attachments';
-import { markSeen, noteOwnEdit, traceChanges } from './cellTraces';
+import { markSeen, traceTableRows } from './cellTraces';
 import { chartProgram } from './tableChart';
-import { cellParts, fromTsv, selectionSummary, sortedRowOrder, toTsv, type SortDirection } from './tableCells';
+import { cellParts, columnSlots, fromTsv, selectionSummary, sortedRowOrder, toTsv, type SortDirection } from './tableCells';
 
 const ROW_HEIGHT_ESTIMATE = 25;
 const MIN_COLUMN_CHARS = 4;
@@ -84,21 +84,6 @@ const ColumnValueItems: React.FC<{
       <span className="truncate">{value || t('filesView.artifact.table.emptyValue')}</span>
     </ContextMenuItem>
   ));
-};
-
-type ColumnSlot = { column: number; span?: undefined } | { column: number; span: number };
-
-/** The columns to draw, with what lies between them as one spanning cell: `<col>` keeps its width. */
-const columnSlots = (columnCount: number, drawn: number[]): ColumnSlot[] => {
-  const slots: ColumnSlot[] = [];
-  let next = 0;
-  for (const column of drawn) {
-    if (column > next) slots.push({ column: next, span: column - next });
-    slots.push({ column });
-    next = column + 1;
-  }
-  if (next < columnCount) slots.push({ column: next, span: columnCount - next });
-  return slots;
 };
 
 type CellText = { row: number; column: number; input: string };
@@ -882,7 +867,7 @@ export const TableGrid: React.FC<{
                               startEditing({ row: -1, column });
                             }}
                           >
-                            <span className="min-w-0 truncate">{name}</span>
+                            <span dir="auto" className="min-w-0 truncate">{name}</span>
                             {sorted ? <Icon name={sorted === 'ascending' ? 'arrow-up-s' : 'arrow-down-s'} className="size-3.5 shrink-0" /> : null}
                             {filtered ? <span className="size-1.5 shrink-0 rounded-full bg-[var(--primary-base)]" aria-hidden /> : null}
                           </button>
@@ -967,12 +952,11 @@ export const TableArtifact: React.FC<{
   React.useEffect(() => {
     // The draft is empty for a moment while the file loads; that is no table to compare with.
     if (table.columnCount === 0) return;
-    const cells = new Map(table.rows.flatMap((row, rowIndex) => row.map((value, column): [string, string] => [`${rowIndex}:${column}`, value])));
+    const unseen = traceTableRows(path, table.rows, ownChange.current);
     if (ownChange.current) {
       ownChange.current = false;
-      noteOwnEdit(path, cells);
     } else {
-      setChangedCells(traceChanges(path, cells));
+      setChangedCells(unseen);
     }
   }, [path, table]);
   // Two edits can land before the next render; each builds on the last.

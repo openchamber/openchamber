@@ -1,4 +1,4 @@
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import os from 'node:os';
@@ -7,6 +7,21 @@ import path from 'node:path';
 const DEFAULT_XDG_DATA_DIRS = ['/usr/local/share', '/usr/share'];
 const TARGET_FIELD_CODES = new Set(['f', 'F', 'u', 'U']);
 const TERMINAL_APP_IDS = new Set(['terminal', 'iterm2', 'ghostty']);
+// Terminals with a documented working-directory option, for desktop entries
+// whose Exec has no field code to put the directory in.
+const TERMINAL_DIRECTORY_FLAGS = new Map([
+  ['alacritty', '--working-directory='],
+  ['foot', '--working-directory='],
+  ['ghostty', '--working-directory='],
+  ['kitty', '--directory='],
+  ['ptyxis', '--working-directory='],
+  ['tilix', '--working-directory='],
+]);
+const DEFAULT_TERMINAL_PROBE_TIMEOUT_MS = 2000;
+const DEFAULT_TERMINAL_MAX_INSPECTED_BYTES = 1024 * 1024;
+// A candidate that exits non-zero within this window failed to open, so the
+// chain moves on. A terminal that is still running after it counts as opened.
+const LINUX_LAUNCH_SETTLE_MS = 1000;
 
 const LINUX_CLI_BY_APP_ID = {
   vscode: 'code',
@@ -50,6 +65,13 @@ const stripDesktopExecFieldCodes = (execValue) => String(execValue || '')
   .replace(/\^@/g, '%')
   .replace(/\s+/g, ' ')
   .trim();
+
+// %u/%U carry a URI, and buildCommandFromDesktopExec substitutes a plain path
+// there, so only a path field code puts the directory where a terminal takes it.
+const hasPathFieldCode = (execValue) => {
+  const value = String(execValue || '').replace(/%%/g, '');
+  return /%[fF]/.test(value);
+};
 
 export const linuxApplicationDirs = ({ env = process.env, homeDir = os.homedir() } = {}) => {
   const dataHome = typeof env.XDG_DATA_HOME === 'string' && env.XDG_DATA_HOME.trim()
@@ -205,7 +227,7 @@ const parseExecCommand = (exec) => {
   return args;
 };
 
-export const buildCommandFromDesktopExec = (entry, targetPath) => {
+export const buildCommandFromDesktopExec = (entry, targetPath, { appendTarget = true } = {}) => {
   const tokens = parseExecCommand(entry?.rawExec || entry?.exec || '');
   if (tokens.length === 0) return null;
   let targetInserted = false;
@@ -224,35 +246,109 @@ export const buildCommandFromDesktopExec = (entry, targetPath) => {
     rendered = rendered.trim();
     if (rendered) args.push(rendered);
   }
-  if (!targetInserted) args.push(targetPath);
+  if (appendTarget && !targetInserted) args.push(targetPath);
   return { program: tokens[0], args };
 };
 
-const commandExists = (program, env = process.env) => {
-  if (!program) return false;
-  if (program.includes(path.sep)) {
+const resolveCommandPath = (program, env = process.env) => {
+  if (!program) return null;
+  const candidates = program.includes(path.sep)
+    ? [program]
+    : String(env.PATH || '').split(':').filter(Boolean).map((dir) => path.join(dir, program));
+  for (const candidate of candidates) {
     try {
-      fs.accessSync(program, fs.constants.X_OK);
-      return true;
-    } catch {
-      return false;
-    }
-  }
-  for (const dir of String(env.PATH || '').split(':').filter(Boolean)) {
-    try {
-      fs.accessSync(path.join(dir, program), fs.constants.X_OK);
-      return true;
+      fs.accessSync(candidate, fs.constants.X_OK);
+      return candidate;
     } catch {
     }
   }
-  return false;
+  return null;
 };
+
+const commandExists = (program, env = process.env) => resolveCommandPath(program, env) !== null;
 
 const findEntry = (entries, appId, appName) => entries.find((entry) => desktopEntryMatchesApp(entry, appName, appId)) || null;
 
 const isTerminalEmulatorEntry = (entry) => {
   const categories = Array.isArray(entry?.categories) ? entry.categories : [];
   return categories.some((category) => normalizeComparable(category) === 'terminalemulator');
+};
+
+const terminalDirectoryFlag = (entry) => {
+  const exec = String(entry?.rawExec || entry?.exec || '').replace(/%%/g, '');
+  if (/%[fFuU]/.test(exec)) return null;
+  return TERMINAL_DIRECTORY_FLAGS.get(path.basename(parseExecCommand(exec)[0] || '')) || null;
+};
+
+// A terminal emulator runs a positional argument as the command to execute, so
+// a terminal entry only receives the directory through a path field code or an
+// option known to take it.
+const isLaunchableTerminalEmulatorEntry = (entry) => (
+  isTerminalEmulatorEntry(entry)
+  && (hasPathFieldCode(entry.rawExec || entry.exec) || terminalDirectoryFlag(entry) !== null)
+);
+
+const buildTerminalEntrySpec = (entry, directory) => {
+  const spec = buildCommandFromDesktopExec(entry, directory, { appendTarget: false });
+  const flag = terminalDirectoryFlag(entry);
+  return spec && flag ? { ...spec, args: [`${flag}${directory}`, ...spec.args] } : spec;
+};
+
+const readExecutableContents = async (filePath) => {
+  let handle = null;
+  try {
+    handle = await fsp.open(filePath, 'r');
+    const { buffer, bytesRead } = await handle.read(Buffer.alloc(DEFAULT_TERMINAL_MAX_INSPECTED_BYTES), 0, DEFAULT_TERMINAL_MAX_INSPECTED_BYTES, 0);
+    return buffer.subarray(0, bytesRead);
+  } catch {
+    return null;
+  } finally {
+    await handle?.close().catch(() => {});
+  }
+};
+
+const queryDefaultTerminalSelection = (env) => new Promise((resolve) => {
+  const child = spawn('xdg-terminal-exec', ['--print-id'], { env, stdio: 'ignore', detached: true });
+  const timer = setTimeout(() => {
+    try {
+      process.kill(-child.pid, 'SIGKILL');
+    } catch {
+    }
+    resolve(false);
+  }, DEFAULT_TERMINAL_PROBE_TIMEOUT_MS);
+  const finish = (selected) => {
+    clearTimeout(timer);
+    resolve(selected);
+  };
+  child.once('error', () => finish(false));
+  child.once('exit', (code) => finish(code === 0));
+});
+
+// A packaged launcher can forward to the implementation: Nix installs a compiled
+// wrapper that holds the implementation's absolute path as a string. Those paths
+// are only read here, so the launcher still runs nothing it would not run itself.
+const readDefaultTerminalImplementation = async (env) => {
+  const launcher = await readExecutableContents(resolveCommandPath('xdg-terminal-exec', env));
+  if (!launcher || launcher.includes('--dir=')) return launcher;
+  const forwardedPaths = (launcher.toString('latin1').match(/\/[\w.+@/-]+/g) ?? [])
+    .filter((candidate) => path.basename(candidate).includes('xdg-terminal-exec'));
+  for (const candidate of new Set(forwardedPaths)) {
+    const contents = await readExecutableContents(candidate);
+    if (contents?.includes('--dir=')) return contents;
+  }
+  return null;
+};
+
+// Reference versions up to 0.12 have neither --print-id nor --help: they drop
+// unknown options and open the terminal, so asking a binary what it supports can
+// itself open a window. Its own file answers that without running it. A version
+// with --dir= but no --print-id stays a candidate, because it exits at once when
+// it finds no terminal and the chain then moves on.
+const canUseDefaultTerminal = async (env) => {
+  const contents = await readDefaultTerminalImplementation(env);
+  if (!contents?.includes('--dir=')) return false;
+  if (!contents.includes('--print-id')) return true;
+  return queryDefaultTerminalSelection(env);
 };
 
 export const buildLinuxOpenSpecs = ({ targetPath, appId, appName, targetKind = 'path', entries = [], env = process.env }) => {
@@ -262,14 +358,25 @@ export const buildLinuxOpenSpecs = ({ targetPath, appId, appName, targetKind = '
   const specs = [];
   if (TERMINAL_APP_IDS.has(appId)) {
     const directory = targetKind === 'file' ? path.dirname(targetPath) : targetPath;
+    // Its reference implementation parses only --dir=<path>; the spaced form and
+    // unknown options are ignored, and the path then falls through as the
+    // positional command to execute. `ready` runs when the chain reaches this
+    // spec, so an explicit app that opens never touches the binary.
+    const defaultTerminalSpec = commandExists('xdg-terminal-exec', env)
+      ? { program: 'xdg-terminal-exec', args: [`--dir=${directory}`], ready: () => canUseDefaultTerminal(env) }
+      : null;
+    // It launches the terminal the user configured as their default, so it is
+    // the first choice for the generic "terminal" id; an explicit id keeps its
+    // own entry first.
+    if (appId === 'terminal' && defaultTerminalSpec) specs.push(defaultTerminalSpec);
     const terminalEntry = appId === 'terminal'
-      ? entries.find(isTerminalEmulatorEntry) || null
+      ? entries.find(isLaunchableTerminalEmulatorEntry) || null
       : findEntry(entries, appId, appName);
     if (terminalEntry) {
-      const spec = buildCommandFromDesktopExec(terminalEntry, directory);
+      const spec = buildTerminalEntrySpec(terminalEntry, directory);
       if (spec) specs.push(spec);
     }
-    specs.push({ program: 'xdg-terminal-exec', args: ['--working-directory', directory] });
+    if (appId !== 'terminal' && defaultTerminalSpec) specs.push(defaultTerminalSpec);
     if (commandExists('gnome-terminal', env)) {
       specs.push({ program: 'gnome-terminal', args: [`--working-directory=${directory}`] });
     }
@@ -282,7 +389,18 @@ export const buildLinuxOpenSpecs = ({ targetPath, appId, appName, targetKind = '
     if (commandExists('x-terminal-emulator', env)) {
       specs.push({ program: 'x-terminal-emulator', args: [] });
     }
-    return specs;
+    if (appId === 'terminal' && !terminalEntry) {
+      // Nothing above took the directory, so this entry gets it only through the
+      // working directory it inherits.
+      const anyTerminalEntry = entries.find(isTerminalEmulatorEntry);
+      const spec = anyTerminalEntry
+        ? buildCommandFromDesktopExec(anyTerminalEntry, directory, { appendTarget: false })
+        : null;
+      if (spec) specs.push(spec);
+    }
+    // The inherited working directory reaches every terminal that starts its own
+    // process, which covers candidates with no option for it.
+    return specs.map((spec) => ({ ...spec, cwd: directory }));
   }
   const cli = LINUX_CLI_BY_APP_ID[appId];
   if (cli && commandExists(cli, env)) {
@@ -294,6 +412,65 @@ export const buildLinuxOpenSpecs = ({ targetPath, appId, appName, targetKind = '
     if (spec) specs.push(spec);
   }
   return specs;
+};
+
+const spawnDetachedLinux = (spec, env) => new Promise((resolve, reject) => {
+  const child = spawn(spec.program, spec.args, {
+    detached: true,
+    stdio: 'ignore',
+    env,
+    cwd: spec.cwd,
+  });
+  let settled = false;
+  let settleTimer = null;
+  const finish = (callback, value) => {
+    if (settled) return;
+    settled = true;
+    clearTimeout(settleTimer);
+    child.unref();
+    callback(value);
+  };
+  child.once('error', (error) => finish(reject, error));
+  child.once('spawn', () => {
+    settleTimer = setTimeout(() => finish(resolve), LINUX_LAUNCH_SETTLE_MS);
+  });
+  child.once('exit', (code, signal) => {
+    if (code === 0) finish(resolve);
+    else finish(reject, new Error(`exited with ${signal || `code ${code}`}`));
+  });
+});
+
+export const runLinuxSpecChain = async (specs, appName, { shell, env = process.env }) => {
+  if (!Array.isArray(specs) || specs.length === 0) {
+    throw new Error(`Failed to open in ${appName}: no launch candidates`);
+  }
+
+  const failures = [];
+  for (const spec of specs) {
+    if (spec.kind === 'default') {
+      if (spec.targetKind === 'file') {
+        shell.showItemInFolder(spec.targetPath);
+        return;
+      }
+      const errorMessage = await shell.openPath(spec.targetPath);
+      if (!errorMessage) return;
+      failures.push(`default opener: ${errorMessage}`);
+      continue;
+    }
+
+    if (spec.ready && !await spec.ready()) {
+      failures.push(`${spec.program}: not usable`);
+      continue;
+    }
+
+    try {
+      await spawnDetachedLinux(spec, env);
+      return;
+    } catch (error) {
+      failures.push(`${spec.program}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  throw new Error(`Failed to open in ${appName}: ${failures.join('; ')}`);
 };
 
 export const filterLinuxInstalledApps = async (apps, options = {}) => {

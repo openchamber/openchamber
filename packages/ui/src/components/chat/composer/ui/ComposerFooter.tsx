@@ -85,6 +85,9 @@ interface ComposerFooterProps {
     escapeStops?: boolean;
     modelSessionId?: string | null;
     btwSelection: BtwSelection;
+    /** Whether the BTW model picker is open; the model shortcut toggles it. */
+    btwModelSelectorOpen?: boolean;
+    onBtwModelSelectorOpenChange?: (open: boolean) => void;
     /** A pinned column's own model, agent and effort (see pinnedComposerSelection.ts). */
     pinnedSelection?: BtwSelection | null;
     /** Offers "Run on several models" in the model picker (desktop). */
@@ -154,6 +157,8 @@ function ComposerFooterView(props: ComposerFooterProps) {
         escapeStops = false,
         modelSessionId,
         btwSelection,
+        btwModelSelectorOpen,
+        onBtwModelSelectorOpenChange,
         pinnedSelection = null,
         onRunInParallel,
         parallelRun = null,
@@ -290,7 +295,7 @@ function ComposerFooterView(props: ComposerFooterProps) {
                     </div>
                     <div className={cn('flex items-center flex-1 justify-end', footerGapClass, 'md:gap-x-3')} data-dictation-chain="true">
                         {waitingForOpenCode ? <OpenCodeStartupNote className="flex-shrink-0" /> : null}
-                        {parallelRun ? <MemoModelControls className="flex-1 min-w-0" agentOnly /> : isBtw ? <ModelControls className="flex-1 min-w-0 justify-end" sessionId={modelSessionId ?? null} selection={btwSelection} rememberVariantPicks={false} /> : pinnedSelection ? <ModelControls className="flex-1 min-w-0 justify-end" sessionId={currentSessionId} selection={pinnedSelection} agentSelectable rememberVariantPicks /> : <MemoModelControls className={cn('flex-1 min-w-0 justify-end')} onRunInParallel={onRunInParallel} />}
+                        {parallelRun ? <MemoModelControls className="flex-1 min-w-0" agentOnly /> : isBtw ? <ModelControls className="flex-1 min-w-0 justify-end" sessionId={modelSessionId ?? null} selection={btwSelection} rememberVariantPicks={false} modelSelectorOpen={btwModelSelectorOpen} onModelSelectorOpenChange={onBtwModelSelectorOpenChange} /> : pinnedSelection ? <ModelControls className="flex-1 min-w-0 justify-end" sessionId={currentSessionId} selection={pinnedSelection} rememberVariantPicks /> : <MemoModelControls className={cn('flex-1 min-w-0 justify-end')} onRunInParallel={onRunInParallel} />}
                         {!isBtw ? <MemoComposerDictation
                             radius={chatInputRadius}
                             isMobile={isMobile}

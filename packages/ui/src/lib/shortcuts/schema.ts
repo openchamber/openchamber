@@ -2,6 +2,7 @@ import { isDesktopShell } from '@/lib/desktop';
 import { isMacOS } from '@/lib/utils';
 import {
   getShortcutConflict,
+  heldSequenceChord,
   isValidShortcutCombo,
   normalizeCombo,
   parseShortcut,
@@ -92,6 +93,38 @@ export function getEffectiveShortcutPrefix(
   return action.defaultBinding;
 }
 
+/** What an action is bound to: a prefix-style action's bare prefix, otherwise its combo. */
+export function getEffectiveShortcutBinding(
+  action: ShortcutAction,
+  overrides?: Record<string, ShortcutCombo>,
+): ShortcutCombo {
+  return 'prefixStyle' in action && action.prefixStyle
+    ? getEffectiveShortcutPrefix(action.id, overrides)
+    : getEffectiveShortcutCombo(action.id, overrides);
+}
+
+/**
+ * Whether the recorded normalized combo fires this action. A sequence also
+ * answers to its second key with the leader's modifiers held, as in dispatch.
+ * A digit prefix has no chord of its own, so its action answers to the prefix
+ * plus a digit it accepts: session tabs start at 1, and context surfaces take
+ * 0 as the tenth.
+ */
+export function shortcutMatchesRecordedCombo(
+  action: ShortcutAction,
+  recorded: ShortcutCombo,
+  overrides?: Record<string, ShortcutCombo>,
+): boolean {
+  const binding = normalizeCombo(getEffectiveShortcutBinding(action, overrides));
+  if (binding === recorded) return true;
+  const [leader, secondChord] = binding.split(' ');
+  if (secondChord) return recorded === `${leader} ${heldSequenceChord(leader, secondChord)}`;
+  if (!('prefixStyle' in action && action.prefixStyle)) return false;
+  const digitChord = /^(.+)\+(\d)$/.exec(recorded);
+  if (digitChord?.[1] !== binding) return false;
+  return action.id !== 'switch_session_tab' || digitChord[2] !== '0';
+}
+
 export function getShortcutBindingConflicts(
   actionId: ShortcutActionId,
   combo: ShortcutCombo,
@@ -102,10 +135,7 @@ export function getShortcutBindingConflicts(
   if (!action) return conflicts;
   for (const candidate of SHORTCUT_SCHEMA) {
     if (candidate.id === actionId || !isShortcutAvailable(candidate)) continue;
-    const candidateCombo = ('prefixStyle' in candidate && candidate.prefixStyle)
-      ? getEffectiveShortcutPrefix(candidate.id, overrides)
-      : getEffectiveShortcutCombo(candidate.id, overrides);
-    const kind = getShortcutConflict(combo, candidateCombo);
+    const kind = getShortcutConflict(combo, getEffectiveShortcutBinding(candidate, overrides));
     if (!kind) continue;
     conflicts.push({ action: candidate, kind });
   }

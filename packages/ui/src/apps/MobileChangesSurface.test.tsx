@@ -146,7 +146,7 @@ test('mobile comparisons drill into files, retry, resume, change source, and yie
   const render = () => act(async () => {
     root.render(<SyncProvider sdk={SYNC_SDK} directory={directory}><I18nProvider><RuntimeAPIContext.Provider value={apis}>
       <MobileChangesPane rootDirectory={directory}
-        repository={{ rootIsGitRepo: true, gitDirectory: directory, nestedRepos: null, nestedRepoSelection: null, repositoryOptions: null, repositoriesKnown: true }}
+        repository={{ rootIsGitRepo: true, gitDirectory: directory, nestedRepos: null, nestedRepoSelection: null, repositoryOptions: null, repositoriesKnown: true, unreadable: null }}
         visible={visible} initialDiff={initialDiff} />
     </RuntimeAPIContext.Provider></I18nProvider></SyncProvider>);
   });
@@ -262,7 +262,7 @@ test('mobile comparisons drill into files, retry, resume, change source, and yie
     nestedIsRepository = false;
     initialDiff = { path: 'nested/', staged: false };
     await render();
-    expect(container.querySelector('h2')?.textContent).toBe('nested/');
+    expect(container.querySelector('h2')?.textContent).toBe('nested');
     expect(container.textContent).not.toContain('Separate Git repository');
     expect(container.textContent).toContain('Content of this file cannot be viewed.');
     await click('[aria-label="Back"]');
@@ -382,7 +382,7 @@ test('bounds Revert All fan-out to two in-flight revert requests', async () => {
     await act(async () => {
       root.render(<SyncProvider sdk={SYNC_SDK} directory="/repo"><I18nProvider><RuntimeAPIContext.Provider value={apis}>
         <MobileChangesPane rootDirectory="/repo"
-          repository={{ rootIsGitRepo: true, gitDirectory: '/repo', nestedRepos: null, nestedRepoSelection: null, repositoryOptions: null, repositoriesKnown: true }}
+          repository={{ rootIsGitRepo: true, gitDirectory: '/repo', nestedRepos: null, nestedRepoSelection: null, repositoryOptions: null, repositoriesKnown: true, unreadable: null }}
           visible />
       </RuntimeAPIContext.Provider></I18nProvider></SyncProvider>);
     });
@@ -516,7 +516,7 @@ test('mobile changes last turn scope lists the turn diffs, opens one, and shows 
   const renderPane = (initialDiff: { path: string; staged: boolean; scope?: 'turn' } | null) => act(async () => {
     root.render(<SyncProvider sdk={SYNC_SDK} directory="/repo"><I18nProvider><RuntimeAPIContext.Provider value={apis}>
       <MobileChangesPane rootDirectory="/repo"
-        repository={{ rootIsGitRepo: true, gitDirectory: '/repo', nestedRepos: null, nestedRepoSelection: null, repositoryOptions: null, repositoriesKnown: true }}
+        repository={{ rootIsGitRepo: true, gitDirectory: '/repo', nestedRepos: null, nestedRepoSelection: null, repositoryOptions: null, repositoriesKnown: true, unreadable: null }}
         visible initialDiff={initialDiff} />
     </RuntimeAPIContext.Provider></I18nProvider></SyncProvider>);
   });
@@ -532,11 +532,11 @@ test('mobile changes last turn scope lists the turn diffs, opens one, and shows 
     const added = container.querySelector('[title="src/added.ts"]')?.closest('button');
     const modified = container.querySelector('[title="src/modified.ts"]')?.closest('button');
     expect(added?.textContent).toContain('A');
-    expect(added?.textContent).toContain('+1 -0');
+    expect(added?.textContent).toContain('+1');
     expect(modified?.textContent).toContain('M');
     expect(modified?.textContent).toContain('+1 -1');
     await openFile('src/added.ts');
-    expect(container.querySelector('h2')?.textContent).toBe('src/added.ts');
+    expect(container.querySelector('h2')?.textContent).toBe('added.ts');
     expect(container.textContent).toContain('Last turn');
     expect(container.textContent).toContain('Content of this file cannot be viewed.');
     await click('[aria-label="Back"]');
@@ -562,14 +562,14 @@ test('mobile changes last turn scope lists the turn diffs, opens one, and shows 
     expect(container.querySelector('[title="src/retried.ts"]')).not.toBeNull();
     // A chip's file opens from Last turn when the turn has it.
     await renderPane({ path: '/repo/src/retried.ts', staged: false, scope: 'turn' });
-    expect(container.querySelector('h2')?.textContent).toBe('src/retried.ts');
+    expect(container.querySelector('h2')?.textContent).toBe('retried.ts');
     expect(container.textContent).toContain('Last turn');
     // Without it the same request lands on Changes, on that file.
     await renderPane({ path: '/repo/src/working.png', staged: false, scope: 'turn' });
-    for (let tick = 0; tick < 20 && container.querySelector('h2')?.textContent !== 'src/working.png'; tick += 1) {
+    for (let tick = 0; tick < 20 && container.querySelector('h2')?.textContent !== 'working.png'; tick += 1) {
       await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
     }
-    expect(container.querySelector('h2')?.textContent).toBe('src/working.png');
+    expect(container.querySelector('h2')?.textContent).toBe('working.png');
     expect(container.textContent).not.toContain('Last turn');
     await click('[aria-label="Back"]');
     expect(container.querySelector('[aria-label="Select change mode"]')?.textContent).toBe('Changes');
@@ -666,7 +666,7 @@ test('mobile changes last turn scope paints loading before the turn fetch settle
     await act(async () => {
       root.render(<SyncProvider sdk={SYNC_SDK} directory="/repo"><I18nProvider><RuntimeAPIContext.Provider value={apis}>
         <MobileChangesPane rootDirectory="/repo"
-          repository={{ rootIsGitRepo: true, gitDirectory: '/repo', nestedRepos: null, nestedRepoSelection: null, repositoryOptions: null, repositoriesKnown: true }}
+          repository={{ rootIsGitRepo: true, gitDirectory: '/repo', nestedRepos: null, nestedRepoSelection: null, repositoryOptions: null, repositoriesKnown: true, unreadable: null }}
           visible />
       </RuntimeAPIContext.Provider></I18nProvider></SyncProvider>);
     });
@@ -777,9 +777,9 @@ test('keeps the nested repository picker reachable once the working list resolve
       await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
     }
   };
-  const render = (rootDirectory: string, repository: { rootIsGitRepo: boolean; gitDirectory: string; nestedRepos: string[] | null; nestedRepoSelection: string | null; repositoryOptions: string[] | null; repositoriesKnown: boolean }) => act(async () => {
+  const render = (rootDirectory: string, repository: { rootIsGitRepo: boolean; gitDirectory: string; nestedRepos: string[] | null; nestedRepoSelection: string | null; repositoryOptions: string[] | null; repositoriesKnown: boolean; unreadable?: null }) => act(async () => {
     root.render(<SyncProvider sdk={SYNC_SDK} directory={rootDirectory}><I18nProvider><RuntimeAPIContext.Provider value={apis}>
-      <MobileChangesPane rootDirectory={rootDirectory} repository={repository} visible />
+      <MobileChangesPane rootDirectory={rootDirectory} repository={{ unreadable: null, ...repository }} visible />
     </RuntimeAPIContext.Provider></I18nProvider></SyncProvider>);
   });
   try {
@@ -802,7 +802,7 @@ test('keeps the nested repository picker reachable once the working list resolve
     if (!picker?.textContent?.includes('sub')) throw new Error('Picker does not show the selected nested repository');
 
     // A root repository with nothing nested keeps the picker hidden.
-    await render('/repo', { rootIsGitRepo: true, gitDirectory: '/repo', nestedRepos: null, nestedRepoSelection: null, repositoryOptions: null, repositoriesKnown: true });
+    await render('/repo', { rootIsGitRepo: true, gitDirectory: '/repo', nestedRepos: null, nestedRepoSelection: null, repositoryOptions: null, repositoriesKnown: true, unreadable: null });
     await settle(() => !container.querySelector('[aria-label="Select a repository..."]'));
     if (container.querySelector('[aria-label="Select a repository..."]')) throw new Error('Picker should stay hidden without nested repositories');
   } finally {

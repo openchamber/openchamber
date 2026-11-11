@@ -52,6 +52,7 @@ export function rehypeMarkdownPolicy({ isVSCode }: { isVSCode: boolean }) {
             || ['id', 'ariaDescribedBy', 'ariaLabel', 'dataFootnoteRef', 'dataFootnoteBackref', 'dataFootnotes'].includes(key)
             || (key === 'dataOcAlert' && node.tagName === 'blockquote')
             || (key === 'dataOcReference' && node.tagName === 'a')
+            || (key === 'dataOcGuestLink' && node.tagName === 'a')
           );
           if (!allowedAttributes.has(key) && !generated) delete node.properties[key];
         }

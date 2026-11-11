@@ -892,7 +892,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible, directory, 
         const selection = terminalControllerRef.current?.getSelection();
         const target = readComposerDraftTarget(contextDirectory);
         if (!selection || !target || !activeTab) return;
-        addContextDraft(target, {
+        const draftId = addContextDraft(target, {
             source: 'terminal',
             fileLabel: activeTab.label,
             startLine: selection.startLine,
@@ -902,8 +902,12 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible, directory, 
             terminalId: activeTab.terminalSessionId ?? activeTab.id,
             text: '',
         });
+        if (!draftId && selection.text.trim()) {
+            toast.error(t('inlineComment.toast.noRoom'));
+            return;
+        }
         queueMicrotask(focusChatInput);
-    }, [activeTab, addContextDraft, contextDirectory]);
+    }, [activeTab, addContextDraft, contextDirectory, t]);
 
     // Touch hosts have no keyboard shortcut for copy, so the toolbar offers the
     // same action the desktop gets from Cmd/Ctrl+C on a selection.

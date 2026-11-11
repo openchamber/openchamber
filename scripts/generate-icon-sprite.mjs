@@ -23,7 +23,23 @@ const outPath = resolve(repoRoot, "packages/ui/src/components/icon/sprite.ts")
 const customIconData = new Map([
   ...openInAppGlyphs,
   // The OpenChamber glyph from scripts/brand, scaled from its 32 grid to 24.
-  ["openchamber", `<g transform="scale(0.75)">${glyphInner()}</g>`],
+  // Its brand stroke turns hairline at row size next to Remixicon's 2px
+  // lines, so the sprite draws it heavier.
+  ["openchamber", `<g transform="scale(0.75)">${glyphInner({ stroke: 2.1 })}</g>`],
+  // OpenCode's mark (packages/identity/mark.svg in the OpenCode repository):
+  // a 4:5 frame with the lower half of its opening filled, drawn as a 2px line
+  // to sit beside Remixicon's line glyphs.
+  [
+    "opencode",
+    `<path fill="none" stroke="currentColor" stroke-width="2" d="M6 4.5h12v15H6Z"/><path fill="currentColor" d="M9 10.5h6v6H9Z"/>`,
+  ],
+  // Worktree: Remixicon has none. Its folder with the bottom-right corner cut
+  // away for an emblem, as `folder-shared` does, holding a three-node branch
+  // in 2px lines like `git-branch`.
+  [
+    "worktree",
+    `<path fill="currentColor" d="M22 11H20V7H11.5858L9.58579 5H4V19H11V21H3C2.44772 21 2 20.5523 2 20V4C2 3.44772 2.44772 3 3 3H10.4142L12.4142 5H21C21.5523 5 22 5.44772 22 6V11Z"/><path fill="none" stroke="currentColor" stroke-width="2" d="M15.5 14V21M21 14V14.5C21 16.4 19.9 17.5 18 17.5H17.5C16.4 17.5 15.5 18.4 15.5 19.5"/><circle fill="currentColor" cx="15.5" cy="14" r="2"/><circle fill="currentColor" cx="21" cy="14" r="2"/><circle fill="currentColor" cx="15.5" cy="21" r="2"/>`,
+  ],
   // Command Code — corner squares + center square (official logo geometry).
   [
     "command-code",

@@ -89,3 +89,11 @@ export function getShownPages(messages: readonly ChatMessageEntry[], finalMessag
     }
     return shown;
 }
+
+/** The message row that currently draws a hoisted UI page. */
+export function uiPageMessageId(turn: TurnRecord | undefined, expanded: boolean, messageId: string, partId: string): string {
+    const final = turn ? getLiveFinalMessage(turn.assistantMessages) : undefined;
+    return !expanded && turn && final && getShownPages(turn.assistantMessages, final).some((part) => part.id === partId && part.messageID === messageId)
+        ? final.info.id
+        : messageId;
+}

@@ -46,7 +46,7 @@ export function SelectionApprovalButton({ mobile, getSelection, onSuccess }: Sel
       },
     );
     if (!draftId) {
-      toast.error(t('chat.textSelection.comment.attachFailed'));
+      toast.error(t('inlineComment.toast.noRoom'));
       return;
     }
     onSuccess();

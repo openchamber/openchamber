@@ -5,6 +5,7 @@ import { fetchLastAssistantMessageText } from './notificationMessage';
 import { findMessagePageItem } from '@openchamber/ui/lib/opencode/messagePaging';
 import { BridgeRequestError, onCommand, onThemeChange, postBridgeNotification, proxyApiRequest, proxySessionMessageRequest, sendBridgeMessage, sendBridgeMessageWithOptions, startSseProxy, stopSseProxy } from './api/bridge';
 import { vscodeStreamPerfCount, vscodeStreamPerfMeasure, vscodeStreamPerfObserve } from './api/streamPerf';
+import { quotaGiftResetBridgePayload } from './quotaGiftResetRequest';
 import { extractBodyBase64, extractBodyText, extractJsonBody, hasInitBody } from './requestBodyTransport';
 import type { RuntimeAPIs } from '@openchamber/ui/lib/api/types';
 import { opencodeClient } from '@openchamber/ui/lib/opencode/client';
@@ -371,7 +372,11 @@ const pluginConfigErrorStatus = (message: string): number => {
 // extension refused comes back as 400 with its code, so the dialog can say so
 // under the field.
 const pluginEntryErrorResponse = (message: string, code: string | undefined): Response => {
-  const status = code === 'UNLOADABLE_SPEC' ? 400 : pluginConfigErrorStatus(message);
+  const status = code === 'UNLOADABLE_SPEC'
+    ? 400
+    : code === 'SWITCH_UNAVAILABLE' || code === 'SWITCH_OVERRIDDEN'
+      ? 409
+      : pluginConfigErrorStatus(message);
   return jsonResponse({ error: message, code }, status);
 };
 
@@ -1092,6 +1097,26 @@ const handleLocalApiRequest = async (input: RequestInfo | URL, url: URL, init: R
     }
   }
 
+  const pluginEntryEnabledMatch = pathname.match(/^\/api\/config\/plugins\/entry\/([^/]+)\/enabled$/);
+  if (pluginEntryEnabledMatch && method === 'PUT') {
+    try {
+      const body = await extractJsonBody(input, init, method);
+      const directory = getRequestDirectoryHint(url, input, init);
+      const data = await sendBridgeMessage('api:config/plugins', {
+        method,
+        target: 'entry',
+        action: 'enabled',
+        pluginId: decodeURIComponent(pluginEntryEnabledMatch[1]),
+        body,
+        directory,
+      });
+      return jsonResponse(data);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return pluginEntryErrorResponse(message, error instanceof BridgeRequestError ? error.code : undefined);
+    }
+  }
+
   if (pathname === '/api/config/plugins/entry' && method === 'POST') {
     try {
       const body = await extractJsonBody(input, init, method);
@@ -1113,6 +1138,26 @@ const handleLocalApiRequest = async (input: RequestInfo | URL, url: URL, init: R
         method,
         target: 'entry',
         pluginId: decodeURIComponent(pluginEntryMatch[1]),
+        body,
+        directory,
+      });
+      return jsonResponse(data);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return pluginEntryErrorResponse(message, error instanceof BridgeRequestError ? error.code : undefined);
+    }
+  }
+
+  const pluginFileEnabledMatch = pathname.match(/^\/api\/config\/plugins\/file\/([^/]+)\/enabled$/);
+  if (pluginFileEnabledMatch && method === 'PUT') {
+    try {
+      const body = await extractJsonBody(input, init, method);
+      const directory = getRequestDirectoryHint(url, input, init);
+      const data = await sendBridgeMessage('api:config/plugins', {
+        method,
+        target: 'file',
+        action: 'enabled',
+        pluginId: decodeURIComponent(pluginFileEnabledMatch[1]),
         body,
         directory,
       });
@@ -1294,11 +1339,7 @@ const handleLocalApiRequest = async (input: RequestInfo | URL, url: URL, init: R
     const providerId = decodeURIComponent(quotaGiftResetMatch[1]);
     try {
       const body = await extractJsonBody(input, init, method);
-      const data = await sendBridgeMessage('api:quota:giftReset:use', {
-        providerId,
-        recordId: body.recordId,
-        resetType: body.resetType,
-      });
+      const data = await sendBridgeMessage('api:quota:giftReset:use', quotaGiftResetBridgePayload(providerId, body));
       return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -1630,6 +1671,7 @@ onCommand('addLineComment', (payload) => {
       return;
     }
 
+    // VS Code has already emptied the comment field, so a refusal would lose the text.
     useInlineCommentDraftStore.getState().addDraft(target, {
       id: draftId,
       source,
@@ -1640,7 +1682,7 @@ onCommand('addLineComment', (payload) => {
       code,
       language,
       text: comment,
-    });
+    }, { written: true });
   });
 });
 

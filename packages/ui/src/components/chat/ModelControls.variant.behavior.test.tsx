@@ -1116,7 +1116,7 @@ describe('ModelControls effort restore', () => {
         expect(overrideWrites).toEqual([]);
         expect(variantWrites).toEqual([]);
         expect(saveModel.mock.calls).toEqual([]);
-        expect(dom.container.querySelector('.model-controls__agent-label')).toBeNull();
+        expect(dom.container.querySelector('.model-controls__agent-label')?.textContent).toBe('Plan');
         expect(dom.container.querySelector('.model-controls__variant-label')?.textContent?.trim()).toBe(variantLabel);
         if (!isMobile) {
           expect(dom.container.querySelector('.model-controls__model-trigger')?.closest('[data-menu-open]')?.getAttribute('data-menu-open')).toBe('false');
@@ -1150,6 +1150,66 @@ describe('ModelControls effort restore', () => {
       }
     });
   }
+
+  // The BTW composer offers the agent picker, so a side question can start on
+  // another agent without collapsing the panel first (#6333).
+  for (const isMobile of [false, true]) {
+    test(`a controlled agent pick stays on its own session (mobile: ${isMobile})`, async () => {
+      const btwSessionId = 'btw-pending:ses_restore';
+      useUIStore.setState({ isMobile });
+      useConfigStore.setState({ agents: [agent, planAgent] });
+      const { dom, cleanup } = await renderModelControls({
+        sessionId: btwSessionId,
+        selection: { model: { providerId: PROVIDER_ID, modelId: MODEL_ID }, agent: AGENT, variant: 'low' },
+        rememberVariantPicks: false,
+      });
+      const buttonsReading = (label: string) => Array
+        .from(dom.container.querySelectorAll<HTMLButtonElement>('button'))
+        .filter((button) => button.textContent?.trim() === label);
+      try {
+        expect(dom.container.querySelector('.model-controls__agent-label')?.textContent).toBe('Build');
+        // Mobile reaches the agents through the bottom sheet the chip opens.
+        if (isMobile) {
+          expect(buttonsReading('Plan')).toHaveLength(0);
+          await act(async () => dom.container.querySelector<HTMLButtonElement>('.model-controls__agent-trigger')?.click());
+        }
+        expect(buttonsReading('Plan')).toHaveLength(1);
+        await act(async () => buttonsReading('Plan')[0]?.click());
+
+        expect(useSelectionStore.getState().sessionAgentSelections.get(btwSessionId)).toBe('plan');
+        // The picked agent is the fork's alone: the main chat keeps its own.
+        expect(useSelectionStore.getState().sessionAgentSelections.get(SESSION_ID)).toBe(AGENT);
+        expect(useConfigStore.getState().currentAgentName).toBe(AGENT);
+        // Effort is remembered per agent, so the level the composer carries
+        // follows the pick instead of falling back to the model's own.
+        expect(variantWrites).toEqual(['low']);
+        // The sheet answers the pick by closing.
+        if (isMobile) expect(buttonsReading('Plan')).toHaveLength(0);
+      } finally {
+        await cleanup();
+      }
+    });
+  }
+
+  test('a controlled agent pick leaves an unchosen effort unchosen', async () => {
+    const btwSessionId = 'btw-pending:ses_restore';
+    useConfigStore.setState({ agents: [agent, planAgent] });
+    const { dom, cleanup } = await renderModelControls({
+      sessionId: btwSessionId,
+      selection: { model: { providerId: PROVIDER_ID, modelId: MODEL_ID }, agent: AGENT, variant: undefined },
+      rememberVariantPicks: false,
+    });
+    try {
+      const planRow = Array.from(dom.container.querySelectorAll<HTMLButtonElement>('button'))
+        .find((button) => button.textContent?.trim() === 'Plan');
+      await act(async () => planRow?.click());
+      expect(useSelectionStore.getState().sessionAgentSelections.get(btwSessionId)).toBe('plan');
+      // Nothing was chosen, so the new agent inherits instead of latching Default.
+      expect(variantWrites).toEqual([]);
+    } finally {
+      await cleanup();
+    }
+  });
 
   for (const isMobile of [false, true]) {
     test(`reselecting the controlled model preserves Default (mobile: ${isMobile})`, async () => {
@@ -1515,6 +1575,7 @@ describe('ModelControls in a pinned column', () => {
     catalogLoads.length = 0;
     knownElsewhere = nothingKnownElsewhere();
     setSessionRecord(undefined);
+    useSelectionStore.setState({ savedVariant: undefined, sessionAgentSelections: new Map() });
     useUIStore.setState({ isMobile: false, isModelSelectorOpen: false, lastUsedEfforts: {} });
     useConfigStore.setState({ providers: [provider], agents: [agent], providersLoaded: true, agentsLoaded: true });
     folderCatalogs = new Map([[PINNED_FOLDER, { providers: [pinnedProvider], agents: [agent, stockAgent], loaded: true }]]);
@@ -1523,7 +1584,7 @@ describe('ModelControls in a pinned column', () => {
   // The main chat's folder lacks `stock` and the pinned model; the pinned
   // chat's folder has both, and its picker lists that folder's catalog (#5522).
   test('lists the agents and models of its own session folder', async () => {
-    const { dom, cleanup } = await renderModelControls({ selection: pinnedSelection, sessionId: 'ses_pinned', agentSelectable: true }, column);
+    const { dom, cleanup } = await renderModelControls({ selection: pinnedSelection, sessionId: 'ses_pinned' }, column);
     try {
       expect(dom.container.textContent).toContain('Stock');
       expect(dom.container.querySelector('.model-controls__model-trigger')?.textContent).toContain('Pinned Model');
@@ -1535,7 +1596,7 @@ describe('ModelControls in a pinned column', () => {
 
   test('is ready when its own folder is, whatever the main folder does', async () => {
     useConfigStore.setState({ providers: [], agents: [], providersLoaded: false, agentsLoaded: false });
-    const { dom, cleanup } = await renderModelControls({ selection: pinnedSelection, sessionId: 'ses_pinned', agentSelectable: true }, column);
+    const { dom, cleanup } = await renderModelControls({ selection: pinnedSelection, sessionId: 'ses_pinned' }, column);
     try {
       expect(dom.container.querySelector('.model-controls__model-trigger')?.textContent).toContain('Pinned Model');
       expect(dom.container.textContent).toContain('Stock');
@@ -1552,7 +1613,6 @@ describe('ModelControls in a pinned column', () => {
     const { dom, cleanup } = await renderModelControls({
       selection: { agent: AGENT, model: { providerId: PROVIDER_ID, modelId: MODEL_ID }, variant: undefined },
       sessionId: 'ses_pinned',
-      agentSelectable: true,
     }, column);
     try {
       const host = dom.container.querySelector('[data-testid="model-picker-host"]');
@@ -1561,6 +1621,48 @@ describe('ModelControls in a pinned column', () => {
       });
       expect(useUIStore.getState().lastUsedEfforts).toEqual({ [`${PROVIDER_ID}/${MODEL_ID}`]: 'max' });
     } finally {
+      await cleanup();
+    }
+  });
+
+  // BTW's model shortcut opens its own picker, never the main chat's (#6403).
+  test('opens the picker its composer opens, and only that one', async () => {
+    useUIStore.setState({ isModelSelectorOpen: true });
+    const isOpen = (dom: { container: Element }) => dom.container.querySelector('.model-controls__model-trigger')?.closest('[data-menu-open]')?.getAttribute('data-menu-open');
+    const closed = await renderModelControls({ selection: pinnedSelection, sessionId: 'ses_btw', modelSelectorOpen: false, onModelSelectorOpenChange: () => undefined }, column);
+    try {
+      expect(isOpen(closed.dom)).toBe('false');
+    } finally {
+      await closed.cleanup();
+    }
+    useUIStore.setState({ isModelSelectorOpen: false });
+    const open = await renderModelControls({ selection: pinnedSelection, sessionId: 'ses_btw', modelSelectorOpen: true, onModelSelectorOpenChange: () => undefined }, column);
+    try {
+      expect(isOpen(open.dom)).toBe('true');
+    } finally {
+      await open.cleanup();
+    }
+  });
+
+  // A pinned chat's agent pick carries the level its composer is on, as a
+  // BTW pick does, instead of the new agent falling back to another level.
+  test('an agent pick carries the effort the pinned composer is on', async () => {
+    // The store copies a spy into every later state, so restore the function
+    // on the live state: `mockRestore` reaches only the object spied on.
+    const saveOriginal = useSelectionStore.getState().saveAgentModelVariantForSession;
+    const saveVariant = spyOn(useSelectionStore.getState(), 'saveAgentModelVariantForSession');
+    const callsBefore = saveVariant.mock.calls.length;
+    const { dom, cleanup } = await renderModelControls({ selection: { ...pinnedSelection, variant: 'high' }, sessionId: 'ses_pinned' }, column);
+    try {
+      const stockRow = Array.from(dom.container.querySelectorAll<HTMLButtonElement>('button'))
+        .find((button) => button.textContent?.trim() === 'Stock');
+      await act(async () => stockRow?.click());
+      expect(useSelectionStore.getState().sessionAgentSelections.get('ses_pinned')).toBe('stock');
+      expect(saveVariant.mock.calls.slice(callsBefore)).toEqual([['ses_pinned', 'stock', 'pinned', 'pinned-model', 'high']]);
+      // The main chat's agent stays its own.
+      expect(useConfigStore.getState().currentAgentName).toBe(AGENT);
+    } finally {
+      useSelectionStore.setState({ saveAgentModelVariantForSession: saveOriginal });
       await cleanup();
     }
   });
@@ -1576,7 +1678,7 @@ describe('ModelControls in a pinned column', () => {
 
   test('loads the pinned folder catalog when it has not loaded', async () => {
     folderCatalogs = new Map([[PINNED_FOLDER, { providers: [], agents: [], loaded: false }]]);
-    const { cleanup } = await renderModelControls({ selection: pinnedSelection, sessionId: 'ses_pinned', agentSelectable: true }, column);
+    const { cleanup } = await renderModelControls({ selection: pinnedSelection, sessionId: 'ses_pinned' }, column);
     try {
       expect(catalogLoads).toEqual([`models:${PINNED_FOLDER}`, `agents:${PINNED_FOLDER}`]);
     } finally {

@@ -15,6 +15,18 @@ import { useProjectsStore } from "./useProjectsStore";
 import { getRuntimeApiBaseUrl, getRuntimeKey, switchRuntimeEndpoint } from "@/lib/runtime-switch";
 
 describe("catalogRefreshTasks", () => {
+  test("a plugin refresh also re-reads the plugin policies", async () => {
+    const before = usePluginsStore.getState();
+    const { loadPlugins } = before;
+    usePluginsStore.setState({ loadPlugins: async () => true });
+    try {
+      await catalogRefreshTasks("plugin")[0]();
+      expect(usePluginsStore.getState().policyRevision).toBe(before.policyRevision + 1);
+    } finally {
+      usePluginsStore.setState({ loadPlugins });
+    }
+  });
+
   test("an A to B to A runtime switch cannot join or retire the old refresh", async () => {
     const originalKey = getRuntimeKey();
     const originalBase = getRuntimeApiBaseUrl();

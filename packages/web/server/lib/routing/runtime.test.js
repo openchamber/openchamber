@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { attachmentHint, createRoutingRuntime, readOpenCodeKeys, requestTextOf, routingRequestTextOf } from './runtime.js';
 import { resolveEffectiveConfig } from './store.js';
 import { excerptHead, excerptHeadTail, turnsToHistory } from './history.js';
@@ -23,6 +23,8 @@ const makeRuntime = ({
   config = readyConfig(), token = 'key', classifierSource = null, customEndpoint = null, providerKeys = {}, zenPromotionActive = true,
   enterprise = false, pinned = null, catalog = [], answers, askError, lastAnswer = null, configEntries = [], nowMs = 1_000_000_000,
   warmSessions = [],
+  // The agent OpenCode holds per session; tests switch it the way a send does.
+  sessionAgents = {},
 } = {}) => {
   const events = [];
   const store = {
@@ -59,6 +61,10 @@ const makeRuntime = ({
     },
     readSessionHistory: async () => ({ history: [], lastAnswer }),
     readConfigEntries,
+    readSessionAgent: async ({ sessionId }) => {
+      if (sessionAgents.unreadable) throw new Error('OpenCode down');
+      return sessionAgents[sessionId] ?? null;
+    },
     isSessionWarm: (sessionId) => warmSessions.includes(sessionId),
     now: () => nowMs,
   });
@@ -75,6 +81,12 @@ describe('requestTextOf', () => {
   it('keeps the command name when it has no arguments', () => {
     expect(requestTextOf({ name: 'review', text: '' })).toBe('/review');
     expect(requestTextOf({ name: 'review' })).toBe('/review');
+  });
+});
+
+describe('requestTextOf a form reply', () => {
+  it('is the values the user filled in', () => {
+    expect(requestTextOf({ answer: { q1: 'refactor the parser', q2: ['tests', 'docs'], q3: true } })).toBe('refactor the parser\ntests\ndocs\ntrue');
   });
 });
 
@@ -234,6 +246,98 @@ describe('resolveAutoSelection', () => {
 
     const unreachable = makeRuntime({ catalog: new Error('OpenCode down'), answers: { category: { choice: 'trivial', confidence: 0.99 } } });
     expect((await unreachable.runtime.resolveAutoSelection(send())).model.variant).toBe('medium');
+  });
+});
+
+describe('the agent a category set', () => {
+  // `hard` runs as plan, `trivial` names no agent.
+  const route = async (made, choice, agent = null) => {
+    made.answers.category = { choice, confidence: 0.95 };
+    const resolved = await made.runtime.resolveAutoSelection({ sessionId: 's1', model: AUTO, agent, requestText: 'go' });
+    if (resolved.agent) made.sessionAgents.s1 = resolved.agent;
+    return resolved;
+  };
+  const setup = (sessionAgents = { s1: 'build' }) => {
+    const answers = {};
+    return { ...makeRuntime({ answers, sessionAgents }), answers, sessionAgents };
+  };
+
+  it('goes back to the agent before routing when the next category names none (#6392)', async () => {
+    const made = setup();
+    expect((await route(made, 'hard')).agent).toBe('plan');
+    // In Auto the composer shows the session's agent, so a queued send names plan.
+    expect((await route(made, 'trivial', 'plan')).agent).toBe('build');
+    expect((await route(made, 'trivial')).agent).toBeNull();
+    expect(made.sessionAgents.s1).toBe('build');
+  });
+
+  it('does not hold the routed category for a queued send while the cache is warm', async () => {
+    const answers = {};
+    const sessionAgents = { s1: 'build' };
+    const lastAnswer = { providerID: 'openai', modelID: 'gpt-6-astra', completed: 1_000_000_000 - 60_000 };
+    const made = { ...makeRuntime({ answers, sessionAgents, lastAnswer }), answers, sessionAgents };
+    await route(made, 'hard');
+    const resolved = await route(made, 'trivial', 'plan');
+    expect(resolved.decision.cacheHold).toBeUndefined();
+    expect(resolved.agent).toBe('build');
+  });
+
+  it('goes back on a classifier failure too', async () => {
+    const made = setup();
+    await route(made, 'hard');
+    made.jev.ask.mockRejectedValueOnce(new Error('Jev down'));
+    const resolved = await made.runtime.resolveAutoSelection({ sessionId: 's1', model: AUTO, agent: null, requestText: 'go' });
+    expect(resolved.decision.reason).toBe('error');
+    expect(resolved.agent).toBe('build');
+  });
+
+  it('keeps an agent the user chose, before Auto or since', async () => {
+    const chosenBefore = setup({ s1: 'plan' });
+    expect((await route(chosenBefore, 'hard')).agent).toBe('plan');
+    expect((await route(chosenBefore, 'trivial')).agent).toBeNull();
+
+    const switchedSince = setup();
+    await route(switchedSince, 'hard');
+    switchedSince.sessionAgents.s1 = 'review';
+    expect((await route(switchedSince, 'trivial')).agent).toBeNull();
+
+    const leftAuto = setup();
+    await route(leftAuto, 'hard');
+    leftAuto.runtime.noteModelSelection('s1', { providerID: 'anthropic', id: 'claude-opus-5' });
+    expect((await route(leftAuto, 'trivial')).agent).toBeNull();
+  });
+
+  it('follows a composer agent other than the routed one', async () => {
+    const made = setup();
+    await route(made, 'hard');
+    expect((await route(made, 'trivial', 'review')).agent).toBe('review');
+    expect((await route(made, 'trivial')).agent).toBeNull();
+  });
+
+  it('remembers the first agent across several routed agents', async () => {
+    const config = readyConfig();
+    config.categories = config.categories.map((c) => (c.id === 'research' ? { ...c, agent: 'review' } : c));
+    const answers = {};
+    const sessionAgents = { s1: 'build' };
+    const made = { ...makeRuntime({ config, answers, sessionAgents }), answers, sessionAgents };
+    await route(made, 'hard');
+    expect((await route(made, 'research')).agent).toBe('review');
+    expect((await route(made, 'trivial')).agent).toBe('build');
+  });
+
+  it('retries the switch back when it did not take, and leaves the agent when it cannot read it', async () => {
+    const made = setup();
+    await route(made, 'hard');
+    made.answers.category = { choice: 'trivial', confidence: 0.95 };
+    const send = { sessionId: 's1', model: AUTO, agent: null, requestText: 'go' };
+    // The caller's switch failed, so the session is still on plan.
+    expect((await made.runtime.resolveAutoSelection(send)).agent).toBe('build');
+    expect((await made.runtime.resolveAutoSelection(send)).agent).toBe('build');
+
+    made.sessionAgents.unreadable = true;
+    expect((await made.runtime.resolveAutoSelection(send)).agent).toBeNull();
+    made.sessionAgents.unreadable = false;
+    expect((await made.runtime.resolveAutoSelection(send)).agent).toBe('build');
   });
 });
 
@@ -436,6 +540,29 @@ describe('readOpenCodeKeys', () => {
     const readAuth = () => { throw new Error('locked'); };
     expect(await readOpenCodeKeys({ readAuth, env })).toEqual({ zenKey: null, openrouterKey: 'or-env', vercelKey: 'gw-env' });
     expect(await readOpenCodeKeys({ readAuth: () => ({}), env: { OPENROUTER_API_KEY: '  ' } })).toEqual({ zenKey: null, openrouterKey: null, vercelKey: null });
+  });
+});
+
+describe('routeSend', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('switches a form reply onto the routed model and agent, judged on the answer', async () => {
+    const calls = [];
+    vi.stubGlobal('fetch', vi.fn(async (input, init) => {
+      const url = new URL(input instanceof Request ? input.url : input);
+      const body = input instanceof Request ? await input.clone().text() : init?.body;
+      calls.push({ path: url.pathname, body: JSON.parse(body) });
+      return new Response(null, { status: 204 });
+    }));
+    const { runtime, jev } = makeRuntime({ answers: { category: { choice: 'hard', confidence: 0.97 } } });
+
+    await runtime.routeSend({ sessionId: 's1', directory: '/repo', body: { answer: { plan: 'rewrite the scheduler' } } });
+
+    expect(jev.ask.mock.calls[0][0].state.request).toBe('rewrite the scheduler');
+    expect(calls).toEqual([
+      { path: '/api/session/s1/model', body: { model: { providerID: 'openai', id: 'gpt-6-astra', variant: 'high' } } },
+      { path: '/api/session/s1/agent', body: { agent: 'plan' } },
+    ]);
   });
 });
 

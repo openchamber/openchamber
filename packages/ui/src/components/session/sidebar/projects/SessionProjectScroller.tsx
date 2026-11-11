@@ -41,7 +41,7 @@ import { SortableSidebarSection } from './SortableSidebarSection';
 import { sectionDragId, sectionIdOfRow } from './sectionDrag';
 import { sessionDetailedRowPaddingLeft, sessionTreeTextInset } from '../sessions/sessionTreeGeometry';
 import { SessionSidebarActivityHeader, SessionSidebarCaption } from '../sessionSidebarHeaderPresentation';
-import { resolveSessionSidebarStickyHeader, type SessionSidebarRow, type SessionSidebarRowModel } from '../sessionSidebarRowModel';
+import { isPinnedZoneRowKey, resolveSessionSidebarStickyHeader, type SessionSidebarRow, type SessionSidebarRowModel } from '../sessionSidebarRowModel';
 import { SortableProjectItem } from './sortableItems';
 import { WorktreeWorkRow } from '../works/WorktreeWorkRow';
 import { SessionDraftRow } from '../works/SessionDraftRow';
@@ -63,6 +63,7 @@ import { useSessionUIStore } from '@/sync/session-ui-store';
 import { isSessionInWork } from '@/lib/sessionWorkMetadata';
 import { useOpenProjectOnBoard } from '@/components/sourceBoard/openTrackerItem';
 import { useProjectsInSidebarOrder } from '../list/useProjectsInSidebarOrder';
+import { useResumeOpenCodeFolder } from '@/components/projects/useOpenCodeTrustPause';
 
 type SessionProjectScrollerState = Pick<SessionGroupSectionProps,
   | 'editingId'
@@ -156,6 +157,7 @@ function SessionProjectScrollerComponent({ model, view, actions }: SessionProjec
   streamPerfCount('ui.sidebar_projects_list.render');
   const { t } = useI18n();
   const childStores = useChildStoreManager();
+  const resumeFolder = useResumeOpenCodeFolder();
   const { files } = useRuntimeAPIs();
   const toggleFolderCollapse = useSessionFoldersStore((state) => state.toggleFolderCollapse);
   const renameFolder = useSessionFoldersStore((state) => state.renameFolder);
@@ -310,8 +312,13 @@ function SessionProjectScrollerComponent({ model, view, actions }: SessionProjec
   const renderStatus = React.useCallback((row: Extract<SessionSidebarRow, { kind: 'status' }>) => {
     const retry = () => retryGroupStatus(row, childStores);
     const grant = () => grantGroupAccess(row, childStores);
+    const trustPaused = row.status.state === 'trust-paused';
+    const pausedDirectory = trustPaused ? row.status.directory : null;
     let label: string;
     switch (row.status.state) {
+      case 'trust-paused':
+        label = t('sessions.sidebar.group.empty.trustPaused');
+        break;
       case 'permission-denied':
         label = t('sessions.sidebar.group.empty.permissionDenied');
         break;
@@ -329,10 +336,11 @@ function SessionProjectScrollerComponent({ model, view, actions }: SessionProjec
         {row.status.state === 'loading' ? <Spinner className="size-3" /> : null}
         {label}
         {row.status.canGrantAccess ? <Button variant="link" size="xs" className="h-auto p-0 typography-micro" onClick={() => void grant()}>{t('sessions.sidebar.group.empty.grantAccess')}</Button> : null}
-        {row.status.state !== 'loading' ? <Button variant="link" size="xs" className="h-auto p-0 typography-micro" onClick={retry}>{t('sessions.sidebar.group.empty.retry')}</Button> : null}
+        {pausedDirectory ? <Button variant="link" size="xs" className="h-auto p-0 typography-micro" onClick={() => void resumeFolder(pausedDirectory)}>{t('sessions.sidebar.group.empty.reviewTrust')}</Button> : null}
+        {row.status.state !== 'loading' && !trustPaused ? <Button variant="link" size="xs" className="h-auto p-0 typography-micro" onClick={retry}>{t('sessions.sidebar.group.empty.retry')}</Button> : null}
       </span>
     </div>;
-  }, [childStores, t]);
+  }, [childStores, resumeFolder, t]);
 
   const renderRow = React.useCallback((row: SessionSidebarRow): React.ReactNode => {
     if (row.kind === 'activity-header') {
@@ -419,7 +427,7 @@ function SessionProjectScrollerComponent({ model, view, actions }: SessionProjec
       // row; the archive keeps its group header.
       return isGroupWork(row.group)
         ? <WorktreeWorkRow
-          group={row.group} groupKey={row.groupKey} projectId={row.projectId} depth={row.depth} detailed={row.detailed} mixed={row.mixed}
+          group={row.group} groupKey={row.groupKey} projectId={row.projectId} depth={row.depth} detailed={row.detailed} mixed={row.mixed} inPinnedZone={isPinnedZoneRowKey(row.key)}
           collapsed={row.collapsed} forceExpanded={row.forceExpanded} empty={row.empty}
           normalizedSessionSearchQuery={model.groupProps.normalizedSessionSearchQuery}
           alwaysShowActions={view.alwaysShowActions} mobileVariant={view.mobileVariant}

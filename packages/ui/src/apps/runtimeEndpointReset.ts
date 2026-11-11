@@ -45,6 +45,8 @@ import { resetGlobalBlockingRequests } from '@/sync/global-blocking-requests';
 import { resetPendingSessionAssists } from '@/sync/pending-session-assists';
 import { resetRecoverableQuestions } from '@/sync/recoverable-questions';
 import { resetBackgroundShells } from '@/sync/background-shells';
+import { resetBackgroundImages } from '@/sync/background-images';
+import { resetSessionLiveWork } from '@/sync/session-live-work';
 import { useMultiRunStore } from '@/stores/useMultiRunStore';
 import { resetSessionOrdering } from '@/sync/session-ordering';
 import { resetSessionActivityTiming } from '@/sync/session-activity-timing';
@@ -101,6 +103,8 @@ export const resetAppForRuntimeEndpointChange = (detail: RuntimeEndpointChangedD
   resetPendingSessionAssists();
   resetRecoverableQuestions();
   resetBackgroundShells();
+  resetBackgroundImages();
+  resetSessionLiveWork();
   resetSessionOrdering();
   // Turn timings belong to the previous instance's sessions, and the reset also
   // restarts the resume window so the switch is treated as a fresh load.
@@ -145,6 +149,9 @@ export const resetAppForRuntimeEndpointChange = (detail: RuntimeEndpointChangedD
   useSessionUIStore.getState().restoreForRuntimeSwitch(detail.runtimeKey, detail.previousRuntimeKey);
   useSessionUIStore.setState({ worktreeDiscoveryByProject: new Map() });
   useUIStore.getState().setOpenGuestPage(null);
+  // Uploaded provider logos live on the instance; a server that never stored any
+  // omits the key, and the sync below keeps an omitted key as it was.
+  useUIStore.setState({ customProviderLogos: {} });
   resetStreamingState();
   queueMicrotask(() => void syncDesktopSettings());
 };

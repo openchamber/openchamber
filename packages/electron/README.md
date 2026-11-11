@@ -58,8 +58,8 @@ remote or SSH default instance, local server not skipped) main navigates the
 splash to the application as soon as the login-shell probe has resolved,
 before the local server is imported, and the renderer parses, fetches and
 compiles the application while the server starts. The runtime values the
-application needs before any request (local origin, API base, client token)
-do not exist yet, so that document ends with a parser-blocking
+application needs before any request (local origin, API base, client token,
+request headers) do not exist yet, so that document ends with a parser-blocking
 `<script src="/__runtime-config.js">`; main answers it once `activateMainWindow`
 has the resolved runtime (`packaged-runtime-config.mjs`). Module scripts run only
 after parsing ends, so no application code runs before the values are set.
@@ -71,6 +71,13 @@ through the preload bridge, and main answers only the top frame of a window on
 the packaged origin. The scheme answers every frame in the session, including
 sandboxed ones, and a request to it carries nothing that says who is asking, so
 main decides by the IPC sender's frame.
+
+The main window is created before startup resolves, so its preload has no
+request headers and leaves the headers global unset: a global the preload
+exposes is read-only, and an exposed empty set would keep the document from
+receiving the headers of a remote startup host. Main answers with the asking
+window's own headers, so a window opened for another host never receives the
+main window's.
 
 A launch runs one startup. The tray, a second launch, a deep link, a shortcut or
 macOS `activate` can ask for a window while that startup still runs, and
@@ -201,6 +208,7 @@ IPC results if its endpoint changes while the read is pending.
 | `remote-page-policy.mjs` | What remote-safe IPC accepts from and returns to another server's page: splash colour parsing, host list without credentials |
 | `shell-environment.mjs` | Asynchronous login-shell environment discovery and shared one-shot probe |
 | `windows-app-discovery.mjs` | Windows "Open in": which apps are installed, their icons, and launch candidates. Every `where.exe` and PowerShell lookup is awaited, because a synchronous spawn per candidate froze the window for the whole scan |
+| `linux-app-discovery.mjs` | Linux "Open in": installed FreeDesktop entries, their icons, launch candidates and the chain that runs them. The generic "Terminal" id tries `xdg-terminal-exec` first with `--dir=<path>`, the only spelling the reference implementation parses. The binary runs only after its file, or the file a packaged launcher forwards to, shows support for `--dir=`, and `--print-id` runs bounded only where that file lists it, because older versions ignore that flag and `--help` and open a terminal. Explicit apps reach it only after their own entry fails. Every terminal candidate starts in the project directory; entries get it as an argument through `%f`/`%F` or a known working-directory option. A single-instance terminal without either opens in its own directory. A candidate that exits non-zero within 1 second counts as failed and the chain moves on (#6092) |
 | `preload.mjs` | Safe bridge from the rendered UI to Electron IPC |
 | `ssh-manager.mjs` | SSH host import, connection lifecycle, tunnel/port forwarding helpers |
 | `startup-ssh.mjs` | Opening the default SSH instance's tunnel during startup, bounded, with teardown so a failed attempt boots Local (`sshStartupFallbackHostId` in the boot outcome) |
@@ -532,9 +540,14 @@ The server (`packages/web/server/lib/fs/ripgrep.js`) looks for ripgrep in this o
 - `window.open` from a page in that session (`browserPanelWindowOpenTarget`): a
   scripted popup opens as a sandboxed child window of the app window, keeping
   `window.opener`, so a Google, GitHub or SSO sign-in can post its result back;
-  the popup itself may open nothing further. Chromium reports `window.open(url)`
-  without window features as a new tab, the same as a target=_blank link, so the
-  session's preload (`browser-panel-preload.cjs`, exposes nothing) marks every
+  the popup itself may open nothing further. The popup runs in the panel's
+  session, with its sign-ins and permission rules. Electron gives such a window
+  the session's plain Chrome user agent only on navigations the app starts
+  (electron/electron#45897), so main cancels the popup's first navigation before
+  it is sent and starts it again itself; later navigations keep that agent. A
+  form posted into a new window is not repeated and keeps Electron's agent.
+  Chromium reports `window.open(url)` without window features as a new tab, the
+  same as a target=_blank link, so the session's preload (`browser-panel-preload.cjs`, exposes nothing) marks every
   `window.open` that keeps its opener as a popup. A link aimed at a new tab is
   noopener by default and becomes a panel tab
   (`openchamber:browser-panel-open-tab` to the renderer). Pages of an
@@ -551,6 +564,11 @@ minimize and restore. Shared quota readouts use it to stop provider refresh in
 hidden windows. Focus changes do not change visibility. Chromium's document
 visibility is insufficient here because desktop disables background throttling.
 
+On macOS, `openchamber:window-resized` asks the renderer to refresh titlebar
+geometry after a resize and when the window enters or leaves fullscreen. Native
+fullscreen transitions can change the titlebar insets without changing window
+bounds.
+
 Renderer code should call the desktop bridge exposed by `preload.mjs`. Do not import Electron from shared UI code.
 
 Add new native capabilities in this order:
@@ -564,8 +582,8 @@ Add new native capabilities in this order:
 
 The desktop app updates from one of two channels, chosen under Settings → About → Updates and stored as `desktopUpdateChannel` in `settings.json`:
 
-- **Stable**: the latest full release on GitHub (the `github` provider of electron-updater).
-- **Canary**: the nightly build of `main`. `.github/workflows/canary.yml` builds it when `main` moved and replaces the files of one pre-release tagged `canary`; the app reads that pre-release's manifests directly (the `generic` provider on `releases/download/canary/`). Stable never sees them, because the GitHub provider reads only the latest full release.
+- **Stable**: the latest full release, read from its mirror on Cloudflare R2 (`https://downloads.openchamber.dev/desktop/stable/`, the `generic` provider), with the GitHub release as the fallback (the `github` provider). `release.yml`'s `finalize-release` copies the draft's desktop files and `latest*.yml` manifests there with `scripts/release-mirror/mirror-to-r2.mjs` before anything announces the release: publishing it, the Discord post and the website rebuild wait for the upload, and a failed upload leaves the release a draft (`.github/workflows/mirror-release.yml` mirrors a published release again by hand). The script uploads files first and manifests last, keeps the previous release whole (the website links its files until it is rebuilt) and deletes older releases' files except their `.blockmap`s, which a Windows update reads to download only the changed blocks. A check or download that fails on the mirror sends checks to GitHub for an hour (`pickUpdaterSource`, `updater-feed.mjs`); a missing manifest on the mirror counts as a failure there, while on GitHub it still means "no release for this platform yet".
+- **Canary**: the nightly build of `main`. `.github/workflows/canary.yml` builds it when `main` moved, mirrors the night to `https://downloads.openchamber.dev/desktop/canary/` with the same script (`--channel canary`; blockmaps stay for the nights `canary-notes.json` covers), then replaces the files of one pre-release tagged `canary`. The app reads the mirror first and that pre-release's manifests as the fallback (the `generic` provider on `releases/download/canary/`), with the same one-hour switch as Stable. Stable never sees them, because the GitHub provider reads only the latest full release.
 
 Picking Canary checks at once and offers the Canary build as an ordinary update; after it installs, the app is Canary and keeps updating from Canary. Picking Stable from a Canary build offers the latest release, which is older: `applyUpdaterChannel` (`main.mjs`) sets `allowDowngrade` for exactly that case, and `updater-check.mjs` takes electron-updater's verdict instead of comparing versions itself. A release build never downgrades. Without a stored pick the app follows its own build, so a Canary build downloaded from the canary pre-release stays on Canary and is not offered the older release on its first check. On a Linux .deb or .rpm install the downgrade tells the package manager the older package is wanted (`linux-package-install.mjs`), or it would keep the newer one. Every check re-reads the stored channel, so a switch needs no restart; a switch during a running check waits for that check first, because electron-updater answers a running check for the feed it started on.
 
@@ -578,6 +596,10 @@ A separate app (own name, id, profile) was built first. It meant two installs, t
 ### Why Stable after Canary downgrades at once and not at the next release
 
 Waiting for the next release would leave the person on a build they asked to leave for up to a few days. The downgrade is offered right away, knowing that a Canary build may have written settings or data in a form the older release does not read yet.
+
+### Why Stable reads a mirror on R2 and not GitHub alone
+
+GitHub's release downloads fail now and then, answering 504 from `releases/download` for hours while its API serves the same files, and they download at a few MB/s. R2 is served by Cloudflare's network with free egress and downloaded about twice as fast in a measurement on 2.7.0. GitHub stays the fallback, so a broken mirror costs one failed request an hour, never an update.
 
 ### Why one rolling pre-release and not a release per night
 

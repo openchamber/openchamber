@@ -437,6 +437,15 @@ export const createSessionGoalRuntime = ({
     timeoutMs: FETCH_TIMEOUT_MS,
   });
 
+  /** Before OpenCode 2.2.6: the session's own running commands, read from its folder. */
+  const fetchOwnRunningShells = async (session, sessionId, directory) => {
+    const shellDirectory = typeof session.location?.directory === 'string' && session.location.directory
+      ? session.location.directory
+      : directory;
+    const shells = shellDirectory ? await activityProbe.fetchRunningShells(shellDirectory) : null;
+    return shells && shells.filter((shell) => shell.sessionID === sessionId);
+  };
+
   // v2 reports only that a session is running.
   const isWorkingStatus = (status) => Boolean(status);
 
@@ -650,12 +659,17 @@ export const createSessionGoalRuntime = ({
     }
     if (isWorkingStatus(statuses[sessionId])) return;
 
-    const childrenWorking = await activityProbe.hasWorkingChildren(sessionId, statuses);
-    if (childrenWorking === null) {
+    // OpenCode 2.2.6+ lists the background subagents and images of the whole
+    // subagent tree. Child sessions OpenChamber starts itself (workflow agents)
+    // are no OpenCode jobs, so running direct children are asked for as well.
+    const backgroundJobs = await activityProbe.fetchRunningBackgroundJobs(sessionId);
+    if (backgroundJobs === null) {
       armTimer(sessionId, directory, recheckMs);
       return;
     }
-    if (childrenWorking) {
+    const childrenWorking = backgroundJobs?.some((job) => job.kind !== 'shell')
+      || await activityProbe.hasWorkingChildren(sessionId, statuses);
+    if (childrenWorking !== false) {
       armTimer(sessionId, directory, recheckMs);
       return;
     }
@@ -770,16 +784,19 @@ export const createSessionGoalRuntime = ({
     // server, are not waited for. After an explicit Resume nothing is waited
     // for, and a failed or aborted turn settles below without waiting.
     if (goal.statusReason !== 'resumed' && !lastAssistantInfo.error) {
-      const shellDirectory = typeof session.location?.directory === 'string' && session.location.directory
-        ? session.location.directory
-        : directory;
-      const shells = shellDirectory ? await activityProbe.fetchRunningShells(shellDirectory) : null;
-      if (!shells) {
+      // Read after the messages, so a command of the turn just read is listed.
+      // The job list also holds the shells the session's subagents started.
+      const jobs = backgroundJobs && await activityProbe.fetchRunningBackgroundJobs(sessionId);
+      const shells = backgroundJobs
+        ? jobs && jobs.filter((job) => job.kind === 'shell')
+        : await fetchOwnRunningShells(session, sessionId, directory);
+      // A subagent or image the turn just read started holds the audit as well.
+      if (!shells || jobs?.some((job) => job.kind !== 'shell')) {
         armTimer(sessionId, directory, recheckMs);
         return;
       }
       const roundStartedAt = lastUserMessageCreatedAt(messages, goal.createdAt);
-      const waitingOn = shells.filter((shell) => shell.sessionID === sessionId && shell.startedAt >= roundStartedAt);
+      const waitingOn = shells.filter((shell) => shell.startedAt >= roundStartedAt);
       // Past the wait the command is most likely a server left running: the
       // turn is audited as it stands instead of stopping the goal over it.
       const stillWaiting = waitingOn.some((shell) => Date.now() - shell.startedAt < BACKGROUND_SHELL_WAIT_MS);

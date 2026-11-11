@@ -48,6 +48,7 @@ import type { DiffFindSide } from '@/lib/diff/diffFind';
 import { PIERRE_DIFF_TINT_CSS } from '@/lib/shiki/pierreDiffTint';
 import { DiffStickyScrollbar } from './DiffStickyScrollbar';
 import type { DiffCommentOrigin } from '@/lib/diffCommentOrigin';
+import { useEditorCodeMetrics } from '@/lib/editorCodeMetrics';
 
 /**
  * A click on a collapsed-context expander of a partial (patch-only) diff.
@@ -881,11 +882,17 @@ type VirtualizerEntry = {
 
 const virtualizerCache = new WeakMap<Document | HTMLElement, VirtualizerEntry>();
 
-const VIRTUAL_METRICS: Partial<VirtualFileMetrics> = {
-  lineHeight: 24,
-  hunkSeparatorHeight: 24,
-  spacing: 0,
-};
+// Rows are 24px unless the code follows the Editor font size
+// (`useEditorCodeMetrics`); the CSS row height in index.css must match.
+const DEFAULT_DIFF_LINE_HEIGHT = 24;
+
+function diffVirtualMetrics(lineHeight: number): Partial<VirtualFileMetrics> {
+  return {
+    lineHeight,
+    hunkSeparatorHeight: 24,
+    spacing: 0,
+  };
+}
 
 function resolveVirtualizerTarget(container: HTMLElement): VirtualizerTarget {
   const root = container.closest('[data-diff-virtual-root]');
@@ -1040,6 +1047,8 @@ const PierreDiffViewerBody: React.FC<
   const darkTheme = themeContext?.availableThemes.find(t => t.metadata.id === themeContext.darkThemeId) ?? getDefaultTheme(true);
 
   const { isMobile } = useDeviceInfo();
+  const editorCode = useEditorCodeMetrics();
+  const diffLineHeight = editorCode?.lineHeight ?? DEFAULT_DIFF_LINE_HEIGHT;
   const hunkAnchors = hunkActions?.anchors ?? EMPTY_HUNK_ANCHORS;
   const [hunkTargets, setHunkTargets] = React.useState<{
     fileDiff: FileDiffMetadata | undefined;
@@ -1290,7 +1299,7 @@ const PierreDiffViewerBody: React.FC<
   }, [hunkAnchors]);
 
   const handleSaveComment = useCallback((textToSave: string, rangeOverride?: SelectedLineRange) => {
-    saveComment(textToSave, rangeOverride ?? selection ?? undefined);
+    return saveComment(textToSave, rangeOverride ?? selection ?? undefined);
   }, [saveComment, selection]);
 
 
@@ -1526,6 +1535,7 @@ const PierreDiffViewerBody: React.FC<
   const instanceVirtualizerRef = useRef<Virtualizer | null>(null);
   const instanceWorkerPoolRef = useRef<unknown>(null);
   const instanceVirtualHunkSeparatorsRef = useRef<FileDiffOptions<DiffAnnotation, undefined>['hunkSeparators'] | undefined>(undefined);
+  const instanceLineHeightRef = useRef<number | undefined>(undefined);
   const instanceFileDiffRef = useRef<FileDiffMetadata | undefined>(undefined);
   const instanceOldFileRef = useRef<FileContents | undefined>(undefined);
   const instanceNewFileRef = useRef<FileContents | undefined>(undefined);
@@ -1787,6 +1797,7 @@ const PierreDiffViewerBody: React.FC<
       instanceVirtualizerRef.current = null;
       instanceWorkerPoolRef.current = null;
       instanceVirtualHunkSeparatorsRef.current = undefined;
+      instanceLineHeightRef.current = undefined;
       instanceFileDiffRef.current = undefined;
       instanceOldFileRef.current = undefined;
       instanceNewFileRef.current = undefined;
@@ -1853,15 +1864,19 @@ const PierreDiffViewerBody: React.FC<
     }
 
     let instance = diffInstanceRef.current;
+    // The Editor font size changed under a mounted diff. The CSS rows follow
+    // on their own; the virtualizer gets the new row height through
+    // setMetrics, keeping the host and what is attached to it.
+    const lineHeightChanged = Boolean(instance) && instanceLineHeightRef.current !== diffLineHeight;
     const forceRender = !shouldReset && currentInstance
-      ? !areOptionsEqual(currentInstance.options, options)
+      ? !areOptionsEqual(currentInstance.options, options) || lineHeightChanged
       : false;
     if (!instance) {
       instance = sharedVirtualizer
         ? new VirtualizedFileDiff<DiffAnnotation>(
             options,
             sharedVirtualizer.virtualizer,
-            VIRTUAL_METRICS,
+            diffVirtualMetrics(diffLineHeight),
             workerPool,
           )
         : new PierreFileDiff(options, workerPool);
@@ -1869,11 +1884,16 @@ const PierreDiffViewerBody: React.FC<
       lastAppliedSelectionRef.current = null;
     } else {
       instance.setOptions(options);
+      const current: unknown = instance;
+      if (lineHeightChanged && current instanceof VirtualizedFileDiff) {
+        current.setMetrics(diffVirtualMetrics(diffLineHeight));
+      }
     }
 
     instanceVirtualizerRef.current = virtualizer;
     instanceWorkerPoolRef.current = workerPool;
     instanceVirtualHunkSeparatorsRef.current = virtualizer ? options.hunkSeparators : undefined;
+    instanceLineHeightRef.current = diffLineHeight;
     instanceFileDiffRef.current = fileDiff;
     instanceOldFileRef.current = oldFile;
     instanceNewFileRef.current = newFile;
@@ -1906,7 +1926,7 @@ const PierreDiffViewerBody: React.FC<
       cancelReady();
       preserveDone();
     };
-  }, [diffThemeKey, fileDiff, fileName, language, modified, options, original, workerPool]);
+  }, [diffLineHeight, diffThemeKey, fileDiff, fileName, language, modified, options, original, workerPool]);
 
   useEffect(() => {
     const instance = diffInstanceRef.current;
@@ -2154,7 +2174,7 @@ const PierreDiffViewerBody: React.FC<
 
   if (layout === 'fill') {
     return (
-      <div className={cn("flex flex-col relative", "size-full")} data-diff-virtual-root>
+      <div className={cn("flex flex-col relative", "size-full")} style={editorCode?.style} data-diff-virtual-root>
         <div className="flex-1 relative min-h-0">
           <ScrollableOverlay
             outerClassName="pierre-diff-wrapper size-full"
@@ -2176,7 +2196,7 @@ const PierreDiffViewerBody: React.FC<
   // Fallback for 'inline' layout
   return (
     <div className={cn("relative", "w-full")}>
-      <div ref={diffRootRef} className="pierre-diff-wrapper w-full overflow-x-auto overflow-y-visible relative">
+      <div ref={diffRootRef} className="pierre-diff-wrapper w-full overflow-x-auto overflow-y-visible relative" style={editorCode?.style}>
       <div ref={diffContainerRef} className="w-full" />
     </div>
     <DiffStickyScrollbar containerRef={diffContainerRef} />

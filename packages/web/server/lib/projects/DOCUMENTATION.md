@@ -88,7 +88,10 @@ commands existed still matches. `trusted` is true when nothing executes or the p
 file's `sharedTrust.hash` equals the current hash, so a pull that changes a
 command brings the prompt back. The client records an answer with a PUT of
 `sharedTrustHash` (`null` forgets it). The prompt itself lives in the shared
-UI (`packages/ui/src/lib/sharedTrustConfirmation.ts`).
+UI (`packages/ui/src/lib/sharedTrustConfirmation.ts`). A worktree the server
+makes for an agent has no client to ask, so `worktree-setup.js` gives the
+prompt's "skip" answer when the shared commands are not trusted: it leaves
+them out and returns them for the caller to report.
 
 ## Modules
 

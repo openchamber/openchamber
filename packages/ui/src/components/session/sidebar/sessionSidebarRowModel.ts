@@ -7,7 +7,7 @@ import type { GroupSearchData, SessionGroup, SessionNode } from './types';
 import type { ProjectSection } from './projects/sessionProjectRender';
 import { buildGroupRenderDescriptors } from './projects/sessionProjectRender';
 import { normalizeFolderRoots, selectFolderIdsForProjection, selectFolderRootNodes, type BlockingBadgeSessionScope } from './sessions/sessionNodeItemUtils';
-import { getAuthoritativeSessionFolderOwnerKey, getGroupFolderOwnerKey, getSessionFolderIdentityKey, getSessionFolderScopes, getWorkFolderOwnerKey, isArchivedFolderScope } from './sessions/sessionFolderIdentity';
+import { getAuthoritativeSessionFolderOwnerKey, getGroupFolderOwnerKey, getSessionFolderIdentityKey, getSessionFolderScopes, isArchivedFolderScope, resolveSessionFolderOwnerKey } from './sessions/sessionFolderIdentity';
 import type { SessionRowOrderEntry } from './sessions/sessionRowOrder';
 import { computeSessionTreeGuides, type SessionTreeGuide } from './sessions/sessionTreeGeometry';
 import { countSessionTreeQueryMatches } from './recent/activitySections';
@@ -62,6 +62,13 @@ const DEFAULT_BLOCKS: readonly SessionSidebarBlock[] = [{ kind: 'chats' }, { kin
 
 /** Activity sections; the display menu's Collapse all / Expand all drive them with the projects. */
 export const SIDEBAR_ACTIVITY_KEYS: readonly SessionSidebarActivityKey[] = ['chats', 'pinned', 'work', 'timeline'];
+const PINNED_ZONE_KEY = 'activity:pinned';
+/**
+ * A row listed in the Pinned section, whose header already says its works are
+ * pinned, so they carry no pin mark there. Every row of the section, nested
+ * ones included, has a key under the section's.
+ */
+export const isPinnedZoneRowKey = (rowKey: string): boolean => rowKey.startsWith(`${PINNED_ZONE_KEY}:`);
 /** The `collapsedActivities` key of the Projects caption. */
 export const PROJECTS_CAPTION_COLLAPSE_KEY = 'projects';
 
@@ -76,7 +83,7 @@ export type SessionSidebarRenderContext = 'project' | 'timeline-mixed' | 'mixed-
 export const isMultiLineTimelineContext = (context: SessionSidebarRenderContext): boolean => context === 'timeline-mixed';
 
 export type SessionSidebarGroupStatus = {
-  state: 'ready' | 'loading' | 'load-failed' | 'initialization-failed' | 'permission-denied';
+  state: 'ready' | 'loading' | 'load-failed' | 'initialization-failed' | 'permission-denied' | 'trust-paused';
   directory: string | null;
   canGrantAccess: boolean;
 };
@@ -163,9 +170,9 @@ export type SessionSidebarRowModelArgs = {
   authoritativeSections: readonly ProjectSection[];
   chatGroup: SessionGroup | null;
   archivedChatGroup?: SessionGroup | null;
-  /** Pinned sessions, already ordered and search-filtered; they stay under their project too. */
+  /** Pinned sessions, already ordered and search-filtered; `movedSessionIds` says whether they leave their project. */
   pinnedItems?: readonly SessionSidebarActivityItem[];
-  /** Pinned worktree works, listed after the pinned sessions, the latest pin first; they leave their project. */
+  /** Pinned worktree works, listed after the pinned sessions, the latest pin first; `movedGroupKeys` says whether they leave their project. */
   pinnedWorktrees?: readonly SessionSidebarWorkEntry[];
   /** The works in the In work block, in lifecycle order. */
   workEntries?: readonly SessionSidebarWorkEntry[];
@@ -370,7 +377,7 @@ const mergeWorktreeEntries = (
   const rankOfNode = (node: SessionNode): number => sessionOrderIndex.get(node.session.id) ?? Number.POSITIVE_INFINITY;
   const rankOfEntry = (entry: SidebarEntry): number => (isRunEntry(entry) ? Math.min(...entry.lanes.map(rankOfNode)) : rankOfNode(entry));
   const rankOfWorktree = ({ group, groupKey }: WorktreeInFolder): number => {
-    // A pinned worktree still listed here (the Pinned section is hidden)
+    // A pinned worktree still listed here (Pinned is hidden or leaves it in place)
     // leads the list, as pinned sessions do.
     if (group.worktree?.pinnedAt !== undefined) return Number.NEGATIVE_INFINITY;
     // A space nobody has chatted in yet, being made or running, was made to be used now: it leads
@@ -503,14 +510,11 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
   const movedFolderMembers = new Set<string>();
   let searchMatchCount = 0;
   const runIndex = args.runIndex ?? EMPTY_MULTI_RUN_INDEX;
-  // A lane of a run lists under the project root wherever it runs, so it files
-  // like the root's sessions.
-  const folderOwnerKeyOf = (session: Session): string | null => {
-    const owner = args.sessionOwnerById.get(session.id);
-    return owner && owner.kind !== 'project' && !runIndex.runKeyBySessionId.has(session.id)
-      ? getWorkFolderOwnerKey(owner.scopeDirectory)
-      : getAuthoritativeSessionFolderOwnerKey(session, owner);
-  };
+  const folderOwnerKeyOf = (session: Session): string | null => resolveSessionFolderOwnerKey(
+    session,
+    args.sessionOwnerById.get(session.id),
+    runIndex.runKeyBySessionId.has(session.id),
+  );
 
   const authoritativeRoots = [
     ...args.authoritativeSections.flatMap((section) => section.groups.flatMap((group) => group.sessions)),
@@ -1101,8 +1105,8 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
     if (pinnedItems.length === 0 && pinnedWorktrees.length === 0) return;
     const collapsed = appendActivityHeader('pinned');
     if (collapsed) return;
-    appendActivityItems(pinnedItems, 'activity:pinned', zoneRenderContext);
-    appendWorkEntries(pinnedWorktrees, 'activity:pinned');
+    appendActivityItems(pinnedItems, PINNED_ZONE_KEY, zoneRenderContext);
+    appendWorkEntries(pinnedWorktrees, PINNED_ZONE_KEY);
   };
   const appendWork = (): void => {
     const workEntries = (args.workEntries ?? []).filter(matchesSearch);

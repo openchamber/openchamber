@@ -26,6 +26,7 @@ import { useStreamingStore } from '@/sync/streaming';
 import { destroyBtwSession, filterBtwTailMessages, promoteBtwSession, type BtwSessionRef } from '@/lib/btw';
 import type { BtwPanelState } from './useBtwPanelState';
 import { ChatSurfaceProvider } from '../ChatSurfaceContext';
+import { ChatTranscriptDirectoryContext } from '../chatColumnSession';
 import { useMobileAutocompleteMaxHeight } from '../useMobileAutocompleteMaxHeight';
 import ChatMessage from '../ChatMessage';
 import { PermissionCard } from '../PermissionCard';
@@ -424,14 +425,16 @@ const BtwExpandedSheet: React.FC<{
     return (
         <BtwFrame actions={actions} onTitleClick={onTitleClick} titleClickLabel={titleClickLabel} collapsed={false}>
             <ChatSurfaceProvider mode="peek">
-                <BtwMessages
-                    sessionRef={sessionRef}
-                    data={data}
-                    bodyRef={bodyRef}
-                    contentRef={contentRef}
-                    onBodyScroll={handleBodyScroll}
-                    maxHeight={mobileMaxHeight}
-                />
+                <ChatTranscriptDirectoryContext.Provider value={sessionRef.directory}>
+                    <BtwMessages
+                        sessionRef={sessionRef}
+                        data={data}
+                        bodyRef={bodyRef}
+                        contentRef={contentRef}
+                        onBodyScroll={handleBodyScroll}
+                        maxHeight={mobileMaxHeight}
+                    />
+                </ChatTranscriptDirectoryContext.Provider>
             </ChatSurfaceProvider>
         </BtwFrame>
     );

@@ -59,6 +59,11 @@ export const useIsPageWaiting = (sessionId: string | null | undefined): boolean 
   useGlobalBlockingRequestsStore((state) => Boolean(sessionId && state.bySession.get(sessionId)?.pages.length))
 );
 
+/** Whether this call's page or secret card waits for the user's answer, as the server announced it. */
+export const useIsCallWaiting = (sessionId: string | null | undefined, callId: string | null | undefined): boolean => (
+  useGlobalBlockingRequestsStore((state) => Boolean(sessionId && callId && state.bySession.get(sessionId)?.pages.some((page) => page.id === callId)))
+);
+
 /**
  * The pages that stopped waiting between two states of the index, as
  * `sessionID:pageID`: answered, settled by the host's snapshot after a missed

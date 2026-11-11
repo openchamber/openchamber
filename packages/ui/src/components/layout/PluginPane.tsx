@@ -19,6 +19,7 @@ import {
   type HostMessage,
   type HostReadyContext,
   type ResolveResultPayload,
+  trackerProviderIdOf,
 } from '@openchamber/sdk';
 import { guestMessageSchema } from '@openchamber/sdk/schemas';
 
@@ -47,6 +48,7 @@ import {
 import { useGuestBadgeStore } from '@/lib/guests/badge-store';
 import { guestMay, isGuestActive } from '@/lib/guests/capabilities';
 import { guestFileOperation } from '@/lib/guests/files';
+import { useHostTypography } from '@/lib/guests/useHostTypography';
 import { guestGenerate } from '@/lib/guests/generate';
 import { guestGenerateResults, lateGenerateResult, type GenerateOwner } from '@/lib/guests/generate-results';
 import { useConfigStore } from '@/stores/useConfigStore';
@@ -73,6 +75,9 @@ import {
   startGuestOauth,
 } from '@/lib/guests/oauth';
 import { useGuestOauthStore } from '@/lib/guests/oauth-store';
+import { trackerGuestConnection } from '@/lib/guests/tracker-connection';
+import { RuntimeAPIContext } from '@/contexts/runtimeAPIContext';
+import { useTrackerAuthEntry, useTrackerAuthStore } from '@/stores/useTrackerAuthStore';
 import { linkGuestSession, promptGuestSession, startGuestSession } from '@/lib/guests/start-session';
 import { useGuestsStore } from '@/lib/guests/store';
 import { readGuestWorkspace, observeGuestWorkspace, openGuestSession } from '@/lib/guests/workspace';
@@ -143,8 +148,6 @@ type PluginPaneProps = {
 // Isolation is the unique contentWindow plus event.source on receive.
 const OPAQUE_FRAME_TARGET_ORIGIN = '*';
 
-const HOST_FONT_FALLBACK = '"SF Pro Text", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif';
-const HOST_MONO_FALLBACK = 'ui-monospace, "SFMono-Regular", "Menlo", "Cascadia Mono", "Segoe UI Mono", monospace';
 const HOST_RADIUS_FALLBACK = '0.5625rem';
 
 // Sent to the guest, not shown by the host; the guest decides how to surface it.
@@ -226,6 +229,16 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
   const oauthStatus = useGuestOauthStore((state) => state.byId[guestId]);
   const setOauthStatus = useGuestOauthStore((state) => state.setStatus);
   const refreshOauth = useGuestOauthStore((state) => state.refresh);
+  const runtimeTrackers = React.useContext(RuntimeAPIContext)?.trackers;
+  const refreshTrackerStatus = useTrackerAuthStore((state) => state.refreshStatus);
+  // A tracker extension's account lives on its tracker card; an integration of its own keeps its own link.
+  const trackerProvider = guest?.tracker && !guest.integration ? trackerProviderIdOf(guestId) : null;
+  const trackerEntry = useTrackerAuthEntry(trackerProvider);
+  const trackerStatus = trackerProvider ? trackerEntry.status : null;
+  const connection = React.useMemo(
+    () => (trackerProvider ? trackerGuestConnection(trackerStatus) : oauthStatus?.connection ?? EMPTY_GUEST_CONNECTION),
+    [oauthStatus?.connection, trackerProvider, trackerStatus],
+  );
   // A chip click parks the item under this guest's id; take it (clearing the
   // slot) so a later mount of the same pane starts without a stale item.
   const pendingItem = useGuestItemStore((state) => state.pendingItemByGuest[guestId]);
@@ -261,6 +274,7 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
   const readableColors = React.useMemo(() => getReadableThemeColors(currentTheme), [currentTheme]);
   // A frame in a docked panel paints the panel's colour, not the chat's.
   const pageColors = usePageColors();
+  const typography = useHostTypography();
   const ready = React.useMemo<HostReadyContext>(() => {
     const features: NonNullable<HostReadyContext['features']> = {};
     if (guest?.storageId && globalThis.indexedDB) features.deviceStorage = true;
@@ -298,8 +312,9 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
         warning: currentTheme.colors.status.warning,
         error: currentTheme.colors.status.error,
         info: currentTheme.colors.status.info,
-        font: readCssVar('--font-sans', HOST_FONT_FALLBACK),
-        mono: readCssVar('--font-mono', HOST_MONO_FALLBACK),
+        font: typography.font,
+        fontSize: typography.fontSize,
+        mono: typography.mono,
         radius: readCssVar('--radius', HOST_RADIUS_FALLBACK),
         syntaxKeyword: currentTheme.colors.syntax.base.keyword,
         syntaxString: currentTheme.colors.syntax.base.string,
@@ -315,14 +330,14 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
     directory: directory || null,
     session: sessionSnapshot,
     surface: headless && guest?.backgroundEntry ? 'background' : surface,
-    connection: oauthStatus?.connection ?? EMPTY_GUEST_CONNECTION,
+    connection,
     settings: oauthStatus?.settings ?? {},
     item,
     ...(block ? { block: block.call } : {}),
     popover: popoverHost?.context ?? popover,
     features,
     };
-  }, [block, currentTheme, pageColors, readableColors, directory, guest?.backgroundEntry, guest?.storageId, headless, item, locale, oauthStatus, onStatusControls, popover, popoverHost, sessionSnapshot, surface]);
+  }, [block, connection, currentTheme, pageColors, readableColors, typography, directory, guest?.backgroundEntry, guest?.storageId, headless, item, locale, oauthStatus, onStatusControls, popover, popoverHost, sessionSnapshot, surface]);
 
   const fileEditorEntry = surface === 'file' && fileEditor
     ? guest?.fileEditors?.find((editor) => editor.id === fileEditor.editorId)?.entry ?? null
@@ -533,6 +548,10 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
     void refreshOauth(guest.id);
     // A new package version may want another account; a reparsed catalog row may not.
   }, [guest?.id, guest?.revision, hasIntegration, refreshOauth]);
+
+  React.useEffect(() => {
+    if (trackerProvider) void refreshTrackerStatus(runtimeTrackers, trackerProvider, { force: true });
+  }, [refreshTrackerStatus, runtimeTrackers, trackerProvider]);
 
   React.useEffect(() => {
     if (guest && !guestEnabled) {
@@ -1047,8 +1066,8 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
   }, [pushHostState, ready, directory]);
 
   React.useEffect(() => {
-    // A Work Status section or a file editor is not a rail tab and may be the package's only frame.
-    if (headless || surface === 'status' || surface === 'file' || surface === 'popover' || surface === 'block' || catalogStatus !== 'ready' || guest?.entry) {
+    // A Work Status section, file editor, block or full-screen page is not a rail tab and may be the package's only frame.
+    if (headless || surface === 'status' || surface === 'file' || surface === 'popover' || surface === 'block' || surface === 'page' || catalogStatus !== 'ready' || guest?.entry) {
       return;
     }
     closeGuestTabsEverywhere(mode);

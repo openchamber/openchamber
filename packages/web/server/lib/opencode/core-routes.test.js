@@ -361,7 +361,7 @@ describe('core-routes', () => {
     }
   });
 
-  it('lets only GET html-preview and extension-frame file reads past API auth; the grant in the path is checked by the owning route', async () => {
+  it('lets only GET html-preview, extension-frame file reads and MCP OAuth callbacks past API auth; the owning route checks the grant or state', async () => {
     const app = express();
     const requireAuth = vi.fn((_req, res) => res.status(401).json({ error: 'Unauthorized' }));
     registerAuthAndAccessRoutes(app, {
@@ -395,6 +395,7 @@ describe('core-routes', () => {
     app.get(/^\/api\/guest-files\/.+$/, (_req, res) => res.json({ reached: true }));
     app.post(/^\/api\/guest-files\/.+$/, (_req, res) => res.json({ reached: true }));
     app.post('/api/guests/panel/frame-grant', (_req, res) => res.json({ reached: true }));
+    app.get('/api/mcp/oauth/docs/callback', (_req, res) => res.json({ reached: true }));
 
     await request(app).get('/api/fs/preview/grant-1/repo/index.html').expect(200, { reached: true });
     await request(app).post('/api/fs/preview').send({ path: '/repo/index.html' }).expect(401);
@@ -405,7 +406,13 @@ describe('core-routes', () => {
     await request(app).get('/api/guest-files/grant-1').expect(401);
     await request(app).post('/api/guest-files/grant-1/index.html').expect(401);
     await request(app).post('/api/guests/panel/frame-grant').expect(401);
-    expect(requireAuth).toHaveBeenCalledTimes(6);
+    // An MCP sign-in callback arrives without a UI session, and only the exact
+    // GET shape is let through.
+    await request(app).get('/api/mcp/oauth/docs/callback?code=1&state=2').expect(200, { reached: true });
+    await request(app).get('/api/mcp/oauth/Docs/callback?code=1&state=2').expect(401);
+    await request(app).get('/api/mcp/oauth/docs/callback/extra').expect(401);
+    await request(app).post('/api/mcp/oauth/docs/callback').expect(401);
+    expect(requireAuth).toHaveBeenCalledTimes(9);
   });
 
   it('should probe loopback preview URLs and return ok: true for status codes 200-599', async () => {

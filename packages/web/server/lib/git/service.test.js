@@ -5,6 +5,7 @@ import path from 'node:path';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { simpleGit } from 'simple-git';
 import { createWorktreeBootstrapStore } from './worktree-bootstrap-storage.js';
+import { parseDiffFiles } from '../walkthrough/hunks.js';
 import { loadSourceSections, parseSource, sourceKey } from '../walkthrough/sources.js';
 import { registerGitRoutes } from './routes.js';
 import { isUserAction } from '../environment/refresh-scope.js';
@@ -43,6 +44,7 @@ import {
   getWorktrees,
   setWorktreeTaskTitle,
   setWorktreePinned,
+  isWorktreeDirectoryPinned,
   seedBranchTaskTitle,
   markGeneratedBranchName,
   readRenameableGeneratedBranch,
@@ -854,6 +856,49 @@ describe.runIf(canRunGit())('diff output with diff.external configured', () => {
     expect(range).toContain('@@');
     expect(range).not.toContain('EXTERNAL-DIFF-OUTPUT');
   });
+
+  it('keeps a/ and b/ header prefixes when diff.mnemonicPrefix or diff.noprefix is enabled', async () => {
+    const { tmpDir, git } = await createTempRepo();
+    await writeFile(tmpDir, 'file.txt', 'one\n');
+    await git.add('file.txt');
+    await git.commit('Initial');
+    await git.raw(['branch', 'base-branch']);
+    await git.checkoutLocalBranch('head-branch');
+    await writeFile(tmpDir, 'file.txt', 'two\n');
+    await git.add('file.txt');
+    await git.commit('Second');
+    const commitHash = (await git.revparse(['HEAD'])).trim();
+    await writeFile(tmpDir, 'file.txt', 'three\n');
+    await writeFile(tmpDir, 'new.txt', 'untracked\n');
+
+    // Verify diff.mnemonicPrefix alone first (where git would emit c/, w/, and i/
+    // prefixes), then with diff.noprefix enabled on top (where noprefix wins).
+    for (const [key, value] of [
+      ['diff.mnemonicPrefix', 'true'],
+      ['diff.noprefix', 'true'],
+    ]) {
+      runGit(tmpDir, ['config', key, value]);
+
+      const workingDiff = await getDiff(tmpDir, { path: 'file.txt' });
+      expect(workingDiff).toContain('diff --git a/file.txt b/file.txt');
+
+      const rangeDiff = await getRangeDiff(tmpDir, { base: 'base-branch', head: 'head-branch' });
+      expect(rangeDiff).toContain('diff --git a/file.txt b/file.txt');
+
+      const commitDiff = await getCommitDiff(tmpDir, { hash: commitHash });
+      expect(commitDiff).toContain('diff --git a/file.txt b/file.txt');
+
+      for (const [source, expectedPaths] of [
+        [{ kind: 'working-tree', scope: 'all' }, ['file.txt', 'new.txt']],
+        [{ kind: 'branch', baseRef: 'base-branch', headRef: 'head-branch' }, ['file.txt', 'new.txt']],
+        [{ kind: 'commit', hash: commitHash }, ['file.txt']],
+      ]) {
+        const { sections } = await loadSourceSections(tmpDir, source);
+        const files = sections.flatMap((section) => parseDiffFiles(section.patch, section.scope).files);
+        expect(files.map((file) => file.path)).toEqual(expectedPaths);
+      }
+    }
+  });
 });
 
 describe('symlink diffs', () => {
@@ -1088,6 +1133,31 @@ describe('getStatus', () => {
     await expect(getStatus(repo)).resolves.toMatchObject({ current: 'main' });
   });
 
+  it.each(['OPENCHAMBER_GIT_BINARY', 'GIT_BINARY'])('runs Git through %s outside Windows', async (name) => {
+    if (process.platform === 'win32' || !canRunGit()) return;
+
+    const repo = createTempDir();
+    runGit(repo, ['init', '-b', 'main']);
+    const log = path.join(createTempDir(), 'calls.log');
+    const wrapper = path.join(createTempDir(), 'git-wrapper');
+    fs.writeFileSync(wrapper, `#!/bin/sh\nprintf '%s\\n' "$*" >> '${log}'\nexec git "$@"\n`, { mode: 0o755 });
+    const original = process.env[name];
+    process.env[name] = wrapper;
+    try {
+      await expect(getStatus(repo)).resolves.toMatchObject({ current: 'main' });
+      expect(fs.readFileSync(log, 'utf8')).toContain('status');
+
+      // An override that is not an executable file leaves Git to PATH.
+      fs.rmSync(log);
+      process.env[name] = path.join(repo, 'missing-git');
+      await expect(getStatus(repo)).resolves.toMatchObject({ current: 'main' });
+      expect(fs.existsSync(log)).toBe(false);
+    } finally {
+      if (original === undefined) delete process.env[name];
+      else process.env[name] = original;
+    }
+  });
+
   it('reports a branch with no commit yet as unborn until the first commit (#4886)', async () => {
     if (!canRunGit()) return;
 
@@ -1188,6 +1258,41 @@ describe('getStatus', () => {
     } finally {
       process.chdir(previousCwd);
     }
+  });
+
+  it("tells a folder Git refuses from a folder that is no repository, in Git's words", async () => {
+    if (!canRunGit()) return;
+
+    const repo = createTempDir();
+    const plain = createTempDir();
+    runGit(repo, ['init', '-b', 'main']);
+    // Git's own switch for a repository owned by someone else, as a drive
+    // formatted elsewhere looks on Windows.
+    const keys = ['GIT_TEST_ASSUME_DIFFERENT_OWNER', 'GIT_CONFIG_NOSYSTEM', 'GIT_CONFIG_GLOBAL', 'GIT_CONFIG_COUNT', 'GIT_CONFIG_PARAMETERS'];
+    const previous = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
+    const globalConfig = path.join(createTempDir(), 'empty-gitconfig');
+    // Ambient trust settings can otherwise bypass Git's ownership check.
+    process.env.GIT_CONFIG_NOSYSTEM = '1';
+    process.env.GIT_CONFIG_GLOBAL = globalConfig;
+    process.env.GIT_CONFIG_COUNT = '0';
+    delete process.env.GIT_CONFIG_PARAMETERS;
+    process.env.GIT_TEST_ASSUME_DIFFERENT_OWNER = '1';
+    try {
+      await expect(isGitRepository(repo, { failOnGitError: true })).rejects.toMatchObject({
+        code: 'GIT_REPOSITORY_UNREADABLE',
+        message: expect.stringContaining('safe.directory'),
+      });
+      await expect(isGitRepository(plain, { failOnGitError: true })).resolves.toBe(false);
+      await expect(isGitRepository(path.join(plain, 'missing'), { failOnGitError: true })).resolves.toBe(false);
+      // Callers that keep the best-effort probe still read a refusal as no repository.
+      await expect(isGitRepository(repo)).resolves.toBe(false);
+    } finally {
+      for (const key of keys) {
+        if (previous[key] === undefined) delete process.env[key];
+        else process.env[key] = previous[key];
+      }
+    }
+    await expect(isGitRepository(repo, { failOnGitError: true })).resolves.toBe(true);
   });
 
   it('reads status for a git repo when process.cwd() is elsewhere', async () => {
@@ -2346,6 +2451,56 @@ describe('createWorktree', () => {
     }
   });
 
+  it('stops a setup command that never exits, and what it started, for a removal that cancels setup', async () => {
+    if (!canRunGit() || process.platform === 'win32') return;
+
+    const previousXdgDataHome = process.env.XDG_DATA_HOME;
+    const dataHome = createTempDir();
+    const heartbeat = path.join(dataHome, 'heartbeat');
+    process.env.XDG_DATA_HOME = dataHome;
+
+    try {
+      const repo = createTempDir();
+      runGit(repo, ['init', '-b', 'main']);
+      runGit(repo, ['config', 'user.email', 'test@example.com']);
+      runGit(repo, ['config', 'user.name', 'Test User']);
+      fs.writeFileSync(path.join(repo, 'README.md'), '# Test\n');
+      runGit(repo, ['add', 'README.md']);
+      runGit(repo, ['commit', '-m', 'Initial commit']);
+
+      const created = await createWorktree(repo, {
+        mode: 'new',
+        branchName: 'feature/endless-setup',
+        worktreeName: 'endless-setup',
+        returnAfterDirectoryCreated: true,
+        // The loop is a child of the shell, and writes into the checkout too.
+        startCommand: `bash -c 'while true; do echo beat >> "${heartbeat}"; echo beat > left-behind.txt; sleep 0.02; done' & wait`,
+      }, {
+        bootstrapStore: { write: vi.fn(async (_directory, state) => state), read: vi.fn(async () => null), remove: vi.fn(async () => true) },
+        hydrateCheckout: async () => ({ status: 'not-needed', submodules: [], lfs: [] }),
+      });
+
+      await expect.poll(() => fs.existsSync(heartbeat), { timeout: 5_000 }).toBe(true);
+
+      await removeWorktree(repo, { directory: created.path, deleteLocalBranch: true, cancelSetup: true }, {
+        bootstrapStore: { write: vi.fn(async (_directory, state) => state), read: vi.fn(async () => null), remove: vi.fn(async () => true) },
+      });
+
+      expect(fs.existsSync(created.path)).toBe(false);
+      expect(String(runGit(repo, ['branch', '--list', 'feature/endless-setup'])).trim()).toBe('');
+      const beats = fs.readFileSync(heartbeat, 'utf8');
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      expect(fs.readFileSync(heartbeat, 'utf8')).toBe(beats);
+      expect(fs.existsSync(created.path)).toBe(false);
+    } finally {
+      if (previousXdgDataHome === undefined) {
+        delete process.env.XDG_DATA_HOME;
+      } else {
+        process.env.XDG_DATA_HOME = previousXdgDataHome;
+      }
+    }
+  });
+
   it('recovers from an unchanged stale index lock while populating a worktree', async () => {
     if (!canRunGit()) return;
 
@@ -2763,6 +2918,37 @@ describe('createWorktree with OpenCode worktree.directory', () => {
       }
     }
   };
+
+  it('returns preview and creation paths that match Git when home is a symlink', async () => {
+    if (!canRunGit()) return;
+    const parent = createTempDir();
+    const realRoot = path.join(parent, 'real');
+    const aliasRoot = path.join(parent, 'alias');
+    fs.mkdirSync(realRoot);
+    fs.symlinkSync(realRoot, aliasRoot, process.platform === 'win32' ? 'junction' : 'dir');
+    const repo = initRepo();
+    fs.writeFileSync(path.join(repo, 'opencode.json'), JSON.stringify({ worktree: null }));
+    vi.stubEnv('OPENCODE_CONFIG', path.join(repo, 'opencode.json'));
+    vi.stubEnv('HOME', aliasRoot);
+    vi.stubEnv('USERPROFILE', aliasRoot);
+    vi.stubEnv('XDG_CONFIG_HOME', path.join(realRoot, '.config'));
+    vi.stubEnv('XDG_DATA_HOME', undefined);
+    try {
+      const input = {
+        mode: 'new', worktreeName: 'canonical-tree', branchName: 'openchamber/canonical-tree',
+        returnAfterDirectoryCreated: true,
+      };
+      const preview = await previewWorktreeCreate(repo, input);
+      const created = await createWorktree(repo, input);
+      await waitForActiveWorktreeBootstrap(created.path);
+      const listed = (await getWorktrees(repo)).find((entry) => entry.branch === created.branch);
+      expect(listed).toBeDefined();
+      expect(created.path.replaceAll('\\', '/')).toBe(listed.path.replaceAll('\\', '/'));
+      expect(preview.path.replaceAll('\\', '/')).toBe(listed.path.replaceAll('\\', '/'));
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
 
   it('creates and previews under a configured relative folder', withDataHome(async () => {
     if (!canRunGit()) return;
@@ -3491,6 +3677,7 @@ describe('git remote arguments with option-like names', () => {
 
     const { remote, repository } = createRepositoryWithRemote();
     addOptionLikeRemote(repository, remote);
+    runGit(repository, ['symbolic-ref', 'refs/remotes/--mirror/HEAD', 'refs/remotes/--mirror/react']);
     const head = runGit(repository, ['rev-parse', 'HEAD']).trim();
     runGit(repository, ['update-ref', `refs/remotes/${OPTION_LIKE_REMOTE}/gone`, head]);
 
@@ -7035,6 +7222,19 @@ describe('worktree task titles', () => {
 
     expect(await setWorktreePinned(linked, false)).toEqual({ pinned: false, branch: 'feature/task' });
     expect((await entryOf())?.pinnedAt).toBeUndefined();
+  });
+
+  it('tells a pinned worktree\'s folders from the project checkout, whose branch config does not count', async () => {
+    const { repo, linked } = createLinkedWorktree();
+    expect(await isWorktreeDirectoryPinned(linked)).toBe(false);
+    await setWorktreePinned(linked, true, 'release', 1234);
+    expect(await isWorktreeDirectoryPinned(linked)).toBe(true);
+    fs.mkdirSync(path.join(linked, 'sub'), { recursive: true });
+    expect(await isWorktreeDirectoryPinned(path.join(linked, 'sub'))).toBe(true);
+    const rootBranch = String(runGit(repo, ['symbolic-ref', '--short', 'HEAD'])).trim();
+    runGit(repo, ['config', `branch.${rootBranch}.openchamberPinned`, '99']);
+    expect(await isWorktreeDirectoryPinned(repo)).toBe(false);
+    expect(await isWorktreeDirectoryPinned(path.join(repo, 'missing'))).toBe(false);
   });
 
   it('files a pinned worktree into a pin list and back, keeping the first pin time', async () => {

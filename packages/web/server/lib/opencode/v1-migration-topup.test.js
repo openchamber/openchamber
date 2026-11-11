@@ -127,6 +127,22 @@ describe.skipIf(!sqlite)('topUpV1Migration', () => {
     expect(run()).toEqual({ status: 'skipped', missing: 0, revisited: 0, reason: 'no-database' });
   });
 
+  it('opens the database under the XDG_DATA_HOME of the given environment', () => {
+    const dataDir = path.join(dir, 'opencode');
+    fs.mkdirSync(dataDir);
+    dbPath = path.join(dataDir, 'opencode.db');
+    createDatabase();
+    seed({ v1: ['ses_a'] });
+
+    const result = topUpV1Migration({
+      env: { XDG_DATA_HOME: dir },
+      logger: { log: () => {}, warn: () => {} },
+      now: () => 2_000_000,
+    });
+
+    expect(result).toMatchObject({ status: 'scheduled', missing: 1 });
+  });
+
   it('skips a database without the v1 session table', () => {
     createDatabase({ tables: ['session_v2', 'session_message', 'kv', 'event'] });
     seed({ v1: [] });

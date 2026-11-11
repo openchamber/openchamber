@@ -180,6 +180,9 @@
     "agentRenderToolEnabled": {
       "scope": "instance"
     },
+    "agentUsageToolEnabled": {
+      "scope": "instance"
+    },
     "agentImageToolEnabled": {
       "scope": "instance"
     },
@@ -189,10 +192,16 @@
     "agentSecretToolEnabled": {
       "scope": "instance"
     },
-    "agentToolsCodeMode": {
+    "agentMemoryToolEnabled": {
       "scope": "instance"
     },
-    "agentMemoryToolEnabled": {
+    "agentMemoryDreamingEnabled": {
+      "scope": "instance"
+    },
+    "agentMemoryDreamingModel": {
+      "scope": "instance"
+    },
+    "agentMemoryDreamingVariant": {
       "scope": "instance"
     },
     "agentKnowledgeToolEnabled": {
@@ -341,6 +350,10 @@
       "perSurface": true
     },
     "sidebarKeepWorkInPlace": {
+      "scope": "profile",
+      "perSurface": true
+    },
+    "sidebarKeepPinnedInPlace": {
       "scope": "profile",
       "perSurface": true
     },
@@ -615,6 +628,10 @@
       "scope": "profile",
       "perSurface": true
     },
+    "chatFontSize": {
+      "scope": "profile",
+      "perSurface": true
+    },
     "terminalFontSize": {
       "scope": "profile",
       "perSurface": true
@@ -695,6 +712,9 @@
       "scope": "profile"
     },
     "customProviderIcons": {
+      "scope": "profile"
+    },
+    "customProviderLogos": {
       "scope": "profile"
     },
     "recentModels": {

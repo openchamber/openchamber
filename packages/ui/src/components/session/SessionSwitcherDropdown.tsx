@@ -13,7 +13,7 @@ import { Icon } from '@/components/icon/Icon';
 import { SessionActivityIndicator } from '@/components/session/SessionActivityIndicator';
 import { useWaitingBlink } from '@/hooks/useDurationTicker';
 import { useSessionUIStore } from '@/sync/session-ui-store';
-import { useSessionUnread } from '@/sync/session-unread';
+import { useSessionMarkedUnread, useSessionUnread } from '@/sync/session-unread';
 import {
   findSwitcherItemAncestorIds,
   useSwitcherItems,
@@ -233,13 +233,14 @@ function SwitcherRow({ session, depth, variant, secondaryMeta, hasChildren, isEx
   const setCurrentSession = useSessionUIStore((state) => state.setCurrentSession);
 
   const isUnread = useSessionUnread(session.id);
+  const markedUnread = useSessionMarkedUnread(session.id);
 
   const isActive = currentSessionId === session.id;
   const sessionTitle = session.title?.trim() || t('sessions.sidebar.session.untitled');
   const turnActivity = useSessionTurnActivity(session.id);
   const isStreaming = turnActivity !== null;
   const runningBlink = useWaitingBlink(isStreaming);
-  const showUnreadDot = !isStreaming && isUnread && !isActive;
+  const showUnreadDot = !isStreaming && isUnread && (!isActive || markedUnread);
 
   const timestamp = getSessionActivityTime(session) || Date.now();
   const timeLabel = formatSessionCompactDateLabel(timestamp);

@@ -118,7 +118,7 @@ return 409, including through Run now.
 `resolveExecutionDirectory` on the task service returns the project checkout
 or Chats root after scope ID normalization. For a target task it reuses
 `existing-session.js` target validation and returns the session's own directory.
-The control actions use this directory for named-model catalog checks, so a
+The task service uses this directory for named-model catalog checks, so a
 target in a linked worktree uses that worktree's configuration.
 
 Target discovery asks the same rule rather than reproducing it:
@@ -199,6 +199,10 @@ source ref; an absent branch uses the project checkout's `HEAD` at run time.
 The editor reuses multi-run's `BranchSelector`, including remote branches, and
 hides it while isolation is off. Chats and existing-session dispatches do not
 use isolation. Setup commands are outside this implementation.
+The agent tool sets the same choices through `schedule.create` and
+`schedule.update` (`runInWorktree`, `baseBranch`, `cleanupWorktree`); it refuses
+any of them together with `targetSessionId`, because that session's own
+directory wins.
 
 - Project config stores `runInWorktree: true`, a nonempty `baseBranch`, and
   `cleanupWorktree: false`. Omitted fields preserve stored choices. The source
@@ -322,7 +326,7 @@ Portable, git-commit-able scheduled-task definitions:
 name: daily-digest
 schedule: "0 9 * * *"
 enabled: true
-model: anthropic/claude-sonnet-4-5
+model: opencode/big-pickle
 agent: plan
 timezone: Europe/Kyiv
 ---
@@ -340,6 +344,25 @@ Field mapping (model: `packages/ui/src/lib/scheduledTasksApi.ts`):
 | `agent` | `execution.agent` (optional) |
 | `timezone` | `schedule.timezone` (optional, IANA; defaults to the server zone) |
 | body | `execution.prompt` (required) |
+
+A stored `model` is checked against the model catalog when it is written. The
+agent tool and the Scheduled tasks editor both save through
+`scheduledTaskService.upsert`, so both reject a `provider/model` the catalog
+does not serve, with `unknown model: provider/model`. The check follows the
+directory the run will happen in — a target-session task against that session's
+worktree, everything else against the project — and stands down when there is
+nothing to compare against: a catalog that is empty because OpenCode has not
+started in that location yet, or because the runtime cannot be reached at all.
+A folder the user has not trusted is the exception to standing down — the save
+is refused with the same 403 the control layer gives, since the user can act on
+it. Only a model the call changes is checked: a task whose stored model has
+since disappeared stays editable, retimeable and deletable. A task that follows
+session defaults is not checked at all, because the pair it stores is whatever
+the editor prefilled and the fire path ignores it — the check lands on the save
+that turns defaults off, where that stored pair starts to run. A loop file's
+model is checked when the
+loop is enabled from the app, since that is the point a person is present to be
+told.
 
 `thinking_level` and `goalEnabled`/`goalTokenBudget` are not part of the portable
 format (UI/JSON-only today); `daily`/`weekly`/`once` schedules remain UI/JSON-only.

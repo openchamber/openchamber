@@ -22,5 +22,5 @@ test('Highlights languages are ready synchronously once the module has loaded', 
   expect(getCachedHighlightedLines('const a = 1;', 'typescript')?.[0]).toContain('var(--md-token-storageModifier)');
   expect(getCachedHighlightedCode('const a = 1;', 'typescript')?.startsWith('<pre class="highlights"')).toBe(true);
   // Shiki languages still need the worker.
-  expect(getCachedHighlightedLines('a = 1', 'coffee')).toBeNull();
+  expect(getCachedHighlightedLines('a = 1', 'purescript')).toBeNull();
 });

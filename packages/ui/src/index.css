@@ -91,6 +91,13 @@
   }
 }
 
+/* A detailed sidebar row whose second line opens with text, not an icon:
+   the hover chevron sits over the line's start, and the text's first letters
+   fade away under it. */
+@utility oc-lead-mask {
+  mask-image: linear-gradient(var(--oc-to-inline-end), transparent 0.875rem, #000 1.5rem);
+}
+
 /* File tree rows keep the whole name on one line, and a tree wider than its
    pane scrolls sideways. Every row ends in a lane (its git marks) that sticks
    to the pane's end while long rows scroll under it; a row's hover menu is a
@@ -267,6 +274,15 @@ button,
 .markdown-content details > summary {
   unicode-bidi: plaintext;
   text-align: start;
+}
+
+/* A text field takes the direction of what is typed into it, line by line in a
+   textarea, so Persian in an English interface runs from the right. An empty
+   field keeps the interface's direction: with plaintext on a field showing its
+   placeholder, Gecko draws the placeholder outside the box in a right-to-left
+   interface. A field that sets dir keeps it. */
+:where(input, textarea):not([dir]):not(:placeholder-shown) {
+  unicode-bidi: plaintext;
 }
 
 /* Markdown's explicit column alignment still wins over automatic alignment. */
@@ -1134,21 +1150,23 @@ html:not(.dark) .chat-scroll {
    view) renders into the shadow root of a `diffs-container`. Setting the font
    and line height on that host resolves `--text-code` where the instance sits, so local
    overrides such as the Files view's editor font size and the mobile code
-   size apply too. */
+   size apply too. Where code follows the Editor font size (the Files view and
+   the diffs on desktop), `useEditorCodeMetrics()` sets `--oc-code-line-height` so
+   the rows match the editor's. */
 diffs-container {
   --diffs-font-family: var(--font-mono, ui-monospace, monospace);
   --diffs-font-size: var(--text-code);
   /* 24px at the default 12px code size. Tool cards and the tool dialog wrap
      lines, so Pierre measures their rows and the height can scale. */
-  --diffs-line-height: calc(var(--text-code) * 2);
+  --diffs-line-height: var(--oc-code-line-height, calc(var(--text-code) * 2));
 }
 
-/* The Changes view and the walkthrough virtualize with fixed 24px rows
-   (`VIRTUAL_METRICS.lineHeight` in PierreDiffViewer.tsx). Without wrapping,
-   Pierre does not measure rows, so a taller row would make long diffs jump
-   while scrolling. */
+/* The Changes view and the walkthrough virtualize with fixed rows
+   (`lineHeight` in the diff's virtual metrics, PierreDiffViewer.tsx), so the
+   CSS row height must equal that number. Without wrapping, Pierre does not
+   measure rows, so a taller row would make long diffs jump while scrolling. */
 .pierre-diff-wrapper diffs-container {
-  --diffs-line-height: 24px;
+  --diffs-line-height: var(--oc-code-line-height, 24px);
 }
 
 /* Pierre diff viewer styling */
@@ -1883,6 +1901,34 @@ diffs-container {
   font-size: 0.875rem;
 }
 
+/* The Files preview sizes its body from the editor font, an inline px
+   --text-markdown, while tables and headings above are authored in rem and
+   would keep their size when Cmd +/- changes the editor font. Derive them
+   from the body there; the ratios are the old rem sizes over the 0.875rem
+   body, so the default rendering stays on desktop, and on touch screens,
+   where mobile.css sets a 16px body, tables and headings scale from it. */
+.oc-file-preview .markdown-content table {
+  font-size: 1em;
+}
+
+.oc-file-preview .markdown-content h1 {
+  font-size: 1.4286em;
+}
+
+.oc-file-preview .markdown-content h2 {
+  font-size: 1.2857em;
+}
+
+.oc-file-preview .markdown-content h3 {
+  font-size: 1.1429em;
+}
+
+.oc-file-preview .markdown-content h4,
+.oc-file-preview .markdown-content h5,
+.oc-file-preview .markdown-content h6 {
+  font-size: 1em;
+}
+
 /* GitHub writes `<summary><h3>Findings</h3></summary>`: like GitHub, the
    heading keeps its size but sits on the chevron's line without margins. */
 .markdown-content details > summary h1,
@@ -1940,6 +1986,13 @@ diffs-container {
   cursor: pointer;
   text-decoration: underline;
   text-underline-offset: 2px;
+  user-select: text !important;
+  -webkit-user-select: text !important;
+}
+
+/* An identifier an extension claims is a word in the sentence: a selection
+   across it keeps it, though its button role is unselectable app-wide. */
+.markdown-content [data-oc-guest-link] {
   user-select: text !important;
   -webkit-user-select: text !important;
 }

@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { translateWireEvent } from '../event-stream/translate-v2.js';
 
 import {
+  SESSION_EVENT_ARCHIVE_DEDUPE_MS,
   SESSION_EVENT_FAILURE_BACKOFF_MS,
   SESSION_EVENT_IDLE_DEDUPE_MS,
   createExtensionSessionEvents,
@@ -328,13 +329,30 @@ describe('question-asked', () => {
   test('a form of a session is announced with its fields, an MCP elicitation is not', async () => {
     const h = harness({ catalog: [reader()] });
     h.runtime.processPayload({ type: 'form.created', properties: { sessionID: 'global', form: { id: 'form_g', sessionID: 'global', title: 'Token?' } } });
-    h.runtime.processPayload({ type: 'form.created', id: 'evt_form', created: 4_000, properties: { sessionID: 'ses_1', directory: '/repo', form: { id: 'form_1', sessionID: 'ses_1', title: 'Which?', fields: [{ title: 'Branch', description: 'main or dev' }, { title: 'Force' }] } } });
+    h.runtime.processPayload({ type: 'form.created', id: 'evt_form', created: 4_000, properties: { sessionID: 'ses_1', directory: '/repo', form: { id: 'form_1', sessionID: 'ses_1', title: 'Which?', fields: [
+      { key: 'branch', type: 'string', title: 'Branch', description: 'main or dev', required: true, options: [{ value: 'main', label: 'Main' }, { value: 'dev' }] },
+      { key: 'force', type: 'boolean', title: 'Force' },
+      { key: 'tags', type: 'multiselect', options: [{ value: 'a', label: 'A' }], custom: true, when: [{ key: 'force', op: 'eq', value: true }, { key: 'bad', op: 'gt', value: 1 }] },
+      { key: 'session', type: 'string', hidden: true },
+    ] } } });
     await settle();
     expect(h.bodies()).toHaveLength(1);
+    expect(h.bodies()[0].event.question).toEqual({ kind: 'form', id: 'form_1' });
     expect(h.bodies()[0].content).toEqual({
       type: 'question-asked', sessionTitle: null,
-      ask: { kind: 'form', id: 'form_1', title: 'Which?', fields: [{ title: 'Branch', description: 'main or dev' }, { title: 'Force', description: null }] },
+      ask: { kind: 'form', id: 'form_1', title: 'Which?', fields: [
+        { key: 'branch', type: 'string', title: 'Branch', description: 'main or dev', required: true, options: [{ value: 'main', label: 'Main' }, { value: 'dev', label: 'dev' }] },
+        { key: 'force', type: 'boolean', title: 'Force', description: null, required: false },
+        { key: 'tags', type: 'multiselect', title: '', description: null, required: false, options: [{ value: 'a', label: 'A' }], custom: true, when: [{ key: 'force', op: 'eq', value: true }] },
+      ] },
     });
+  });
+
+  test('a waiting page is named on the event so a service can tell it from a form', async () => {
+    const h = harness({ catalog: [reader()] });
+    h.runtime.processPayload({ type: 'openchamber:page-waiting', properties: { sessionID: 'ses_1', directory: '/repo', page: { id: 'call_1', title: 'Pick a layout' } } });
+    await settle();
+    expect(h.bodies()[0].event.question).toEqual({ kind: 'page', id: 'call_1' });
   });
 });
 
@@ -606,6 +624,49 @@ describe('session lifecycle events', () => {
     runtime.processPayload({ type: 'openchamber:session-archived', properties: { sessionID: 'ses_1', archivedAt: 5 } }, '');
     await settle();
     expect(typesPosted(calls)).toEqual(['session-archived']);
+  });
+
+  test('an archive is announced once whoever reports it, and again after a restore or a while', async () => {
+    const { runtime, calls, advance } = harness({ catalog: [lifecycle()] });
+    const opencode = (type, id) => {
+      for (const payload of translateWireEvent({ type, id: `evt_${id}`, created: 1_000, data: { sessionID: id } })) runtime.processPayload(payload, '/repo');
+    };
+    const fromFile = (id, archivedAt) => runtime.processPayload({ type: 'openchamber:session-archived', properties: { sessionID: id, archivedAt } }, '');
+    const announced = async () => { await settle(); return calls.map((call) => JSON.parse(call.body).event.session.id); };
+    opencode('session.archived', 'ses_1');
+    fromFile('ses_1', 5);
+    fromFile('ses_2', 5);
+    opencode('session.archived', 'ses_2');
+    expect(await announced()).toEqual(['ses_1', 'ses_2']);
+    opencode('session.unarchived', 'ses_1');
+    opencode('session.archived', 'ses_1');
+    fromFile('ses_2', null);
+    fromFile('ses_2', 5);
+    expect(await announced()).toEqual(['ses_1', 'ses_2', 'ses_1', 'ses_2']);
+    // A restore this server never heard of must not silence the next archive.
+    advance(SESSION_EVENT_ARCHIVE_DEDUPE_MS);
+    opencode('session.archived', 'ses_1');
+    expect(await announced()).toEqual(['ses_1', 'ses_2', 'ses_1', 'ses_2', 'ses_1']);
+  });
+
+  test('an archive report dropped under backlog leaves the other report to announce it', async () => {
+    let release;
+    let started;
+    const gate = new Promise((resolve) => { release = resolve; });
+    const reading = new Promise((resolve) => { started = resolve; });
+    const h = harness({ catalog: [lifecycle()], beforeFetch: async (url) => {
+      if (url.endsWith('/api/session/ses_0')) { started(); await gate; }
+    } });
+    const archived = (type, id) => ({ type, properties: { sessionID: id, archivedAt: 5 } });
+    h.runtime.processPayload(archived('session.archived', 'ses_0'));
+    await reading;
+    for (let i = 1; i <= SESSION_EVENT_PENDING_MAX + 1; i += 1) h.runtime.processPayload(archived('session.archived', `ses_${i}`));
+    h.runtime.processPayload(archived('session.archived', 'ses_late'));
+    release();
+    await settle();
+    h.runtime.processPayload(archived('openchamber:session-archived', 'ses_late'));
+    await settle();
+    expect(h.bodies().at(-1).event.session.id).toBe('ses_late');
   });
 
   test('a subscriber of none of them hears nothing and costs no read', async () => {

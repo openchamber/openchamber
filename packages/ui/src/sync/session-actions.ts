@@ -18,7 +18,7 @@ import {
   submitRecoveredAnswer,
   type RecoveredQuestion,
 } from "./recoverable-questions"
-import { resolveSendSelection } from "./session-selection"
+import { resolveCheckedSendSelection, resolveSendSelection } from "./session-selection"
 import { useInputStore } from "./input-store"
 import type { ChildStoreManager } from "./child-store"
 import { computeSubtreeIds } from "./scoped-blocking-requests"
@@ -32,7 +32,7 @@ import { readGlobalSessionLineage } from "@/stores/sessionLineage"
 import { isRestorableOnItsOwn } from "./session-restore-rule"
 import { useConfigStore } from "@/stores/useConfigStore"
 import { waitForOpenCodeStartup } from "./opencode-startup-gate"
-import { registerSessionDirectory } from "./sync-refs"
+import { getAllSyncSessions, getDirectoryState, registerSessionDirectory } from "./sync-refs"
 import { useGlobalSessionStatusStore } from "./global-session-status"
 import { recordSendFailure } from "./send-failure-log"
 import { draftFromContextPayload, readContextPart, type ContextCarrierPart } from "@/lib/messages/contextParts"
@@ -50,8 +50,8 @@ import {
 import { withContextObligatoryMessage, type ContextObligatoryMessage } from "@/lib/contextObligatoryMessages"
 import { getBtwOriginalSessionID, getBtwSessionID, isBtwSession, withoutBtwSessionLink } from "@/lib/sessionBtwMetadata"
 import { type LinkedIssue } from "@/lib/linkedIssues"
-import { withSessionWorkState, type SessionWork } from "@/lib/sessionWorkMetadata"
-import { withSessionPinned } from "@/lib/sessionPins"
+import { withSessionWorkClosed, withSessionWorkState, type SessionWork } from "@/lib/sessionWorkMetadata"
+import { isPinnedMetadata, withSessionPinned } from "@/lib/sessionPins"
 import { getImperativeSessionMessageLoader } from "./session-message-loader"
 import { cleanupPersistedSessionState } from "./session-deletion-cleanup"
 import { requestSessionArchiveBatch, requestSessionLinksUpdate, requestSessionMetadataUpdate, requestSessionUnarchiveBatch, type SessionArchiveStamp } from "./session-archive-batch"
@@ -69,6 +69,7 @@ import { trackPromptInFlight } from "./prompts-in-flight"
 import { messagesBefore, messagesFrom } from "./message-ordering"
 import { deleteChatDirectory } from "@/lib/chatDirectories"
 import { createChatDraftIdentity, type ChatDraftIdentity } from "@/lib/chatDraftPersistence"
+import { LOCATION_SCOPED_FORM_SESSION_ID } from "./location-scoped-forms"
 import { cancelSessionTitleGeneration } from "./session-title-generation"
 import { recordSessionActionFailure } from "./session-action-failures"
 import { applyForkInheritance } from "@/lib/sessionForkInheritance"
@@ -696,6 +697,18 @@ export async function clearStagedRevert(sessionId: string): Promise<void> {
   }
 }
 
+/**
+ * Commits the session's staged revert ahead of input that OpenCode admits
+ * without committing it: a UI block answer or a shell command. Admitted while
+ * the revert is staged, that input lies past its boundary, and the next
+ * prompt's commit deletes it. The `session.revert.committed` event then trims
+ * the reverted tail, as it does after another client's prompt.
+ */
+export async function commitStagedRevert(sessionId: string, directory?: string | null): Promise<void> {
+  if (!findLiveSession(sessionId)?.revert) return
+  await opencodeClient.commitRevert(sessionId, directory)
+}
+
 function getGlobalSessionSnapshot(sessionId: string): Session | null {
   const global = useGlobalSessionsStore.getState()
   return [...global.activeSessions, ...global.archivedSessions].find((session) => session.id === sessionId) ?? null
@@ -821,7 +834,7 @@ function restoreContextPartsToInput(
     const payload = readContextPart(part)
     if (!payload) continue
     const draft = draftFromContextPayload(payload)
-    if (draft) store.addDraft(target, draft)
+    if (draft) store.addDraft(target, draft, { written: true })
   }
 }
 
@@ -1294,8 +1307,9 @@ export async function setSessionWorkState(
 ): Promise<Session | null> {
   const runtimeKeyAtClick = getRuntimeKey()
   try {
+    // A pinned session is never in work: Track on one writes nothing.
     return await patchSessionMetadata(sessionId, directory, (metadata) =>
-      withSessionWorkState(metadata, state, Date.now()), runtimeKeyAtClick)
+      state === "open" && isPinnedMetadata(metadata) ? metadata : withSessionWorkState(metadata, state, Date.now()), runtimeKeyAtClick)
   } catch (error) {
     if (isStaleRuntime(runtimeKeyAtClick)) return null
     throw error
@@ -1305,7 +1319,8 @@ export async function setSessionWorkState(
 /**
  * Pin or unpin a session for every client of the server. Bound to the server
  * it was clicked on, like the work state: a runtime switch mid-request writes
- * nothing to the new server and resolves null.
+ * nothing to the new server and resolves null. A pinned session is never in
+ * work, so pinning one that is closes its work in the same write.
  */
 export async function setSessionPinned(
   sessionId: string,
@@ -1315,8 +1330,11 @@ export async function setSessionPinned(
 ): Promise<Session | null> {
   const runtimeKeyAtClick = getRuntimeKey()
   try {
-    return await patchSessionMetadata(sessionId, directory, (metadata) =>
-      withSessionPinned(metadata, pinned, Date.now(), list), runtimeKeyAtClick)
+    return await patchSessionMetadata(sessionId, directory, (metadata) => {
+      const now = Date.now()
+      const next = withSessionPinned(metadata, pinned, now, list)
+      return pinned ? withSessionWorkClosed(next, now) : next
+    }, runtimeKeyAtClick)
   } catch (error) {
     if (isStaleRuntime(runtimeKeyAtClick)) return null
     throw error
@@ -2134,9 +2152,10 @@ export async function optimisticSend(input: {
   markBusy?: boolean
   /**
    * The actual API call. Receives the optimistic message id and the context
-   * with its optimistic ids, so the server's records reconcile in place.
+   * with its optimistic ids, so the server's records reconcile in place, and,
+   * while a revert is staged, the commit to run before any context is admitted.
    */
-  send: (messageID: string, context: SyntheticContextInput[]) => Promise<void>
+  send: (messageID: string, context: SyntheticContextInput[], commitRevert?: () => Promise<void>) => Promise<void>
 }): Promise<void> {
   if (!_optimisticAdd || !_optimisticRemove) {
     throw new Error("Optimistic refs not set — is useSync() mounted?")
@@ -2257,6 +2276,19 @@ export async function optimisticSend(input: {
 
   if (input.markBusy !== false) markSessionStatus(input.sessionId, targetDirectory, "busy")
 
+  // Whether the commit of the staged revert left, and whether the server
+  // answered it. A failed send puts the revert back only while the server
+  // still has it staged.
+  let revertCommitSent = false
+  let revertCommitted = false
+  const commitRevert = revertMessageID
+    ? async () => {
+        revertCommitSent = true
+        await opencodeClient.commitRevert(input.sessionId, targetDirectory)
+        revertCommitted = true
+      }
+    : undefined
+
   const releasePrompt = trackPromptInFlight(input.sessionId)
   // Only a request that left can have been accepted; a failure before it is certain.
   let requestSent = false
@@ -2264,7 +2296,7 @@ export async function optimisticSend(input: {
     await input.ready
     assertRuntimeUnchanged()
     requestSent = true
-    await input.send(messageID, context)
+    await input.send(messageID, context, commitRevert)
   } catch (error) {
     const status = getErrorStatus(error)
     const ambiguousFailure = requestSent && isAmbiguousSendFailure(error)
@@ -2302,6 +2334,13 @@ export async function optimisticSend(input: {
     recordSendFailure(failureRecord)
     console.warn("[session-actions] prompt send rejected; rolling back optimistic message", failureRecord)
 
+    let revertStaged = !revertCommitted
+    // A commit whose response was lost may have landed all the same; the
+    // session record, read once the connection is back, says which.
+    if (revertCommitSent && !revertCommitted && ambiguousFailure) {
+      revertStaged = await opencodeClient.getSession(input.sessionId, targetDirectory).then((record) => !!record.revert, () => true)
+    }
+
     // Rollback via optimistic infrastructure. Context the server admitted
     // before the failure comes back with the next history read. The records
     // are where the session lives now: a session created from a draft can
@@ -2320,7 +2359,7 @@ export async function optimisticSend(input: {
     let message = rollbackState.message
     let part = rollbackState.part
 
-    if (revertMessageID) {
+    if (revertMessageID && revertStaged) {
       session = rollbackState.session.map((candidate) => (
         candidate.id === input.sessionId ? { ...candidate, revert: sessionBeforeSend?.revert } as Session : candidate
       ))
@@ -2545,17 +2584,135 @@ export async function dismissOpenPermissionsForSession(sessionId: string): Promi
 /** One filled-in form: every field the agent declared, keyed by field key. */
 export type FormAnswer = Record<string, string | number | boolean | string[]>
 
+/** What a form's session should run on next; a missing half stays as it is. */
+type FormSelection = {
+  model?: { providerID: string; modelID: string; variant?: string | null }
+  agent?: string
+}
+
+/**
+ * The selection of the composer that belongs to a form's session. The main
+ * chat's composer lives in the app-wide config. Any other session, a pinned
+ * chat or a `/btw` fork, holds its picks per session, and a child session
+ * answered from its parent has none: its record, a workflow's binding included,
+ * stays. A reply never copies another chat's model, agent or effort.
+ */
+function resolveFormSelection(sessionId: string, directory: string | undefined): FormSelection {
+  const picks = useSelectionStore.getState()
+  const agentPick = picks.getSessionAgentPick(sessionId) ?? undefined
+  if (useSessionUIStore.getState().currentSessionId === sessionId) {
+    const config = useConfigStore.getState()
+    return {
+      agent: agentPick ?? config.currentAgentName ?? undefined,
+      model: config.currentProviderId && config.currentModelId
+        ? {
+            providerID: config.currentProviderId,
+            modelID: config.currentModelId,
+            variant: config.currentVariantSelection.override === null ? null : config.currentVariant,
+          }
+        : undefined,
+    }
+  }
+  const record = (getDirectoryState(directory)?.session ?? getAllSyncSessions()).find((session) => session.id === sessionId)
+  const recordModel = record?.model
+  const modelPick = picks.getSessionModelPick(sessionId)
+  const model = modelPick ?? (recordModel ? { providerId: recordModel.providerID, modelId: recordModel.id } : null)
+  const agent = agentPick ?? record?.agent
+  const savedEffort = model && agent
+    ? picks.getAgentModelVariantForSession(sessionId, agent, model.providerId, model.modelId)
+    : undefined
+  // An effort saved before a switch made elsewhere is older than the record.
+  const effortPicked = savedEffort !== undefined && !(recordModel
+    && picks.isSessionModelSwitched(sessionId, `${recordModel.providerID}/${recordModel.id}#${recordModel.variant ?? ""}`))
+  if (!model || (!modelPick && !effortPicked)) return { agent: agentPick }
+  const recordEffort = recordModel?.providerID === model.providerId && recordModel.id === model.modelId
+    ? recordModel.variant
+    : undefined
+  return {
+    agent: agentPick,
+    model: { providerID: model.providerId, modelID: model.modelId, variant: effortPicked ? savedEffort : recordEffort },
+  }
+}
+
+/**
+ * Puts a form's session on its composer's selection before the answer resumes
+ * the turn, as a send does (#6053): an unchanged selection switches nothing,
+ * and a failed switch leaves the answer unsent. Auto reaches the session as
+ * the sentinel; the server routes the reply itself and switches to the real
+ * model before it forwards the answer. Returns what to settle once the answer
+ * is accepted.
+ */
+async function applyFormSelection(sessionId: string, directory: string | undefined, runtimeKey: string): Promise<() => void> {
+  // No session owns a location-scoped form, so nothing can be switched for it.
+  if (sessionId === LOCATION_SCOPED_FORM_SESSION_ID) return () => {}
+  const { model, agent } = resolveFormSelection(sessionId, directory)
+  if (!model && !agent) return () => {}
+  const settleModelPick = model
+    ? useSelectionStore.getState().captureSessionModelPickSettlement(sessionId, model.providerID, model.modelID, runtimeKey)
+    : undefined
+  const selection = await resolveCheckedSendSelection(sessionId, directory, {
+    // Without a model the agent half is all that is compared and used.
+    providerID: model?.providerID ?? "",
+    modelID: model?.modelID ?? "",
+    variant: model?.variant,
+    agent,
+  })
+  await opencodeClient.applySendSelection(
+    sessionId,
+    { model: model ? selection.model : undefined, agent: selection.agent },
+    directory,
+    runtimeKey,
+  )
+  return () => settleModelPick?.()
+}
+
+/**
+ * Puts a model picked in a session's composer, and not sent yet, on the session
+ * while its turn waits for an automatic retry. OpenCode reloads the session's
+ * model before every attempt, so the next attempt runs on the pick and the turn
+ * goes on, as when the limit-failover plugin switches from its retry hook. A
+ * pick made while the turn generates waits for the next send, or for this, if
+ * the turn falls into a retry wait first. Auto has no prompt to route here, so
+ * it waits for the next send too.
+ *
+ * The switch is sent without comparing the pick with the synced record: a pick
+ * reverted before the previous switch reached the record would read as
+ * unchanged. OpenCode ignores a switch to the model the session already runs.
+ */
+export async function applyModelPickToRetry(sessionId: string, directory: string | undefined): Promise<void> {
+  const pick = useSelectionStore.getState().getSessionModelPick(sessionId)
+  if (!pick || isAutoModel(pick.providerId, pick.modelId)) return
+  const { model } = resolveFormSelection(sessionId, directory)
+  if (model?.providerID !== pick.providerId || model.modelID !== pick.modelId) return
+  const settleModelPick = useSelectionStore.getState().captureSessionModelPickSettlement(sessionId, model.providerID, model.modelID)
+  await opencodeClient.switchSessionModel(sessionId, { providerID: model.providerID, id: model.modelID, variant: model.variant }, directory)
+  settleModelPick()
+}
+
 export async function replyToForm(
   sessionId: string,
   formId: string,
   answer: FormAnswer,
 ): Promise<void> {
+  // The client resolves its server at call time, so everything past an await
+  // first proves it still works for the runtime the user answered in.
+  const isCurrentRuntime = captureRuntimeInstance()
+  const runtimeKey = getRuntimeKey()
+  const assertRuntimeCurrent = () => {
+    if (!isCurrentRuntime()) throw new Error("Form reply was cancelled because the runtime changed.")
+  }
   await waitForConnectionOrThrow()
+  assertRuntimeCurrent()
   const directory = getRequestReplyDirectory("form", sessionId, formId)
   try {
+    const settleSelection = await applyFormSelection(sessionId, directory, runtimeKey)
+    assertRuntimeCurrent()
     if (await opencodeClient.replyToForm(sessionId, formId, answer, directory) !== true) {
       throw new Error("Form reply failed")
     }
+    // The stores belong to another server now, and this form is not on it.
+    if (!isCurrentRuntime()) return
+    settleSelection()
     // A successful reply is authoritative: the backend resolved the form, so
     // clear it from the local store deterministically instead of waiting for
     // the SSE `form.replied` event. A lost event (SSE gap) would leave the
@@ -2566,7 +2723,7 @@ export async function replyToForm(
     removeFormRequestFromChildStores(sessionId, formId)
     noteLocalFormReplied(formId)
   } catch (error) {
-    if (isFormRequestNotFoundError(error)) {
+    if (isCurrentRuntime() && isFormRequestNotFoundError(error)) {
       removeFormRequestFromChildStores(sessionId, formId)
       recoverStaleBlockingRequest(sessionId)
     }

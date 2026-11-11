@@ -196,13 +196,15 @@ const parseAuxiliaryGrants = (value) => {
 };
 /**
  * Whether Git may receive this endpoint: HTTPS, `ssh://`, or strict SCP.
- * An SSH URL may name its login user, as SCP does; HTTPS userinfo and any
- * password are credentials and never pass. Clone and every existing-remote
- * transfer share this rule. With `providers`, plain HTTP passes for a
- * loopback host when a provider allows loopback HTTP instances
+ * An SSH URL may name its login user, as SCP does. An HTTP(S) URL may name one
+ * only with `httpsName`, set where the person's own Git authenticates (System
+ * transport): there the name picks the stored credential, as the organization
+ * in an Azure DevOps URL does. A password never passes. Clone and every
+ * existing-remote transfer share this rule. With `providers`, plain HTTP
+ * passes for a loopback host when a provider allows loopback HTTP instances
  * (`loopback-http.js`); never for any other host.
  */
-const isSafeTransferEndpoint = (value, providers = null) => {
+const isSafeTransferEndpoint = (value, providers = null, { httpsName = false } = {}) => {
   if (value.length > 4096) return false;
   if (!value.includes('://')) {
     const match = value.match(/^(?:[A-Za-z0-9._-]+@)?[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?:([^\s:\\]+)$/);
@@ -219,14 +221,33 @@ const isSafeTransferEndpoint = (value, providers = null) => {
   }
   const loopbackHttp = parsed.protocol === 'http:' && loopbackHttpPermitted(parsed.hostname, providers);
   return (['https:', 'ssh:'].includes(parsed.protocol) || loopbackHttp)
-    && (!parsed.username || (parsed.protocol === 'ssh:' && /^[A-Za-z0-9._][A-Za-z0-9._-]*$/.test(parsed.username)))
+    && (!parsed.username || ((parsed.protocol === 'ssh:' || httpsName) && /^[A-Za-z0-9._][A-Za-z0-9._-]*$/.test(parsed.username)))
     && !parsed.password && !parsed.search && !parsed.hash
     && Boolean(parsed.hostname) && Boolean(parsed.pathname) && parsed.pathname !== '/'
     && !/[\0-\x20\x7f\\]/.test(pathname)
     && pathname.split('/').slice(1).every((part) => part && part !== '.' && part !== '..');
 };
-const assertSafeExistingEndpoint = (endpoint, providers = null) => {
-  if (!isSafeTransferEndpoint(requiredString(endpoint, 'Git endpoint'), providers)) throw planError('Git endpoint is invalid');
+const assertSafeExistingEndpoint = (endpoint, providers = null, options = undefined) => {
+  if (!isSafeTransferEndpoint(requiredString(endpoint, 'Git endpoint'), providers, options)) throw planError('Git endpoint is invalid');
+};
+// A repository remote refused only for its userinfo gets its own code, so the
+// client can say what to remove. The message never repeats the userinfo: it may be a token.
+// `transportMode` is the repository's authoritative one, not the request's.
+const assertSafeRemoteEndpoint = (endpoint, providers, transportMode) => {
+  try {
+    assertSafeExistingEndpoint(endpoint, providers, { httpsName: transportMode === 'system' });
+  } catch (error) {
+    let parsed = null;
+    try { parsed = new URL(endpoint); } catch { /* not a URL form */ }
+    if (parsed && parsed.protocol !== 'ssh:' && (parsed.username || parsed.password)) {
+      parsed.username = '';
+      parsed.password = '';
+      if (isSafeTransferEndpoint(parsed.href, providers)) {
+        throw planError('Git remote URL has a name before @', 400, 'INVALID_GIT_REMOTE_USERINFO');
+      }
+    }
+    throw error;
+  }
 };
 // Display URLs are redacted, so a URL-form display never carries userinfo.
 const assertSafeDisplayEndpoint = (endpoint) => {
@@ -320,9 +341,9 @@ const parseRemoteFetchMapping = (remoteName, output) => {
   }
   return { refspec: output.slice(0, -1), force: output.startsWith('+') };
 };
-const parseCloneEndpoint = (value, providers) => {
+const parseCloneEndpoint = (value, providers, transportMode) => {
   const endpoint = requiredString(value, 'remoteUrl');
-  if (!isSafeTransferEndpoint(endpoint, providers)) throw planError('remoteUrl is invalid');
+  if (!isSafeTransferEndpoint(endpoint, providers, { httpsName: transportMode === 'system' })) throw planError('remoteUrl is invalid');
   return endpoint;
 };
 /**
@@ -489,9 +510,9 @@ export function createNetworkOperationPlanner({
     const pushAuthority = await validateGitTransportContext(authorityInput(pushRemote, 'push'));
     const validateAuthority = (authority, remote, transportMode) => {
       const transportRevision = parseDigest(authority.transportRevision, 'transportRevision');
-      assertSafeExistingEndpoint(authority.endpoint, sourceControlProviders);
+      assertSafeRemoteEndpoint(authority.endpoint, sourceControlProviders, authority.transportMode);
       if (transportMode === 'anonymous' && (authority.credentialId !== undefined
-        || normalizeGitRemoteEndpoint(authority.endpoint).protocol !== 'https')) {
+        || normalizeGitRemoteEndpoint(redactRemoteUrl(authority.endpoint)).protocol !== 'https')) {
         throw planError('Anonymous Git transport requires credential-free HTTPS', 501, 'RUNTIME_UNSUPPORTED');
       }
       if (authority.endpointFingerprint !== remote.endpoint.fingerprint
@@ -658,9 +679,9 @@ export function createNetworkOperationPlanner({
       endpointKind,
     });
     const transportRevision = parseDigest(authority.transportRevision, 'transportRevision');
-    assertSafeExistingEndpoint(authority.endpoint, sourceControlProviders);
+    assertSafeRemoteEndpoint(authority.endpoint, sourceControlProviders, authority.transportMode);
     if (transportMode === 'anonymous' && (authority.credentialId !== undefined
-      || normalizeGitRemoteEndpoint(authority.endpoint).protocol !== 'https')) {
+      || normalizeGitRemoteEndpoint(redactRemoteUrl(authority.endpoint)).protocol !== 'https')) {
       throw planError('Anonymous Git transport requires credential-free HTTPS', 501, 'RUNTIME_UNSUPPORTED');
     }
     if (authority.endpointFingerprint !== remote.endpoint.fingerprint
@@ -773,8 +794,8 @@ export function createNetworkOperationPlanner({
       ['operation', 'remoteUrl', 'destinationPath', 'transportMode'],
       ['credentialAccount', 'providerAccount', 'sshCredentialId', 'unverifiedConfirmed', 'gitIdentityId', 'auxiliaryGrants'],
     )) throw planError('Git clone input is invalid');
-    const endpoint = parseCloneEndpoint(input.remoteUrl, sourceControlProviders);
     const transportMode = parseTransportMode(input.transportMode);
+    const endpoint = parseCloneEndpoint(input.remoteUrl, sourceControlProviders, transportMode);
     const dotGitOrigins = [];
     const noteDotGitInstance = (provider, instance) => {
       const descriptor = sourceControlProviders.get(provider);
@@ -843,7 +864,8 @@ export function createNetworkOperationPlanner({
     );
     if (await pathExists(destination, fsImpl)) throw planError('Clone destination already exists');
     if (await pathExists(temporaryDirectory, fsImpl)) throw planError('Clone temporary directory already exists');
-    const providerAccount = parseCloneProviderAccount(input.providerAccount, normalizeGitRemoteEndpoint(endpoint), sourceControlProviders);
+    // The provider account is matched by host; the name a System clone URL may carry is no part of that.
+    const providerAccount = parseCloneProviderAccount(input.providerAccount, normalizeGitRemoteEndpoint(redactRemoteUrl(endpoint)), sourceControlProviders);
     if (providerAccount) noteDotGitInstance(providerAccount.provider, providerAccount.instance);
     const transferEndpoint = dotGitCloneEndpoint(endpoint, dotGitOrigins);
     const internal = { destination, temporaryDirectory, transportMode, auxiliaryGrants: parseAuxiliaryGrants(input.auxiliaryGrants) };
@@ -892,7 +914,7 @@ export function createNetworkOperationPlanner({
       remote: remote.name,
       endpointKind: 'fetch',
     });
-    assertSafeExistingEndpoint(authority.endpoint, sourceControlProviders);
+    assertSafeRemoteEndpoint(authority.endpoint, sourceControlProviders, authority.transportMode);
     if (authority.endpointFingerprint !== remote.endpoint.fingerprint
       || redactRemoteUrl(authority.endpoint) !== remote.endpoint.displayUrl) {
       throw planError('Git checkout hydration source changed', 409, 'GIT_NETWORK_OPERATION_AUTHORITY_CHANGED');

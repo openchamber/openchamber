@@ -9,7 +9,7 @@ const browser = new Window({ url: 'http://localhost' });
 let root: Root;
 const descriptors = new Map<string, PropertyDescriptor | undefined>();
 // React DOM detects input-event support when imported, so install the DOM first.
-for (const [key, value] of Object.entries({ window: browser, document: browser.document, navigator: browser.navigator, localStorage: browser.localStorage, Element: browser.Element, HTMLElement: browser.HTMLElement, IS_REACT_ACT_ENVIRONMENT: true,
+for (const [key, value] of Object.entries({ window: browser, document: browser.document, Event: browser.Event, CustomEvent: browser.CustomEvent, navigator: browser.navigator, localStorage: browser.localStorage, Element: browser.Element, HTMLElement: browser.HTMLElement, IS_REACT_ACT_ENVIRONMENT: true,
   // The row's context menu orders its items and animates its popup.
   Node: browser.Node, MouseEvent: browser.MouseEvent, DOMRect: browser.DOMRect, getComputedStyle: browser.getComputedStyle.bind(browser), requestAnimationFrame: (callback: FrameRequestCallback) => { callback(0); return 1; }, cancelAnimationFrame: () => undefined })) {
   descriptors.set(key, Object.getOwnPropertyDescriptor(globalThis, key));

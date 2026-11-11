@@ -17,7 +17,7 @@ interface PierreDiffCommentOverlaysProps {
   commentText: string;
   onTextChange: (text: string) => void;
   fileLabel: string;
-  onSave: (text: string, range?: SelectedLineRange) => void;
+  onSave: (text: string, range?: SelectedLineRange) => boolean;
   onCancel: () => void;
   onEdit: (draft: InlineCommentDraft) => void;
   onDelete: (draft: InlineCommentDraft) => void;

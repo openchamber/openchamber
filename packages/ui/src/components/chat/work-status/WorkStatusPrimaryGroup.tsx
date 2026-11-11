@@ -18,7 +18,7 @@ import { useSessionUIStore } from '@/sync/session-ui-store';
 import { resolveUsageTone } from '@/lib/quota';
 import { sessionEvents } from '@/lib/sessionEvents';
 import { normalizePath } from '@/lib/pathNormalization';
-import { computeContextUsage } from './contextUsage';
+import { computeContextUsage, computeLastReplyCacheHit } from './contextUsage';
 import { formatCost } from './subagentCost';
 import { useSubagentCostRollup } from './useSubagentCostRollup';
 import {
@@ -198,6 +198,9 @@ export const WorkStatusPrimaryGroup: React.FC<Props> = ({ sessionId, directory, 
     [sessionMessages, contextLimit],
   );
 
+  // What the provider caches right now, from the reply the context reading comes from.
+  const lastReplyCacheHit = React.useMemo(() => computeLastReplyCacheHit(sessionMessages), [sessionMessages]);
+
   const openContextSurface = useUIStore((state) => state.openContextSurface);
   const openContextOverview = useUIStore((state) => state.openContextOverview);
   const openContextPanelTab = useUIStore((state) => state.openContextPanelTab);
@@ -331,6 +334,14 @@ export const WorkStatusPrimaryGroup: React.FC<Props> = ({ sessionId, directory, 
               ) : null}
             </>
           ) : null}
+          {/* Under the meter, from the same reply, so it reads as the cache right now. */}
+          {lastReplyCacheHit !== null ? (
+            <WorkStatusRow
+              muted
+              label={t('contextSidebar.tokens.cacheHit')}
+              value={<WorkStatusValue>{`${lastReplyCacheHit.toFixed(1)}%`}</WorkStatusValue>}
+            />
+          ) : null}
           {/* Below the context readout: the goal is a standing instruction,
               while context is the live number the reader came for. */}
           {goalRow}
@@ -352,6 +363,7 @@ export const WorkStatusPrimaryGroup: React.FC<Props> = ({ sessionId, directory, 
               onClick={directory ? () => openSurface('git') : undefined}
               ariaLabel={t('chat.workStatus.action.openGit')}
               label={branch}
+              labelDir="ltr"
               value={(gitStatus?.ahead ?? 0) > 0 || (gitStatus?.behind ?? 0) > 0 ? (
                 <>
                   {(gitStatus?.ahead ?? 0) > 0
@@ -369,6 +381,7 @@ export const WorkStatusPrimaryGroup: React.FC<Props> = ({ sessionId, directory, 
               onClick={directory ? () => openSurface('git') : undefined}
               ariaLabel={t('chat.workStatus.action.openGit')}
               label={nestedRepoLabel}
+              labelDir="ltr"
               muted
             />
           ) : null}
@@ -403,6 +416,7 @@ export const WorkStatusPrimaryGroup: React.FC<Props> = ({ sessionId, directory, 
                 ariaLabel={t(changeRequestCopy('chat.workStatus.action.openPr', prTerm))}
                 iconColor={`var(--pr-${prSummary.visualState})`}
                 label={prSummary.title ?? t(changeRequestCopy('chat.workStatus.pr.untitled', prTerm))}
+                labelDir={prSummary.title ? 'auto' : undefined}
                 value={(
                   <WorkStatusPill
                     color={`var(--pr-${prSummary.visualState})`}

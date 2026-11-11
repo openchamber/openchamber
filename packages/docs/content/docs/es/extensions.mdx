@@ -54,6 +54,8 @@ Mostrar un panel y leer qué proyecto y sesión están abiertos no necesita perm
 - **Leer lo que dice el agente en segundo plano**: la respuesta final de cada turno, las preguntas que hace el agente y para qué pide permiso, en todos los proyectos, enviados al servicio local de la extensión. Permítelo solo si confías en adónde lo envía la extensión.
 - **Iniciar sesiones y enviar mensajes por sí sola**: su servicio local lo hace sin ninguna ventana abierta, lo que gasta tokens y puede ejecutar herramientas.
 - **Añadir a lo que leen los agentes**: texto en las instrucciones de tus sesiones y skills que se ofrecen a todos los agentes mientras la extensión esté activa.
+- **Añadir un plugin a OpenCode**: el plugin del paquete se carga en tu OpenCode mientras la extensión esté activa. El código del plugin se ejecuta dentro de OpenCode con todo tu acceso, como un servicio local, así que permítelo solo si confías en el autor.
+- **Reconocer sus enlaces en los chats**: identificadores como `DEMO-12` y enlaces al sitio de la extensión se vuelven clicables en tus mensajes del chat. El diálogo indica cuáles y dice si un clic los abre en la extensión o los adjunta a tu mensaje. Los enlaces que OpenChamber ya conoce, como los pull requests de GitHub y las incidencias de Linear, mantienen su comportamiento habitual.
 
 Un servicio local también puede seguir funcionando mientras OpenChamber esté en marcha, o activarse según un horario. El diálogo lo dice bajo **Ejecutar un servicio local**, e indica cuándo lo que escribes después de `@` va al servicio. Una extensión puede añadir sus propias filas al menú `@` y sus propios bloques a las respuestas del agente. Pausar la extensión quita todo esto.
 
@@ -63,9 +65,17 @@ Cuando una versión más nueva pide más de lo que permitiste, la tarjeta muestr
 
 ## Dónde aparece
 
-Además de su panel en la barra lateral, una extensión puede añadir entradas a menús que ya usas: las acciones de un mensaje del chat, el menú de una sesión, el menú + junto al cuadro de chat y comandos de barra como `/task ABC-12` que adjuntan algo sin abrir nada. También puede dar a sus propias herramientas un icono, un título y un diseño de salida propios en el chat, como los que tienen las herramientas integradas de OpenChamber. La extensión decide cuáles de ellos ofrece; todos están apagados hasta que permites la extensión.
+Además de su panel en la barra lateral, una extensión puede añadir entradas a menús que ya usas: las acciones de un mensaje del chat, el menú de una sesión, el menú + junto al cuadro de chat y comandos de barra como `/task ABC-12` que adjuntan algo sin abrir nada. También puede dar a sus propias herramientas un icono, un título y un diseño de salida propios en el chat, como los que tienen las herramientas integradas de OpenChamber. La extensión decide cuáles de ellos ofrece; todos están apagados hasta que permites la extensión. Las acciones de sesión y los comandos de barra también aparecen en la paleta de comandos (⌘P o Ctrl+P) cuando buscas su nombre o el de la extensión.
 
 Algunas extensiones muestran una imagen en vivo en lugar de un panel propio: aquello en lo que un agente está trabajando en el servidor, como un navegador o un simulador. Haz clic en la imagen o escribe para tomar el control; la línea de estado dirá **Tienes el control** y las acciones de navegador del agente se rechazarán hasta que pulses **Devolver al agente**. Copiar y pegar funcionan como siempre. Otro dispositivo conectado a la vez ve quién tiene el control y no puede quitarlo. Una extensión así puede añadir sus propios controles junto a la imagen, por ejemplo una barra de direcciones encima o una columna de herramientas al lado.
+
+## Una extensión con un plugin de OpenCode
+
+Una extensión puede incluir un plugin de OpenCode, para que instales una sola cosa en vez de dos. Su diálogo de permisos tiene una fila que empieza con **Añadir un plugin a OpenCode**. Una vez que lo permites, OpenChamber añade el plugin al OpenCode que ejecuta para ti en un par de segundos, sin reiniciar; desactivar o eliminar la extensión lo retira del mismo modo. No se escribe nada en tu propio `opencode.json`, así que el plugin nunca sobrevive a la extensión ni se ejecuta en el OpenCode que inicias en una terminal.
+
+Cuando OpenChamber no inició el OpenCode con el que habla, o tu entorno define su propio `OPENCODE_CONFIG`, la configuración de OpenChamber no llega a ese OpenCode. La pantalla de la extensión lo dice y ofrece **Añadir a la configuración global**. Eso escribe la carpeta del plugin en tu configuración global de OpenCode: entonces se ejecuta en cada OpenCode de este equipo, terminal incluida, sigue activo mientras la extensión esté desactivada y es tuyo para gestionarlo en **Ajustes → Plugins**. Si eliminas la extensión, OpenCode muestra esa entrada como un plugin fallido y sigue funcionando hasta que borres la entrada allí. Un OpenCode en otra máquina no puede cargar una carpeta de esta; la pantalla lo dice.
+
+VS Code y la app móvil no cargan extensiones. Una sesión dentro de un espacio aislado ejecuta su propio OpenCode, que nunca recibe el plugin. En modo empresa el plugin cuenta como un servicio local: la extensión solo se instala desde un repositorio aprobado por tu administrador.
 
 ## Una extensión como host Git
 

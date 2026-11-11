@@ -29,9 +29,14 @@ const createCtx = (workingDirectory, restartImpl = async () => undefined) => {
   const restart = mock(restartImpl);
   return {
     restart,
+    context: {
+      globalStorageUri: { fsPath: path.join(scratchConfigRoot, 'storage') },
+    },
     manager: {
       getWorkingDirectory: () => workingDirectory,
       restart,
+      getDebugInfo: () => ({ mode: 'managed', status: 'connected', workingDirectory }),
+      refreshPluginSwitches: async () => ({ updated: true, requiresManualRestart: false }),
     },
   };
 };
@@ -514,6 +519,136 @@ describe('skills catalog bridge', () => {
     }, createCtx(os.tmpdir()), deps);
 
     expect(response?.data).toEqual({ ok: false, error: { kind: 'invalidSource', message: 'Unknown source' } });
+  });
+});
+
+describe('VS Code plugin switches', () => {
+  test('switches an entry off in its own store and reports it in the list', async () => {
+    const root = path.join(scratchConfigRoot, 'xdg', 'opencode');
+    fs.mkdirSync(root, { recursive: true });
+    tempRoots.push(root);
+    process.env.OPENCODE_CONFIG = path.join(root, 'opencode.json');
+    fs.writeFileSync(process.env.OPENCODE_CONFIG, JSON.stringify({ plugins: ['leakshield'] }));
+    const storage = fs.mkdtempSync(path.join(scratchConfigRoot, 'storage-'));
+    tempRoots.push(storage);
+    const ctx = createCtx(root);
+    ctx.context.globalStorageUri.fsPath = storage;
+
+    const listed = await handleConfigBridgeMessage(
+      { id: 'l', type: 'api:config/plugins', payload: { target: 'list', directory: root } },
+      ctx,
+      deps,
+    );
+    const entry = listed.data.entries.find((candidate) => candidate.spec === 'leakshield');
+    expect(entry.switchState).toBe('on');
+
+    const off = await handleConfigBridgeMessage({
+      id: 'off',
+      type: 'api:config/plugins',
+      payload: { method: 'PUT', target: 'entry', action: 'enabled', pluginId: entry.id, body: { enabled: false }, directory: root },
+    }, ctx, deps);
+    expect(off.success).toBe(true);
+    expect(off.data).toMatchObject({ enabled: false, resource: 'plugin:leakshield', changed: true, requiresManualRestart: false });
+    expect(readJson(path.join(storage, 'plugin-switches.json'))).toEqual({ version: 1, disabled: ['plugin:leakshield'] });
+
+    const after = await handleConfigBridgeMessage(
+      { id: 'l2', type: 'api:config/plugins', payload: { target: 'list', directory: root } },
+      ctx,
+      deps,
+    );
+    expect(after.data.entries.find((candidate) => candidate.spec === 'leakshield').switchState).toBe('off');
+  });
+
+  test('keeps the saved switch and asks for a restart when the managed layer cannot be rewritten', async () => {
+    const root = path.join(scratchConfigRoot, 'xdg', 'opencode');
+    fs.mkdirSync(root, { recursive: true });
+    tempRoots.push(root);
+    process.env.OPENCODE_CONFIG = path.join(root, 'opencode.json');
+    fs.writeFileSync(process.env.OPENCODE_CONFIG, JSON.stringify({ plugins: ['leakshield'] }));
+    const storage = fs.mkdtempSync(path.join(scratchConfigRoot, 'storage-'));
+    tempRoots.push(storage);
+    const base = createCtx(root);
+    base.context.globalStorageUri.fsPath = storage;
+    const ctx = {
+      ...base,
+      manager: { ...base.manager, refreshPluginSwitches: async () => { throw new Error('disk full'); } },
+    };
+
+    const listed = await handleConfigBridgeMessage(
+      { id: 'l', type: 'api:config/plugins', payload: { target: 'list', directory: root } },
+      ctx,
+      deps,
+    );
+    const entry = listed.data.entries.find((candidate) => candidate.spec === 'leakshield');
+    const off = await handleConfigBridgeMessage({
+      id: 'off',
+      type: 'api:config/plugins',
+      payload: { method: 'PUT', target: 'entry', action: 'enabled', pluginId: entry.id, body: { enabled: false }, directory: root },
+    }, ctx, deps);
+
+    expect(off.success).toBe(true);
+    expect(off.data).toMatchObject({ enabled: false, changed: true, requiresReload: false, requiresManualRestart: true });
+    expect(readJson(path.join(storage, 'plugin-switches.json'))).toEqual({ version: 1, disabled: ['plugin:leakshield'] });
+  });
+
+  test('reports a plugin a config allow keeps loading and refuses to switch it off', async () => {
+    const root = path.join(scratchConfigRoot, 'xdg', 'opencode');
+    fs.mkdirSync(root, { recursive: true });
+    tempRoots.push(root);
+    process.env.OPENCODE_CONFIG = path.join(root, 'opencode.json');
+    fs.writeFileSync(process.env.OPENCODE_CONFIG, JSON.stringify({
+      plugins: ['leakshield'],
+      policies: [{ action: 'plugin.use', resource: '*', effect: 'allow' }],
+    }));
+    const storage = fs.mkdtempSync(path.join(scratchConfigRoot, 'storage-'));
+    tempRoots.push(storage);
+    const ctx = createCtx(root);
+    ctx.context.globalStorageUri.fsPath = storage;
+
+    const listed = await handleConfigBridgeMessage(
+      { id: 'l', type: 'api:config/plugins', payload: { target: 'list', directory: root } },
+      ctx,
+      deps,
+    );
+    const entry = listed.data.entries.find((candidate) => candidate.spec === 'leakshield');
+    expect(entry.switchState).toBe('overridden');
+
+    let thrown;
+    try {
+      await handleConfigBridgeMessage({
+        id: 'off',
+        type: 'api:config/plugins',
+        payload: { method: 'PUT', target: 'entry', action: 'enabled', pluginId: entry.id, body: { enabled: false }, directory: root },
+      }, ctx, deps);
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown?.code).toBe('SWITCH_OVERRIDDEN');
+    expect(fs.existsSync(path.join(storage, 'plugin-switches.json'))).toBe(false);
+  });
+
+  test('refuses a switch when the extension connects to an external OpenCode', async () => {
+    const base = createCtx(os.tmpdir());
+    const ctx = {
+      ...base,
+      manager: {
+        ...base.manager,
+        getDebugInfo: () => ({ mode: 'external' }),
+      },
+    };
+    let thrown;
+    try {
+      await handleConfigBridgeMessage({
+        id: 'x',
+        type: 'api:config/plugins',
+        payload: { method: 'PUT', target: 'entry', action: 'enabled', pluginId: 'id', body: { enabled: false } },
+      }, ctx, deps);
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(Error);
+    expect(thrown?.code).toBe('SWITCH_UNAVAILABLE');
   });
 });
 

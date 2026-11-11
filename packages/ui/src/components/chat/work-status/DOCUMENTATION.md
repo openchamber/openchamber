@@ -197,6 +197,7 @@ which requests only providers enabled for this panel.
 | Block | Source | Notes |
 |---|---|---|
 | Context + cost | `contextUsage.ts` over `useSessionMessages`; cost via `useSubagentCostRollup` (own cost + every descendant subagent, recursively) | see below — the store getters cannot serve this |
+| Cache hit | `computeLastReplyCacheHit` over `useSessionMessages` | the reply the context reading comes from; see below |
 | Branch, ahead/behind, attention | `useGitStore` directory state | warmed via `runBackgroundNetworkTask(ensureStatus)` and refreshed from Git mutation hints |
 | Changed files | `useGitStore` status `files` + `diffStats` | working tree, not session-authored edits |
 | PR + checks | `useFreshestSourceControlVisualSummaryForBranch` | **read-only**; follows the freshest bound-identity entry for the branch |
@@ -204,13 +205,14 @@ which requests only providers enabled for this panel.
 | Subagent blockers | directory `permission` / `question` maps | one subscription covers every child |
 | Workflows | `useSessionWorkflowRuns` (`lib/workflows/store.ts`): the session's runs read once from the server, then kept current by `openchamber:workflow-run` events | only while workflows are shown: not in VS Code, and only with the workflow tool on (`selectWorkflowsShown`) |
 | Usage | `components/usage/usageGroups.ts` over `useQuotaStore` | grouping shared with the mobile popover; presentation is not |
+| Linked plans | `useProjectContextStore` plans of the session's project whose `session.sessionId` is this session | refreshed through `observeProjectContext` |
 | Linked threads | `lib/linkedIssues.ts` over session metadata; state from tracked items | written by the flows that attach an issue or PR, and removable from the row; a linked PR that is also the checked-out branch's PR shows the branch summary, as its sidebar row does |
 | Turn stats | `telemetry.ts` over `useSessionMessageRecords` | computed while authoritatively idle, including when collapsed; active mounts read warm records once for the previous turn; either rate above 5,000 tok/s is reported as unknown (see the two-rate description below) |
 | Keep-warm switch | `useSessionWarmingStore`, mirrored from the server's `lib/session-warming` | on the Context row, shown only while Settings chose per-session warming and for a root session outside an isolated space; the tooltip's countdown ticks only while it is open |
 | Goal | `useSessionGoal` | respects the Settings toggle |
 | MCP | `useMcpStore` | the switch reuses the dropdown's `setEnabled` |
 | Pinned messages | `getContextObligatoryMessages` + `state.part`, else one `getSessionMessage` read | see below |
-| Todos | live `state.todo[sessionId]`, persisted fallback | live channel wins |
+| Tasks | `useSessionTodosStore`: the server's list for the session (`packages/web/server/lib/session-todos`), read once by `useLoadSessionTodos` in the section list, then kept current by `openchamber:session-todos` events | listed only once the server says OpenCode's experimental `todowrite` tool is on in the session's directory; while it is off nothing is read or shown |
 
 ### Subagent rows
 
@@ -370,6 +372,19 @@ There is no cost-only fallback row. A row labelled "Context" showing nothing but
 a price is not a context reading; cost rides along with the percentage or waits
 for it.
 
+### Why the cache row shows the last reply and not session totals
+
+The row under the context meter answers "what is the provider caching now":
+the cache hit of the reply the context reading comes from, on every surface.
+Its output was dropped as uninteresting for one reply. Whole-session totals
+were tried here and dropped too: they span every
+compaction, so a session's 97% average says nothing about the prompt that
+goes out next. They stay in the context panel's overview
+(`computeSessionTokenTotals`), read off the session record, which OpenCode
+adds every step's usage to; summing loaded messages would shrink as a long
+session keeps only its tail. Their "Input" counts the whole prompt, cache
+included, since OpenCode's `input` is only the uncached part.
+
 ### Pinned messages load only what they need
 
 Pins are most useful on a long session — which is exactly when the pinned
@@ -475,14 +490,14 @@ The default order is by durability:
    long as the session is open. Usage sits here rather than lower down because a
    spent quota stops the work outright, and Context sources because it holds the
    linked issue and PR, which tell what the session is about;
-2. **Subagents** and **Workflows** — what is happening right now;
+2. **Subagents**, **Tasks** and **Workflows** — what is happening right now;
 3. **MCP** and **Pinned messages** — supporting material.
 
 The sections dialog has drag handles for changing this order, including hidden
 sections. A drop updates the panel immediately. `workStatusSectionOrder` is a
 profile preference persisted through the settings registry and the local UI
 store. Missing or empty order uses the default; duplicate and obsolete ids are
-discarded, and newly introduced sections append in default order. Visibility
+discarded, and newly introduced sections append in default order, except those listed in `PLACED_AFTER` (`sections.ts`), which go right after their default neighbour: Tasks lands after Subagents in every saved list, where the default puts it. Visibility
 changes never alter positions.
 
 Clients saved the default as their order without the user choosing it, so a
@@ -525,7 +540,7 @@ mounted, the section is visible, and the section is expanded; the collapsible
 drops its children when folded. `PluginPane` itself is lazy-loaded, so a panel
 without extension sections never loads it. The frame's height starts at the
 manifest `height` (default 120px) and follows the guest's `setHeight`, clamped
-to 24..320px; taller content scrolls inside the frame, never the host. The last
+to 24..480px; taller content scrolls inside the frame, never the host. The last
 requested height is remembered per extension id and version for the app
 session (a module-level map, one number per installed extension), so folding
 and reopening a section does not jump back to the manifest default.
@@ -546,7 +561,7 @@ with `surface: 'popover'`. Folding or hiding the section removes the card with
 its owner; project/runtime and authorization changes also dismiss it. Pointer
 travel into the card and keyboard dismissal are handled by the SDK anchor
 helper and the host overlay controller. This does not increase the status
-frame's 320px height limit. The public contract is in `packages/sdk/API.md`,
+frame's 480px height limit. The public contract is in `packages/sdk/API.md`,
 under Anchored popovers.
 
 ### Sections the app draws
@@ -744,7 +759,22 @@ a tab.
 
 ## Context sources
 
-Linked issues and change requests first, then skills and MCP counts.
+The plan the session works on and linked issues and change requests first,
+then pinned knowledge, memory, skills and MCP counts.
+
+### The plan the session works on
+
+A plan records the session it was sent to (Implement or Improve in the plan,
+or an agent's `knowledge.save` with a `sessionId`), and its card in Project
+knowledge opens that session. The row here is the way back: it lists every
+plan of the session's project whose link names this session, with the plan's
+step progress, and opens the plan in place in Project knowledge on desktop and
+web (`openProjectKnowledgePlan`, the same request an agent's `knowledge.show`
+makes) and full screen on the phone (`MobileAppActions.openPlan`). The plans
+come from the project's knowledge store, refreshed through
+`observeProjectContext` behind the background gate. A plan both linked and
+pinned shows once, as the linked row with the pin as its leading control.
+There is no unlink control: the plan's own card owns its link.
 
 Agents are deliberately absent: an agent is who does the work, not material
 loaded into the context. Tools are absent too — `Agent.tools` is a per-agent
@@ -772,9 +802,9 @@ disabled styling; those pins are the behavioural precedent — the panel that
 shows what is attached can detach it — not the visual one. Pressing it sends
 the removal through the same server operation (`setLinkedIssue(…, false)`) the
 attach flows use — one writer for the list, so a link cannot be dropped by a
-path that does not know the others. The write
-is deliberately user-initiated: an agent links but never removes, so it cannot
-drop a link the user set (`packages/web/server/lib/openchamber-sessions/session-link.js`).
+path that does not know the others. An agent removes a link with the
+`openchamber` tool's `session.unlink`, which runs the same list transform on
+the server (`packages/web/server/lib/openchamber-sessions/session-link.js`).
 A failed removal reports `chat.workStatus.linkedIssues.unlinkFailed` rather than
 leaving the row looking removed.
 

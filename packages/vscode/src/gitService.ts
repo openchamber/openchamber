@@ -320,13 +320,25 @@ async function execGit(args: string[], cwd: string, env?: NodeJS.ProcessEnv): Pr
 
 // ============== Repository Operations ==============
 
+const GIT_PROBE_TIMEOUT_MS = 30_000;
+
 /**
  * Check if a directory is a git repository
  */
 export async function checkIsGitRepository(directory: string): Promise<boolean> {
-  const result = await execGit(['rev-parse', '--is-inside-work-tree', '--is-bare-repository'], directory);
+  // A missing folder is simply not a repository; a Git that ran there and
+  // could not answer is a failure the panel shows in Git's words, as the web
+  // server does (`probeRepository` in the server's git service).
+  if (!fs.existsSync(normalizePath(directory))) return false;
+  const result = await executeGit(['rev-parse', '--is-inside-work-tree', '--is-bare-repository'], normalizePath(directory), {
+    binary: gitApi?.git.path || 'git',
+    timeoutMs: GIT_PROBE_TIMEOUT_MS,
+    // English messages, so "not a git repository" is recognised whatever the locale.
+    env: { LC_ALL: 'C' },
+  });
   if (result.exitCode !== 0) {
-    return false;
+    if (result.exitCode === 128 && /^fatal: not a git repository\b/i.test(result.stderr.trim())) return false;
+    throw Object.assign(new Error(result.stderr.trim() || 'Git could not read this directory.'), { code: 'GIT_REPOSITORY_UNREADABLE' });
   }
   // A bare repository is not inside a work tree but is still a repository:
   // its linked worktrees are the checkouts a user works in.
@@ -1899,6 +1911,7 @@ export async function previewWorktreeCreate(directory: string, input: CreateGitW
   const mode = input?.mode === 'existing' ? 'existing' : 'new';
   const context = await resolveWorktreeProjectContext(directory);
   await fs.promises.mkdir(context.worktreeRoot, { recursive: true });
+  context.worktreeRoot = await fs.promises.realpath(context.worktreeRoot);
 
   const preferredName = String(input?.worktreeName || input?.name || '').trim();
   const preferredBranchName = cleanBranchName(String(input?.branchName || '').trim());
@@ -2166,6 +2179,7 @@ export async function createWorktree(directory: string, input: CreateGitWorktree
   const preparedInput = prepared.input;
 
   await fs.promises.mkdir(context.worktreeRoot, { recursive: true });
+  context.worktreeRoot = await fs.promises.realpath(context.worktreeRoot);
 
   const preferredName = String(preparedInput.worktreeName || preparedInput.name || '').trim();
   const preferredBranchName = cleanBranchName(String(preparedInput.branchName || '').trim());

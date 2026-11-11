@@ -227,6 +227,7 @@ export const saveProjectTodos = async (
 export type ProjectTodoChange =
   | { kind: 'create'; id: string; text: string }
   | { kind: 'complete'; id: string; completed: boolean }
+  | { kind: 'edit'; id: string; text: string }
   | { kind: 'delete'; id: string };
 
 /**
@@ -239,7 +240,7 @@ export const writeProjectTodo = async (
   change: ProjectTodoChange,
 ): Promise<ProjectContextData | null> => {
   const base = `${basePath(requireProjectId(project))}/todos`;
-  const json = (method: 'POST' | 'PATCH', body: { id: string; text: string } | { completed: boolean }): RequestInit => ({
+  const json = (method: 'POST' | 'PATCH', body: { id: string; text: string } | { text: string } | { completed: boolean }): RequestInit => ({
     method,
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -248,7 +249,9 @@ export const writeProjectTodo = async (
     ? [base, json('POST', { id: change.id, text: change.text })]
     : change.kind === 'complete'
       ? [`${base}/${encodeURIComponent(change.id)}`, json('PATCH', { completed: change.completed })]
-      : [`${base}/${encodeURIComponent(change.id)}`, { method: 'DELETE' }];
+      : change.kind === 'edit'
+        ? [`${base}/${encodeURIComponent(change.id)}`, json('PATCH', { text: change.text })]
+        : [`${base}/${encodeURIComponent(change.id)}`, { method: 'DELETE' }];
   const response = await runtimeFetch(url, init);
   if (response.status === 404 && change.kind !== 'create') {
     return null;

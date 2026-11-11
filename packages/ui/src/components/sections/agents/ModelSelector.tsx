@@ -50,6 +50,8 @@ interface ModelSelectorProps {
      * mouse from the list.
      */
     triggerTooltip?: string;
+    /** Shown but closed, so a row can keep its layout while its option is off. */
+    disabled?: boolean;
 }
 
 export const ModelSelector: React.FC<ModelSelectorProps> = ({
@@ -66,6 +68,7 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
     directory,
     offerAuto = false,
     triggerTooltip,
+    disabled = false,
 }) => {
     const { t } = useI18n();
     const autoReady = useRoutingStore(selectAutoReady);
@@ -74,6 +77,7 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
         : null), [autoReady, offerAuto, t]);
     const isAutoSelected = isAutoModel(providerId, modelId);
     const { isReady, isUnavailable } = useOpenCodeReadiness('models', directory);
+    const canOpen = isReady && !disabled;
     const providers: ModelPickerProvider[] = useConfigStore((state) => directory === undefined
         ? state.providers : selectProvidersForDirectory(state, directory));
     const loadProviders = useConfigStore((state) => state.loadProviders);
@@ -165,6 +169,12 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
             tooltipsEnabled={tooltipsEnabled && (isActuallyMobile ? isMobilePanelOpen : isDropdownOpen)}
             isFavorite={(entry) => isFavoriteModel(entry.providerID, entry.modelID)}
             onToggleFavorite={(entry) => toggleFavoriteModel(entry.providerID, entry.modelID)}
+            {...(isActuallyMobile ? {
+                autoFocus: false,
+                maxHeightClassName: 'min-h-0 flex-1',
+                providersStartCollapsed: true,
+                showKeyboardHints: false,
+            } : null)}
         />
     );
 
@@ -173,11 +183,11 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
             <>
                 <button
                     type="button"
-                    onClick={isReady ? () => setIsMobilePanelOpen(true) : undefined}
-                    disabled={!isReady}
+                    onClick={canOpen ? () => setIsMobilePanelOpen(true) : undefined}
+                    disabled={!canOpen}
                     className={cn(
                         dropdownTriggerVariants({ size: 'mobile' }),
-                        'w-full',
+                        'w-fit max-w-full',
                         className,
                     )}
                 >
@@ -202,6 +212,7 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
                     open={isMobilePanelOpen}
                     onClose={closePicker}
                     title={t('settings.agents.modelSelector.title')}
+                    scrollContent={false}
                 >
                     {picker}
                 </MobileOverlayPanel>
@@ -215,7 +226,7 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
                 className={cn(
                     dropdownTriggerVariants(),
                     'min-w-0 w-fit',
-                    !isReady && 'opacity-60 cursor-not-allowed',
+                    !canOpen && 'opacity-60 cursor-not-allowed',
                     className,
                 )}
                 // The name is gone from the trigger, so it has to stay
@@ -249,7 +260,7 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
     );
 
     return (
-        <DropdownMenu open={isReady && isDropdownOpen} onOpenChange={isReady ? setIsDropdownOpen : undefined}>
+        <DropdownMenu open={canOpen && isDropdownOpen} onOpenChange={canOpen ? setIsDropdownOpen : undefined}>
             {triggerTooltip ? <HoverTooltip label={triggerTooltip} side="bottom">{trigger}</HoverTooltip> : trigger}
             <DropdownMenuContent className="w-[min(380px,calc(100vw-2rem))] p-0 flex flex-col" align="start" portalToBody={dropdownPortalToBody}>
                 {picker}

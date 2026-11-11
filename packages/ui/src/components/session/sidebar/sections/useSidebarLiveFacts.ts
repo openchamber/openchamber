@@ -1,5 +1,6 @@
 import React from 'react';
 import { useBackgroundShellsStore } from '@/sync/background-shells';
+import { useBackgroundImagesStore } from '@/sync/background-images';
 import { useGlobalBlockingRequestsStore } from '@/sync/global-blocking-requests';
 import { collectOpenTurnSessionIds, useGlobalSessionStatusStore } from '@/sync/global-session-status';
 import { usePrWatchStore } from '@/sync/pr-watch';
@@ -44,13 +45,14 @@ export const useSidebarLiveFacts = (enabled: boolean): SidebarLiveFacts => {
   const activeIds = useGlobalSessionStatusStore((state) => (enabled ? state.activeSessionIds : EMPTY_IDS));
   const workflowIds = useWorkflowActivityStore((state) => (enabled ? state.runningSessionIds : EMPTY_IDS));
   const shellIds = useBackgroundShellsStore((state) => (enabled ? state.sessionIds : EMPTY_IDS));
+  const imageIds = useBackgroundImagesStore((state) => (enabled ? state.sessionIds : EMPTY_IDS));
   const prWatches = usePrWatchStore((state) => (enabled ? state.bySession : EMPTY_PR_WATCHES));
   const blocking = useGlobalBlockingRequestsStore((state) => (enabled ? state.bySession : EMPTY_BLOCKING));
   const outcomeKey = useGlobalSessionsStore(React.useCallback((state) => (enabled ? selectTurnOutcomeKey(state) : ''), [enabled]));
   return React.useMemo(() => {
     if (!enabled) return EMPTY_SIDEBAR_LIVE_FACTS;
     const [unread = '', failed = ''] = outcomeKey.split('|');
-    const openTurnIds = collectOpenTurnSessionIds(activeIds, [workflowIds, shellIds, prWatches.keys()]);
+    const openTurnIds = collectOpenTurnSessionIds(activeIds, [workflowIds, shellIds, imageIds, prWatches.keys()]);
     return {
       activeIds: openTurnIds,
       blockingIds: new Set([...blocking].flatMap(([sessionId, pending]) => (
@@ -59,7 +61,7 @@ export const useSidebarLiveFacts = (enabled: boolean): SidebarLiveFacts => {
       unreadIds: new Set(unread ? unread.split(',').filter((sessionId) => !openTurnIds.has(sessionId)) : []),
       failedIds: new Set(failed ? failed.split(',') : []),
     };
-  }, [activeIds, blocking, enabled, outcomeKey, prWatches, shellIds, workflowIds]);
+  }, [activeIds, blocking, enabled, imageIds, outcomeKey, prWatches, shellIds, workflowIds]);
 };
 
 /** The start of the local hour: a local midnight is always one, whatever the time zone's offset. */

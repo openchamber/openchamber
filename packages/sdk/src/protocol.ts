@@ -89,6 +89,7 @@ const themeTokensSchema = z.object({
   error: z.string().min(1),
   info: z.string().min(1),
   font: z.string().min(1),
+  fontSize: z.string().min(1).optional(),
   mono: z.string().min(1),
   radius: z.string().min(1),
   syntaxKeyword: z.string().min(1).optional(),
@@ -271,9 +272,15 @@ const diffItemSchema = z.object({
   side: z.enum(['additions', 'deletions']).optional(),
 });
 
-// Action items carry a literal `kind`; the chip's optional `kind` is `issue`
-// / `pull`, so they never overlap.
-const guestItemSchema = z.union([messageItemSchema, sessionItemSchema, selectionItemSchema, fileItemSchema, diffItemSchema, attachPayloadSchema]).nullable();
+const linkItemSchema = z.object({
+  kind: z.literal('link'),
+  identifier: z.string().trim().min(1).max(GUEST_ATTACH_ID_MAX),
+  url: z.string().trim().min(1).max(GUEST_ATTACH_URL_MAX).optional(),
+}).strict();
+
+// Action and link items carry a literal `kind`; the chip's optional `kind` is
+// `issue` / `pull`, so they never overlap.
+const guestItemSchema = z.union([messageItemSchema, sessionItemSchema, selectionItemSchema, fileItemSchema, diffItemSchema, linkItemSchema, attachPayloadSchema]).nullable();
 
 const readyPayloadSchema = z.object({
   theme: z.object({

@@ -68,9 +68,15 @@ interface RecordingOptions {
   maxKeys: number;
   /** On macOS Control and Command are separate keys and record separately. */
   macModifiers: boolean;
+  /** Backspace records as a key; by default it removes the last chord. */
+  recordBackspace: boolean;
 }
 
-const DEFAULT_RECORDING_OPTIONS: RecordingOptions = { maxKeys: DEFAULT_MAX_KEY_COUNT, macModifiers: isMacOS() };
+const DEFAULT_RECORDING_OPTIONS: RecordingOptions = {
+  maxKeys: DEFAULT_MAX_KEY_COUNT,
+  macModifiers: isMacOS(),
+  recordBackspace: false,
+};
 
 // `mod` is Command on macOS and Control elsewhere. On macOS a held Control is
 // its own `ctrl` modifier, so Ctrl+N never records as Cmd+N; elsewhere Meta is
@@ -161,7 +167,7 @@ export function updateShortcutRecordingState(
     return { ...state, livePreview: getModifierPreview(event, recordingOptions) };
   }
 
-  if (event.key === 'Backspace') {
+  if (event.key === 'Backspace' && !recordingOptions.recordBackspace) {
     return { chords: state.chords.slice(0, -1), livePreview: null, settled: false };
   }
 

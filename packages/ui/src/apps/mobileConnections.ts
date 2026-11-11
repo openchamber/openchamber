@@ -112,7 +112,7 @@ type MobileTransportCandidate =
   | { kind: 'direct'; url: string }
   | { kind: 'relay'; relay: MobileRelayConfig };
 
-type MobileSavedConnection = {
+export type MobileSavedConnection = {
   id: string;
   label: string;
   candidates: MobileTransportCandidate[];

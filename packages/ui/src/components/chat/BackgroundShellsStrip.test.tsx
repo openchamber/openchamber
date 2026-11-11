@@ -10,6 +10,7 @@ import type { SyncEvent } from '@/lib/opencode/events';
 import type { Session } from '@/lib/opencode/model';
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { applyBackgroundShellEvents, resetBackgroundShells } from '@/sync/background-shells';
+import { applyBackgroundImageEvents, resetBackgroundImages } from '@/sync/background-images';
 import { BackgroundShellsStrip } from './BackgroundShellsStrip';
 
 const session = (id: string, parentID?: string): Session => ({
@@ -40,6 +41,19 @@ const start = (...shells: RunningShell[]) => act(async () => {
   ]));
 });
 
+/** An image job the session started, as its `image_generate` call settles. */
+const startImage = (jobID: string, sessionID: string, path: string) => act(async () => {
+  applyBackgroundImageEvents('/repo', [{
+    type: 'message.tool.transition',
+    properties: {
+      sessionID,
+      messageID: 'msg_1',
+      partID: `call_${jobID}`,
+      transition: { kind: 'success', output: '', metadata: { jobID, path, model: 'openai/gpt-image-2' }, executed: true, end: Date.now() - 5_000 },
+    },
+  }]);
+});
+
 describe('BackgroundShellsStrip', () => {
   let windowInstance: Window;
   let host: HTMLDivElement;
@@ -56,6 +70,7 @@ describe('BackgroundShellsStrip', () => {
       IS_REACT_ACT_ENVIRONMENT: true,
     });
     resetBackgroundShells();
+    resetBackgroundImages();
     useGlobalSessionsStore.setState({
       entityById: new Map([
         ['ses_root', session('ses_root')],
@@ -79,6 +94,7 @@ describe('BackgroundShellsStrip', () => {
     await act(async () => root.unmount());
     await windowInstance.happyDOM.close();
     resetBackgroundShells();
+    resetBackgroundImages();
   });
 
   const buttons = () => [...host.querySelectorAll('button')];
@@ -181,5 +197,23 @@ describe('BackgroundShellsStrip', () => {
     } finally {
       stop.mockRestore();
     }
+  });
+
+  test('an image the session generates is its own row, without a stop', async () => {
+    await startImage('image_1', 'ses_root', '/repo/assets/hero');
+    expect(host.textContent).toContain('Generating an image');
+    expect(host.textContent).toContain('hero');
+    expect(button('Stop')).toBeUndefined();
+  });
+
+  test('a command and an image of a subagent collapse into one count; Stop all stops the command only', async () => {
+    const stop = spyOn(opencodeClient, 'stopBackgroundShells').mockResolvedValue(undefined);
+    await start(shell('sh_1', 'ses_root', 'bun run dev'));
+    await startImage('image_1', 'ses_child', '/tmp/images/image_1');
+    expect(host.textContent).toContain('In the background: 2');
+
+    await act(async () => button('Stop all')?.click());
+    expect(stop.mock.calls.map(([input]) => input.shells.map((item) => item.shellID))).toEqual([['sh_1']]);
+    stop.mockRestore();
   });
 });

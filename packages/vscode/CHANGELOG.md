@@ -1,3 +1,31 @@
+## [2.7.0] - 2026-11-08
+
+### New
+
+- Chat: a waiting form split into tabs has a Next button on each tab and Send on the last one (thanks to @JosueGalRe).
+- Chat: a page that waits for your answer has a Decline button. The agent hears that you declined and doesn't choose for you (thanks to @yulia-ivashko).
+- Chat: an eye button on a secret request shows what you typed before you save it (thanks to @Naputt1).
+- Composer: Shift+Enter continues a numbered list (thanks to @gabrielantoniosilvaoficial).
+- Plugins: a switch on each plugin card turns it off and keeps its config entry and options (thanks to @jwcrystal).
+- Stats: a Today range (thanks to @Eveerme).
+
+### Improvements
+
+- Composer: the thinking level after the model name is coloured by level, and the / list is as wide as @ (thanks to @yulia-ivashko).
+
+### Fixes
+
+- Remote-SSH: an OpenCode path set on your own computer no longer stops OpenChamber from starting on the server (thanks to @yulia-ivashko).
+- Composer: pasted text like @john.doe or @types/node stays text, and a mention of a missing file no longer stops the send.
+- Composer: attached context survives a send after a revert (thanks to @IbrahimKhan12), and so does a form answer or ! command given while a revert is staged (thanks to @yulia-ivashko).
+- Chat: a form in a reply always has Send, and one broken part of a reply's block no longer hides the charts and tables around it.
+- Chat: an answered question stays between the text before it and the reply after it with Activity collapsed.
+- Chat: a collapsed message with many comments takes two lines, and Show more on a long message opens it in place (thanks to @yulia-ivashko).
+- Chat: rendered pages no longer jump between two heights at a fractional display scale, and stay selectable while a form waits (thanks to @ChangeHow).
+- Chat: a finished tool row no longer says "Could not load the result" for a session shown under another folder (thanks to @yangyaofei).
+- Plugins: the page lists plugins from every config file OpenCode reads.
+- Usage: Codex shows numbers when OpenChamber signed in with ChatGPT and the Codex CLI is signed in, and OpenCode Go Teams shows its limits, where it said "no subscription" (thanks to @yulia-ivashko).
+
 ## [2.6.1] - 2026-11-04
 
 ### New

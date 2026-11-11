@@ -24,6 +24,8 @@ import {
   type FlattenedTreeRow,
 } from './changesTree';
 import type { GitStatus } from '@/lib/api/types';
+import { useDeviceInfo } from '@/lib/device';
+import { longPressHandlers } from '@/lib/longPress';
 import { cn } from '@/lib/utils';
 import { useUIStore } from '@/stores/useUIStore';
 import { useI18n } from '@/lib/i18n';
@@ -93,6 +95,7 @@ export const ChangesPanel: React.FC<ChangesPanelProps> = ({
   onRevertDirectory,
 }) => {
   const { t } = useI18n();
+  const { isMobile } = useDeviceInfo();
   const scrollRef = React.useRef<HTMLDivElement | null>(null);
   const gitChangesViewMode = useUIStore((state) => state.gitChangesViewMode);
   const isTreeView = gitChangesViewMode === 'tree';
@@ -379,8 +382,15 @@ export const ChangesPanel: React.FC<ChangesPanelProps> = ({
       const isDirectoryReverting = isRevertingAll || directoryPaths.some((path) => revertingPaths.has(path));
       return (
         <div
-          className={cn('group flex items-center gap-2 py-1.5 text-muted-foreground hover:text-foreground', ROW_PADDING_CLASSNAME)}
+          className={cn(
+            'group flex items-center gap-2 text-muted-foreground hover:text-foreground',
+            isMobile ? 'min-h-11 select-none' : 'py-1.5',
+            ROW_PADDING_CLASSNAME,
+          )}
           style={{ paddingInlineStart: `${depth * TREE_INDENT_PX}px` }}
+          {...(isMobile && group.showRevertActions !== false && onRevertDirectory && !isDirectoryReverting
+            ? longPressHandlers(() => setPendingDirectoryRevert({ path: directory.path, paths: directoryPaths, count: directoryPaths.length }))
+            : null)}
         >
           <button
             type="button"
@@ -417,7 +427,7 @@ export const ChangesPanel: React.FC<ChangesPanelProps> = ({
                 type="button"
                 onClick={() => setPendingDirectoryRevert({ path: directory.path, paths: directoryPaths, count: directoryPaths.length })}
                 disabled={isDirectoryReverting}
-                className="flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--interactive-focus-ring)] disabled:cursor-not-allowed disabled:opacity-50"
+                className={isMobile ? 'sr-only' : 'flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--interactive-focus-ring)] disabled:cursor-not-allowed disabled:opacity-50'}
                 aria-label={t('gitView.changes.revertDirectoryAria', { path: directory.path })}
                 data-row-tooltip={t('gitView.changes.revertDirectoryTooltip')}
               >
@@ -444,7 +454,7 @@ export const ChangesPanel: React.FC<ChangesPanelProps> = ({
         </div>
       );
     },
-    [expandedDirectories, isRevertingAll, onRevertDirectory, revertingPaths, t, toggleDirectoryExpanded]
+    [expandedDirectories, isMobile, isRevertingAll, onRevertDirectory, revertingPaths, t, toggleDirectoryExpanded]
   );
 
   const renderRow = React.useCallback(
@@ -519,7 +529,8 @@ export const ChangesPanel: React.FC<ChangesPanelProps> = ({
   const showDivider = React.useCallback(
     (index: number): boolean => {
       // The tree reads by indentation and guides; row dividers turn it into a table.
-      if (isTreeView) return false;
+      // The phone's lists are flat.
+      if (isTreeView || isMobile) return false;
       const row = rows[index];
       const previous = rows[index - 1];
       if (!row || !previous) return false;
@@ -527,7 +538,7 @@ export const ChangesPanel: React.FC<ChangesPanelProps> = ({
       if (previous.type !== 'file' && previous.type !== 'directory') return false;
       return previous.groupIndex === row.groupIndex;
     },
-    [isTreeView, rows]
+    [isMobile, isTreeView, rows]
   );
 
   return (

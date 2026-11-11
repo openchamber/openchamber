@@ -14,7 +14,7 @@ globalThis.fetch = async (input: string | URL | Request) => {
   return new Response(JSON.stringify(payload), { status: 200, headers: { 'content-type': 'application/json' } });
 };
 browser.document.write('<!doctype html><html><head></head><body></body></html>');
-Object.assign(globalThis, { window: browser, document: browser.document, navigator: browser.navigator,
+Object.assign(globalThis, { window: browser, document: browser.document, Event: browser.Event, CustomEvent: browser.CustomEvent, navigator: browser.navigator,
   localStorage: browser.localStorage, sessionStorage: browser.sessionStorage, HTMLElement: browser.HTMLElement,
   HTMLAnchorElement: browser.HTMLAnchorElement, Element: browser.Element, Node: browser.Node, Text: browser.Text,
   SVGElement: browser.SVGElement, customElements: browser.customElements, MutationObserver: browser.MutationObserver,

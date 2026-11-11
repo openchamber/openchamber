@@ -246,3 +246,19 @@ describe('createVSCodeGitAPI author profiles and remotes', () => {
     ]);
   });
 });
+
+describe('createVSCodeGitAPI repository check', () => {
+  test("turns the extension's GIT_REPOSITORY_UNREADABLE into the shared error with Git's message", async () => {
+    messages.length = 0;
+    const { GitRepositoryUnreadableError } = await import('@openchamber/ui/lib/gitRepositoryUnreadable');
+    const git = createVSCodeGitAPI();
+    const checking = git.checkIsGitRepository('/repo');
+    const request = await nextMessage();
+    assert.equal(request.type, 'api:git/check');
+    const message = "fatal: detected dubious ownership in repository at '/repo'";
+    listeners.dispatchEvent(new MessageEvent('message', {
+      data: { id: request.id, type: request.type, success: false, error: message, code: 'GIT_REPOSITORY_UNREADABLE' },
+    }));
+    await assert.rejects(checking, (error) => error instanceof GitRepositoryUnreadableError && error.message === message);
+  });
+});

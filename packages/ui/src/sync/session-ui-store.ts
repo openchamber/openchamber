@@ -22,7 +22,7 @@ import type { WorktreeMetadata } from "@/types/worktree"
 import { opencodeClient, type SkillMentions } from "@/lib/opencode/client"
 import { buildSkillMentionInstruction } from "@/lib/skillMentionInstruction"
 import { runtimeFetch } from "@/lib/runtime-fetch"
-import { selectCatalogLoadedForDirectory, selectConfigAgentsForDirectory, useConfigStore } from "@/stores/useConfigStore"
+import { useConfigStore } from "@/stores/useConfigStore"
 import { runAfterOpenCodeStartup } from "./opencode-startup-gate"
 import { useProjectsStore } from "@/stores/useProjectsStore"
 import { useSessionDisplayStore } from "@/stores/useSessionDisplayStore"
@@ -68,10 +68,11 @@ import {
   type SessionDirectoryResolution,
   type SessionDirectorySources,
 } from "./session-directory-resolution"
-import { resolveSendSelection } from "./session-selection"
+import { resolveCheckedSendSelection } from "./session-selection"
 
 export { resolveSendSelection } from "./session-selection"
 import { markSessionViewed } from "./notification-store"
+import { releaseKeptUnreadMarks } from "./session-unread"
 import { setActiveSession } from "./sync-context"
 import {
   adoptSessionMove,
@@ -87,6 +88,7 @@ import {
   unarchiveSessions as unarchiveSessionsAction,
   updateSessionTitle as updateSessionTitleAction,
   optimisticSend,
+  commitStagedRevert,
   refetchSessionMessages,
   revertToMessage as revertToMessageAction,
   forkFromMessage as forkFromMessageAction,
@@ -210,24 +212,12 @@ export async function routeMessage(params: {
   // show, so only a genuine change travels with the prompt. Resolved when the
   // request is about to leave: a session created from a draft has its record,
   // with the model it was created on, only once `ready` settles.
-  const sendSelection = async () => {
-    const directory = sendDirectory()
-    const selection = await resolveSendSelection(params.sessionId, directory, {
-      providerID: params.providerID,
-      modelID: params.modelID,
-      variant: params.variant,
-      agent: params.agent,
-    })
-    // The session can already be on an agent its folder lacks: set before the
-    // client checked it, or its file was removed since. When the folder's
-    // loaded catalog does not list it, the agent goes with the send, so the
-    // client checks it against a fresh list before anything is switched.
-    if (selection.agent || !params.agent || !directory) return selection
-    const config = useConfigStore.getState()
-    const listed = !selectCatalogLoadedForDirectory(config, "agents", directory)
-      || selectConfigAgentsForDirectory(config, directory).some((agent) => agent.id === params.agent)
-    return listed ? selection : { ...selection, agent: params.agent }
-  }
+  const sendSelection = () => resolveCheckedSendSelection(params.sessionId, sendDirectory(), {
+    providerID: params.providerID,
+    modelID: params.modelID,
+    variant: params.variant,
+    agent: params.agent,
+  })
   // A context item becomes a synthetic message, which carries text only. Any
   // file it brought rides with the send so the attachment still arrives.
   const contextItems = (params.additionalParts ?? [])
@@ -246,6 +236,7 @@ export async function routeMessage(params: {
     await params.ready
     assertRuntimeCurrent()
     params.beforeSend?.()
+    await commitStagedRevert(params.sessionId, sendDirectory())
     await opencodeClient.shellSession({
       runtimeKey: params.runtimeKey,
       sessionId: params.sessionId,
@@ -313,6 +304,7 @@ export async function routeMessage(params: {
         ...skillInstructionContext(),
       ]
       const selection = await sendSelection()
+      const revertStaged = getSyncSessions(sendDirectory()).some((session) => session.id === params.sessionId && session.revert)
       await opencodeClient.sendCommand({
         runtimeKey: params.runtimeKey,
         id: params.sessionId,
@@ -325,6 +317,7 @@ export async function routeMessage(params: {
         delivery: params.delivery,
         directory: sendDirectory(),
         beforeSend: params.beforeSend,
+        commitRevert: revertStaged ? () => opencodeClient.commitRevert(params.sessionId, sendDirectory()) : undefined,
       })
       return 'command'
     }
@@ -350,7 +343,7 @@ export async function routeMessage(params: {
     ready: params.ready,
     markBusy: params.markBusy,
     appendSubmissions: params.appendSubmissions,
-    send: async (messageID, context) => {
+    send: async (messageID, context, commitRevert) => {
       assertRuntimeCurrent()
       const selection = await sendSelection()
       return opencodeClient.sendMessage({
@@ -368,6 +361,7 @@ export async function routeMessage(params: {
         directory: sendDirectory(),
         skills,
         beforeSend: params.beforeSend,
+        commitRevert,
       }).then(() => {})
     },
   })
@@ -1152,17 +1146,21 @@ const createSessionWithDraftLifecycle = async (
  * user explicitly picked "Default", so the sent value alone cannot tell the two
  * apart, and recording it raw clears a real "Default". The live selection can
  * tell them apart, because its `override` keeps `null` for "Default" — but only
- * while it still describes the agent and model being sent to. Otherwise the
- * send's own value is all there is to go on.
+ * while it still describes the agent and model being sent to, and only for a
+ * send from the main chat, whose composer that selection is: a `/btw` fork or
+ * a chat pinned in the side panel keeps its own level on the same agent and
+ * model. Otherwise the send's own value is all there is to go on.
  */
 const resolveVariantToRecord = (
+  sendsFromMainChat: boolean,
   agentName: string | undefined,
   providerID: string,
   modelID: string,
   sentVariant: string | null | undefined,
 ): string | null | undefined => {
   const config = useConfigStore.getState()
-  const describesThisSend = config.currentProviderId === providerID
+  const describesThisSend = sendsFromMainChat
+    && config.currentProviderId === providerID
     && config.currentModelId === modelID
     && config.currentAgentName === agentName
   return describesThisSend ? config.currentVariantSelection.override : sentVariant
@@ -1327,7 +1325,9 @@ const finishDraftSession = (
 const saveDraftSessionSelection = (sessionId: string, selection: DraftSessionSelection): string | undefined => {
   const configState = useConfigStore.getState()
   const effectiveDraftAgent = trimAgent(selection.agent) ?? configState.currentAgentName
+  // Only the main chat opens a new-session draft.
   const variantOverride = resolveVariantToRecord(
+    true,
     effectiveDraftAgent,
     selection.providerID,
     selection.modelID,
@@ -1672,6 +1672,9 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
 
     // Mark session viewed in notification store + update active session ref
     if (id) {
+      // Opening another session ends the visit in which marks were made, so
+      // they clear the next time their sessions are opened.
+      if (previousSessionId !== id) releaseKeptUnreadMarks()
       markSessionViewed(id)
       setActiveSession(resolvedDir ?? "", id)
     } else {
@@ -2448,7 +2451,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
           effectiveAgent,
           providerID,
           modelID,
-          resolveVariantToRecord(effectiveAgent, providerID, modelID, variant),
+          resolveVariantToRecord(targetSessionId === get().currentSessionId, effectiveAgent, providerID, modelID, variant),
         )
       }
 

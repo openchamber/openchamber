@@ -19,7 +19,7 @@ import { repositoryBindingOwner } from '@/lib/source-control/repository-binding'
 import { runBackgroundNetworkTask } from '@/lib/background-network';
 import { captureRuntimeInstance, getRuntimeKey } from '@/lib/runtime-switch';
 import type { SourceControlReadContext } from '@/lib/api/types';
-import { limitSourceControlDiscoveryCandidates } from '../sourceControlDiscovery';
+import { limitSourceControlDiscoveryCandidates, sourceControlDiscoverySignature } from '../sourceControlDiscovery';
 import { reconcileRegisteredContextDirectories, type RegisteredContextDirectories } from './registeredContextDirectories';
 import { subscribeOpenchamberEvents } from '@/lib/openchamberEvents';
 import { getLinkedSidebarChanges, getLinkedSidebarIssues, type RepositoryThreadRef } from '@/lib/linkedIssues';
@@ -75,6 +75,7 @@ import { useSidebarSpaces, useSpacesStore, type SpaceMark } from '@/lib/spaces/s
 import { spaceOfCreationRequest } from '@/lib/spaces/space-creation-requests';
 import { useUIStore } from '@/stores/useUIStore';
 import { isSessionInWork } from '@/lib/sessionWorkMetadata';
+import { useClosePinnedWork } from '../works/useClosePinnedWork';
 import { getSessionPinList, isSessionPinned } from '@/lib/sessionPins';
 import { buildMultiRunIndex } from '@/lib/multirun/runs';
 import { useI18n } from '@/lib/i18n';
@@ -92,6 +93,7 @@ const EMPTY_ZONE_ITEMS: ReturnType<typeof deriveTimelineActivityItems> = [];
 const EMPTY_WORK_ENTRIES: readonly SessionSidebarWorkEntry[] = [];
 const EMPTY_IDS: ReadonlySet<string> = new Set();
 const NO_DRAFTS: readonly SessionDraft[] = [];
+const NO_SESSIONS: readonly Session[] = [];
 const NO_PLAN_PROJECTS: readonly { id: string; path: string }[] = [];
 /** Pinned root sessions, and the works In work lists. */
 type ZoneWorks = { pinned: readonly Session[]; pinnedWorktrees: readonly SidebarWorkRef[]; work: readonly SidebarWorkRef[] };
@@ -433,6 +435,7 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
   const sessionWorkEnabled = useUIStore((state) => state.sessionWorkEnabled);
   const showWorkSection = useSessionDisplayStore((state) => state.showWorkSection);
   const showPinnedSection = useSessionDisplayStore((state) => state.showPinnedSection);
+  const keepPinnedInPlace = useSessionDisplayStore((state) => state.keepPinnedInPlace);
   const detailedZoneRows = useSessionDisplayStore((state) => state.detailedZoneRows);
   const savedSections = useSessionDisplayStore((state) => state.sections);
   const hiddenSections = useSessionDisplayStore((state) => state.hiddenSections);
@@ -445,8 +448,9 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
     draftIsNew: sectionDraftIsNew,
     show: { chats: showChatsSection, pinned: showPinnedSection, work: sessionWorkEnabled && showWorkSection },
     keepWorkInPlace,
+    keepPinnedInPlace,
     customSections: !topology.isVSCode,
-  }), [hiddenSections, keepWorkInPlace, savedSections, sectionDraft, sectionDraftIsNew, sessionWorkEnabled, showChatsSection, showPinnedSection, showWorkSection, topology.isVSCode]);
+  }), [hiddenSections, keepPinnedInPlace, keepWorkInPlace, savedSections, sectionDraft, sectionDraftIsNew, sessionWorkEnabled, showChatsSection, showPinnedSection, showWorkSection, topology.isVSCode]);
   const showPinned = visibleSections.some((section) => section.kind === 'pinned');
   const showWork = visibleSections.some((section) => section.kind === 'work');
   const customTimeSections = visibleSections.some((section) => section.kind === 'custom' && section.section.grouping === 'time');
@@ -530,6 +534,27 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
   const removingWorktreePaths = useRemovingWorktreePaths();
   // The works In work listed last time, in order (see the removal case below).
   const lastWorkKeysRef = React.useRef<readonly string[]>([]);
+  // A pinned work is never in work, whatever an older client or server left
+  // in its sessions' state: In work leaves it out, and its sessions' work is
+  // closed (`useClosePinnedWork`).
+  const isPinnedWork = React.useCallback((ref: SidebarWorkRef): boolean => {
+    if (ref.kind === 'group') return ref.group.worktree?.pinnedAt !== undefined;
+    const root = collection.sessionById.get(ref.rootSessionId);
+    return Boolean(root && isSessionPinned(collection.pinnedSessionIds, root.directory, root.id));
+  }, [collection.pinnedSessionIds, collection.sessionById]);
+  const pinnedSessionsInWork = React.useMemo(() => {
+    if (!sessionWorkEnabled) return NO_SESSIONS;
+    const sessions = collection.orderedSessions.filter((session) => {
+      if (session.parentID || session.time?.archived || !isSessionInWork(session)) return false;
+      // Its own pin counts too: a session pinned inside a worktree that is not.
+      if (isSessionPinned(collection.pinnedSessionIds, session.directory, session.id)) return true;
+      const root = sessionRootIndex.get(session.id);
+      const ref = workIndex.bySessionId.get(session.id) ?? (root ? workIndex.bySessionId.get(root) : undefined);
+      return ref !== undefined && isPinnedWork(ref);
+    });
+    return sessions.length > 0 ? sessions : NO_SESSIONS;
+  }, [collection.orderedSessions, collection.pinnedSessionIds, isPinnedWork, sessionRootIndex, sessionWorkEnabled, workIndex]);
+  useClosePinnedWork(pinnedSessionsInWork);
   // What each section could list, before the sections above it take theirs.
   const sectionCandidates = React.useMemo(() => {
     const sessionRef = (session: Session): SidebarWorkRef => {
@@ -553,13 +578,15 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
         .filter((ref) => ref.group.worktree?.pinnedAt !== undefined && (ref.group.worktree.pinList ?? DEFAULT_PIN_LIST) === DEFAULT_PIN_LIST)
         .sort((left, right) => (right.group.worktree?.pinnedAt ?? 0) - (left.group.worktree?.pinnedAt ?? 0))
       : [];
-    const work = showWork ? orderInWorkWorks(collection.orderedSessions, workIndex, sessionRootIndex, isChatDirectoryPath) : [];
+    const work = showWork
+      ? orderInWorkWorks(collection.orderedSessions, workIndex, sessionRootIndex, isChatDirectoryPath).filter((ref) => !isPinnedWork(ref))
+      : [];
     // A worktree or a space with no session yet is in work while a draft is
     // begun there: the user just made it for a task. It opens the block, as
     // the newest. A space's draft waits on the project root while the space
     // is made, and names it by its creation request.
     const begun = showWork
-      ? workIndex.groupWorks.filter((ref) => ref.group.sessions.length === 0 && !work.some((entry) => entry.key === ref.key) && (
+      ? workIndex.groupWorks.filter((ref) => ref.group.sessions.length === 0 && !isPinnedWork(ref) && !work.some((entry) => entry.key === ref.key) && (
         draftPlacement.byGroupKey.has(ref.key)
         || Boolean(openDraftDirectory && isPathWithinProject(openDraftDirectory, normalizePath(ref.group.directory ?? null)))
         || Boolean(openDraftSpaceId && ref.group.space?.id === openDraftSpaceId)
@@ -591,7 +618,7 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
       all = [...unstarted.filter(leads), ...all, ...unstarted.filter((ref) => !leads(ref))];
     }
     return { pinned: [...pinnedSessions.map(sessionRef), ...pinnedWorktrees], work: listed, all };
-  }, [collection.orderedSessions, collection.pinnedSessionIds, customTimeSections, draftPlacement, liveSpaceIds, openDraftDirectory, openDraftSpaceId, ownership.bySessionId, removingWorktreePaths, rootSessionIds, sessionRootIndex, showPinned, showWork, workIndex, worktreeArchiveAnchors]);
+  }, [collection.orderedSessions, collection.pinnedSessionIds, customTimeSections, draftPlacement, isPinnedWork, liveSpaceIds, openDraftDirectory, openDraftSpaceId, ownership.bySessionId, removingWorktreePaths, rootSessionIds, sessionRootIndex, showPinned, showWork, workIndex, worktreeArchiveAnchors]);
   const projectIds = React.useMemo(() => new Set(projectSections.map((section) => section.project.id)), [projectSections]);
   // Which root folder holds each session and worktree: the Folder condition and
   // the list by time read it.
@@ -748,9 +775,9 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
   // session in yet. A group of projects keeps its projects.
   const timeEntries = React.useMemo((): readonly SessionSidebarWorkEntry[] | null => {
     if (!timeGrouping) return null;
-    const listedKeys = new Set([...zoneWorks.work, ...zoneWorks.pinnedWorktrees].map((ref) => ref.key));
-    for (const session of zoneWorks.pinned) listedKeys.add(`session:${session.id}`);
-    for (const key of membership.claimedKeys) listedKeys.add(key);
+    // What a section took out of its project, and what In work lists. Pinned
+    // that leaves its works in place leaves them in this list too.
+    const listedKeys = new Set([...membership.claimedKeys, ...zoneWorks.work.map((ref) => ref.key)]);
     // A search lists each match once, in the first section that shows it.
     if (view.hasSessionSearchQuery) for (const key of membership.listedKeys) listedKeys.add(key);
     const inClaimedProject = (projectId: string | null): boolean => projectId !== null && membership.claimedProjectIds.has(projectId);
@@ -766,7 +793,7 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
     const leads = (ref: SidebarWorkRef): boolean => ref.kind === 'group' && Boolean(ref.group.space && liveSpaceIds.has(ref.group.space.id));
     refs.unshift(...unstarted.filter(leads));
     refs.push(...unstarted.filter((ref) => !leads(ref)));
-    // A pinned worktree still listed here (the Pinned section is hidden)
+    // A pinned worktree still listed here (Pinned is hidden or leaves it in place)
     // leads the list, as pinned sessions do in the lifecycle order.
     const isPinnedWorktree = (ref: SidebarWorkRef): boolean => ref.kind === 'group' && ref.group.worktree?.pinnedAt !== undefined;
     // New works the user has only drafted open the list.
@@ -886,11 +913,12 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
   const shownPrTargets = shownPrs.targets;
   // The discovery effect below subscribes to bindings and reads them; keep its
   // input stable while the shown branches are the same, so ordinary sidebar
-  // updates do not restart it.
+  // updates do not restart it. Rows reorder whenever sessions do, so the
+  // signature ignores order: a reorder is not new work (#6084).
   const discoveryCandidatesRef = React.useRef<{ signature: string; candidates: Array<{ directory: string; branch: string }> } | null>(null);
   const discoveryCandidates = React.useMemo(() => {
     const candidates = limitSourceControlDiscoveryCandidates(shownPrTargets.values());
-    const signature = JSON.stringify(candidates);
+    const signature = sourceControlDiscoverySignature(candidates);
     if (discoveryCandidatesRef.current?.signature !== signature) {
       discoveryCandidatesRef.current = { signature, candidates };
     }

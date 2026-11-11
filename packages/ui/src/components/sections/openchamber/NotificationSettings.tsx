@@ -13,6 +13,7 @@ import {
   SettingsSection,
   SettingsTwoColumn,
   SettingsCheckboxRow,
+  SettingsNewBadge,
   SettingsGroupTitle,
   SETTINGS_OPTION_STACK_CLASS,
 } from '@/components/sections/shared/SettingsSection';
@@ -479,6 +480,11 @@ export const NotificationSettings: React.FC = () => {
                     : undefined
               }
               ariaLabel={t('settings.notifications.page.delivery.enableAria')}
+              // The event rows render only once notifications are on, so a new one
+              // among them is announced on the switch that reveals it.
+              labelAccessory={nativeNotificationsEnabled && canShowNotifications ? undefined : (
+                <SettingsNewBadge items={['notifications.events', ...(isVSCode ? [] : ['notifications.pullRequests'])]} />
+              )}
             />
 
             {/* The native Capacitor app never notifies while focused (hard rule) and uses

@@ -45,7 +45,7 @@ const schema: NonNullable<Parameters<typeof rehypeSanitize>[0]> = {
   strip: ['script', 'style', 'iframe', 'object', 'embed', 'svg', 'math', 'form'],
   attributes: {
     '*': ['align', 'alt', 'checked', 'colSpan', 'height', 'media', 'open', 'rowSpan', 'start', 'title', 'width'],
-    a: ['href', 'id', 'ariaDescribedBy', 'ariaLabel', 'dataFootnoteRef', 'dataFootnoteBackref', 'dataOcLinkSource', 'dataOcReference'],
+    a: ['href', 'id', 'ariaDescribedBy', 'ariaLabel', 'dataFootnoteRef', 'dataFootnoteBackref', 'dataOcLinkSource', 'dataOcReference', 'dataOcGuestLink'],
     // `:` for GitLab's suggestion fences (`suggestion:-0+2`).
     code: [['className', /^language-[\w#+.:-]+$/, 'math-inline', 'math-display'], 'metastring'],
     img: ['src', 'srcSet', 'alt', 'dataOcMediaSource'],
@@ -90,6 +90,18 @@ function remarkSessionLinks() {
     }
     walk(tree);
   };
+}
+
+/**
+ * Text a person typed reads as typed: `<b>` and `&amp;` stay those characters
+ * instead of becoming HTML or `&`. The parser never sees them as HTML or
+ * character references, so inline code and formulas keep their characters
+ * too, which escaping the source cannot give: an entity there is shown
+ * literally (`a&lt;b` in code, a broken formula).
+ */
+export function remarkLiteralText(this: Processor) {
+  const data = this.data();
+  (data.micromarkExtensions ??= []).push({ disable: { null: ['htmlFlow', 'htmlText', 'characterReference'] } });
 }
 
 // Static mode parses the whole document without the streaming BlockComponent.

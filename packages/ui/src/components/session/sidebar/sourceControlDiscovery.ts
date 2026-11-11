@@ -21,3 +21,15 @@ export const limitSourceControlDiscoveryCandidates = (
   }
   return [...candidates.values()];
 };
+
+/**
+ * The candidate list's identity, independent of the order the sidebar shows it
+ * in. Discovery restarts its subscriptions and binding reads only when this
+ * changes: session activity reorders rows without adding work, and each
+ * restart re-read every shown directory's binding (#6084).
+ */
+export const sourceControlDiscoverySignature = (
+  candidates: ReadonlyArray<{ directory: string; branch: string }>,
+): string => JSON.stringify(
+  [...candidates].sort((left, right) => (left.directory < right.directory ? -1 : left.directory > right.directory ? 1 : 0)),
+);

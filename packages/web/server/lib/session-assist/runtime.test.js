@@ -355,6 +355,48 @@ describe('session assist runtime', () => {
     vi.unstubAllGlobals();
   });
 
+  it('says once why the session model on a local endpoint was skipped', async () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const persistSessionAssist = vi.fn(async () => undefined);
+    const records = [
+      { id: 'msg_idle', type: 'idle', outcome: 'succeeded' },
+      { id: 'msg_a', type: 'assistant', content: [{ type: 'text', text: 'All done.' }], finish: 'stop', time: { completed: 2 }, model: { providerID: 'cpa', id: 'm' } },
+      { id: 'msg_u', type: 'user', text: 'Do the thing' },
+    ];
+    vi.stubGlobal('fetch', vi.fn(async (input) => {
+      const url = new URL(String(input));
+      let body;
+      if (url.pathname === '/api/session/ses_1' || url.pathname === '/api/session/ses_2') body = { data: { id: url.pathname.split('/').pop(), location: { directory: '/repo' } } };
+      else if (url.pathname.endsWith('/message')) body = { data: records.slice(0, Number(url.searchParams.get('limit'))), cursor: {} };
+      else throw new Error(`unexpected ${url.pathname}`);
+      return new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } });
+    }));
+    // The reporter's setup: a loopback OpenAI-compatible proxy forwarding to a
+    // hosted vendor, so the endpoint looks local to `isLocalModelEndpoint`.
+    const describeSmallModel = vi.fn(async () => ({ inputCharBudget: 20_000, providerID: 'cpa', modelID: 'm', source: 'session-model', localEndpoint: true }));
+    const generateSmallModelText = vi.fn(async () => ({ text: '{"recap":"Did the thing.","suggestion":""}' }));
+    const { runtime } = makeRuntime({
+      persistSessionAssist,
+      buildOpenCodeUrl: (fetchPath) => `http://opencode.test${fetchPath}`,
+      getSmallModelService: async () => ({ describeSmallModel, generateSmallModelText }),
+    });
+
+    runtime.processPayload(idle('ses_1'));
+    runtime.processPayload(idle('ses_2'));
+    for (let i = 0; i < 30 && describeSmallModel.mock.calls.length < 2; i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    expect(describeSmallModel).toHaveBeenCalledTimes(2);
+    expect(generateSmallModelText).not.toHaveBeenCalled();
+    const notices = log.mock.calls.filter(([line]) => String(line).includes('[session-assist] skipped'));
+    expect(notices).toHaveLength(1);
+    expect(notices[0][0]).toContain('cpa/m');
+    expect(notices[0][0]).toContain('Set a different Small Model');
+    vi.unstubAllGlobals();
+  });
+
   it('asks the turn-end gate first and arms nothing when it rules both fields out', async () => {
     const persistSessionAssist = vi.fn(async () => undefined);
     const getSmallModelService = vi.fn(async () => {

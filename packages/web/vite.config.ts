@@ -42,6 +42,9 @@ const themeJsonHmrPlugin = () => ({
 
 export default defineConfig({
   root: path.resolve(__dirname, '.'),
+  // Each dev server started by scripts/dev-web-hmr.mjs gets its own
+  // dependency cache; see the note there.
+  cacheDir: process.env.OPENCHAMBER_VITE_CACHE_DIR || undefined,
   plugins: [
     // The React Compiler is most of a cold dev start; its output is kept on
     // disk for every checkout of the repository, so a restart or a new

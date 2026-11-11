@@ -1,0 +1,122 @@
+{
+  "metadata": {
+    "id": "patina-light",
+    "name": "Patina",
+    "variant": "light",
+    "description": "OpenChamber accents aged to one muted lightness and saturation, over neutral graphite and warm paper (light variant)",
+    "version": "1.0.0",
+    "author": "OpenChamber",
+    "tags": [
+      "light",
+      "brand",
+      "warm",
+      "muted",
+      "copper"
+    ]
+  },
+  "colors": {
+    "primary": {
+      "base": "#9d5939",
+      "foreground": "#fbfaf7",
+      "hover": "#8e4c2c",
+      "active": "#814020",
+      "muted": "#9d593966"
+    },
+    "surface": {
+      "background": "#faf9f6",
+      "foreground": "#2a2926",
+      "muted": "#f3f1ed",
+      "mutedForeground": "#6c6963",
+      "elevated": "#f0eee9",
+      "subtle": "#efede8"
+    },
+    "interactive": {
+      "border": "#d6d3cbb3",
+      "selection": "#2a29261c",
+      "borderHover": "#c4c0b6",
+      "borderFocus": "#416ba199",
+      "focus": "#0000000d",
+      "focusRing": "#9d593966",
+      "cursor": "#9d5939",
+      "hover": "#00000008",
+      "active": "#0000000f"
+    },
+    "status": {
+      "error": "#a0554c",
+      "errorBackground": "#a0554c1f",
+      "errorBorder": "#a0554c66",
+      "warning": "#7e6938",
+      "warningBackground": "#7e69381f",
+      "warningBorder": "#7e693866",
+      "success": "#587246",
+      "successBackground": "#5872461f",
+      "successBorder": "#58724666",
+      "info": "#436da3",
+      "infoBackground": "#436da31f",
+      "infoBorder": "#436da366"
+    },
+    "syntax": {
+      "base": {
+        "background": "#f2f0ec",
+        "comment": "#8f8b84",
+        "keyword": "#3c7357",
+        "string": "#a05d4f",
+        "number": "#3d7582",
+        "function": "#517936",
+        "variable": "#926537",
+        "type": "#397682",
+        "operator": "#a15757"
+      },
+      "tokens": {
+        "punctuation": "#6c6963",
+        "stringEscape": "#3f7380",
+        "parameter": "#4b4c46",
+        "variableProperty": "#7d6f2d",
+        "className": "#5a689e"
+      },
+      "highlights": {
+        "diffAdded": "#44723c",
+        "diffAddedBackground": "#44723c22",
+        "diffRemoved": "#965e5d",
+        "diffRemovedBackground": "#965e5d22",
+        "diffModified": "#397682",
+        "diffModifiedBackground": "#3976821c",
+        "lineNumber": "#a8a49c",
+        "lineNumberActive": "#9d5939"
+      }
+    },
+    "pr": {
+      "blocked": "#9d5939",
+      "merged": "#7261a2"
+    },
+    "chat": {
+      "background": "#faf9f6",
+      "userMessageBackground": "#eee8e5",
+      "divider": "#d6d3cbd4"
+    },
+    "markdown": {
+      "link": "#457680",
+      "linkHover": "#31626c",
+      "inlineCode": "#366c42",
+      "inlineCodeBackground": "#ebe9e3",
+      "blockquote": "#6c6963",
+      "blockquoteBorder": "#416ba1",
+      "listMarker": "#9d5939b3",
+      "bold": "#1f1e1c",
+      "italic": "#2a2926",
+      "hr": "#d6d3cbb3"
+    },
+    "tools": {
+      "border": "#d6d3cb99",
+      "icon": "#6c6963",
+      "title": "#2a2926",
+      "description": "#6c6963",
+      "edit": {
+        "addedBackground": "#44723c22",
+        "removedBackground": "#965e5d22",
+        "modifiedBackground": "#3976821c",
+        "lineNumber": "#a8a49c"
+      }
+    }
+  }
+}

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { sourceControlServiceLoginSchema } from '@openchamber/sdk/schemas';
 
 /**
  * What the UI knows about one source-control provider, as the connected
@@ -100,6 +101,7 @@ const descriptorSchema = z.object({
     methods: z.array(z.union([authMethodSchema, z.string().transform((): null => null)]))
       .transform((methods) => methods.filter((method): method is SourceControlAuthMethod => method !== null)),
     cliName: z.string().min(1).max(32).optional(),
+    login: sourceControlServiceLoginSchema.optional(),
     cliTransport: z.boolean(),
     token: z.object({
       scopes: z.array(z.string().min(1).max(64)).max(32),

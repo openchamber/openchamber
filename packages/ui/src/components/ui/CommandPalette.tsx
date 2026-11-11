@@ -22,8 +22,6 @@ import { useGlobalSessionsStore, resolveGlobalSessionDirectory } from '@/stores/
 import { orderVisibleRootSessions } from '@/lib/sessionListOrder';
 import { settingsPageTitleKey } from '@/lib/settings/pageTitle';
 import { useSessionPinnedStore } from '@/stores/useSessionPinnedStore';
-import { isSessionPinned } from '@/lib/sessionPins';
-import { toggleSessionPin } from '@/sync/session-pins';
 import {
   EMPTY_SESSION_ORDER_RANKS,
   useSessionOrderingStore,
@@ -34,15 +32,27 @@ import { useFileSearchStore } from '@/stores/useFileSearchStore';
 import { useDeviceInfo } from '@/lib/device';
 import { useDebouncedValue } from '@/hooks/useDebouncedValue';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
+import {
+  addProject,
+  copyCurrentSessionId,
+  openArchive,
+  openMultiRun,
+  openNewWorktreeDialog,
+  openNotes,
+  openOverview,
+  openTodos,
+  pinCurrentSession,
+  reloadUi,
+  restartOpenCode,
+  showContextUsage,
+  showDiagnosticTimeline,
+} from '@/lib/paletteCommands';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { toastContextFileOpenFailure, validateContextFileOpen } from '@/lib/contextFileOpenGuard';
-import { toast } from '@/components/ui';
 import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
 import type { Session } from '@/lib/opencode/model';
 import { createWorktreeSession } from '@/lib/worktreeSessionCreator';
-import { formatShortcutForDisplay, getEffectiveShortcutCombo, shortcutRegistry } from '@/lib/shortcuts';
-import { showOpenCodeStatus } from '@/lib/openCodeStatus';
-import { restartOpenCodeWithFeedback } from '@/lib/restartOpenCode';
+import { formatShortcutForDisplay, getEffectiveShortcutCombo, shortcutRegistry, type ShortcutActionId } from '@/lib/shortcuts';
 import { canUseElectronDesktopIPC, getMiniChatRuntimeArgs, invokeDesktop, isDesktopShell, isVSCodeRuntime, isWebRuntime } from '@/lib/desktop';
 import { SETTINGS_PAGE_METADATA, type SettingsRuntimeContext } from '@/lib/settings/metadata';
 
@@ -56,12 +66,9 @@ import { matchSegments, type MatchRange } from '@/lib/search/matchSegments';
 import { MatchHighlight } from './MatchHighlight';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
-import { sessionEvents } from '@/lib/sessionEvents';
-import { copyTextToClipboard } from '@/lib/clipboard';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { buildCommandPaletteFileSearchKey, scoreCommandPaletteFiles } from './commandPaletteFilesState';
 import { fileRowMatchRanges, projectRowMatchRanges, splitRelativePath } from './commandPaletteMatches';
-import { openParallelComposer } from '@/lib/multirun/openParallelComposer';
 import { openSessionLink } from '@/lib/router/openSessionFromRoute';
 import { useMessageSearch } from '@/hooks/useMessageSearch';
 import type { MessageSearchHit } from '@/lib/messageSearch';
@@ -70,13 +77,33 @@ import { requestReasoningReveal } from '@/components/chat/search/reasoningReveal
 import { useObserveProjectActionRuns, useProjectActions } from '@/components/layout/projectActionsRunnerContext';
 import { resolveProjectActionIconName } from '@/lib/projectActions';
 import { isSessionDirectoryAdmitted } from '@/sync/session-admission-rule';
+import { useGuestActions, useGuestCommands } from '@/hooks/useGuestSurfaces';
+import { useGuestsStore } from '@/lib/guests/store';
+import { guestSessionActions, type GuestActionEntry } from '@/lib/guests/actions';
+import { guestPackageIconSrc, resolveGuestIconName } from '@/lib/guests/icon';
+import { runGuestSessionAction } from '@/lib/guests/session-action';
+import { GuestIcon } from '@/components/layout/GuestRailIcon';
+import { getRuntimeUrlResolver } from '@/lib/runtime-url';
+import { useComposerConfigDirectory } from '@/hooks/useComposerConfigDirectory';
+import { selectCommandsForComposer, useCommandsStore } from '@/stores/useCommandsStore';
+import { reservedComposerCommandNames } from '@/components/chat/composer/submit/guestCommands';
+import { useInputStore } from '@/sync/input-store';
+import { useSessionMessageRecordsForExport } from '@/sync/use-sync';
+import { toast } from './toast';
 
 type CommandEntry = {
   id: string;
   title: string;
   icon: React.ReactNode;
-  shortcutId?: string;
+  shortcutId?: ShortcutActionId;
   searchText: string;
+  /** Muted text after the title, such as the extension a command comes from. */
+  detail?: string;
+  /**
+   * More words that find the entry (the extension's name, a description),
+   * ranked below entries whose own text matches the query.
+   */
+  keywords?: string;
   /** Search-only command: reachable by typing, hidden from the initial list
       so the first screen stays scroll-free. */
   secondary?: boolean;
@@ -92,12 +119,14 @@ const MESSAGE_PAGE_SIZE = 30;
 
 /**
  * Commands, Settings pages and projects match a query only at word starts, so a short
- * query like "ts" finds "TypeScript" but not the tail of "Agents".
+ * query like "ts" finds "TypeScript" but not the tail of "Agents". The query
+ * splits the way the text does, so "/task" finds the extension command `/task`.
  */
+const WORD_SEPARATOR = /[^\p{L}\p{N}]+/u;
 const matchesWordStarts = (text: string, query: string): boolean => {
-  const words = text.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean);
-  return query.toLowerCase().split(/\s+/).filter(Boolean)
-    .every((token) => words.some((word) => word.startsWith(token)));
+  const words = text.toLowerCase().split(WORD_SEPARATOR).filter(Boolean);
+  const tokens = query.toLowerCase().split(WORD_SEPARATOR).filter(Boolean);
+  return tokens.length > 0 && tokens.every((token) => words.some((word) => word.startsWith(token)));
 };
 
 // Left-to-right marks keep a path's leading "." or trailing "/" in place
@@ -141,16 +170,13 @@ export const CommandPalette: React.FC = () => {
   const setSettingsPage = useUIStore((s) => s.setSettingsPage);
   const setSessionSwitcherOpen = useUIStore((s) => s.setSessionSwitcherOpen);
   const toggleSidebar = useUIStore((s) => s.toggleSidebar);
-  const openContextOverview = useUIStore((s) => s.openContextOverview);
+  const setSidebarOpen = useUIStore((s) => s.setSidebarOpen);
   const openContextSurface = useUIStore((s) => s.openContextSurface);
   const openContextFile = useUIStore((s) => s.openContextFile);
   const shortcutOverrides = useUIStore((s) => s.shortcutOverrides);
-  const setArchivePageOpen = useUIStore((s) => s.setArchivePageOpen);
-  const setProjectContextTab = useUIStore((s) => s.setProjectContextTab);
 
   const openNewSessionDraft = useSessionUIStore((s) => s.openNewSessionDraft);
   const setCurrentSession = useSessionUIStore((s) => s.setCurrentSession);
-  const currentSessionId = useSessionUIStore((s) => s.currentSessionId);
 
   const activeSessions = useGlobalSessionsStore(React.useCallback(
     (state) => isCommandPaletteOpen ? state.activeSessions : EMPTY_SESSIONS,
@@ -219,7 +245,7 @@ export const CommandPalette: React.FC = () => {
 
   const close = React.useCallback(() => setCommandPaletteOpen(false), [setCommandPaletteOpen]);
   const run = React.useCallback(
-    (fn: () => void | Promise<void>) => () => {
+    (fn: () => void | boolean | Promise<void>) => () => {
       close();
       void fn();
     },
@@ -256,20 +282,18 @@ export const CommandPalette: React.FC = () => {
       {
         id: 'new-worktree-dialog',
         title: t('commandPalette.item.newWorktreeDialog'),
-        icon: <Icon name="git-branch" className="me-2 h-4 w-4" />,
+        icon: <Icon name="worktree" className="me-2 h-4 w-4" />,
+        shortcutId: 'open_new_worktree_dialog',
         searchText: t('commandPalette.item.newWorktreeDialog'),
-        onSelect: run(() => {
-          useUIStore.getState().setNewWorktreeDialogOpen(true);
-        }),
+        onSelect: run(openNewWorktreeDialog),
       },
       {
         id: 'add-project',
         title: t('commandPalette.item.addProject'),
         icon: <Icon name="folder-add" className="me-2 h-4 w-4" />,
+        shortcutId: 'add_project',
         searchText: t('commandPalette.item.addProject'),
-        onSelect: run(() => {
-          sessionEvents.requestDirectoryDialog();
-        }),
+        onSelect: run(addProject),
       },
       {
         id: 'toggle-sidebar',
@@ -304,10 +328,9 @@ export const CommandPalette: React.FC = () => {
         id: 'context-usage',
         title: t('commandPalette.item.showContextUsage'),
         icon: <Icon name="pie-chart" className="me-2 h-4 w-4" />,
+        shortcutId: 'show_context_usage',
         searchText: t('commandPalette.item.showContextUsage'),
-        onSelect: run(() => {
-          if (currentDirectory) openContextOverview(currentDirectory);
-        }),
+        onSelect: run(showContextUsage),
       },
       {
         id: 'cycle-theme',
@@ -325,10 +348,9 @@ export const CommandPalette: React.FC = () => {
         secondary: true,
         title: t('commandPalette.item.showOpenCodeStatus'),
         icon: <Icon name="pulse" className="me-2 h-4 w-4" />,
+        shortcutId: 'show_opencode_status',
         searchText: t('commandPalette.item.showOpenCodeStatus'),
-        onSelect: run(() => {
-          void showOpenCodeStatus();
-        }),
+        onSelect: run(showDiagnosticTimeline),
       },
       {
         id: 'open-settings',
@@ -345,8 +367,9 @@ export const CommandPalette: React.FC = () => {
         secondary: true,
         title: t('overview.title'),
         icon: <Icon name="compass-3" className="me-2 h-4 w-4" />,
+        shortcutId: 'open_overview',
         searchText: t('overview.title'),
-        onSelect: run(() => useUIStore.getState().setOverviewOpen(true)),
+        onSelect: run(openOverview),
       });
     }
     if (!isVSCodeRuntime()) {
@@ -366,92 +389,91 @@ export const CommandPalette: React.FC = () => {
         secondary: true,
         title: t('commandPalette.item.reloadUi'),
         icon: <Icon name="refresh" className="me-2 h-4 w-4" />,
+        shortcutId: 'reload_ui',
         searchText: t('commandPalette.item.reloadUi'),
-        onSelect: run(() => window.location.reload()),
+        onSelect: run(reloadUi),
       });
     }
     list.push(
+      {
+        id: 'collapse-sessions-all',
+        secondary: true,
+        title: t('sessions.sidebar.header.displayMode.collapseAll'),
+        icon: <Icon name="contract-up-down" className="me-2 h-4 w-4" />,
+        shortcutId: 'collapse_sessions_all',
+        searchText: t('sessions.sidebar.header.displayMode.collapseAll'),
+        onSelect: run(() => {
+          // The sidebar handler acts on hidden sidebars too; opening it shows the result.
+          setSidebarOpen(true);
+          shortcutRegistry.invoke('collapse_sessions_all');
+        }),
+      },
+      {
+        id: 'expand-sessions-all',
+        secondary: true,
+        title: t('sessions.sidebar.header.displayMode.expandAll'),
+        icon: <Icon name="expand-up-down" className="me-2 h-4 w-4" />,
+        shortcutId: 'expand_sessions_all',
+        searchText: t('sessions.sidebar.header.displayMode.expandAll'),
+        onSelect: run(() => {
+          // The sidebar handler acts on hidden sidebars too; opening it shows the result.
+          setSidebarOpen(true);
+          shortcutRegistry.invoke('expand_sessions_all');
+        }),
+      },
       {
         id: 'pin-session',
         secondary: true,
         title: t('commandPalette.item.pinSession'),
         icon: <Icon name="pushpin" className="me-2 h-4 w-4" />,
+        shortcutId: 'pin_current_session',
         searchText: t('commandPalette.item.pinSession'),
-        onSelect: run(() => {
-          if (currentSessionId && currentDirectory) {
-            const failedKey = isSessionPinned(useSessionPinnedStore.getState().ids, currentDirectory, currentSessionId)
-              ? 'sessions.sidebar.session.pin.unpinFailed'
-              : 'sessions.sidebar.session.pin.pinFailed';
-            toggleSessionPin({ directory: currentDirectory, sessionId: currentSessionId }).catch(() => toast.error(t(failedKey)));
-          }
-        }),
+        onSelect: run(pinCurrentSession(t)),
       },
       {
         id: 'copy-session-id',
         secondary: true,
         title: t('commandPalette.item.copySessionId'),
         icon: <Icon name="file-copy" className="me-2 h-4 w-4" />,
+        shortcutId: 'copy_current_session_id',
         searchText: t('commandPalette.item.copySessionId'),
-        onSelect: run(() => {
-          if (!currentSessionId) return;
-          void copyTextToClipboard(currentSessionId)
-            .then((result) => {
-              if (result.ok) {
-                toast.success(t('sessions.sidebar.session.copyId.success'));
-                return;
-              }
-              toast.error(t('sessions.sidebar.session.copyId.error'));
-            })
-            .catch(() => toast.error(t('sessions.sidebar.session.copyId.error')));
-        }),
+        onSelect: run(copyCurrentSessionId(t)),
       },
       {
         id: 'open-multi-run',
         secondary: true,
         title: t('commandPalette.item.openMultiRun'),
         icon: <ArrowsMerge className="me-2 h-4 w-4" />,
+        shortcutId: 'open_multi_run',
         searchText: t('commandPalette.item.openMultiRun'),
-        onSelect: run(() => {
-          setSessionSwitcherOpen(false);
-          openParallelComposer();
-        }),
+        onSelect: run(openMultiRun),
       },
       {
         id: 'open-archive',
         secondary: true,
         title: t('commandPalette.item.openArchive'),
         icon: <Icon name="archive" className="me-2 h-4 w-4" />,
+        shortcutId: 'open_archive',
         searchText: t('commandPalette.item.openArchive'),
-        onSelect: run(() => {
-          setSessionSwitcherOpen(false);
-          setArchivePageOpen(true);
-        }),
+        onSelect: run(openArchive),
       },
       {
         id: 'open-notes',
         secondary: true,
         title: t('commandPalette.item.openNotes'),
         icon: <Icon name="sticky-note" className="me-2 h-4 w-4" />,
+        shortcutId: 'open_notes',
         searchText: t('commandPalette.item.openNotes'),
-        onSelect: run(() => {
-          if (currentDirectory) {
-            setProjectContextTab('notes');
-            openContextSurface(currentDirectory, 'notes');
-          }
-        }),
+        onSelect: run(openNotes),
       },
       {
         id: 'open-todos',
         secondary: true,
         title: t('commandPalette.item.openTodos'),
         icon: <Icon name="checkbox-circle" className="me-2 h-4 w-4" />,
+        shortcutId: 'open_todos',
         searchText: t('commandPalette.item.openTodos'),
-        onSelect: run(() => {
-          if (currentDirectory) {
-            setProjectContextTab('todos');
-            openContextSurface(currentDirectory, 'notes');
-          }
-        }),
+        onSelect: run(openTodos),
       },
     );
     if (!isVSCodeRuntime()) {
@@ -460,10 +482,9 @@ export const CommandPalette: React.FC = () => {
         secondary: true,
         title: t('commandPalette.item.restartOpenCode'),
         icon: <Icon name="restart" className="me-2 h-4 w-4" />,
+        shortcutId: 'restart_opencode',
         searchText: t('commandPalette.item.restartOpenCode'),
-        onSelect: run(() => {
-          void restartOpenCodeWithFeedback(t);
-        }),
+        onSelect: run(restartOpenCode(t)),
       });
     }
     list.push({
@@ -533,21 +554,101 @@ export const CommandPalette: React.FC = () => {
     t,
     run,
     isMobile,
-        setSessionSwitcherOpen,
+    setSessionSwitcherOpen,
     openNewSessionDraft,
     toggleSidebar,
+    setSidebarOpen,
     openContextSurface,
     currentDirectory,
-    openContextOverview,
     setSettingsDialogOpen,
     activeProject?.id,
     activeProject?.path,
-    currentSessionId,
-    setArchivePageOpen,
-    setProjectContextTab,
     projectActions,
     overviewAvailable,
   ]);
+
+  // ---------------------------------------------------------------------------
+  // Extensions: session actions on the current session, and slash commands.
+  // Search-only. Message, selection, file and diff actions stay in their own
+  // menus: the palette has no message, selection or lines to give them.
+  // ---------------------------------------------------------------------------
+  const hasCurrentSession = useSessionUIStore((s) => Boolean(s.currentSessionId));
+  const guestActions = useGuestActions();
+  const guestGuests = useGuestsStore((s) => s.guests);
+  // The same reserved names as the composer's slash menu, so the palette never
+  // offers a command the composer would hand to OpenCode instead.
+  const composerCommandsTarget = useComposerConfigDirectory(effectiveDirectory);
+  const composerCommands = useCommandsStore((s) => selectCommandsForComposer(s, composerCommandsTarget));
+  const reservedCommandNames = React.useMemo(() => reservedComposerCommandNames(composerCommands), [composerCommands]);
+  const guestCommands = useGuestCommands(reservedCommandNames);
+  const loadSessionRecords = useSessionMessageRecordsForExport();
+
+  // The current session as the session header menu gives it; read when the action runs.
+  const runCurrentSessionGuestAction = React.useCallback((entry: GuestActionEntry) => {
+    const { currentSessionId: sessionId, currentSessionDirectory } = useSessionUIStore.getState();
+    if (!sessionId) return;
+    const session = useGlobalSessionsStore.getState().entityById.get(sessionId);
+    const directory = (session ? resolveGlobalSessionDirectory(session) : null) ?? currentSessionDirectory;
+    void runGuestSessionAction({
+      entry,
+      t,
+      session: { id: sessionId, title: session?.title, directory },
+      loadRecords: async () => {
+        if (!directory) return null;
+        try {
+          return await loadSessionRecords({ sessionID: sessionId, directory });
+        } catch {
+          return null;
+        }
+      },
+      onLoadFailed: () => toast.error(t('sessions.sidebar.session.export.failedLoadHistory')),
+    });
+  }, [loadSessionRecords, t]);
+
+  const extensionCommands = React.useMemo<CommandEntry[]>(() => {
+    const list: CommandEntry[] = [];
+    if (hasCurrentSession) {
+      for (const entry of guestSessionActions(guestActions)) {
+        list.push({
+          id: `extension-action:${entry.guest.id}:${entry.action.id}`,
+          secondary: true,
+          title: entry.action.label,
+          detail: entry.guest.name,
+          icon: <GuestIcon icon={entry.icon} iconSrc={entry.iconSrc} className="me-2 h-4 w-4" />,
+          searchText: entry.action.label,
+          keywords: entry.guest.name,
+          onSelect: run(() => runCurrentSessionGuestAction(entry)),
+        });
+      }
+    }
+    if (guestCommands.length > 0) {
+      const authenticatedAsset = getRuntimeUrlResolver().authenticatedAsset;
+      const guestsById = new Map(guestGuests.map((guest) => [guest.id, guest]));
+      for (const entry of guestCommands) {
+        const guestIcon = guestsById.get(entry.guestId)?.icon ?? '';
+        const title = `/${entry.command.name}`;
+        list.push({
+          id: `extension-command:${entry.guestId}:${entry.command.name}`,
+          secondary: true,
+          title,
+          detail: entry.guestName,
+          icon: <GuestIcon icon={resolveGuestIconName(guestIcon)} iconSrc={guestPackageIconSrc(entry.guestId, guestIcon, authenticatedAsset)} className="me-2 h-4 w-4" />,
+          searchText: title,
+          keywords: `${entry.guestName} ${entry.command.description ?? ''}`,
+          // Like picking it in the composer's slash menu: the command waits
+          // in the composer for its argument and runs when the user sends.
+          // Settings or a page covering the chat closes, so the composer can be seen.
+          onSelect: run(() => {
+            const ui = useUIStore.getState();
+            ui.setSettingsDialogOpen(false);
+            ui.closeMainSurfaces();
+            useInputStore.getState().setPendingInputText(entry.command.name, 'slash-command');
+          }),
+        });
+      }
+    }
+    return list;
+  }, [guestActions, guestCommands, guestGuests, hasCurrentSession, run, runCurrentSessionGuestAction]);
 
   // ---------------------------------------------------------------------------
   // Settings sub-pages (only show when there's a query)
@@ -713,9 +814,18 @@ export const CommandPalette: React.FC = () => {
     if (!hasQuery) {
       return commands.filter((item) => !item.secondary).map((item) => ({ item, score: 0, ranges: NO_RANGES }));
     }
-    const candidates = commands.filter((item) => matchesWordStarts(item.searchText, liveTrimmed));
-    return rankBySubsequence(candidates, liveTrimmed, (c) => c.searchText, { limit: 7 });
-  }, [commands, liveTrimmed, hasQuery]);
+    const all = [...commands, ...extensionCommands];
+    const candidates = all.filter((item) => matchesWordStarts(item.searchText, liveTrimmed));
+    // "task" means the command `/task` before an action found through its
+    // extension's name, Task Board.
+    const byKeywords = all.filter((item) => item.keywords
+      && !matchesWordStarts(item.searchText, liveTrimmed)
+      && matchesWordStarts(`${item.searchText} ${item.keywords}`, liveTrimmed));
+    return [
+      ...rankBySubsequence(candidates, liveTrimmed, (c) => c.searchText),
+      ...rankBySubsequence(byKeywords, liveTrimmed, (c) => `${c.searchText} ${c.keywords}`),
+    ].slice(0, 7);
+  }, [commands, extensionCommands, liveTrimmed, hasQuery]);
 
   const scoredSettings = React.useMemo(() => {
     if (!hasQuery) return [];
@@ -840,7 +950,7 @@ export const CommandPalette: React.FC = () => {
   );
 
   const shortcut = React.useCallback(
-    (actionId: string) =>
+    (actionId: ShortcutActionId) =>
       formatShortcutForDisplay(getEffectiveShortcutCombo(actionId, shortcutOverrides)),
     [shortcutOverrides],
   );
@@ -979,6 +1089,9 @@ export const CommandPalette: React.FC = () => {
                       <CommandItem key={cmd.id} value={cmd.id} onSelect={cmd.onSelect}>
                         {cmd.icon}
                         <span className="truncate"><Matched text={cmd.title} ranges={ranges} /></span>
+                        {cmd.detail ? (
+                          <span dir="auto" className="max-w-[180px] shrink-0 truncate text-muted-foreground typography-meta">{cmd.detail}</span>
+                        ) : null}
                         {cmd.shortcutId ? (
                           <CommandShortcut>{shortcut(cmd.shortcutId)}</CommandShortcut>
                         ) : null}
@@ -1019,12 +1132,12 @@ export const CommandPalette: React.FC = () => {
                           <Icon name="chat-ai-3" className="me-2 h-4 w-4" />
                           <span dir="auto" className="min-w-0 flex-1 truncate oc-ui-start-align"><Matched text={title} ranges={ranges} /></span>
                           {projectLabel ? (
-                            <span className="max-w-[180px] shrink-0 truncate text-muted-foreground typography-meta">{projectLabel}</span>
+                            <span dir="auto" className="max-w-[180px] shrink-0 truncate text-muted-foreground typography-meta">{projectLabel}</span>
                           ) : null}
                           {branch ? (
                             <span className="inline-flex max-w-[160px] shrink-0 items-center gap-1 text-muted-foreground typography-meta">
                               <Icon name="git-branch" className="h-3 w-3" />
-                              <span className="truncate">{branch}</span>
+                              <span dir="ltr" className="truncate">{branch}</span>
                             </span>
                           ) : null}
                         </CommandItem>
@@ -1050,7 +1163,7 @@ export const CommandPalette: React.FC = () => {
                         onSelect={() => handleOpenProject(project.id, project.path)}
                       >
                         <Icon name="folder" className="me-2 h-4 w-4" />
-                        <span className="shrink-0 truncate"><Matched text={project.displayName} ranges={nameRanges} /></span>
+                        <span dir="auto" className="shrink-0 truncate"><Matched text={project.displayName} ranges={nameRanges} /></span>
                         <LeadingTruncated text={project.path} ranges={pathRanges} className="flex-1" />
                       </CommandItem>
                     ))}

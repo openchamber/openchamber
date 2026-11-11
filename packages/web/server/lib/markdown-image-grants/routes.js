@@ -3,6 +3,7 @@ import { mintOutsideFileGrant } from '../fs/routes.js';
 import { unwrapOpenCodeResponse } from '../opencode/response-envelope.js';
 import { fitRenderPageImages, renderPageImageSources } from '../openchamber-control/render-page.js';
 import { generatedImagePaths } from '../openchamber-control/generate-image.js';
+import { capturedScreenshotPaths } from '../openchamber-control/screenshots.js';
 import { isString } from '../shared/guards.js';
 import { inspectLocalImage } from './inspect-image.js';
 
@@ -219,18 +220,28 @@ const comparablePath = (value) => {
   return /^\/[A-Za-z]:\//.test(text) ? text.slice(1) : text;
 };
 
+// The tools whose stored result names image files the chat draws in their row,
+// with the reader of those names. `browser.capture` runs behind Code Mode, so
+// its result is usually an `execute` call's.
+const TOOL_RESULT_IMAGE_PATHS = new Map([
+  ['openchamber_image', generatedImagePaths],
+  ['openchamber_web', capturedScreenshotPaths],
+  ['execute', capturedScreenshotPaths],
+]);
+
 /**
- * The files the message's openchamber_image calls saved, named by the result
- * each call stored, as `comparablePath` spells them. The chat draws them in the
- * call's row.
+ * The files the message's openchamber_image calls saved and its page
+ * screenshots, named by the result each call stored, as `comparablePath`
+ * spells them. The chat draws them in the call's row.
  */
-const generatedImageSources = (message) => {
+const toolResultImageSources = (message) => {
   const sources = new Set();
   for (const part of messageContent(message)) {
-    if (part?.type !== 'tool' || part.name !== 'openchamber_image' || part.state?.status !== 'completed') continue;
+    const readPaths = part?.type === 'tool' ? TOOL_RESULT_IMAGE_PATHS.get(part.name) : undefined;
+    if (!readPaths || part.state?.status !== 'completed') continue;
     for (const item of Array.isArray(part.state.content) ? part.state.content : []) {
       if (item?.type !== 'text' || !isString(item.text)) continue;
-      for (const source of generatedImagePaths(item.text)) sources.add(comparablePath(source));
+      for (const source of readPaths(item.text)) sources.add(comparablePath(source));
     }
   }
   return sources;
@@ -318,7 +329,7 @@ export const registerMarkdownImageGrantRoutes = (app, dependencies) => {
           check = (source) => checked.get(source) ?? { status: 'error' };
         } else {
           const referenced = new Set([...markdownImageSources(message), ...renderPageSources(message)]);
-          const generated = generatedImageSources(message);
+          const generated = toolResultImageSources(message);
           check = (source) => (referenced.has(source) || generated.has(comparablePath(source)) ? inspect(source) : { status: 'error' });
         }
         const results = [];

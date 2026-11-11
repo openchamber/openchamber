@@ -14,7 +14,7 @@ import type { SidebarWorkRef } from '../works/sidebarWorks';
  */
 export type VisibleSidebarSection =
   | { kind: 'chats' }
-  | { kind: 'pinned' }
+  | { kind: 'pinned'; claims: boolean }
   | { kind: 'work'; claims: boolean }
   | { kind: 'custom'; section: CustomSidebarSection; preview: boolean }
   | { kind: 'projects' };
@@ -31,6 +31,7 @@ export const resolveVisibleSidebarSections = ({
   draftIsNew,
   show,
   keepWorkInPlace,
+  keepPinnedInPlace,
   customSections,
 }: {
   sections: readonly SidebarSectionEntry[];
@@ -39,6 +40,7 @@ export const resolveVisibleSidebarSections = ({
   draftIsNew: boolean;
   show: Readonly<Record<Exclude<BuiltinSidebarSectionId, 'projects'>, boolean>>;
   keepWorkInPlace: boolean;
+  keepPinnedInPlace: boolean;
   /** False where the user's sections do not apply (VS Code). */
   customSections: boolean;
 }): VisibleSidebarSection[] => {
@@ -52,7 +54,7 @@ export const resolveVisibleSidebarSections = ({
     if (entry.kind === 'builtin') {
       switch (entry.id) {
         case 'chats': return show.chats ? [{ kind: 'chats' }] : [];
-        case 'pinned': return show.pinned ? [{ kind: 'pinned' }] : [];
+        case 'pinned': return show.pinned ? [{ kind: 'pinned', claims: !keepPinnedInPlace }] : [];
         case 'work': return show.work ? [{ kind: 'work', claims: !keepWorkInPlace }] : [];
         case 'projects': return [{ kind: 'projects' }];
       }
@@ -83,9 +85,9 @@ type SidebarSectionMembership = {
 /**
  * Which works each section lists. The user's sections list every work that
  * matches, so one work can show in several; a section that takes its works
- * (`claims`) takes them out of their projects only. Pinned and In work keep
- * taking works from each other by their order, and a group of projects takes
- * its projects from the Projects section.
+ * (`claims`) takes them out of their projects only, and a group of projects
+ * takes its projects from the Projects section. Pinned and In work never share
+ * a work: a pinned work is never in work, so their order decides nothing.
  */
 export const resolveSidebarSectionMembership = ({
   sections,
@@ -115,9 +117,6 @@ export const resolveSidebarSectionMembership = ({
   const claimedProjectIds = new Set<string>();
   const custom = new Map<string, readonly SidebarWorkRef[]>();
   const projectGroups = new Map<string, readonly string[]>();
-  // Pinned and In work take their works from each other, as they always did:
-  // the one higher up lists a work that is both pinned and in work.
-  const takenByBuiltin = new Set<string>();
   let pinnedRefs: readonly SidebarWorkRef[] = [];
   let workRefs: readonly SidebarWorkRef[] = [];
   // A search lists each match once, in the first section that shows it.
@@ -133,14 +132,11 @@ export const resolveSidebarSectionMembership = ({
       case 'projects':
         continue;
       case 'pinned':
-        // A pinned work always leaves its project: the section is there by choice.
-        pinnedRefs = unshown(pinned).filter((ref) => !takenByBuiltin.has(ref.key));
-        pinnedRefs.forEach((ref) => takenByBuiltin.add(ref.key));
-        show(pinnedRefs, true);
+        pinnedRefs = unshown(pinned);
+        show(pinnedRefs, section.claims);
         continue;
       case 'work':
-        workRefs = unshown(work).filter((ref) => !takenByBuiltin.has(ref.key));
-        if (section.claims) workRefs.forEach((ref) => takenByBuiltin.add(ref.key));
+        workRefs = unshown(work);
         show(workRefs, section.claims);
         continue;
       case 'custom': {

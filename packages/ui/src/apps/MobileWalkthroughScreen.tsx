@@ -1,4 +1,5 @@
 import React from 'react';
+import { cn } from '@/lib/utils';
 
 import { Icon } from '@/components/icon/Icon';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
@@ -16,8 +17,7 @@ import { useWalkthroughReview } from '@/components/views/walkthrough/useWalkthro
 import { useI18n } from '@/lib/i18n';
 import type { WalkthroughTarget } from '@/lib/walkthrough/types';
 import { diffCommentOriginFromTarget } from '@/lib/diffCommentOrigin';
-
-const HEADER_BUTTON_CLASS = 'flex size-9 shrink-0 items-center justify-center rounded-lg text-muted-foreground hover:bg-interactive-hover hover:text-foreground focus-visible:outline-none';
+import { MOBILE_HEADER_BUTTON_CLASS, MOBILE_HEADER_CLASS, MOBILE_HEADER_TITLE_CLASS } from '@/components/ui/mobileHeader';
 
 /**
  * The walkthrough of what the phone's Changes shows, pushed over its list the
@@ -58,35 +58,35 @@ export const MobileWalkthroughScreen: React.FC<{
 
   return (
     <div className="flex h-full flex-col overflow-hidden bg-background text-foreground">
-      <header className="flex h-[var(--oc-header-height,56px)] shrink-0 items-center gap-1.5 border-b border-edge px-3 text-foreground">
-        <button type="button" className={HEADER_BUTTON_CLASS} aria-label={t('header.actions.backAria')} onClick={goBack}>
+      <header className={cn(MOBILE_HEADER_CLASS, 'border-b border-edge text-foreground')}>
+        <button type="button" className={MOBILE_HEADER_BUTTON_CLASS} aria-label={t('header.actions.backAria')} onClick={goBack}>
           <Icon name="arrow-left" className="size-5" />
         </button>
         <div className="min-w-0 flex-1 px-1">
-          <h2 className="truncate typography-ui-header text-foreground">{t('contextPanel.mode.walkthrough')}</h2>
+          <h2 className={cn('truncate', MOBILE_HEADER_TITLE_CLASS)}>{t('contextPanel.mode.walkthrough')}</h2>
           <p className="truncate typography-meta text-muted-foreground">{subtitle}</p>
         </div>
         {reading && view ? (
           <>
-            <button type="button" className={HEADER_BUTTON_CLASS} aria-label={t('walkthrough.action.previous')} onClick={() => review.step(-1)}>
+            <button type="button" className={MOBILE_HEADER_BUTTON_CLASS} aria-label={t('walkthrough.action.previous')} onClick={() => review.step(-1)}>
               <Icon name="arrow-right-s" className="size-5 rotate-180" />
             </button>
             <WalkthroughStepMenu review={review} view={view} size="mobile" />
-            <button type="button" className={HEADER_BUTTON_CLASS} aria-label={t('walkthrough.action.next')} onClick={() => review.step(1)}>
+            <button type="button" className={MOBILE_HEADER_BUTTON_CLASS} aria-label={t('walkthrough.action.next')} onClick={() => review.step(1)}>
               <Icon name="arrow-right-s" className="size-5" />
             </button>
           </>
-        ) : (
+        ) : view || review.blocked || review.showStages ? (
           <button
             type="button"
-            className={HEADER_BUTTON_CLASS}
+            className={MOBILE_HEADER_BUTTON_CLASS}
             aria-label={t('walkthrough.options.moreAria')}
             aria-haspopup="dialog"
             onClick={() => setOptionsOpen(true)}
           >
             <Icon name="more" className="size-5" />
           </button>
-        )}
+        ) : null}
       </header>
 
       <WalkthroughBanners review={review} view={view} />
@@ -128,9 +128,7 @@ export const MobileWalkthroughScreen: React.FC<{
       </div>
 
       <MobileOverlayPanel open={optionsOpen} onClose={() => setOptionsOpen(false)} title={t('walkthrough.options.title')}>
-        <div className="px-2 py-2">
-          <WalkthroughOptions review={review} hasView={view !== null} size="mobile" onActed={() => setOptionsOpen(false)} />
-        </div>
+        <WalkthroughOptions review={review} hasView={view !== null} size="mobile" onActed={() => setOptionsOpen(false)} />
       </MobileOverlayPanel>
     </div>
   );

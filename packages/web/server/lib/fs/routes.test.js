@@ -796,7 +796,21 @@ describe('fs upload', () => {
     const res = await callUpload(handler, { path: '/repo/link/file.bin' });
 
     expect(res.statusCode).toBe(403);
-    expect(res.body).toEqual({ error: 'Access denied' });
+    expect(res.body).toEqual({ error: 'Access denied', reason: 'outside-workspace' });
+    expect(fsPromises.open).not.toHaveBeenCalled();
+  });
+
+  it('rejects an existing target that resolves outside the workspace', async () => {
+    const fsPromises = {
+      realpath: vi.fn(async (targetPath) => targetPath === '/repo/file.bin' ? '/outside/file.bin' : targetPath),
+      open: vi.fn(async () => ({ write: vi.fn(), close: vi.fn() })),
+    };
+    const handler = registerUpload(fsPromises);
+
+    const res = await callUpload(handler);
+
+    expect(res.statusCode).toBe(403);
+    expect(res.body).toEqual({ error: 'Access denied', reason: 'outside-workspace' });
     expect(fsPromises.open).not.toHaveBeenCalled();
   });
 
@@ -818,7 +832,11 @@ describe('fs upload', () => {
       });
 
       expect(res.statusCode).toBe(413);
-      expect(res.body).toEqual({ error: 'File exceeds maximum size of 5 bytes' });
+      expect(res.body).toEqual({
+        error: 'File exceeds maximum size of 5 bytes',
+        reason: 'too-large',
+        maxBytes: 5,
+      });
       expect(write).toHaveBeenCalledWith(Buffer.from('123'), 0, 3, null);
       expect(fsPromises.link).not.toHaveBeenCalled();
       expect(fsPromises.unlink).toHaveBeenCalledWith(expect.stringMatching(/^\/repo\/file\.bin\.upload-/));
@@ -839,7 +857,11 @@ describe('fs upload', () => {
       const res = await callUpload(handler, { body: Buffer.from('123456') });
 
       expect(res.statusCode).toBe(413);
-      expect(res.body).toEqual({ error: 'File exceeds maximum size of 5 bytes' });
+      expect(res.body).toEqual({
+        error: 'File exceeds maximum size of 5 bytes',
+        reason: 'too-large',
+        maxBytes: 5,
+      });
       expect(fsPromises.open).not.toHaveBeenCalled();
     } finally {
       if (previous === undefined) delete process.env.OPENCHAMBER_FS_UPLOAD_MAX_BYTES;
@@ -2289,7 +2311,14 @@ describe('fs stat directory error handling', () => {
     registerFsRoutes(app, {
       os: { homedir: () => '/home/user' },
       path: path.posix,
-      fsPromises: { realpath: async (targetPath) => targetPath, stat, readdir: vi.fn(async () => []) },
+      fsPromises: {
+        realpath: async (targetPath) => {
+          if (targetPath === '/unresolvable') throw new Error('loop');
+          return targetPath === '/link' ? '/repo' : targetPath;
+        },
+        stat,
+        readdir: vi.fn(async () => []),
+      },
       spawn: vi.fn(),
       crypto: { randomUUID: () => 'job-0' },
       normalizeDirectoryPath: (p) => p,
@@ -2301,10 +2330,12 @@ describe('fs stat directory error handling', () => {
     const handler = getRoute('POST', '/api/fs/directory-stats');
 
     const response = createMockResponse();
-    await handler({ body: { paths: ['/repo', '/gone', '/file'] } }, response);
+    await handler({ body: { paths: ['/repo', '/link', '/unresolvable', '/gone', '/file'] } }, response);
     expect(response.statusCode).toBe(200);
     expect(response.body).toEqual({ results: [
-      { path: '/repo', isDirectory: true },
+      { path: '/repo', isDirectory: true, realPath: '/repo' },
+      { path: '/link', isDirectory: true, realPath: '/repo' },
+      { path: '/unresolvable', isDirectory: true },
       { path: '/gone', isDirectory: false, reason: 'not-found' },
       { path: '/file', isDirectory: false, reason: 'not-directory' },
     ] });

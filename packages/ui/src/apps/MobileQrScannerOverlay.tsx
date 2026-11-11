@@ -6,6 +6,8 @@ import { Button } from '@/components/ui/button';
 import { OpenChamberLogo } from '@/components/ui/OpenChamberLogo';
 import { useI18n } from '@/lib/i18n';
 
+import { qrScanDrawsOwnScreen } from './mobileQrScan';
+
 export const MobileQrScannerOverlay: React.FC<{ onCancel: () => void }> = ({ onCancel }) => {
   const { t } = useI18n();
   const overlayRef = React.useRef<HTMLDivElement>(null);
@@ -70,6 +72,12 @@ export const MobileQrScannerOverlay: React.FC<{ onCancel: () => void }> = ({ onC
     document.addEventListener('visibilitychange', handleVisibilityChange);
     return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
   }, [onCancel]);
+
+  // iOS's scanner slides over the page before its camera starts: a plain
+  // backdrop keeps this screen from showing through its controls.
+  if (!qrScanDrawsOwnScreen()) {
+    return createPortal(<div ref={overlayRef} className="fixed inset-0 z-[1000] bg-background" aria-hidden />, document.body);
+  }
 
   return createPortal(
     <div

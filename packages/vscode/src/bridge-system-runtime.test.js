@@ -248,7 +248,7 @@ describe('VS Code system bridge api:quota:giftReset:use', () => {
     const response = await handleSystemBridgeMessage({
       id: 'gift-use',
       type: 'api:quota:giftReset:use',
-      payload: { providerId: 'zai-coding-plan', recordId: 462029, resetType: 'FIVE_HOUR' },
+      payload: { providerId: 'zai-coding-plan', recordId: 462029, resetType: 'FIVE_HOUR', grantType: 'GLOBAL' },
     }, undefined, deps);
 
     expect(response).toEqual({
@@ -260,7 +260,55 @@ describe('VS Code system bridge api:quota:giftReset:use', () => {
     expect(activateQuotaGiftReset).toHaveBeenCalledWith('zai-coding-plan', {
       recordId: 462029,
       resetType: 'FIVE_HOUR',
+      grantType: 'GLOBAL',
     });
+  });
+
+  test('passes the record grantType through unchanged', async () => {
+    await handleSystemBridgeMessage({
+      id: 'gift-activity',
+      type: 'api:quota:giftReset:use',
+      payload: { providerId: 'zai-coding-plan', recordId: 1, resetType: 'WEEK', grantType: 'ACTIVITY' },
+    }, undefined, deps);
+
+    expect(activateQuotaGiftReset).toHaveBeenCalledWith('zai-coding-plan', {
+      recordId: 1,
+      resetType: 'WEEK',
+      grantType: 'ACTIVITY',
+    });
+  });
+
+  test('keeps an omitted grantType omitted', async () => {
+    const response = await handleSystemBridgeMessage({
+      id: 'gift-no-grant',
+      type: 'api:quota:giftReset:use',
+      payload: { providerId: 'zai-coding-plan', recordId: 1, resetType: 'FIVE_HOUR' },
+    }, undefined, deps);
+
+    expect(response.success).toBe(true);
+    expect(activateQuotaGiftReset).toHaveBeenCalledWith('zai-coding-plan', {
+      recordId: 1,
+      resetType: 'FIVE_HOUR',
+      grantType: undefined,
+    });
+  });
+
+  test.each([[''], ['   '], [null], [7]])('leaves grantType %j for the provider to reject', async (grantType) => {
+    activateQuotaGiftReset.mockRejectedValueOnce(new Error('Invalid gift reset request'));
+
+    const response = await handleSystemBridgeMessage({
+      id: 'gift-bad-grant',
+      type: 'api:quota:giftReset:use',
+      payload: { providerId: 'zai-coding-plan', recordId: 1, resetType: 'FIVE_HOUR', grantType },
+    }, undefined, deps);
+
+    expect(response).toEqual({
+      id: 'gift-bad-grant',
+      type: 'api:quota:giftReset:use',
+      success: false,
+      error: 'Invalid gift reset request',
+    });
+    expect(activateQuotaGiftReset).toHaveBeenCalledWith('zai-coding-plan', { recordId: 1, resetType: 'FIVE_HOUR', grantType });
   });
 
   test('rejects a payload without a recordId', async () => {

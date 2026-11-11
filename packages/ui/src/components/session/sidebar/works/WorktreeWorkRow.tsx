@@ -28,10 +28,10 @@ import { handleSessionRenameKeyDown } from '@/components/session/sessionRenameKe
 import { useOpenTrackerItem } from '@/components/sourceBoard/openTrackerItem';
 import { useShiftKeyHeld } from '@/hooks/useShiftKeyHeld';
 import { useI18n } from '@/lib/i18n';
+import { SessionReadShortcut } from '@/components/session/SessionReadMenuItem';
 import { sessionEvents } from '@/lib/sessionEvents';
 import { refTintStyle } from '@/lib/source-control/prVisualState';
 import { cn, formatDirectoryName } from '@/lib/utils';
-import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { useSessionFoldersStore } from '@/stores/useSessionFoldersStore';
 import { DirectoryActionIndicator } from '../sessions/DirectoryActionIndicator';
 import { CollapsedActivityIndicator } from '../sessions/collapsedActivityIndicator';
@@ -84,6 +84,8 @@ type Props = {
   detailed: boolean;
   /** Listed among other projects' works (In work, the list by time), so it names its project. */
   mixed: boolean;
+  /** Listed in the Pinned section, whose header already says it is pinned. */
+  inPinnedZone: boolean;
   collapsed: boolean;
   forceExpanded: boolean;
   empty: boolean;
@@ -116,6 +118,7 @@ export function WorktreeWorkRow(props: Props): React.ReactNode {
     depth,
     detailed,
     mixed,
+    inPinnedZone,
     collapsed,
     forceExpanded,
     empty,
@@ -141,11 +144,10 @@ export function WorktreeWorkRow(props: Props): React.ReactNode {
     title, branch, label, secondName, finishing, canArchive, canRename, canNewChat, pinned, canPin, workAction, inWork, activityState,
     runningSessionId, durationSessionId,
   } = work;
-  // With the Pinned section shown a pinned work is listed there, whose header
-  // already says so; otherwise the row carries the mark, as a session's does.
-  const pinnedSectionShown = useSessionDisplayStore((state) => state.showPinnedSection);
+  // The Pinned section's header already says its works are pinned; anywhere
+  // else the row carries the mark, as a session's does.
   const pinnedLabel = t('sessions.sidebar.session.status.pinned');
-  const pinnedMark = pinned && !pinnedSectionShown ? (
+  const pinnedMark = pinned && !inPinnedZone ? (
     <RowMarkTooltip label={pinnedLabel}>
       <span className="inline-flex flex-shrink-0 items-center" aria-label={pinnedLabel}>
         <Icon name="pushpin" className="h-3 w-3 text-muted-foreground" />
@@ -179,8 +181,13 @@ export function WorktreeWorkRow(props: Props): React.ReactNode {
   const expandable = !empty;
   const expanded = forceExpanded || !collapsed;
 
-  const openWork = (): void => {
-    if (!renaming) work.open();
+  const openWork = (event?: React.MouseEvent): void => {
+    if (renaming) return;
+    if (event?.altKey && work.canMarkUnread) {
+      work.toggleRead();
+      return;
+    }
+    work.open();
   };
   const newChat = (event: React.MouseEvent): void => {
     event.stopPropagation();
@@ -219,7 +226,7 @@ export function WorktreeWorkRow(props: Props): React.ReactNode {
     <Icon name="instance" className={cn(className, 'flex-shrink-0 text-muted-foreground')} aria-hidden={false} role="img" aria-label={t('sessions.sidebar.group.space')} />
   ) : (
     <Icon
-      name="git-branch"
+      name="worktree"
       className={cn(className, 'flex-shrink-0', refs.prColor ? 'oc-ref-tint' : 'text-muted-foreground')}
       style={refs.prColor ? refTintStyle(refs.prColor) : undefined}
       aria-hidden={false}
@@ -327,9 +334,15 @@ export function WorktreeWorkRow(props: Props): React.ReactNode {
   // Hover actions swap in over the meta at the row's end; the title's
   // tail fades under them (`oc-actions-mask`), so nothing moves.
   const hasWorkAction = workAction;
-  const actionsReserve = hasWorkAction ? '[--oc-actions-reserve:2.875rem]' : '[--oc-actions-reserve:1.75rem]';
-  const hideOnHover = alwaysShowActions ? undefined : 'group-hover/work:opacity-0 group-has-[:focus-visible]/work:opacity-0';
-  const maskOnHover = alwaysShowActions ? undefined : 'group-hover/work:oc-actions-mask group-has-[:focus-visible]/work:oc-actions-mask';
+  // With a mouse the work's menu is its right-click menu (Shift+F10 from the
+  // keyboard); the ⋯ button shows on touch only: always in touch layouts, on
+  // hover for a touch screen elsewhere. Hover reserves count it only where it
+  // always shows.
+  const showMenuButton = alwaysShowActions;
+  const hoverButtons = (hasWorkAction ? 1 : 0) + (shiftArchive || canNewChat ? 1 : 0) + (showMenuButton ? 1 : 0);
+  const actionsReserve = [undefined, '[--oc-actions-reserve:0.625rem]', '[--oc-actions-reserve:1.75rem]', '[--oc-actions-reserve:2.875rem]'][hoverButtons];
+  const hideOnHover = alwaysShowActions || hoverButtons === 0 ? undefined : 'group-hover/work:opacity-0 group-has-[:focus-visible]/work:opacity-0';
+  const maskOnHover = alwaysShowActions || hoverButtons === 0 ? undefined : 'group-hover/work:oc-actions-mask group-has-[:focus-visible]/work:oc-actions-mask';
   const actionButtonClass = cn(
     'inline-flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
     alwaysShowActions ? 'h-6 w-6' : 'h-4 w-4',
@@ -343,6 +356,13 @@ export function WorktreeWorkRow(props: Props): React.ReactNode {
         <Slots.Item onClick={startRename}>
           <Icon name="edit" className="h-4 w-4" />
           <span>{t('sessions.sidebar.work.menu.rename')}</span>
+        </Slots.Item>
+      ) : null}
+      {work.canMarkUnread ? (
+        <Slots.Item onClick={work.toggleRead}>
+          <Icon name={work.hasUnread ? 'chat-check' : 'checkbox-circle'} className="h-4 w-4" />
+          <span>{work.hasUnread ? t('sessions.sidebar.session.menu.markRead') : t('sessions.sidebar.session.menu.markUnread')}</span>
+          {alwaysShowActions ? null : <SessionReadShortcut />}
         </Slots.Item>
       ) : null}
       {canPin ? (
@@ -362,7 +382,7 @@ export function WorktreeWorkRow(props: Props): React.ReactNode {
           <Slots.SubContent className="min-w-[160px]">
             {projectFolders.map((folder) => (
               <Slots.Item key={folder.id} onClick={() => moveToFolder(folder.id)} className="flex items-center justify-between">
-                <span className="min-w-0 truncate">{folder.name}</span>
+                <span dir="auto" className="min-w-0 truncate">{folder.name}</span>
                 {folder.id === currentFolderId ? <Icon name="check" className="h-4 w-4 text-primary" /> : null}
               </Slots.Item>
             ))}
@@ -469,7 +489,7 @@ export function WorktreeWorkRow(props: Props): React.ReactNode {
         style={{ paddingInlineStart: detailed ? sessionDetailedRowPaddingLeft(depth) : sessionTreeRowPaddingLeft(depth) }}
         // The whole box opens the work, its second line and paddings too.
         onClick={(event) => {
-          if (isRowBoxClick(event)) openWork();
+          if (isRowBoxClick(event)) openWork(event);
         }}
         className={cn(
           // The same box as a session row in the same place: zone rows are a
@@ -552,9 +572,10 @@ export function WorktreeWorkRow(props: Props): React.ReactNode {
           <div className="flex h-4 w-full min-w-0 items-center gap-1">
             {lead}
             {mixed && project && space ? workMark('h-3 w-3') : null}
-            {mixed && project && secondName && secondName === branch ? (
-              <Icon name="git-branch" className="h-3 w-3 flex-shrink-0 text-muted-foreground" />
-            ) : null}
+            {/* A worktree's branch wears the worktree mark: after the project's
+                icon it is what tells the work from a plain session row, whose
+                branch shows no icon. A space's mark is already above. */}
+            {mixed && project && !space && secondName && secondName === branch ? workMark('h-3 w-3') : null}
             {secondName ? (
               <span dir="auto" className="min-w-0 truncate typography-micro text-muted-foreground">{secondName}</span>
             ) : null}
@@ -629,23 +650,25 @@ export function WorktreeWorkRow(props: Props): React.ReactNode {
                 <TooltipContent side="top" sideOffset={6}>{t('sessions.sidebar.project.actions.newDraftSession')}</TooltipContent>
               </Tooltip>
             ) : null}
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <button
-                  type="button"
-                  className={actionButtonClass}
-                  aria-label={t('sessions.sidebar.work.menu.label', { label })}
-                  onPointerDown={(event) => event.stopPropagation()}
-                  onClick={(event) => event.stopPropagation()}
-                  onKeyDown={(event) => event.stopPropagation()}
-                >
-                  <Icon name="more-2" className={actionIconClass} />
-                </button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="min-w-[180px]">
-                {renderMenuItems(DROPDOWN_SLOTS)}
-              </DropdownMenuContent>
-            </DropdownMenu>
+            {(
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    type="button"
+                    className={cn(actionButtonClass, !showMenuButton && 'pointer-fine:hidden')}
+                    aria-label={t('sessions.sidebar.work.menu.label', { label })}
+                    onPointerDown={(event) => event.stopPropagation()}
+                    onClick={(event) => event.stopPropagation()}
+                    onKeyDown={(event) => event.stopPropagation()}
+                  >
+                    <Icon name="more-2" className={actionIconClass} />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="min-w-[180px]">
+                  {renderMenuItems(DROPDOWN_SLOTS)}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
           </TooltipProvider>
         </div>
       </div>

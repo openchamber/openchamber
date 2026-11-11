@@ -220,9 +220,11 @@
       },
       "auth": {
         "methods": [
-          "pat"
+          "pat",
+          "cli"
         ],
         "cliTransport": false,
+        "cliName": "gt",
         "token": {
           "scopes": [
             "write:repository",

@@ -50,6 +50,8 @@ Showing a panel and reading which project and session are open needs no permissi
 - **Read what the agent says in the background**: the final answer of each turn, the questions the agent asks and what it asks permission for, in every project, sent to the extension's local service. Allow it only if you trust where the extension sends it.
 - **Start sessions and send messages on its own**: its local service does this with no window open, which costs tokens and can run tools.
 - **Add to what agents read**: text in the instructions of your sessions, and skills offered to every agent while the extension is on.
+- **Add a plugin to OpenCode**: the package's plugin is loaded into your OpenCode while the extension is on. Plugin code runs inside OpenCode with your full access, like a local service, so allow it only if you trust the author.
+- **Recognise its links in chats**: identifiers like `DEMO-12` and links to the extension's site become clickable in your chat messages. The dialog lists which ones and says whether a click opens them in the extension or attaches them to your message. Links OpenChamber already knows, such as GitHub pull requests and Linear issues, keep their usual behavior.
 
 A local service can also keep running while OpenChamber runs, or wake on a schedule. The dialog says so under **Run a local service**, and it says when what you type after `@` goes to the service. An extension can add its own rows to the `@` menu and its own blocks to agent replies. Pausing the extension takes all of this away.
 
@@ -63,9 +65,17 @@ An extension can also offer a full-screen page, such as a task board. Open it fr
 
 Extensions can save their own data on the connected OpenChamber server without putting files in your project. The data survives reloads and is deleted when you remove the extension. A board can track agents working in different projects or worktrees, while deciding its own task statuses.
 
-Besides its panel on the rail, an extension can add entries to menus you already use: the actions on a chat message, the menu of a session, the + menu next to the chat box, and slash commands like `/task ABC-12` that attach something without opening anything. It can also give its own tools a proper icon, title, and output layout in the chat, the way OpenChamber's built-in tools have. The extension decides which of these it offers; all of them are off until you allow the extension.
+Besides its panel on the rail, an extension can add entries to menus you already use: the actions on a chat message, the menu of a session, the + menu next to the chat box, and slash commands like `/task ABC-12` that attach something without opening anything. It can also give its own tools a proper icon, title, and output layout in the chat, the way OpenChamber's built-in tools have. The extension decides which of these it offers; all of them are off until you allow the extension. Session actions and slash commands also turn up in the command palette (⌘P or Ctrl+P) when you search for their name or the extension's.
 
 Some extensions show a live picture instead of a panel of their own: what an agent is working in on the server, such as a browser or a simulator. Click into the picture or type to take control, and the status line says **You have control**; the agent's own browser actions are refused until you press **Hand back to agent**. Copy and paste work as usual. Another device connected at the same time sees who is in control and cannot take it over. Such an extension can add its own controls beside the picture, an address bar above it or a tool column next to it for example.
+
+## An extension with an OpenCode plugin
+
+An extension can ship an OpenCode plugin, so you install one thing instead of two. Its permission dialog has a row that starts with **Add a plugin to OpenCode**. Once you allow it, OpenChamber adds the plugin to the OpenCode it runs for you within a couple of seconds, with no restart; disabling or removing the extension takes it out the same way. Nothing is written into your own `opencode.json`, so the plugin never outlives the extension and never runs in the OpenCode you start in a terminal.
+
+When OpenChamber did not start the OpenCode it talks to, or your environment sets its own `OPENCODE_CONFIG`, OpenChamber's config does not reach that OpenCode. The extension's screen says so and offers **Add to global config**. That writes the plugin's folder into your global OpenCode config: it then runs in every OpenCode on this computer, including the terminal, stays on while the extension is off, and is yours to manage on **Settings → Plugins**. If you remove the extension, OpenCode lists that entry as a failed plugin and keeps running until you delete the entry there. An OpenCode on another machine cannot load a folder from this one; the screen says so.
+
+VS Code and the mobile app load no extensions. A session inside an isolated space runs its own OpenCode, which never receives the plugin. In enterprise mode the plugin counts like a local service: the extension installs only from a repository your administrator listed.
 
 ## An extension as a git host
 

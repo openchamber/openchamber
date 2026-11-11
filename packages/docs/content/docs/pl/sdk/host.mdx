@@ -66,7 +66,7 @@ Tokeny dostępu nigdy nie pojawiają się tutaj ani w wyniku `request`.
 | `onResolve(handler)` | rejestruje obsługę Twoich poleceń z ukośnikiem. Dostaje `{ command, args }` i zwraca element do dołączenia albo `null`. |
 | `setBadge(count)` | oznacza Twoją ikonę na pasku bocznym kropką i pokazuje liczbę (0 do 999) w jej podpowiedzi, albo `null`, żeby ją usunąć |
 | `openCommit(sha)` | otworzyć widok Diff na tym commicie bieżącego projektu. `sha` ma od 7 do 64 znaków szesnastkowych; OpenChamber sam odczytuje commit. |
-| `setHeight(px)` | ustawić wysokość twojej sekcji Work Status. OpenChamber trzyma ją między 24 a 320 pikselami; wyższa treść przewija się wewnątrz strony. W innych miejscach jest ignorowane. |
+| `setHeight(px)` | ustawić wysokość twojej sekcji Work Status. OpenChamber trzyma ją między 24 a 480 pikselami; wyższa treść przewija się wewnątrz strony. W innych miejscach jest ignorowane. |
 | `onFileOpen(listener)` | edytory plików: odebrać plik do edycji, `{ path, name, readOnly }` plus `encoding: "text"` z `content` albo `encoding: "binary"` z `bytes`. Sprawia też, że Cmd/Ctrl+S w twojej stronie zapisuje. |
 | `onFileSnapshot(handler)` | edytory plików: zwrócić `{ content, version }` (albo `{ bytes, version }` w edytorze binarnym), cały zmieniony plik. OpenChamber wywołuje to przy zapisie oraz przed przełączeniem na widok źródła lub pełny ekran. |
 | `onFileSaved(listener)` | edytory plików: migawka z tą `version` jest na dysku. Odpowiedz przez `reportFileChange`. |
@@ -149,7 +149,9 @@ Bez `send` `prompt` zastępuje tekst w polu czatu. Z `send: true` wysyła wiadom
 
 `await onProjects(listener)`, `await onWorktrees(projectId, listener)` i `await onSessions(projectId, listener)` zwracają funkcję anulowania subskrypcji. Obsłuż błędy rejestracji. Najpierw dostajesz migawkę, potem zmiany. Maksymalnie 32 subskrypcje na ramkę; `dispose()`, zamknięcie, wstrzymanie, usunięcie i zmiana serwera zwalniają je. `state` to `loading`, `ready` lub `error`, a sesje mają `coverage` dla katalogów. Błąd zachowuje dane; tylko `ready` potwierdza pełną pustą listę.
 
-`activity` to `unknown`, `idle`, `running`, `retrying`, `waiting-permission` lub `waiting-question`. `outcome` to zaobserwowane `completed`, `failed` lub `null`, przechowywane wyłącznie w pamięci dla maksymalnie 2 000 sesji. Idle po błędzie zachowuje błąd do następnego uruchomienia. Nie oznacza to ukończenia zadania. `openSession(sessionId)` jawnie otwiera czat.
+`activity` to `unknown`, `idle`, `running`, `retrying`, `waiting-permission` lub `waiting-question`. `outcome` to zaobserwowane `completed`, `failed` lub `null`, przechowywane wyłącznie w pamięci dla maksymalnie 2 000 sesji. Idle po błędzie zachowuje błąd do następnego uruchomienia. Nie oznacza to ukończenia zadania. `inWork` to `true`, gdy sesja jest w bloku W toku na pasku bocznym, i zawsze `false`, gdy użytkownik ma wyłączone W toku; starsze hosty go pomijają. `unread` to `true`, gdy ostatnia tura się zakończyła i od tego czasu nikt nie otworzył sesji, czyli znacznik widoczny na pasku bocznym; przetrwa ponowne uruchomienie i znika na każdym urządzeniu. `openSession(sessionId)` jawnie otwiera czat.
+
+`tool` to to, z czym sesja pracuje, dopóki `activity` ma wartość `running`: trwające wywołanie narzędzia albo ostatnie zakończone, gdy agent zastanawia się nad jego wynikiem. Pola: `name` tak, jak nazywa je OpenCode (`read`, `edit`, `bash`), oraz `target`, plik lub folder wskazany w wywołaniu, względem `directory` sesji (dla ścieżki spoza niego sama nazwa), albo `null`, gdy wywołanie żadnego nie wskazuje. Tekst polecenia powłoki nigdy się tu nie pojawia. `context` mówi, jak bardzo zapełnione było okno kontekstu po ostatnim kroku sesji: `tokens`, ile w nim było, i `limit`, rozmiar okna modelu, albo `null`, gdy host go nie zna. `tool` ma wartość `null`, gdy sesja nie działa; `context` ma wartość `null`, zanim host zobaczy krok, oraz po kompaktowaniu do następnego kroku. Starsze hosty pomijają oba pola.
 
 `host.storage.get(key)`, `set(key, value)`, `delete(key)` i `keys()` zapisują własny JSON na połączonym serwerze bez dodatkowego uprawnienia. Brak klucza daje `undefined`, zapisane null pozostaje null. Klucze mają od 1 do 128 znaków, wartość do 64 KiB UTF-8, całość do 2 MiB i 2 000 kluczy. Dla danych projektu umieść jego ID w kluczu. Zapisy są serializowane i atomowe, a błędy zachowują poprzednie dane. Usunięcie rozszerzenia usuwa pamięć.
 
@@ -231,7 +233,11 @@ await host.setInstructions(directory, 'Deploys run through the release branch.')
 await host.emit('deploy-finished', { id: 42 });
 ```
 
-`sessions.start`, `sessions.send`, `sessions.retry` i `sessions.status` wymagają `contributes.sessionControl`, które użytkownik zatwierdza jako osobny wiersz. `sessions.lastReply` wymaga `sessionControl: { content: true }`. `setInstructions` wymaga `contributes.instructions` i uzupełnia to, co czytają agenci, w jednym folderze albo, z `null`, wszędzie.
+`sessions.start`, `sessions.send`, `sessions.retry`, `sessions.status` i `sessions.stop` wymagają `contributes.sessionControl`, które użytkownik zatwierdza jako osobny wiersz. `sessions.lastReply` wymaga `sessionControl: { content: true }`. Wiadomość z `sessions.send` zamyka formularz lub stronę, na które agent czeka w tej sesji, tak samo jak wiadomość wpisana w czacie.
+
+Aby przenosić żądania agenta gdzie indziej, na przykład do komunikatora, dodaj `answers: true`. Użytkownik zatwierdza to jako kolejny wiersz, a usługa może wtedy odpowiadać w imieniu użytkownika w dowolnej sesji: `sessions.answerPermission(sessionId, requestId, { decision: 'allow' })` (lub `'deny'` z `message`, którą czyta agent) na zdarzenie `permission-asked` oraz `sessions.answerForm(sessionId, formId, values)` na zdarzenie `question-asked`, którego `event.question.kind` to `form`. Treść zdarzenia wymienia pola formularza z ich `key` i opcjami wyboru. `null` zamiast wartości odrzuca formularz. Zgoda obejmuje tylko to jedno żądanie.
+
+`setInstructions` wymaga `contributes.instructions` i uzupełnia to, co czytają agenci, w jednym folderze albo, z `null`, wszędzie.
 
 `emit` dociera do Twoich otwartych ramek przez `host.onServiceEvent`, więc panel nie musi już odpytywać usługi. Nic nie jest wysyłane ponownie, dlatego ramka otwarta później najpierw odczytuje bieżący stan. `readSettings` daje usłudze ustawienia integracji razem z polami `secret`, a `needsConfiguration` pokazuje komunikat na karcie rozszerzenia.
 

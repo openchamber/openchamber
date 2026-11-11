@@ -44,8 +44,8 @@ const isCaseInsensitiveFilePath = (normalized: string): boolean => (
   WINDOWS_DRIVE_ABSOLUTE_PATTERN.test(normalized) || normalized.startsWith('//')
 );
 
-const toComparableFilePath = (value: string | null | undefined): string => {
-  const normalized = normalizeFilePath(value);
+const toComparableFilePath = (value: string | null | undefined, options?: FilePathOptions): string => {
+  const normalized = normalizeFilePath(value, options);
   return isCaseInsensitiveFilePath(normalized) ? normalized.toLowerCase() : normalized;
 };
 
@@ -105,20 +105,20 @@ export const toAbsoluteFilePath = (basePath: string | null | undefined, targetPa
   return joined;
 };
 
-export const isFilePathWithinDirectory = (filePath: string | null | undefined, directory: string | null | undefined): boolean => {
-  const normalizedFilePath = normalizeFilePath(filePath);
+export const isFilePathWithinDirectory = (filePath: string | null | undefined, directory: string | null | undefined, options?: FilePathOptions): boolean => {
+  const normalizedFilePath = normalizeFilePath(filePath, options);
   const normalizedDirectory = normalizeFilePath(directory);
   if (!normalizedFilePath || !normalizedDirectory) {
     return false;
   }
 
-  const comparablePath = toComparableFilePath(normalizedFilePath);
+  const comparablePath = toComparableFilePath(normalizedFilePath, options);
   const comparableDirectory = toComparableFilePath(normalizedDirectory);
   return comparablePath === comparableDirectory || comparablePath.startsWith(`${comparableDirectory}/`);
 };
 
-export const getRelativeFilePath = (filePath: string | null | undefined, directory: string | null | undefined): string => {
-  const normalizedFilePath = normalizeFilePath(filePath);
+export const getRelativeFilePath = (filePath: string | null | undefined, directory: string | null | undefined, options?: FilePathOptions): string => {
+  const normalizedFilePath = normalizeFilePath(filePath, options);
   const normalizedDirectory = normalizeFilePath(directory);
   if (!normalizedFilePath) {
     return '';
@@ -128,11 +128,11 @@ export const getRelativeFilePath = (filePath: string | null | undefined, directo
     return normalizedFilePath;
   }
 
-  if (toComparableFilePath(normalizedFilePath) === toComparableFilePath(normalizedDirectory)) {
+  if (toComparableFilePath(normalizedFilePath, options) === toComparableFilePath(normalizedDirectory)) {
     return '.';
   }
 
-  if (!isFilePathWithinDirectory(normalizedFilePath, normalizedDirectory)) {
+  if (!isFilePathWithinDirectory(normalizedFilePath, normalizedDirectory, options)) {
     return normalizedFilePath;
   }
 

@@ -15,6 +15,31 @@ export const CANARY_UPDATER_FEED = Object.freeze({
   url: 'https://github.com/openchamber/openchamber/releases/download/canary/',
 });
 
+// Both channels are mirrored to Cloudflare R2 (scripts/release-mirror):
+// release.yml copies each Stable release, canary.yml each night. The same
+// files and manifests as on GitHub, served by Cloudflare, which stays up when
+// GitHub's release downloads fail and downloads faster. GitHub stays the
+// fallback.
+export const STABLE_MIRROR_UPDATER_FEED = Object.freeze({
+  provider: 'generic',
+  url: 'https://downloads.openchamber.dev/desktop/stable/',
+});
+
+export const CANARY_MIRROR_UPDATER_FEED = Object.freeze({
+  provider: 'generic',
+  url: 'https://downloads.openchamber.dev/desktop/canary/',
+});
+
+// After the mirror fails a check or a download, the app reads GitHub for this
+// long before trying the mirror again, so a broken mirror costs one failed
+// request, not one per check.
+export const MIRROR_FAILURE_BACKOFF_MS = 60 * 60 * 1000;
+
+/** The source a check reads: the mirror unless it failed within the backoff, GitHub otherwise. */
+export const pickUpdaterSource = ({ mirrorFailedAt = null, now = Date.now() } = {}) => (
+  mirrorFailedAt === null || now - mirrorFailedAt >= MIRROR_FAILURE_BACKOFF_MS ? 'mirror' : 'github'
+);
+
 // Where the app takes its updates from: the releases, or the nightly Canary
 // build. The person picks it in Settings → About; the app installs the next
 // update from that channel and keeps following it. Without a pick (unset, an
@@ -62,8 +87,11 @@ export const resolveUpdaterFeed = ({
   environment = process.env,
   testBuild = false,
   channel = 'stable',
+  source = 'github',
 } = {}) => {
-  const productionFeed = channel === 'canary' ? CANARY_UPDATER_FEED : PRODUCTION_UPDATER_FEED;
+  const productionFeed = channel === 'canary'
+    ? (source === 'mirror' ? CANARY_MIRROR_UPDATER_FEED : CANARY_UPDATER_FEED)
+    : (source === 'mirror' ? STABLE_MIRROR_UPDATER_FEED : PRODUCTION_UPDATER_FEED);
   if (environment.OPENCHAMBER_E2E !== '1'
     || testBuild !== true) {
     return productionFeed;

@@ -19,6 +19,7 @@ import { MobileFilesSurface } from './MobileFilesSurface';
 import { MobileStatusPane } from './MobileStatusPane';
 import { useEdgeSwipe } from './useEdgeSwipe';
 import { isVimEditorEventTarget } from '@/lib/editorFocus';
+import { MOBILE_HEADER_BUTTON_CLASS, MOBILE_HEADER_CLASS } from '@/components/ui/mobileHeader';
 
 const DRAWER_ROOT_ID = 'mobile-surface-root';
 const ENTER_DELAY_MS = 16;
@@ -162,14 +163,14 @@ export const MobileWorkspaceDrawer: React.FC<{
 
   const body = (
     <>
-      <div className="flex h-[var(--oc-header-height,56px)] shrink-0 items-center gap-2 px-3">
+      <div className={MOBILE_HEADER_CLASS}>
         <div className="flex h-9 min-w-0 flex-1 items-center">
           {/* Mounted only while shown; nonCompositedIndicator keeps the active
               pill off its own compositing layer — creating one inside the
               drawer's slide flickers in WKWebView. */}
           {/* One tab has nothing to switch to: it is named, not offered. */}
           {soleTab ? (
-            <h2 className="flex min-w-0 items-center gap-2 px-1 typography-ui-header font-semibold text-foreground">
+            <h2 className="flex min-w-0 items-center gap-2 px-1 typography-ui-label font-medium text-foreground">
               <span className="flex shrink-0 text-muted-foreground">{soleTab.icon}</span>
               <span className="truncate">{soleTab.label}</span>
             </h2>
@@ -195,7 +196,7 @@ export const MobileWorkspaceDrawer: React.FC<{
         {tab === 'status' ? (
           <button
             type="button"
-            className="flex size-10 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className={MOBILE_HEADER_BUTTON_CLASS}
             aria-label={t('chat.workStatus.sections.open')}
             onClick={() => setStatusSectionsOpen(true)}
             style={{ touchAction: 'manipulation' }}
@@ -205,7 +206,7 @@ export const MobileWorkspaceDrawer: React.FC<{
         ) : null}
         <button
           type="button"
-          className="-me-1 flex size-10 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-interactive-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className={MOBILE_HEADER_BUTTON_CLASS}
           aria-label={t('mobile.surface.closeAria')}
           onClick={onClose}
           style={{ touchAction: 'manipulation' }}
@@ -285,7 +286,7 @@ export const MobileWorkspaceDrawer: React.FC<{
       aria-modal="true"
       aria-label={t('mobile.header.openWorkspaceAria')}
       aria-hidden={!open}
-      className="oc-keyboard-inset-surface oc-bottom-safe-surface fixed inset-0 z-50 flex flex-col bg-background text-foreground"
+      className="oc-keyboard-inset-surface oc-bottom-safe-surface oc-side-safe-area fixed inset-0 z-50 flex flex-col bg-background text-foreground"
       style={{
         paddingTop: 'var(--oc-safe-area-top, 0px)',
         // Settled state drops the transform entirely so the drawer isn't kept

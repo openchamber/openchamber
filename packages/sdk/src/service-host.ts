@@ -129,6 +129,16 @@ export type ServiceSessionSent = { sent: true };
 export type ServiceSessionStatus = { status: 'idle' | 'busy' | 'waiting' };
 /** The agent's last answer, `null` before it gave one. */
 export type ServiceSessionReply = { reply: string | null };
+/** `stopped` is false when the session had no turn running. */
+export type ServiceSessionStopped = { stopped: boolean };
+/** `allow` lets the agent do it this once; `deny` refuses, and `message` tells the agent why. */
+export type ServicePermissionAnswer = { decision: 'allow' | 'deny'; message?: string };
+/** A form's values keyed by field `key`, as the `question-asked` content describes the fields. */
+export type ServiceFormValues = Record<string, string | number | boolean | string[]>;
+export type ServiceAnswered = { answered: true };
+
+/** Characters of the note a service sends with a refusal or a dismissed form. */
+export const SERVICE_ANSWER_MESSAGE_MAX = 2_000;
 
 export type ServiceHostCalls = {
   'sessions.start': { input: ServiceSessionStart; result: ServiceSessionStarted };
@@ -136,6 +146,9 @@ export type ServiceHostCalls = {
   'sessions.retry': { input: { sessionId: string }; result: ServiceSessionSent };
   'sessions.status': { input: { sessionId: string }; result: ServiceSessionStatus };
   'sessions.lastReply': { input: { sessionId: string }; result: ServiceSessionReply };
+  'sessions.stop': { input: { sessionId: string }; result: ServiceSessionStopped };
+  'sessions.answerPermission': { input: { sessionId: string; requestId: string } & ServicePermissionAnswer; result: ServiceAnswered };
+  'sessions.answerForm': { input: { sessionId: string; formId: string; values: ServiceFormValues | null; message?: string }; result: ServiceAnswered };
   'instructions.set': { input: { directory: string | null; text: string }; result: { saved: true } };
   'panels.emit': { input: { topic: string; data?: JsonValue }; result: { delivered: true } };
   'settings.read': { input: Record<string, never>; result: { settings: Record<string, string> } };
@@ -146,6 +159,7 @@ export type ServiceHostMethod = keyof ServiceHostCalls;
 
 export const SERVICE_HOST_METHODS = [
   'sessions.start', 'sessions.send', 'sessions.retry', 'sessions.status', 'sessions.lastReply',
+  'sessions.stop', 'sessions.answerPermission', 'sessions.answerForm',
   'instructions.set', 'panels.emit', 'settings.read', 'status.set',
 ] as const satisfies readonly ServiceHostMethod[];
 
@@ -173,6 +187,19 @@ export type ServiceHost = {
     status: (sessionId: string) => Promise<ServiceSessionStatus>;
     /** Needs `sessionControl.content`. */
     lastReply: (sessionId: string) => Promise<ServiceSessionReply>;
+    /** Stops the turn the session is running, as the stop button does. */
+    stop: (sessionId: string) => Promise<ServiceSessionStopped>;
+    /**
+     * Answers a permission the agent asked, named by `event.permission.requestId`
+     * of a `permission-asked` event. Needs `sessionControl.answers`.
+     */
+    answerPermission: (sessionId: string, requestId: string, answer: ServicePermissionAnswer) => Promise<ServiceAnswered>;
+    /**
+     * Answers a form the agent shows, named by `event.question.id` of a
+     * `question-asked` event whose `kind` is `form`. `null` dismisses it, and
+     * `message` tells the agent why. Needs `sessionControl.answers`.
+     */
+    answerForm: (sessionId: string, formId: string, values: ServiceFormValues | null, message?: string) => Promise<ServiceAnswered>;
   };
   /** Text the agent reads in every session under `directory`, or everywhere with `null`. Empty text removes it. */
   setInstructions: (directory: string | null, text: string) => Promise<{ saved: true }>;
@@ -219,6 +246,9 @@ export const createServiceHost = ({ env }: { env: ServiceHostEnv }): ServiceHost
       retry: (sessionId) => call('sessions.retry', { sessionId }),
       status: (sessionId) => call('sessions.status', { sessionId }),
       lastReply: (sessionId) => call('sessions.lastReply', { sessionId }),
+      stop: (sessionId) => call('sessions.stop', { sessionId }),
+      answerPermission: (sessionId, requestId, answer) => call('sessions.answerPermission', { sessionId, requestId, ...answer }),
+      answerForm: (sessionId, formId, values, message) => call('sessions.answerForm', { sessionId, formId, values, ...(message === undefined ? {} : { message }) }),
     },
     setInstructions: (directory, text) => call('instructions.set', { directory, text }),
     emit: (topic, data) => call('panels.emit', { topic, data }),

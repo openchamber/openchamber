@@ -40,6 +40,12 @@ export type HostThemeTokens = {
   error: string;
   info: string;
   font: string;
+  /**
+   * The app's body text size as a pixel length, `14px` at the default
+   * interface font size and larger when the user raises it. `applyHostTheme`
+   * makes it the frame's `1rem`. Hosts before this token leave it out.
+   */
+  fontSize?: string;
   /** Monospace stack for code and identifiers. */
   mono: string;
   radius: string;
@@ -328,7 +334,23 @@ export type GuestDiffItem = {
   side?: 'additions' | 'deletions';
 };
 
-export type GuestItem = AttachIssueRequest | GuestMessageItem | GuestSessionItem | GuestSelectionItem | GuestFileItem | GuestDiffItem;
+/**
+ * The user clicked an identifier or a link in a chat message that the
+ * extension's `contributes.links` claims, with `action: "open"`. Built by the
+ * host from the match: `identifier` is what `{id}` or the key matched. `url`
+ * is the clicked link without its fragment and without query parameters
+ * other than the template's own; for an identifier in text, the link the first
+ * template without `{segment}` builds from it, absent when there is none or
+ * the identifier does not have `urls.identifier`'s shape (`PROJ-12` and
+ * `number`).
+ */
+export type GuestLinkItem = {
+  kind: 'link';
+  identifier: string;
+  url?: string;
+};
+
+export type GuestItem = AttachIssueRequest | GuestMessageItem | GuestSessionItem | GuestSelectionItem | GuestFileItem | GuestDiffItem | GuestLinkItem;
 
 /** The captured target of a background action. Delivered once through `onAction`, not `onItem`. */
 export type GuestActionItem = GuestMessageItem | GuestSessionItem | GuestSelectionItem | GuestFileItem | GuestDiffItem;
@@ -341,6 +363,10 @@ export const isGuestMessageItem = (item: GuestItem | null): item is GuestMessage
 
 export const isGuestSessionItem = (item: GuestItem | null): item is GuestSessionItem => (
   item !== null && item.kind === 'session'
+);
+
+export const isGuestLinkItem = (item: GuestItem | null): item is GuestLinkItem => (
+  item !== null && item.kind === 'link'
 );
 
 /** The composer chip: what the guest handed to `attach`, with `text` filled from the chip. */
