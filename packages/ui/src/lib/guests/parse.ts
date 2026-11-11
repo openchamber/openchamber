@@ -26,6 +26,9 @@ import {
   GUEST_TOOL_OUTPUTS,
   TRACKER_URL_TEMPLATES_MAX,
   isBuildableLinkTemplate,
+  GUEST_WAITS_MAX,
+  GUEST_WAIT_ID,
+  GUEST_WAIT_TITLE_MAX,
   isFileEditorPattern,
   isGuestProviderLogoPath,
   isGuestRequestPath,
@@ -231,6 +234,11 @@ const installedGuestSchema = z.object({
   service: publicServiceSchema.optional(),
   sourceControl: publicSourceControlSchema.optional().catch(undefined),
   sessionEvents: publicSessionEventsSchema.optional().catch(undefined),
+  // Only what the approval dialog names; a malformed slice drops the field, never the row.
+  waits: z.array(z.object({
+    id: z.string().regex(GUEST_WAIT_ID),
+    title: z.string().trim().min(1).max(GUEST_WAIT_TITLE_MAX),
+  })).max(GUEST_WAITS_MAX).optional().catch(undefined),
   notifications: publicNotificationsSchema.optional().catch(undefined),
   tracker: publicTrackerSchema.optional().catch(undefined),
   quota: publicQuotaSchema.optional().catch(undefined),

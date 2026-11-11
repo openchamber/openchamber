@@ -5,6 +5,7 @@ import { GUEST_PROVIDER_LOGOS_MAX, clampStatusSectionHeight, hasGuestPage, reque
 import type { JsonValue } from './contract.ts';
 import type { LinksContribution } from './manifest.ts';
 import { parseManifest, parseManifestJson } from './parse.ts';
+import { WAIT_CHECK_INTERVAL_DEFAULT, toPublicWaits } from './waits.ts';
 
 const validBlock = {
   apiVersion: OPENCHAMBER_SDK_API_VERSION,
@@ -1490,6 +1491,44 @@ describe('contributes.sessionEvents', () => {
     expect(result).toMatchObject({ ok: true });
     if (!result.ok) throw new Error(result.message);
     expect(requestedGuestCapabilities(result.manifest.contributes)).toEqual(['files', 'service']);
+  });
+});
+
+describe('contributes.waits', () => {
+  const pageless = { id: 'wait-kit', name: 'Wait Kit', icon: 'timer' };
+  const service = { entry: 'service/main.js', runtime: 'host' };
+  const timer = { id: 'timer', title: 'Timer', description: 'Wakes the session after some seconds', params: { seconds: { type: 'number', required: true } }, interval: 10_000 };
+  const parse = <T,>(contributes: T) => parseManifestJson(JSON.stringify({ apiVersion: OPENCHAMBER_SDK_API_VERSION, contributes }));
+
+  test('a service-only package may declare waits and asks for wake', () => {
+    const result = parse({ panel: pageless, service, waits: [timer, { id: 'url-ready', title: 'URL ready', description: 'Wakes when a URL answers' }] });
+    if (!result.ok) throw new Error(result.message);
+    expect(requestedGuestCapabilities(result.manifest.contributes)).toEqual(['service', 'wake']);
+    expect(toPublicWaits(result.manifest.contributes.waits!)).toEqual([
+      { id: 'timer', title: 'Timer', description: 'Wakes the session after some seconds', params: { seconds: { type: 'number', required: true } }, interval: 10_000 },
+      { id: 'url-ready', title: 'URL ready', description: 'Wakes when a URL answers', params: {}, interval: WAIT_CHECK_INTERVAL_DEFAULT },
+    ]);
+  });
+
+  test('needs contributes.service, and its fields are checked', () => {
+    expect(parse({ panel: pageless, waits: [timer] })).toMatchObject({
+      ok: false, code: 'invalid-waits', message: expect.stringContaining('declare contributes.service'),
+    });
+    const invalid = [
+      [],
+      [timer, timer],
+      [{ ...timer, id: 'Timer' }],
+      [{ ...timer, title: '' }],
+      [{ ...timer, interval: 1_000 }],
+      [{ ...timer, params: { seconds: { type: 'date' } } }],
+      [{ ...timer, params: { seconds: { type: 'number', required: false } } }],
+      [{ ...timer, params: { 'two words': { type: 'string' } } }],
+      [{ ...timer, params: Object.fromEntries(Array.from({ length: 9 }, (_, index) => [`p${index}`, { type: 'string' }])) }],
+      [{ ...timer, schedule: 'daily' }],
+    ];
+    for (const waits of invalid) {
+      expect(parse({ panel: pageless, service, waits })).toMatchObject({ ok: false, code: 'invalid-waits' });
+    }
   });
 });
 

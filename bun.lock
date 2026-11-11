@@ -246,6 +246,13 @@
         "@openchamber/sdk": "workspace:*",
       },
     },
+    "packages/sdk/examples/wait-kit": {
+      "name": "@openchamber/example-wait-kit",
+      "version": "1.0.0",
+      "dependencies": {
+        "@openchamber/sdk": "workspace:*",
+      },
+    },
     "packages/ui": {
       "name": "@openchamber/ui",
       "version": "2.7.0",
@@ -1188,6 +1195,8 @@
     "@openchamber/example-tools-only": ["@openchamber/example-tools-only@workspace:packages/sdk/examples/tools-only"],
 
     "@openchamber/example-tracker-provider": ["@openchamber/example-tracker-provider@workspace:packages/sdk/examples/tracker-provider"],
+
+    "@openchamber/example-wait-kit": ["@openchamber/example-wait-kit@workspace:packages/sdk/examples/wait-kit"],
 
     "@openchamber/mobile": ["@openchamber/mobile@workspace:packages/mobile"],
 

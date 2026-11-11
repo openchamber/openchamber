@@ -35,6 +35,7 @@ export {
   trackerProviderMethodSchema,
   trackerProviderSchemasV1,
 } from './service-provider-schemas.ts';
+export { waitArgsSchema, waitCheckOutcomeSchema, waitCheckResultSchema, waitStartResultSchema } from './waits-schemas.ts';
 export {
   surfaceClipboardAnswerSchema,
   surfaceControllerSchema,

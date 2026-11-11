@@ -451,6 +451,10 @@ other.
   own `url` input and hands it to `prWatch` (`../pr-watch/DOCUMENTATION.md`),
   which reads it, follows it and wakes the session once when it changes. Both
   act only on the calling session, never one the input names.
+- `wait.list`, `wait.start` and `wait.stop` are the same kind of wait for what
+  an extension's service follows (`../extension-waits/DOCUMENTATION.md`):
+  `wait.start` takes `source` (`<extension>/<wait>`) and `args`, `wait.stop`
+  an optional `waitId`, all three only for the calling session.
 - `session.link` records a code change under review or an issue on a session
   (`../openchamber-sessions/session-link.js`), defaulting to the calling
   session. When to link is not in the action's description but at the head of
@@ -526,8 +530,8 @@ dropping slots or ignoring the requested time.
 
 ### Why a background message waits behind a page and does not end it
 
-A dispatched session's result, a pull request wake, a workflow report or a
-restart resume can arrive while a page or a secret card waits. OpenCode keeps it
+A dispatched session's result, a pull request or extension wait's wake, a
+workflow report or a restart resume can arrive while a page or a secret card waits. OpenCode keeps it
 in the session's inbox until the waiting call returns, and the agent reads it at
 the next step, right after the user's answer. The alternative, ending the wait
 so the agent reads the message at once and asks again, loses the question the

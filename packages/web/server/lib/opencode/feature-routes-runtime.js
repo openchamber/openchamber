@@ -39,6 +39,7 @@ import { registerPermissionAutoAcceptRoutes } from '../permission-auto-accept/ru
 import { registerMessageQueueRoutes } from '../message-queue/runtime.js';
 import { registerAutoReviewRoutes } from '../auto-review/runtime.js';
 import { registerPrWatchRoutes } from '../pr-watch/runtime.js';
+import { registerExtensionWaitsRoutes } from '../extension-waits/runtime.js';
 import { registerWorkflowRoutes } from '../workflows/routes.js';
 import { registerRoutingPromptRewrite, registerRoutingRoutes } from '../routing/routes.js';
 import { registerConfigEntityRoutes } from './config-entity-routes.js';
@@ -250,6 +251,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       openchamberDataDir,
       onGuestDeactivated,
       onExtensionSessionEventsChanged = () => {},
+      onExtensionWaitsChanged = () => {},
       extensionNotificationChannels = null,
       surfaceViewerHeaders,
       // How an extension's OpenCode plugin reaches OpenCode right now (`guests/opencode-plugin.js`).
@@ -306,6 +308,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       messageQueueRuntime,
       autoReviewRuntime,
       prWatchRuntime = null,
+      extensionWaitsRuntime = null,
       mergeFollowRuntime = null,
       routingRuntime,
       globalEventHub,
@@ -326,6 +329,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
     registerMessageQueueRoutes(app, messageQueueRuntime);
     registerAutoReviewRoutes(app, autoReviewRuntime);
     if (prWatchRuntime) registerPrWatchRoutes(app, prWatchRuntime);
+    if (extensionWaitsRuntime) registerExtensionWaitsRoutes(app, extensionWaitsRuntime);
     registerRoutingRoutes(app, routingRuntime);
     // Before the generic OpenCode proxy: swallows the `openchamber/auto` model
     // switch and routes the sends that follow it.
@@ -837,6 +841,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
         { name: 'hand back an extension role', listener: onGuestDeactivated },
         { name: 'withdraw an extension Git host', listener: (event) => extensionSourceControlProviders.deactivated(event) },
         { name: 'drop an extension\'s session event subscription', listener: () => onExtensionSessionEventsChanged() },
+        { name: 'end an extension\'s waits', listener: () => onExtensionWaitsChanged() },
         { name: 'withdraw an extension notification channel', listener: (event) => extensionNotificationChannels?.deactivated(event) },
         { name: 'withdraw an extension tracker', listener: (event) => extensionTrackers.deactivated(event) },
         { name: 'withdraw an extension usage provider', listener: () => extensionQuotaProviders.deactivated() },
@@ -846,6 +851,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
         const results = await Promise.allSettled([
           extensionSourceControlProviders.reconcile(),
           onExtensionSessionEventsChanged(),
+          onExtensionWaitsChanged(),
           extensionNotificationChannels?.reconcile(),
           extensionTrackers.reconcile(),
           extensionQuotaProviders.reconcile(),

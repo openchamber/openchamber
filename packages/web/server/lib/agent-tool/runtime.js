@@ -213,6 +213,9 @@ const CONTROL_PARAMETER_PROPERTIES = {
   // follows or which link session.unlink removes.
   url: { type: 'string', description: 'pr.watch: the pull or merge request address. session.unlink: the address of the link to remove' },
   identifier: { type: 'string', description: 'session.unlink: the identifier of the link to remove, when no url' },
+  source: { type: 'string', description: 'wait.start: <extension>/<wait> as wait.list names it' },
+  args: { type: 'object', description: 'wait.start: the arguments the source\'s params list, such as { "seconds": 60 }' },
+  waitId: { type: 'string', description: 'wait.stop: the wait to stop; without it every wait of this session' },
 };
 const SCHEDULE_PARAMETER_PROPERTIES = {
   ...pickParameters(SCHEDULE_PARAMETER_NAMES),

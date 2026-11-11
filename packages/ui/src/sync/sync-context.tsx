@@ -77,6 +77,7 @@ import { isAutoReviewAvailable, useAutoReviewStore } from "@/stores/useAutoRevie
 import { subscribeMessageQueueSync } from "./message-queue-sync"
 import { subscribeAutoReviewSync } from "./auto-review-sync"
 import { subscribePrWatchSync } from "./pr-watch-sync"
+import { subscribeExtensionWaitsSync } from "./extension-waits-sync"
 import { subscribeSessionWarmingSync } from "./session-warming-sync"
 import { subscribeSessionTodosSync } from "./session-todos-sync"
 import { subscribeSessionFoldersSync } from "./session-folders-sync"
@@ -3285,6 +3286,7 @@ export function SyncProvider(props: {
     const unsubscribeSessionAdmission = subscribeSessionAdmission()
     const unsubscribeAutoReviewEvents = subscribeAutoReviewSync(runtimeKey)
     const unsubscribePrWatchEvents = subscribePrWatchSync(runtimeKey)
+    const unsubscribeExtensionWaitEvents = subscribeExtensionWaitsSync(runtimeKey)
     const unsubscribeSessionWarming = subscribeSessionWarmingSync(runtimeKey)
     const unsubscribeSessionTodos = subscribeSessionTodosSync(runtimeKey)
     const unsubscribeFolderEvents = subscribeSessionFoldersSync(runtimeKey)
@@ -3450,6 +3452,7 @@ export function SyncProvider(props: {
       unsubscribeSessionAdmission()
       unsubscribeAutoReviewEvents()
       unsubscribePrWatchEvents()
+      unsubscribeExtensionWaitEvents()
       unsubscribeSessionWarming()
       unsubscribeSessionTodos()
       unsubscribeFolderEvents()

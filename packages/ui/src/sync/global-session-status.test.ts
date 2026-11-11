@@ -281,6 +281,10 @@ describe("what a session row says keeps its turn open", () => {
     // An image the session waits on comes after a command and before a pull request.
     expect(resolveSessionTurnActivity(null, false, false, true, true)).toBe("image")
     expect(resolveSessionTurnActivity(null, false, true, false, true)).toBe("shell")
+    // So does one waiting on an extension, last of all.
+    expect(resolveSessionTurnActivity(null, false, false, false, false, true)).toBe("extensionWait")
+    expect(resolveSessionTurnActivity(null, false, false, true, false, true)).toBe("pullRequest")
+    expect(resolveSessionTurnActivity("subagent", false, false, false, false, true)).toBe("subagent")
   })
 })
 
