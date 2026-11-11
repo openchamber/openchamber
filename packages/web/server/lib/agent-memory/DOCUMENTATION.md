@@ -50,7 +50,10 @@ record, `lastRunAt`, and, when anything changed, the snapshot and the id and
 `updatedAt` of every entry the pass left, which is how undo tells the pass's
 writes from later ones. Then it deletes the session and announces the change to
 open panels. The agent's last line, `DREAM {"project": P, "global": G}`, splits
-each scope's deleted count into merged and removed. A failed pass is tried again
+each scope's deleted count into merged and removed, and its `toDocs` lists the
+project entries that belong in the project's agent docs, kept in the record for
+the panel to offer moving. The pass leaves those entries as they are: it never
+writes to the repository. A failed pass is tried again
 after six hours.
 
 ### Why topical merges wait for an overflow

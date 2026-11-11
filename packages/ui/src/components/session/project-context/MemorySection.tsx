@@ -19,7 +19,7 @@ import { classifyMemory, memoryViewKey, type MemoryBadge } from '@/lib/agentMemo
 import { cn } from '@/lib/utils';
 import { selectProjectMemoryForPath, useAgentMemoryStore } from '@/stores/useAgentMemoryStore';
 import { useUIStore } from '@/stores/useUIStore';
-import { startMemoryTidy } from './memoryTidy';
+import { startMemoryTidy, startMemoryToDocs } from './memoryTidy';
 
 /**
  * Starts the tidy-up session. Offered only while both scopes are loaded for
@@ -121,6 +121,50 @@ const DreamLine: React.FC<{ dream: AgentMemoryDream; onUndo: () => void; undoing
           </button>
         </>
       ) : null}
+    </p>
+  );
+};
+
+/**
+ * Project entries the last pass found belong in the project's agent docs, and
+ * a click that moves them in a session the user watches. Counted against the
+ * entries still in memory, so the line goes once they have moved.
+ */
+const DocsLine: React.FC<{ projectPath: string; entries: AgentMemoryEntry[] }> = ({ projectPath, entries }) => {
+  const { t } = useI18n();
+  const [starting, setStarting] = React.useState(false);
+  const handleMove = async () => {
+    setStarting(true);
+    try {
+      const outcome = await startMemoryToDocs({
+        projectPath,
+        title: t('rightSidebar.contextNotesTodo.memory.toDocs.sessionTitle'),
+        entries,
+      });
+      if (!outcome.ok) {
+        toast.error(t(outcome.reason === 'no-model'
+          ? 'rightSidebar.contextNotesTodo.memory.tidy.noModel'
+          : 'rightSidebar.contextNotesTodo.memory.toDocs.failed'));
+      }
+    } catch {
+      toast.error(t('rightSidebar.contextNotesTodo.memory.toDocs.failed'));
+    } finally {
+      setStarting(false);
+    }
+  };
+  return (
+    <p className="flex min-w-0 flex-wrap items-center gap-x-1.5 typography-micro text-muted-foreground">
+      <Icon name="file-text" className="size-3 shrink-0" />
+      <span>{t('rightSidebar.contextNotesTodo.memory.toDocs.summary', { count: entries.length })}</span>
+      <span aria-hidden="true">·</span>
+      <button
+        type="button"
+        disabled={starting}
+        onClick={() => void handleMove()}
+        className="text-foreground/80 hover:text-foreground disabled:opacity-50"
+      >
+        {t('rightSidebar.contextNotesTodo.memory.toDocs.action')}
+      </button>
     </p>
   );
 };
@@ -447,6 +491,10 @@ export const MemorySection: React.FC<{
   // A project's line shows only while the store holds that project's entries.
   const dreamOwner = useAgentMemoryStore((state) => state.projectPath);
   const scopeDream = scope === 'global' ? dream.global : dreamOwner === projectPath ? dream.project : null;
+  const toDocsEntries = React.useMemo(() => {
+    const ids = new Set(scope === 'project' ? scopeDream?.toDocs ?? [] : []);
+    return projectEntries.filter((entry) => ids.has(entry.id));
+  }, [projectEntries, scope, scopeDream]);
   const [undoing, setUndoing] = React.useState(false);
   const handleUndoDream = React.useCallback(async () => {
     setUndoing(true);
@@ -516,6 +564,7 @@ export const MemorySection: React.FC<{
       </div>
 
       {scopeDream ? <DreamLine dream={scopeDream} undoing={undoing} onUndo={() => void handleUndoDream()} /> : null}
+      {scope === 'project' && projectPath && toDocsEntries.length > 0 ? <DocsLine projectPath={projectPath} entries={toDocsEntries} /> : null}
 
       {scope === 'project' && !projectPath ? (
         <p className="typography-meta text-muted-foreground">

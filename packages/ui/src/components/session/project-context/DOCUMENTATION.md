@@ -399,7 +399,13 @@ The panel shows only the last pass of the scope on show, one line under the
 chips: when it ran, how many entries it merged, removed and rewrote, and Undo.
 There is no review and no notification: checking memories by hand is the chore
 dreaming removes. Undo puts back the store as the pass found it and keeps what
-was written after the pass. The line comes with `/api/agent-memory/all`, so it is
+was written after the pass. When the pass found project entries that belong in
+the project's agent docs, a second line counts the ones still in memory and
+offers Move: it starts a visible session (`memoryTidy.ts`, the `memory.toDocs`
+magic prompt) that adds each entry to the right AGENTS.md, skill or module doc,
+deletes it from memory and leaves the edits uncommitted. The pass itself never
+writes to the repository; moving is the user's click, in a session they watch
+and a diff they review. The lines come with `/api/agent-memory/all`, so they are
 as fresh as the list, and a pass that ends announces itself with the same
 `openchamber:agent-memory-changed` event a tool write does.
 

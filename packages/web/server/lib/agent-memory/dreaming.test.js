@@ -45,7 +45,7 @@ const fill = async (count) => {
  * A stand-in OpenCode: records each request, answers the routes a pass uses,
  * and plays the agent on `prompt` through `onPrompt`.
  */
-const createOpenCode = ({ active = {}, onPrompt = async () => {}, reply = 'Done.\nDREAM {"project": 1, "global": 0}', hangWait = false } = {}) => {
+const createOpenCode = ({ active = {}, onPrompt = async () => {}, reply = 'Done.\nDREAM {"project": 1, "global": 0, "toDocs": ["mem-6", "mem-3"]}', hangWait = false } = {}) => {
   // The pass's own session reads as running for one look after its prompt, or for good with `hangWait`.
   let runningLooks = 0;
   const calls = [];
@@ -172,6 +172,8 @@ describe('a pass', () => {
 
     const state = await memory.readDreamState(PROJECT);
     expect(state.record).toMatchObject({ status: 'done', merged: 1, removed: 1, rewritten: 2 });
+    // Fact 2 (mem-3) was deleted by the pass, so only the entry still there is offered for the docs.
+    expect(state.record.toDocs).toEqual(['mem-6']);
     expect(state.snapshot).toHaveLength(12);
   });
 
@@ -237,5 +239,6 @@ describe('pieces', () => {
     expect(prompt).toContain('"memoryId":"mem-1"');
     expect(prompt).toContain('12 titles do not fit now');
     expect(prompt).not.toContain('The user\'s memory (scope "global")');
+    expect(prompt).toContain('belong in the project\'s agent docs');
   });
 });

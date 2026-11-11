@@ -71,6 +71,8 @@ const dreamRecordSchema = z.object({
   rewritten: count,
   undone: z.boolean().catch(false),
   error: z.string().min(1).transform((value) => value.slice(0, 500)).nullable().catch(null),
+  // Project entries the pass found belong in the project's agent docs; the panel offers to move them.
+  toDocs: z.array(z.string().min(1)).max(200).catch([]),
 });
 
 const dreamStateSchema = z.object({

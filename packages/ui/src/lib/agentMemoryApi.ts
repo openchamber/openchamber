@@ -60,6 +60,8 @@ export interface AgentMemoryDream {
   rewritten: number;
   undone: boolean;
   canUndo: boolean;
+  /** Project entries the pass found belong in the project's agent docs. */
+  toDocs: string[];
 }
 
 /** Mirrors the server's clamps, so the editor stops where storage would cut. */
@@ -184,6 +186,7 @@ const dreamSchema = z.object({
   rewritten: dreamCountSchema,
   undone: z.boolean().catch(false),
   canUndo: z.boolean().catch(false),
+  toDocs: z.array(z.string()).catch([]),
 });
 /** Each scope's last pass; one that cannot be read shows as none, never fails the load. */
 const dreamsSchema = z.object({

@@ -57,7 +57,9 @@ export type MagicPromptId =
   | 'session.fusion.instructions'
   | 'session.fusion.codeInstructions'
   | 'memory.tidy.visible'
-  | 'memory.tidy.instructions';
+  | 'memory.tidy.instructions'
+  | 'memory.toDocs.visible'
+  | 'memory.toDocs.instructions';
 
 interface MagicPromptDefinition {
   id: MagicPromptId;
@@ -913,6 +915,33 @@ An entry nothing contradicts still holds. Leave it as it is.
 Nothing waits for approval. Keep the original text of what you changed in mind: if the user disagrees with something, you restore it from there.
 
 --- STORED MEMORY ---
+{{memory_entries}}`,
+  },
+  {
+    id: 'memory.toDocs.visible',
+    title: 'Memory to Docs Visible Prompt',
+    group: 'Memory',
+    description: 'Visible user message sent when the Memory panel offers to move entries into the project\'s agent docs.',
+    template: 'Move these memory entries into the project\'s agent docs.',
+  },
+  {
+    id: 'memory.toDocs.instructions',
+    title: 'Memory to Docs Instructions',
+    group: 'Memory',
+    description: 'Hidden instructions for moving memory entries into the project\'s agent docs, followed by the entries to move.',
+    placeholders: [
+      { key: 'memory_entries', description: 'The memory entries to move: id, scope, type, dates, title and body.' },
+    ],
+    template: `The memory entries below hold project knowledge (a rule, a recipe, a gotcha, a decision) that belongs in the project's agent docs, where every agent and teammate working here reads it. Memory reaches only this user. Move each one:
+
+1. Find where it belongs: the AGENTS.md, skill or module documentation an agent reads while doing the work the entry is about. Prefer an existing file and section over a new one. When the project has instructions for writing agent docs, follow them.
+2. Check the entry against the code before writing it. When part of it is no longer true, write what is true now; when it is wrong as a whole or turns out to be about the user rather than the project, skip it and keep it in memory.
+3. Add only what the file does not say yet, in that file's own style: no dates, no story of how it was learned, no people or private details.
+4. Delete each moved entry from memory with memory.delete and its memoryId.
+
+Do not commit: the changes stay in the working tree for the user to review. Reply with a short report in the language the user works in: each entry and the file it went to, and each skipped entry with one line on why.
+
+--- ENTRIES TO MOVE ---
 {{memory_entries}}`,
   },
 ] as const;

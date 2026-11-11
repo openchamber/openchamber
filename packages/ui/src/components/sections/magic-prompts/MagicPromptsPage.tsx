@@ -190,6 +190,14 @@ const PROMPT_PAGE_MAP: Record<string, PromptPageConfig> = {
       { id: 'memory.tidy.instructions', titleKey: 'settings.magicPrompts.page.block.instructions' },
     ],
   },
+  'memory.toDocs': {
+    titleKey: 'settings.magicPrompts.page.group.memoryToDocs.title',
+    descriptionKey: 'settings.magicPrompts.page.group.memoryToDocs.description',
+    blocks: [
+      { id: 'memory.toDocs.visible', titleKey: 'settings.magicPrompts.page.block.visiblePrompt' },
+      { id: 'memory.toDocs.instructions', titleKey: 'settings.magicPrompts.page.block.instructions' },
+    ],
+  },
 };
 
 const isVisiblePromptId = (id: MagicPromptId): boolean => id.endsWith('.visible');

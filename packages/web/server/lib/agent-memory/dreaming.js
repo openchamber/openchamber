@@ -103,8 +103,11 @@ export const buildDreamPrompt = ({ directory, global, project, index }) => {
     '- Rewrite an entry whose details went out of date with what is true now.',
     '- Leave flagged entries alone.',
     `- ${fit}`,
+    ...(project ? [
+      '- Note the project entries that belong in the project\'s agent docs instead: a rule, a recipe, a gotcha or a decision about this codebase that every agent and teammate working here should know, when the project keeps agent instructions (AGENTS.md, skills, module docs) and they do not hold it yet. Not people, business, private setups or how the user likes to work: those stay in memory. Leave these entries as they are; the user moves them.',
+    ] : []),
     '',
-    'End your reply with one line and nothing after it: DREAM {"project": P, "global": G}, where P and G are how many entries of that scope you deleted because you folded them into another.',
+    'End your reply with one line and nothing after it: DREAM {"project": P, "global": G, "toDocs": [ids]}, where P and G are how many entries of that scope you deleted because you folded them into another, and toDocs lists the memoryIds of the project entries that belong in the agent docs.',
     '',
     ...sections,
   ].join('\n');
@@ -135,14 +138,18 @@ const createdSessionSchema = z.union([
 ]);
 
 const mergedCountSchema = z.number().int().nonnegative().catch(0);
-const mergedReportSchema = z.object({ project: mergedCountSchema, global: mergedCountSchema });
+const mergedReportSchema = z.object({
+  project: mergedCountSchema,
+  global: mergedCountSchema,
+  toDocs: z.array(z.string().min(1)).catch([]),
+});
 
-/** The agent's closing `DREAM {"project": P, "global": G}` line, newest answer first; none counts as 0 each. */
+/** The agent's closing `DREAM {...}` line, newest answer first; none counts as nothing merged or flagged. */
 const readMergedCount = (messages) => {
   for (const message of messages) {
     if (message.type !== 'assistant') continue;
     for (const part of message.content) {
-      const match = part.type === 'text' && part.text ? /DREAM\s*(\{[^}]*\})/.exec(part.text) : null;
+      const match = part.type === 'text' && part.text ? /DREAM\s*(\{.*\})/.exec(part.text) : null;
       if (!match) continue;
       try {
         const report = mergedReportSchema.safeParse(JSON.parse(match[1]));
@@ -152,7 +159,7 @@ const readMergedCount = (messages) => {
       }
     }
   }
-  return { project: 0, global: 0 };
+  return { project: 0, global: 0, toDocs: [] };
 };
 
 /**
@@ -329,7 +336,7 @@ export const createMemoryDreaming = (deps) => {
     let sessionID = null;
     const model = resolveModel(settings, pass.project);
     let error = null;
-    let merged = { project: 0, global: 0 };
+    let merged = { project: 0, global: 0, toDocs: [] };
     const controller = new AbortController();
     const timeout = setTimer(() => controller.abort(), passTimeoutMs);
     try {
@@ -404,6 +411,8 @@ export const createMemoryDreaming = (deps) => {
           removed: deleted - mergedHere,
           rewritten,
           error,
+          // Only ids the pass left in the store: a flagged entry it deleted anyway has nothing to move.
+          toDocs: key === 'project' ? merged.toDocs.filter((id) => after.some((entry) => entry.id === id)) : [],
         },
         snapshot: changed ? before[key] : null,
         after: changed ? after.map((entry) => ({ id: entry.id, updatedAt: entry.updatedAt })) : null,
