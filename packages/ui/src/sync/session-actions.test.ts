@@ -687,6 +687,32 @@ describe("moveSessionToDirectory", () => {
     expect(destination.getState().message["session-a"]?.[0]?.id).toBe("message-a")
     expect((globalUpsertedSessions.at(-1) as Session).title).toBe("Renamed")
   })
+
+  test("publishes nothing locally when the caller's server changed during the move", async () => {
+    const source = createStore({}, {
+      session: [{
+        id: "session-a",
+        projectID: "project",
+        title: "Move me",
+        directory: "/source",
+        cost: 0,
+        tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+        time: { created: 1, updated: 1 },
+      }],
+      sessionTotal: 1,
+    })
+    const destination = createStore({})
+    const childStores = createChildStores([["/source", source], ["/destination", destination]])
+    const { moveSessionToDirectory, setActionRefs } = await import("./session-actions")
+    setActionRefs(childStores, () => "/source")
+
+    await moveSessionToDirectory(source.getState().session[0], "/source", "/destination", () => false)
+
+    expect(replyCalls.filter((call) => call.method === "session.move")).toHaveLength(1)
+    expect(source.getState().session[0]?.id).toBe("session-a")
+    expect(destination.getState().session).toHaveLength(0)
+    expect(globalUpsertedSessions).toHaveLength(0)
+  })
 })
 
 describe("confirmed session removal", () => {
