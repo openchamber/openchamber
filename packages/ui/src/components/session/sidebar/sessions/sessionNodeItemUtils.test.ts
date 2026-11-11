@@ -13,6 +13,7 @@ import {
   resolveSessionPrLookup,
   resolveTooltipBranchLabel,
   selectFolderRootNodes,
+  selectBlockingBadgeSessionIds,
   selectBlockingBadgeSessionScopes,
 } from './sessionNodeItemUtils';
 import type { SessionNode } from '../types';
@@ -91,6 +92,36 @@ describe('selectBlockingBadgeSessionScopes', () => {
     expect(selectBlockingBadgeSessionScopes(root, false, '/fallback')).toEqual([
       { directory: '/fallback', sessionIDs: ['root'] },
     ]);
+  });
+});
+
+describe('selectBlockingBadgeSessionIds', () => {
+  test('counts the hidden subtree of a collapsed row', () => {
+    const grandchild: SessionNode = { session: session('grandchild', 'Grandchild'), children: [], worktree: null };
+    const child: SessionNode = { session: session('child', 'Child'), children: [grandchild], worktree: null };
+    const root: SessionNode = { session: session('root', 'Root'), children: [child], worktree: null };
+
+    expect(selectBlockingBadgeSessionIds(root, false)).toEqual(['root', 'child', 'grandchild']);
+  });
+
+  test('keeps a session with no known directory, so the index still answers for it', () => {
+    const child: SessionNode = { session: session('child', 'Child'), children: [], worktree: null };
+    const root: SessionNode = { session: session('root', 'Root'), children: [child], worktree: null };
+
+    expect(selectBlockingBadgeSessionIds(root, false)).toEqual(['root', 'child']);
+  });
+
+  test('an expanded row counts its own session and the workflow agents under it', () => {
+    const agentChild: SessionNode = { session: session('agent-child', 'Agent child'), children: [], worktree: null };
+    const agent: SessionNode = {
+      session: { ...session('agent', 'Agent'), metadata: { openchamber: { kind: 'workflow-agent' } } },
+      children: [agentChild],
+      worktree: null,
+    };
+    const child: SessionNode = { session: session('child', 'Child'), children: [], worktree: null };
+    const root: SessionNode = { session: session('root', 'Root'), children: [child, agent], worktree: null };
+
+    expect(selectBlockingBadgeSessionIds(root, true)).toEqual(['root', 'agent', 'agent-child']);
   });
 });
 
