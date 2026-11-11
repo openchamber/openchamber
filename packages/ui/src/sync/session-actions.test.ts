@@ -21,6 +21,9 @@ const sessionMessageRecords = new Map<string, Array<{ info: Message; parts: Part
 // the page by index, so a paged lookup can be pinned without the flat records.
 let cursorMessagePages: Array<{ items: Array<{ info: Message; parts: Part[] }>; cursor: { next?: string } }> | null = null
 const sessionRecords = new Map<string, Session>()
+// Records the server returns for a session no sync store holds, so a test can
+// shape the cache-miss read without the lookup chain finding the record.
+const fetchedSessionRecords = new Map<string, Session>()
 const failingRevertSessionIds = new Set<string>()
 let commitRevertError: Error | null = null
 let sessionDeleteError: unknown | null = null
@@ -83,7 +86,7 @@ mock.module("@/lib/opencode/client", () => ({
     getSession: mock(async (sessionId: string, directory?: string | null): Promise<Session> => {
       replyCalls.push({ method: "session.get", params: { sessionID: sessionId, directory } })
       beforeSessionGetResolve?.()
-      const record = sessionRecords.get(sessionId)
+      const record = sessionRecords.get(sessionId) ?? fetchedSessionRecords.get(sessionId)
       if (!record) throw notFound("Session")
       return record
     }),
@@ -532,7 +535,7 @@ mock.module("./sync-refs", () => ({
 
 import { AgentUnavailableError } from "@/lib/opencode/agent-unavailable-error"
 import { getRuntimeApiBaseUrl, getRuntimeKey, switchRuntimeEndpoint } from "@/lib/runtime-switch"
-import { agentUnavailableFrom } from "./form-request-error"
+import { agentUnavailableFrom, isFormRequestNotFoundError } from "./form-request-error"
 import { INITIAL_STATE } from "./types"
 import type { State } from "./types"
 import type { DirectoryStore } from "./child-store"
@@ -2236,6 +2239,17 @@ describe("optimisticSend target directory", () => {
 describe("respondToPermission passes directory", () => {
   beforeEach(() => {
     replyCalls.length = 0
+    permissionReplyError = null
+    sessionRecords.clear()
+    fetchedSessionRecords.clear()
+    globalActiveSessions = []
+    globalArchivedSessions.length = 0
+    directoryStateOverride = null
+    sessionRecords.set("session-a", sessionFixture("session-a"))
+  })
+  afterEach(() => {
+    sessionRecords.clear()
+    fetchedSessionRecords.clear()
   })
 
   test("passes directory from child store when permission is found", async () => {
@@ -2267,12 +2281,16 @@ describe("respondToPermission passes directory", () => {
     const { setActionRefs, respondToPermission } = await import("./session-actions")
     setActionRefs(childStores, () => "/test/project")
 
+    // The server's record names no directory, so the guess stands.
+    // SAFETY: the reply reads only the record's id and directory fields.
+    fetchedSessionRecords.set("session-b", { id: "session-b" } as Session)
     await respondToPermission("session-b", "perm-2", "always")
 
-    expect(replyCalls.length).toBe(1)
-    expect(replyCalls[0].params.requestID).toBe("perm-2")
-    expect(replyCalls[0].params.reply).toBe("always")
-    expect(replyCalls[0].params.directory).toBe("/other/project")
+    const replies = replyCalls.filter((call) => call.method === "permission.reply")
+    expect(replies).toHaveLength(1)
+    expect(replies[0].params.requestID).toBe("perm-2")
+    expect(replies[0].params.reply).toBe("always")
+    expect(replies[0].params.directory).toBe("/other/project")
   })
 
   test("passes directory from current directory as last resort", async () => {
@@ -2281,12 +2299,15 @@ describe("respondToPermission passes directory", () => {
     const { setActionRefs, respondToPermission } = await import("./session-actions")
     setActionRefs(childStores, () => "/fallback/dir")
 
+    // SAFETY: the reply reads only the record's id and directory fields.
+    fetchedSessionRecords.set("unknown-session", { id: "unknown-session" } as Session)
     await respondToPermission("unknown-session", "perm-3", "reject")
 
-    expect(replyCalls.length).toBe(1)
-    expect(replyCalls[0].params.requestID).toBe("perm-3")
-    expect(replyCalls[0].params.reply).toBe("reject")
-    expect(replyCalls[0].params.directory).toBe("/fallback/dir")
+    const replies = replyCalls.filter((call) => call.method === "permission.reply")
+    expect(replies).toHaveLength(1)
+    expect(replies[0].params.requestID).toBe("perm-3")
+    expect(replies[0].params.reply).toBe("reject")
+    expect(replies[0].params.directory).toBe("/fallback/dir")
   })
 
   test("uses an explicit event directory before incomplete local routing state", async () => {
@@ -2299,6 +2320,32 @@ describe("respondToPermission passes directory", () => {
 
     expect(replyCalls.filter((call) => call.method === "permission.reply").map((call) => call.params.directory)).toContain("/event/project")
     expect(replyCalls[0].params.directory).toBe("/event/project")
+  })
+
+  test("a worktree permission whose record no store holds is answered on the record's own directory (#6555)", async () => {
+    const permission = buildPermission("perm-wt", "session-wt")
+    const store = createStore({ "session-wt": [permission] })
+    fetchedSessionRecords.set("session-wt", { ...sessionFixture("session-wt"), directory: "/test/project/wt" })
+
+    const { setActionRefs, respondToPermission } = await import("./session-actions")
+    setActionRefs(createChildStores([["/test/project", store]]), () => "/test/project")
+
+    await respondToPermission("session-wt", "perm-wt", "once")
+
+    expect(replyCalls.filter((call) => call.method === "permission.reply").map((call) => call.params.directory)).toEqual(["/test/project/wt"])
+  })
+
+  test("a failed record read sends nothing and keeps the permission pending (#6555)", async () => {
+    const permission = buildPermission("perm-unread", "session-unread")
+    const store = createStore({ "session-unread": [permission] })
+
+    const { setActionRefs, respondToPermission } = await import("./session-actions")
+    setActionRefs(createChildStores([["/test/project", store]]), () => "/test/project")
+
+    await expect(respondToPermission("session-unread", "perm-unread", "once")).rejects.toThrow()
+
+    expect(replyCalls.filter((call) => call.method === "permission.reply")).toHaveLength(0)
+    expect(store.getState().permission["session-unread"]).toEqual([permission])
   })
 })
 
@@ -3264,12 +3311,33 @@ describe("dismissPermission passes directory", () => {
     expect(replyCalls[0].params.reply).toBe("reject")
     expect(replyCalls[0].params.directory).toBe("/test/project")
   })
+
+  test("a failed record read rejects nothing and keeps the permission pending (#6555)", async () => {
+    const permission = buildPermission("perm-unread", "session-unread")
+    const store = createStore({ "session-unread": [permission] })
+    fetchedSessionRecords.clear()
+
+    const { setActionRefs, dismissPermission } = await import("./session-actions")
+    setActionRefs(createChildStores([["/test/project", store]]), () => "/test/project")
+
+    await expect(dismissPermission("session-unread", "perm-unread")).rejects.toThrow()
+
+    expect(replyCalls.filter((call) => call.method === "permission.reply")).toHaveLength(0)
+    expect(store.getState().permission["session-unread"]).toEqual([permission])
+  })
 })
 
 describe("replyToForm passes directory", () => {
+  // Seeded here so each test stands alone: the reply needs the form session's record.
   beforeEach(() => {
     replyCalls.length = 0
     formReplyError = null
+    sessionRecords.clear()
+    fetchedSessionRecords.clear()
+    sessionRecords.set("session-a", sessionFixture("session-a"))
+  })
+  afterEach(() => {
+    sessionRecords.clear()
   })
 
   test("passes directory to form.reply", async () => {
@@ -3311,6 +3379,13 @@ describe("cancelForm passes directory", () => {
   beforeEach(() => {
     replyCalls.length = 0
     formReplyError = null
+    formCancelError = null
+    sessionRecords.clear()
+    fetchedSessionRecords.clear()
+  })
+  afterEach(() => {
+    sessionRecords.clear()
+    fetchedSessionRecords.clear()
   })
 
   test("passes directory to form.cancel", async () => {
@@ -3319,11 +3394,46 @@ describe("cancelForm passes directory", () => {
     const { setActionRefs, cancelForm } = await import("./session-actions")
     setActionRefs(childStores, () => "/test/project")
 
+    sessionRecords.set("session-a", sessionFixture("session-a"))
     await cancelForm("session-a", "q-2")
 
     expect(replyCalls.length).toBe(1)
     expect(replyCalls[0].params.formID).toBe("q-2")
     expect(replyCalls[0].params.directory).toBe("/test/project")
+  })
+
+  test("a worktree form whose record no store holds is cancelled on the record's own directory (#6555)", async () => {
+    const form = buildForm("q-wt", "session-wt")
+    const store = createStore({}, { form: { "session-wt": [form] } })
+    fetchedSessionRecords.set("session-wt", { ...sessionFixture("session-wt"), directory: "/test/project/wt" })
+
+    const { setActionRefs, cancelForm } = await import("./session-actions")
+    setActionRefs(createChildStores([["/test/project", store]]), () => "/test/project")
+
+    await cancelForm("session-wt", "q-wt")
+
+    expect(replyCalls.filter((call) => call.method === "form.cancel").map((call) => call.params.directory)).toEqual(["/test/project/wt"])
+    expect(store.getState().form["session-wt"]).toBe(undefined)
+  })
+
+  test("a failed record read cancels nothing and keeps the form pending (#6555)", async () => {
+    const form = buildForm("q-unread", "session-unread")
+    const store = createStore({}, { form: { "session-unread": [form] } })
+
+    const { setActionRefs, cancelForm } = await import("./session-actions")
+    setActionRefs(createChildStores([["/test/project", store]]), () => "/test/project")
+
+    let thrown: unknown
+    try {
+      await cancelForm("session-unread", "q-unread")
+    } catch (error) {
+      thrown = error
+    }
+
+    expect(thrown).toBeInstanceOf(Error)
+    expect(isFormRequestNotFoundError(thrown)).toBe(false)
+    expect(replyCalls.filter((call) => call.method === "form.cancel")).toHaveLength(0)
+    expect(store.getState().form["session-unread"]).toEqual([form])
   })
 })
 
@@ -3359,6 +3469,9 @@ describe("replyToForm applies the composer selection", () => {
     selectionPicks.switched = false
     selectionPicks.settled.length = 0
     sessionRecords.clear()
+    fetchedSessionRecords.clear()
+    globalActiveSessions = []
+    globalArchivedSessions.length = 0
   }
 
   beforeEach(reset)
@@ -3394,6 +3507,7 @@ describe("replyToForm applies the composer selection", () => {
 
   test("a failed switch leaves the answer unsent and the pick in place", async () => {
     mainSessionId = "session-a"
+    seedSession("session-a")
     configState = { currentProviderId: "openai", currentModelId: "gpt-6" }
     selectionApplyError = new Error("model switch failed")
 
@@ -3440,6 +3554,7 @@ describe("replyToForm applies the composer selection", () => {
 
   test("a composer whose catalog has not loaded switches nothing", async () => {
     mainSessionId = "session-a"
+    seedSession("session-a")
 
     await replyInMainChat()
 
@@ -3504,6 +3619,192 @@ describe("replyToForm applies the composer selection", () => {
     expect(replyCalls.map((call) => call.method)).toEqual(["form.reply"])
   })
 
+  test("an open subagent answers on its own record, never the composer's (#6555)", async () => {
+    // The subagent's chat can be opened straight from a notification, before
+    // the composer's config has followed its record, so the app-wide config
+    // still holds the previous chat's selection. Answering must not switch
+    // the subagent off the agent and model it runs on.
+    mainSessionId = "session-a"
+    configState = { currentProviderId: "google", currentModelId: "gemini", currentVariant: "max", currentAgentName: "review" }
+    seedSession("session-a", { parentID: "session-parent", model: { ...SESSION_MODEL, variant: "high" }, agent: "plan" })
+
+    await replyInMainChat()
+
+    expect(replyMethods()).toEqual(["form.reply"])
+    expect(selectionPicks.settled).toEqual([])
+  })
+
+  test("an open subagent's own agent pick still applies, not the composer's (#6555)", async () => {
+    mainSessionId = "session-a"
+    configState = { currentProviderId: "google", currentModelId: "gemini", currentVariant: "max", currentAgentName: "review" }
+    seedSession("session-a", { parentID: "session-parent", model: SESSION_MODEL, agent: "plan" })
+    selectionPicks.agents.set("session-a", "build")
+
+    await replyInMainChat()
+
+    expect(replyMethods()).toEqual(["selection.apply", "form.reply"])
+    expect(replyCalls.find((call) => call.method === "selection.apply")?.params.selection).toEqual({ agent: "build" })
+    expect(selectionPicks.settled).toEqual([])
+  })
+
+  for (const placement of ["another directory's store", "the global cache"] as const) {
+    test(`a child whose record sits only in ${placement} still answers on its own record (#6555)`, async () => {
+      // The reply resolves a directory whose store exists but holds only
+      // other sessions (the project-holds-worktree split), so the lookup must
+      // widen instead of reading the miss as "this is the main chat".
+      mainSessionId = "session-a"
+      configState = { currentProviderId: "google", currentModelId: "gemini", currentVariant: "max" }
+      const child: Session = { ...sessionFixture("session-a"), parentID: "session-parent", model: SESSION_MODEL, agent: "plan" }
+      if (placement === "another directory's store") sessionRecords.set("session-a", child)
+      else globalActiveSessions = [child]
+      // SAFETY: the reply's directory store is read only for its session slice.
+      directoryStateOverride = () => ({ session: [sessionFixture("session-other")] }) as State
+
+      await replyInMainChat()
+
+      expect(replyMethods()).toEqual(["form.reply"])
+      expect(selectionPicks.settled).toEqual([])
+    })
+  }
+
+  test("an unknown child reads its record from the server and keeps it (#6555)", async () => {
+    mainSessionId = "session-a"
+    configState = { currentProviderId: "google", currentModelId: "gemini", currentVariant: "max", currentAgentName: "review" }
+    fetchedSessionRecords.set("session-a", {
+      ...sessionFixture("session-a"),
+      directory: "/owned/project",
+      parentID: "session-parent",
+      model: SESSION_MODEL,
+      agent: "plan",
+    })
+
+    await replyInMainChat()
+
+    expect(replyCalls.some((call) => call.method === "session.get")).toBe(true)
+    expect(replyMethods()).toEqual(["form.reply"])
+    expect(replyCalls.find((call) => call.method === "form.reply")?.params.directory).toBe("/owned/project")
+  })
+
+  test("a record an event inserts during the read wins over the older snapshot (#6555)", async () => {
+    mainSessionId = "session-a"
+    configState = { currentProviderId: "google", currentModelId: "gemini", currentAgentName: "review" }
+    const snapshot: Session = { ...sessionFixture("session-a"), directory: "/owned/older", parentID: "session-parent", agent: "plan" }
+    fetchedSessionRecords.set("session-a", snapshot)
+    const live: Session = { ...snapshot, directory: "/owned/newer", title: "Newer title" }
+    beforeSessionGetResolve = () => { globalActiveSessions = [live] }
+    try {
+      await replyInMainChat()
+    } finally {
+      beforeSessionGetResolve = null
+    }
+
+    expect(replyCalls.find((call) => call.method === "form.reply")?.params.directory).toBe("/owned/newer")
+  })
+
+  test("an unknown root reads its record from the server and answers with the composer (#6053)", async () => {
+    mainSessionId = "session-a"
+    configState = { currentProviderId: "openai", currentModelId: "gpt-6", currentAgentName: "build" }
+    fetchedSessionRecords.set("session-a", {
+      ...sessionFixture("session-a"),
+      directory: "/owned/root",
+      model: SESSION_MODEL,
+      agent: "plan",
+    })
+
+    await replyInMainChat()
+
+    expect(replyCalls.some((call) => call.method === "session.get")).toBe(true)
+    expect(replyMethods()).toEqual(["selection.apply", "form.reply"])
+    expect(replyCalls.find((call) => call.method === "selection.apply")?.params.selection).toEqual({
+      model: { providerID: "openai", id: "gpt-6" },
+      agent: "build",
+    })
+    expect(replyCalls.find((call) => call.method === "form.reply")?.params.directory).toBe("/owned/root")
+  })
+
+  test("an unknown review session reads its record from the server and gets composer semantics (#6555)", async () => {
+    mainSessionId = "session-a"
+    configState = { currentProviderId: "google", currentModelId: "gemini", currentVariant: "max", currentAgentName: "review" }
+    fetchedSessionRecords.set("session-a", {
+      ...sessionFixture("session-a"),
+      directory: "/owned/review",
+      parentID: "session-parent",
+      model: SESSION_MODEL,
+      agent: "plan",
+      metadata: { openchamber: { kind: "review", originalSessionID: "session-parent" } },
+    })
+
+    await replyInMainChat()
+
+    expect(replyCalls.some((call) => call.method === "session.get")).toBe(true)
+    expect(replyMethods()).toEqual(["selection.apply", "form.reply"])
+    expect(replyCalls.find((call) => call.method === "selection.apply")?.params.selection).toEqual({
+      model: { providerID: "google", id: "gemini", variant: "max" },
+      agent: "review",
+    })
+    expect(replyCalls.find((call) => call.method === "form.reply")?.params.directory).toBe("/owned/review")
+  })
+
+  test("a failed record read sends nothing and leaves the form pending (#6555)", async () => {
+    mainSessionId = "session-a"
+    configState = { currentProviderId: "openai", currentModelId: "gpt-6" }
+    const form = buildForm("q-1", "session-a")
+    const store = createStore({}, { form: { "session-a": [form] } })
+
+    const { setActionRefs, replyToForm } = await import("./session-actions")
+    setActionRefs(createChildStores([["/test/project", store]]), () => "/test/project")
+    const error = await replyToForm("session-a", "q-1", { choice: true }).then(() => null, (caught: Error) => caught)
+
+    // Every form caller gates on this helper: a record-read 404 classified as
+    // form-not-found dismisses the card while the form stays pending (#6555).
+    expect(error).toBeInstanceOf(Error)
+    expect(isFormRequestNotFoundError(error)).toBe(false)
+    expect(replyCalls.map((call) => call.method)).toEqual(["session.get"])
+    expect(store.getState().form["session-a"]).toEqual([form])
+  })
+
+  test("a runtime change during the record read sends nothing and leaves the form pending (#6555)", async () => {
+    const original = { apiBaseUrl: getRuntimeApiBaseUrl(), runtimeKey: getRuntimeKey() }
+    switchRuntimeEndpoint({ apiBaseUrl: "http://form-fetch.test", runtimeKey: "form-fetch" })
+    mainSessionId = "session-a"
+    configState = { currentProviderId: "openai", currentModelId: "gpt-6" }
+    fetchedSessionRecords.set("session-a", sessionFixture("session-a"))
+    const form = buildForm("q-1", "session-a")
+    const store = createStore({}, { form: { "session-a": [form] } })
+    beforeSessionGetResolve = () => switchRuntimeEndpoint({ apiBaseUrl: "http://form-other.test", runtimeKey: "form-other" })
+
+    try {
+      const { setActionRefs, replyToForm } = await import("./session-actions")
+      setActionRefs(createChildStores([["/test/project", store]]), () => "/test/project")
+      await expect(replyToForm("session-a", "q-1", { choice: true })).rejects.toThrow("runtime changed")
+
+      expect(replyCalls.map((call) => call.method)).toEqual(["session.get"])
+      expect(store.getState().form["session-a"]).toEqual([form])
+    } finally {
+      beforeSessionGetResolve = null
+      switchRuntimeEndpoint(original)
+    }
+  })
+
+  test("an open review session answers with the composer's selection despite parentID (#6555)", async () => {
+    mainSessionId = "session-a"
+    configState = { currentProviderId: "google", currentModelId: "gemini", currentVariant: "max", currentAgentName: "review" }
+    seedSession("session-a", {
+      parentID: "session-parent",
+      model: SESSION_MODEL,
+      agent: "plan",
+      metadata: { openchamber: { kind: "review", originalSessionID: "session-parent" } },
+    })
+
+    await replyInMainChat()
+
+    expect(replyMethods()).toEqual(["selection.apply", "form.reply"])
+    expect(replyCalls.find((call) => call.method === "selection.apply")?.params.selection).toEqual({
+      model: { providerID: "google", id: "gemini", variant: "max" },
+      agent: "review",
+    })
+  })
+
   test("an effort saved before a switch made elsewhere does not undo that switch", async () => {
     mainSessionId = "session-parent"
     seedSession("session-a", { model: { ...SESSION_MODEL, variant: "low" } })
@@ -3535,6 +3836,7 @@ describe("replyToForm applies the composer selection", () => {
       const home = { apiBaseUrl: "http://form-home.test", runtimeKey: "form-home" }
       switchRuntimeEndpoint(home)
       mainSessionId = "session-a"
+      seedSession("session-a")
       configState = { currentProviderId: "openai", currentModelId: "gpt-6" }
       const form = buildForm("q-1", "session-a")
       const store = createStore({}, { form: { "session-a": [form] } })
@@ -3569,6 +3871,7 @@ describe("replyToForm applies the composer selection", () => {
   test("a not-found answer from an old runtime cleans nothing up", async () => {
     const original = { apiBaseUrl: getRuntimeApiBaseUrl(), runtimeKey: getRuntimeKey() }
     switchRuntimeEndpoint({ apiBaseUrl: "http://form-home.test", runtimeKey: "form-home" })
+    seedSession("session-a")
     const form = buildForm("q-1", "session-a")
     const store = createStore({}, { form: { "session-a": [form] } })
     formReplyError = Object.assign(new Error("FormNotFoundError"), { status: 404 })
@@ -3616,6 +3919,7 @@ describe("form dismissal clears pending state without the SSE echo (issues #2911
       session: [sessionFixture("session-a")],
       form: { "session-a": [form] },
     })
+    sessionRecords.set("session-a", sessionFixture("session-a"))
     const childStores = createChildStores([["/test/project", store]])
 
     const { setActionRefs, cancelForm } = await import("./session-actions")
@@ -3636,6 +3940,7 @@ describe("form dismissal clears pending state without the SSE echo (issues #2911
       session: [sessionFixture("session-a")],
       form: { "session-a": [form] },
     })
+    sessionRecords.set("session-a", sessionFixture("session-a"))
     const childStores = createChildStores([["/test/project", store]])
 
     const { setActionRefs, replyToForm } = await import("./session-actions")
@@ -3672,6 +3977,7 @@ describe("form dismissal clears pending state without the SSE echo (issues #2911
       session: [sessionFixture("session-a")],
       form: {},
     })
+    sessionRecords.set("session-a", sessionFixture("session-a"))
 
     const { setActionRefs, cancelForm, replyToForm } = await import("./session-actions")
     setActionRefs(createChildStores([["/test/project", store]]), () => "/test/project")
@@ -3712,6 +4018,8 @@ describe("blocking request reply routing and stale recovery (issue OPE-236)", ()
       session: [{ id: "session-wt", directory: "/test/project/wt" } as Session],
       form: { "session-wt": [form] },
     })
+    // SAFETY: mirrors the session slice this store already holds.
+    sessionRecords.set("session-wt", { id: "session-wt", directory: "/test/project/wt" } as Session)
     const childStores = createChildStores([["/test/project", store]])
 
     const { setActionRefs, replyToForm } = await import("./session-actions")
@@ -3750,6 +4058,8 @@ describe("blocking request reply routing and stale recovery (issue OPE-236)", ()
       session: [{ id: "session-a" } as Session],
       form: { "session-a": [form] },
     })
+    // SAFETY: mirrors the session slice this store already holds.
+    sessionRecords.set("session-a", { id: "session-a" } as Session)
     const childStores = createChildStores([["/test/project", store]])
 
     const { setActionRefs, replyToForm } = await import("./session-actions")
@@ -3780,6 +4090,8 @@ describe("blocking request reply routing and stale recovery (issue OPE-236)", ()
         } as Part],
       },
     })
+    // SAFETY: mirrors the session slice this store already holds.
+    sessionRecords.set("session-a", { id: "session-a" } as Session)
     const childStores = createChildStores([["/test/project", store]])
     formReplyError = Object.assign(new Error("form.reply failed (404): FormNotFoundError"), { status: 404 })
 
@@ -3900,6 +4212,8 @@ describe("dismissOpenFormsForSession", () => {
     })
     const childStores = createChildStores([["/test/project", store]])
 
+    // The sync index holds every store's records; this mock reads it from sessionRecords.
+    for (const session of store.getState().session) sessionRecords.set(session.id, session)
     const { setActionRefs, dismissOpenFormsForSession } = await import("./session-actions")
     setActionRefs(childStores, () => "/test/project")
 
@@ -4062,6 +4376,8 @@ describe("dismissOpenPermissionsForSession", () => {
     })
     const childStores = createChildStores([["/test/project", store]])
 
+    // The sync index holds every store's records; this mock reads it from sessionRecords.
+    for (const session of store.getState().session) sessionRecords.set(session.id, session)
     const { setActionRefs, dismissOpenPermissionsForSession } = await import("./session-actions")
     setActionRefs(childStores, () => "/test/project")
 

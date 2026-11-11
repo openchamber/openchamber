@@ -37,8 +37,11 @@ export async function resolveSendSelection(
     if (!isCurrentRuntime()) throw new Error("Message was not sent because the runtime changed.")
     agentChanged = currentSession.agent !== desired.agent
   }
-  const sessions = getDirectoryState(directory)?.session ?? getAllSyncSessions()
-  const session = sessions.find((candidate) => candidate.id === sessionId)
+  // A directory store without the record falls through to every store: a
+  // project holds its worktrees' sessions too, and a missed record would turn
+  // an unchanged model into a switch record in the transcript.
+  const session = getDirectoryState(directory)?.session.find((candidate) => candidate.id === sessionId)
+    ?? getAllSyncSessions().find((candidate) => candidate.id === sessionId)
   // Compared in wire form: an explicit `Default` (null) switches the session
   // off an effort once, then matches the `"default"` OpenCode records for it.
   const model = toModelRef({ providerID: desired.providerID, id: desired.modelID, variant: desired.variant })

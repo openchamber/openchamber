@@ -87,6 +87,13 @@ describe("send agent selection", () => {
     expect(requests).toHaveLength(1)
   })
 
+  test("a record another store holds suppresses an unchanged model when the directory store misses it", async () => {
+    manager.getChild(DIRECTORY)?.setState({ session: [] })
+    manager.ensureChild("/repo", { bootstrap: false }).setState({ session: [session] })
+
+    expect(await selectAgent()).toEqual({ model: undefined, agent: undefined })
+  })
+
   test("a send without an agent keeps the model comparison and makes no server read", async () => {
     expect(await selectAgent()).toEqual({ model: undefined, agent: undefined })
     expect(requests).toHaveLength(0)
