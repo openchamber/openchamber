@@ -1142,11 +1142,9 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
       branchLabel={tooltipBranchLabel}
       spaceMark={branchInSpace ? t('sessions.sidebar.group.space') : null}
       statusDot={liveStateMark}
-      // Under a project, pinned and unpinned rows mix: every row keeps the
-      // pin's 12px column, so all titles end at one x.
-      pinnedMarker={isPinnedSession && !isSessionActionPending && !hidePinnedMarker
-        ? pinnedMarkerContent
-        : renderContext === 'project' && !hidePinnedMarker ? <span aria-hidden className="w-3 flex-shrink-0" /> : null}
+      // Only a row that shows a pin gives up width for it: reserving the slot
+      // on every project row cut their titles 20px short of the other lists'.
+      pinnedMarker={isPinnedSession && !isSessionActionPending && !hidePinnedMarker ? pinnedMarkerContent : null}
       // No date: the list is ordered by recency and the row's tooltip carries
       // the time. A turn's duration shows while it runs and until it is read.
       timeSlot={showActivityDuration && !waitingOnUser

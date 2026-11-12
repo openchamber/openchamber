@@ -242,7 +242,7 @@ const getTabIcon = (
   }
 
   if (tab.mode === 'walkthrough') {
-    return <Icon name="route" className="h-3.5 w-3.5" />;
+    return <Icon name="signpost" className="h-3.5 w-3.5" />;
   }
 
   if (tab.mode === 'git') {

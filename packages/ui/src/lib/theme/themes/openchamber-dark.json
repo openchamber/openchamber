@@ -56,11 +56,10 @@
         "operator": "#da6b6d"
       },
       "tokens": {
-        "commentDoc": "#687b68",
+        "commentDoc": "#7a8e7a",
         "stringEscape": "#dcd7c6",
         "variableProperty": "#bda94a",
-        "variableLocal": "#201e1c",
-        "className": "#646fba",
+        "className": "#8590d6",
         "punctuation": "#908b7e"
       },
       "highlights": {

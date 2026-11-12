@@ -134,7 +134,9 @@ import { createPortal } from 'react-dom';
 type ToolJsonViewMode = 'summary' | 'formatted' | 'raw';
 
 const TOOL_ROW_TEXT_CLASS = '!text-[length:var(--text-meta)] !leading-5 sm:!leading-6 tracking-normal';
-const TOOL_ROW_TITLE_CLASS = cn('typography-meta font-medium', TOOL_ROW_TEXT_CLASS);
+// A tool's name is the row's label: muted, regular weight. What it acted on
+// (a file name, an argument) reads in the foreground, quieter than prose.
+const TOOL_ROW_TITLE_CLASS = cn('typography-meta font-normal', TOOL_ROW_TEXT_CLASS);
 const TOOL_ROW_DESCRIPTION_CLASS = cn('typography-meta', TOOL_ROW_TEXT_CLASS);
 
 type ToolStateWithMetadata = ToolStateUnion & { metadata?: Metadata; input?: ToolInput; output?: string; error?: string; time?: { start: number; end?: number }; attachments?: Array<FilePart> };
@@ -1059,7 +1061,7 @@ const CODE_TAG_PROPS = { style: { background: 'transparent', backgroundColor: 't
 const TOOL_ERROR_ICON_STYLE: React.CSSProperties = { color: 'var(--status-error)' };
 const TOOL_NORMAL_ICON_STYLE: React.CSSProperties = { color: 'var(--tools-icon)' };
 const TOOL_ERROR_TITLE_STYLE: React.CSSProperties = { color: 'var(--status-error)' };
-const TOOL_NORMAL_TITLE_STYLE: React.CSSProperties = { color: 'var(--tools-title)' };
+const TOOL_NORMAL_TITLE_STYLE: React.CSSProperties = { color: 'var(--tools-description)' };
 
 const renderPathLikeGitChanges = (path: string, grow = true) => {
     const lastSlash = path.lastIndexOf('/');
@@ -1471,13 +1473,14 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
         }
 
         if (isFileChangeTool(part.tool) && (diffEntries.length > 0 || !!diagnosticSection)) {
+            // The row's own icon size (14px), muted at rest like the row's label.
             const renderEntryActions = (entry: DiffPatchEntry) => (
                 <>
                                 {entry.renderMode === 'diff' ? (
                                     <DiffViewToggle
                                         mode={diffViewMode}
                                         onModeChange={setDiffViewMode}
-                                        iconClassName="size-4"
+                                        iconClassName="size-3.5"
                                     />
                                 ) : null}
                                 <HoverTooltip label={t('chat.toolPart.openFileAtFirstChange')}>
@@ -1488,7 +1491,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
                                         onClick={(event) => openEntryFile(entry, event)}
                                         aria-label={t('chat.toolPart.openFileAtFirstChange')}
                                     >
-                                        <Icon name="file-edit" className="size-4" />
+                                        <Icon name="file-edit" className="size-3.5" />
                                     </Button>
                                 </HoverTooltip>
                                 <HoverTooltip label={t('chat.toolPart.openFileDiff')}>
@@ -1499,7 +1502,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
                                         onClick={(event) => openEntryDiff(entry, event)}
                                         aria-label={t('chat.toolPart.openFileDiff')}
                                     >
-                                        <Icon name="git-pull-request" className="size-4" />
+                                        <Icon name="git-pull-request" className="size-3.5" />
                                     </Button>
                                 </HoverTooltip>
                 </>
@@ -2266,7 +2269,8 @@ const ToolPartContent: React.FC<ToolPartProps & { header?: ToolRowHeader; subage
                                     <Text
                                         variant={animateTailText ? 'generate-effect' : 'static'}
                                         className={cn('min-w-0 truncate', TOOL_ROW_DESCRIPTION_CLASS)}
-                                        style={{ color: 'var(--tools-description)' }}
+                                        // The argument is what the row is about: foreground.
+                                        style={{ color: 'var(--tools-title)' }}
                                         title={description}
                                     >
                                         {description}

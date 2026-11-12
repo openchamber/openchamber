@@ -286,11 +286,11 @@ export const WorkStatusPrimaryGroup: React.FC<Props> = ({ sessionId, directory, 
   // Colour threshold uses the rounded percentage, matching what the header
   // feeds `resolveUsageTone`; the displayed number stays unrounded.
   const usageTone = usagePercent === null ? null : resolveUsageTone(Math.round(usagePercent));
-  // Same tone ramp as the header's context icon — healthy is success, not
-  // primary, so a full bar reads as a warning rather than as brand colour.
+  // Same tone ramp as the header's context icon. Below the warning threshold
+  // the fill is neutral: green means finished, and a context in use is not.
   const meterColor = usageTone === 'critical' ? 'var(--status-error)'
     : usageTone === 'warn' ? 'var(--status-warning)'
-      : 'var(--status-success)';
+      : 'var(--muted-foreground)';
 
   // Rollup total: own cost plus every descendant subagent's cost, recursively
   // (see useSubagentCostRollup). Shown here instead of session.cost alone, so
@@ -309,7 +309,7 @@ export const WorkStatusPrimaryGroup: React.FC<Props> = ({ sessionId, directory, 
 
   return children({
       session: hasSession ? (
-        <WorkStatusSection title={t('chat.workStatus.section.session')}>
+        <WorkStatusSection title={t('chat.workStatus.section.session')} icon="chat-4">
           {contextUsage !== null ? (
             <>
               <WorkStatusRow
@@ -325,8 +325,9 @@ export const WorkStatusPrimaryGroup: React.FC<Props> = ({ sessionId, directory, 
                     <WorkStatusValue>{usagePercent !== null ? formatPercent(usagePercent) : UNKNOWN_PERCENT}</WorkStatusValue>
                     {/* No icon of its own: the sprite has no currency glyph, and
                         spend belongs with consumption anyway. The `$` labels it. */}
-                    {/* The card's one value style, as the percent beside it. */}
-                    {cost !== null ? <WorkStatusValue>{formatCost(cost)}</WorkStatusValue> : null}
+                    {/* The card's one value style and separator: "0.1% · $0.0112",
+                        as Turn stats writes "1m 35s · $0.003". */}
+                    {cost !== null ? <WorkStatusValue>{`· ${formatCost(cost)}`}</WorkStatusValue> : null}
                   </>
                 )}
               />
@@ -364,6 +365,7 @@ export const WorkStatusPrimaryGroup: React.FC<Props> = ({ sessionId, directory, 
       repository: hasRepository ? (
         <WorkStatusSection
           title={t('chat.workStatus.section.project')}
+          icon="folder"
           subject={projectLabel}
         >
           {attentionLabel ? <WorkStatusCallout>{attentionLabel}</WorkStatusCallout> : null}

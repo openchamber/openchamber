@@ -640,7 +640,8 @@ const ChatViewport = React.memo(({
                         observeMutations={false}
                         onThumbDragStart={onScrollbarDrag}
                     />
-                    {showPromptNavigator && promptTurnIds.length >= 2 ? (
+                    {/* From three turns: with one or two its mark read as a stray dash. */}
+                    {showPromptNavigator && promptTurnIds.length >= 3 ? (
                         <PromptNavigatorRail
                             sessionId={currentSessionId}
                             directory={directory}

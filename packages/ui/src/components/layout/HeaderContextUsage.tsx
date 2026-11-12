@@ -11,8 +11,10 @@ import { useCurrentContextReading } from './useCurrentContextReading';
 
 const UNKNOWN_PERCENT = '—';
 
+// Neutral until the warning threshold, as the Session card's meter: green
+// means finished, and a context in use is not.
 const TONE_COLOR = {
-  safe: 'var(--status-success)',
+  safe: 'var(--muted-foreground)',
   warn: 'var(--status-warning)',
   critical: 'var(--status-error)',
 } as const;

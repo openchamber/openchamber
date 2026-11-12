@@ -32,8 +32,9 @@ const SECTION_CLASS = cn(
   '[&:not(:first-child)]:mt-5',
 );
 
-// A section's caption, as the sidebar writes them: a muted word at the rows' size.
-const HEADING_CLASS = 'text-[0.8125rem] font-medium text-muted-foreground';
+// A section's header at the rows' size, in the foreground over the muted row
+// labels under it, so a header never reads as one more row.
+const HEADING_CLASS = 'text-[0.8125rem] font-medium text-foreground';
 const TOUCH_HEADING_CLASS = 'typography-meta font-semibold text-muted-foreground';
 const SUMMARY_CLASS = 'min-w-0 max-w-[60%] truncate text-end tabular-nums';
 // A heading's value reads as a row's value does: the rows' size, in the text
@@ -48,6 +49,8 @@ const TouchCard: React.FC<{ children: React.ReactNode }> = ({ children }) => (
 
 export const WorkStatusSection: React.FC<{
   title: string;
+  /** Every header carries an icon in the rows' icon column, so all labels start at one x. */
+  icon: IconName;
   /**
    * Names what the section is about (the project). It takes the heading's
    * trailing value, where a collapsible section shows its summary, so every
@@ -57,7 +60,7 @@ export const WorkStatusSection: React.FC<{
   /** Aggregate for the whole section; belongs on the heading, not on a row. */
   summary?: React.ReactNode;
   children: React.ReactNode;
-}> = ({ title, subject, summary, children }) => {
+}> = ({ title, icon, subject, summary, children }) => {
   const touch = React.useContext(WorkStatusTouchContext);
   const trailing = summary ?? subject;
   return (
@@ -65,6 +68,7 @@ export const WorkStatusSection: React.FC<{
       {/* As tall as a collapsible section's heading, so every gap between
           sections is the same. */}
       <div data-work-status-heading className={cn('flex items-center gap-2', touch ? 'mb-1.5 min-h-6 px-2.5' : 'mb-0.5 h-6 px-1')}>
+        {touch ? null : <Icon name={icon} className="size-3.5 shrink-0 text-muted-foreground" />}
         <h3 className={cn(touch ? TOUCH_HEADING_CLASS : HEADING_CLASS, 'min-w-0 flex-1 truncate')}>
           {title}
         </h3>
@@ -119,7 +123,8 @@ export const WorkStatusCollapsibleSection: React.FC<{
           aria-expanded={expanded}
           onClick={() => setExpandedInStore(id, !expanded)}
           className={cn(
-            'group/section flex min-w-0 flex-1 items-center gap-1.5 rounded-md text-start',
+            // The rows' icon-to-label gap, so every label starts at one x.
+            'group/section flex min-w-0 flex-1 items-center gap-2 rounded-md text-start',
             // On the phone the whole heading is the tap target, as tall as a finger needs.
             touch ? 'min-h-9' : 'px-1',
             // No hover fill anywhere in the panel: at this row density the blocks
@@ -402,11 +407,12 @@ export const WorkStatusCallout: React.FC<{ children: React.ReactNode }> = ({ chi
 export const WorkStatusMeter: React.FC<{ percent: number; color: string }> = ({ percent, color }) => {
   const touch = React.useContext(WorkStatusTouchContext);
   return (
-    // A meter, not a rule: 3px with round ends on a quiet track, and any fill
-    // above zero at least as long as the bar is tall, so 0.1% shows as a dot.
-    <div className={cn('h-[3px] overflow-hidden rounded-full bg-[color-mix(in_srgb,var(--foreground)_7%,transparent)]', touch ? 'mx-2.5 mb-2' : 'mx-1 mb-1')}>
+    // A meter, not a rule: 4px with round ends on a quiet track, set a few
+    // pixels under its row, and any fill above zero at least as long as the
+    // bar is tall, so 0.1% shows as a dot.
+    <div className={cn('h-1 overflow-hidden rounded-full bg-[color-mix(in_srgb,var(--foreground)_8%,transparent)]', touch ? 'mx-2.5 mt-1 mb-2' : 'mx-1 mt-1 mb-2')}>
       <div
-        className={cn('h-full rounded-full', percent > 0 && 'min-w-[3px]')}
+        className={cn('h-full rounded-full', percent > 0 && 'min-w-1')}
         style={{ width: `${Math.max(0, Math.min(100, percent))}%`, backgroundColor: color }}
       />
     </div>

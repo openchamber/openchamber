@@ -60,14 +60,13 @@
       "tokens": {
         "stringEscape": "#393a32",
         "variableProperty": "#9a8402",
-        "variableLocal": "#cfd0c9",
         "className": "#5567b6",
         "punctuation": "#6b6b61",
         "url": "#136aad"
       },
       "highlights": {
-        "diffAdded": "#2c751e",
-        "diffRemoved": "#ab5959",
+        "diffAdded": "#1f8a36",
+        "diffRemoved": "#c4413b",
         "diffModified": "#2d7d8c",
         "diffModifiedBackground": "#2d7d8c20"
       }
@@ -85,7 +84,7 @@
       "link": "#2d7d8c",
       "linkHover": "#296aa3",
       "inlineCode": "#262521",
-      "inlineCodeBackground": "#f7f6f4",
+      "inlineCodeBackground": "#ecebe7",
       "blockquote": "#6b6b63",
       "blockquoteBorder": "#d8d5d0",
       "listMarker": "#1e754f99",
@@ -95,11 +94,11 @@
     "tools": {
       "border": "#d8d5d073",
       "icon": "#696960",
-      "title": "#44443d",
+      "title": "#262521",
       "description": "#696960",
       "edit": {
-        "addedBackground": "#2c751e25",
-        "removedBackground": "#ab595925",
+        "addedBackground": "#1f8a3625",
+        "removedBackground": "#c4413b25",
         "lineNumber": "#696960"
       }
     }

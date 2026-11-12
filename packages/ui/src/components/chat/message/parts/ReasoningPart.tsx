@@ -19,7 +19,9 @@ import { useReasoningReveal } from '@/components/chat/search/reasoningReveal';
 import { dispatchRowExpand } from '@/components/chat/lib/scroll/timelineScrollIntent';
 
 const TOOL_ROW_TEXT_CLASS = '!text-[length:var(--text-meta)] !leading-5 sm:!leading-6 tracking-normal';
-const TOOL_ROW_TITLE_CLASS = cn('typography-meta font-medium', TOOL_ROW_TEXT_CLASS);
+// A tool's name is the row's label: muted, regular weight. What it acted on
+// (a file name, an argument) reads in the foreground, quieter than prose.
+const TOOL_ROW_TITLE_CLASS = cn('typography-meta font-normal', TOOL_ROW_TEXT_CLASS);
 const TOOL_ROW_DESCRIPTION_CLASS = cn('typography-meta', TOOL_ROW_TEXT_CLASS);
 
 type PartWithText = Part & { text?: string; content?: string; time?: { start?: number; end?: number } };
@@ -431,7 +433,7 @@ export const ReasoningTimelineBlock: React.FC<ReasoningTimelineBlockProps> = ({
                     </div>
 
                     {isStreaming ? (
-                        <span className={cn('flex items-center gap-1', TOOL_ROW_TITLE_CLASS)} style={{ color: 'var(--tools-title)' }}>
+                        <span className={cn('flex items-center gap-1', TOOL_ROW_TITLE_CLASS)} style={{ color: 'var(--tools-description)' }}>
                             <span>{title}</span>
                             <BusyDots />
                         </span>

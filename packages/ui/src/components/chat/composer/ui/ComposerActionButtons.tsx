@@ -76,6 +76,11 @@ export const ComposerActionButtons = React.memo(function ComposerActionButtons(p
             }}
             className={cn(
                 footerIconButtonClass,
+                // A raised round button, the jump-to-bottom pill's recipe: the
+                // composer's main action stands up from the footer. The same
+                // 28px circle in both states, so the footer never changes width.
+                'rounded-full oc-raised bg-[var(--surface-background)] dark:bg-surface-elevated',
+                !isMobile && 'h-7 w-7',
                 canSend && (currentSessionId || newSessionDraftOpen)
                     ? 'text-primary hover:text-primary'
                     // Disabled, it rests in the secondary tone: present, not pressable.

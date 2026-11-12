@@ -463,8 +463,9 @@ export const ContextPanelRail: React.FC = () => {
       <DndContext sensors={sensors} collisionDetection={collisionDetection} onDragStart={handleDragStart} onDragCancel={handleDragCancel} onDragEnd={handleDragEnd}>
         {groups.map((group, groupIndex) => (
           <React.Fragment key={contextSurfaceGroup(group[0])}>
-          {/* Groups are set apart by space alone: an empty item doubles the gap. */}
-          {groupIndex > 0 ? <div aria-hidden="true" className="h-0 shrink-0" /> : null}
+          {/* Groups are set apart by space alone: a 6px spacer between two gaps
+              makes 22px against the 8px inside a group, plainly a new group. */}
+          {groupIndex > 0 ? <div aria-hidden="true" className="h-1.5 shrink-0" /> : null}
           <SortableContext items={group.map((surface) => surface.id)} strategy={verticalListSortingStrategy}>
           {group.map((surface) => {
             orderNumber += 1;
@@ -529,8 +530,9 @@ export const ContextPanelRail: React.FC = () => {
             onClick={() => setIsSurfacesDialogOpen(true)}
             className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:text-foreground"
           >
-            {/* Its own glyph: the sliders mean the sidebar's display options. */}
-            <Icon name="apps" className="h-[17px] w-[17px]" />
+            {/* Choosing which surfaces show: the Session card's sections button
+                means the same and takes the same glyph. */}
+            <Icon name="list-check-2" className="h-[17px] w-[17px]" />
           </button>
         </TooltipTrigger>
         <TooltipContent side="left" sideOffset={8}>

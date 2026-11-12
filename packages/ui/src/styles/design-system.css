@@ -467,8 +467,19 @@
    the canvas, as if recessed or disabled. Like every raised control in a
    light theme it takes the canvas colour and lifts on its ring and shadow.
    Dark themes keep the elevated fill, lighter than the page. */
+.oc-composer-surface {
+  --oc-composer-foreground: var(--surface-elevated-foreground);
+}
+
+/* The fill and its text go together: on the canvas fill the composer and its
+   editor (composer/editor/theme.ts) write in the canvas foreground. A light
+   theme with a white canvas and dark elevated surfaces would otherwise type
+   its elevated foreground, white, on white. */
 html:not(.dark) .oc-composer-surface {
   background-color: var(--surface-background);
+  --oc-composer-foreground: var(--surface-foreground);
+  --foreground: var(--surface-foreground);
+  color: var(--foreground);
 }
 
 /* The desktop composer box in dark themes: the text fields' faint sheen,
@@ -676,10 +687,25 @@ html:not(.dark) .oc-composer-surface {
    theme, a model in the picker. The selection token is translucent, so on
    the sidebar, a tile, a dialog and a glass menu it came out as four
    different tones. Painted over the chat's page colour it is one opaque tone
-   wherever the row sits. Text colour stays with the caller. */
+   wherever the row sits. Like bg-interactive-selection it owns its text
+   context: children writing text-foreground get the selection's foreground,
+   so a theme with a dark selection and light selection text stays legible. */
 .oc-selected {
   background-color: var(--oc-chat-background);
   background-image: linear-gradient(var(--interactive-selection), var(--interactive-selection));
+  --foreground: var(--interactive-selection-foreground);
+  color: var(--foreground);
+}
+
+/* Light themes: one layer of the selection stood off the sidebar by a third
+   of the luminance step it has in dark themes (contrast 1.10 against 1.42 in
+   the default themes). Three layers of the same tint bring it to about the
+   dark step (1.38) and keep each theme's own hue. */
+html:not(.dark) .oc-selected {
+  background-image:
+    linear-gradient(var(--interactive-selection), var(--interactive-selection)),
+    linear-gradient(var(--interactive-selection), var(--interactive-selection)),
+    linear-gradient(var(--interactive-selection), var(--interactive-selection));
 }
 }
 

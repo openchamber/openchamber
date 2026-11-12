@@ -28,38 +28,27 @@ export const PIERRE_DIFF_TINT_CSS = `
   }
 `;
 
-// The row between hunks ("N unmodified lines"): a faint tint with hairlines
-// above and below and its label in the line-number colour beside the gutter,
-// the same in the Changes view and in a tool's diff in the chat, where
-// Pierre's default solid band was the loudest thing in the card. Injected
-// into each diff's shadow root.
+// The row between hunks ("N unmodified lines"): muted text on the diff's own
+// background (24px, the height the virtualized Changes view lays rows out
+// with), the same in the Changes view and in
+// a tool's diff in the chat. A tinted band with hairlines read heavier than
+// the rows it introduces. Injected into each diff's shadow root.
 export const PIERRE_SEPARATOR_CSS = `
   [data-diff-header],
   [data-diff] {
     [data-separator] {
       height: 24px !important;
+      background: var(--diffs-bg) !important;
     }
   }
 
-  /* A faint tint and hairlines above and below, across every column of both
-     sides, so two hunks read as two even where the label shows on one side
-     only. Inset shadows, not borders: the row keeps the height Pierre lays
-     out with. */
+  /* No fill and no lines, in every column of both sides: the label alone,
+     in the line-number colour, says the hunks are apart. */
   [data-separator="line-info-basic"] {
     height: 24px !important;
-    background: color-mix(in srgb, var(--diffs-fg) 2%, var(--diffs-bg)) !important;
+    background: var(--diffs-bg) !important;
     position: relative;
-    box-shadow:
-      inset 0 1px 0 var(--interactive-border),
-      inset 0 -1px 0 var(--interactive-border);
-  }
-
-  [data-separator="line-info-basic"][data-separator-first] {
-    box-shadow: inset 0 -1px 0 var(--interactive-border);
-  }
-
-  [data-separator="line-info-basic"][data-separator-last] {
-    box-shadow: inset 0 1px 0 var(--interactive-border);
+    box-shadow: none !important;
   }
 
   [data-diff-type="single"] [data-gutter],
