@@ -147,6 +147,10 @@ export function createDictationRuntime({
       emit: ({ type, payload }) => send({ type, ...payload }),
       createSttSession: (options) => service.createSttSession(options),
       correctTranscript,
+      // One diagnostic line per stream event, so a dictation that stops early
+      // or finalizes slowly can be traced afterwards. It never carries the
+      // transcript text, only lengths and counters.
+      log: (line) => console.log(line),
     });
 
     send({ type: 'ready' });

@@ -172,20 +172,42 @@ export class DictationStreamManager {
    * @param {number} [params.finalTimeoutMs]
    * @param {number} [params.segmentMinSeconds] audio before a pause may split a segment
    * @param {number} [params.segmentMaxSeconds] hard segment cap for pauseless speech
+   * @param {(line: string) => void} [params.log]
+   *   Receives one diagnostic line per stream event. Silent by default, so a
+   *   caller that does not pass it gets no output. Never carries transcript
+   *   text, only lengths and counters.
    */
-  constructor({ emit, createSttSession, correctTranscript, finalTimeoutMs, segmentMinSeconds, segmentMaxSeconds }) {
+  constructor({ emit, createSttSession, correctTranscript, finalTimeoutMs, segmentMinSeconds, segmentMaxSeconds, log }) {
     this.emit = emit;
     this.createSttSession = createSttSession;
     this.correctTranscript = correctTranscript ?? null;
     this.finalTimeoutMs = finalTimeoutMs ?? DEFAULT_FINAL_TIMEOUT_MS;
     this.segmentMinSeconds = segmentMinSeconds ?? DEFAULT_SEGMENT_MIN_SECONDS;
     this.segmentMaxSeconds = segmentMaxSeconds ?? DEFAULT_SEGMENT_MAX_SECONDS;
+    this.log = typeof log === 'function' ? log : () => {};
     this.streams = new Map();
+  }
+
+  /**
+   * Write one diagnostic line. A log sink that throws must never break a
+   * stream, so the call is contained here rather than at every site.
+   */
+  logLine(line) {
+    try {
+      this.log(line);
+    } catch {
+      // a broken sink is not a broken dictation
+    }
+  }
+
+  /** Audio seconds the stream has carried so far, at provider rate. */
+  streamAudioSeconds(state) {
+    return state.audioSecondsTotal.toFixed(1);
   }
 
   cleanupAll() {
     for (const dictationId of Array.from(this.streams.keys())) {
-      this.cleanupStream(dictationId);
+      this.cleanupStream(dictationId, 'cancel');
     }
   }
 
@@ -195,7 +217,7 @@ export class DictationStreamManager {
    * @param {object} startOptions provider/config options forwarded to createSttSession
    */
   async handleStart(dictationId, format, startOptions = {}) {
-    this.cleanupStream(dictationId);
+    this.cleanupStream(dictationId, 'restart');
 
     const inputRate = parsePcmRateFromFormat(format, 16000) ?? 16000;
     if (!Number.isFinite(inputRate) || inputRate <= 0) {
@@ -231,8 +253,18 @@ export class DictationStreamManager {
       // event arrives after an async hop, and zeroing the counters on arrival
       // would discard audio that came in meanwhile — up to and including
       // mistaking the tail of the dictation for silence and clearing it.
+      //
+      // One timestamp per commit in flight, oldest first: with two commits
+      // outstanding a single field would be overwritten and the first
+      // round-trip would read far too short.
+      const commitStartedAt = state.commitStartedAt.shift();
+      const roundTripMs = commitStartedAt === undefined ? 0 : Date.now() - commitStartedAt;
       state.committedSegmentIds.push(segmentId);
       state.pendingCommits = Math.max(0, state.pendingCommits - 1);
+      this.logLine(
+        `[dictation] ${dictationId} committed segmentId=${segmentId} roundTripMs=${roundTripMs}` +
+          ` segments=${state.committedSegmentIds.length}`,
+      );
 
       this.maybeFinalizeStream(dictationId);
     });
@@ -265,7 +297,7 @@ export class DictationStreamManager {
       this.failAndCleanupStream(dictationId, message, true);
     });
 
-    this.streams.set(dictationId, {
+    const state = {
       dictationId,
       inputFormat: format,
       stt,
@@ -299,7 +331,25 @@ export class DictationStreamManager {
           ? { language: startOptions.language }
           : null,
       correcting: false,
-    });
+      startedAt: Date.now(),
+      audioSecondsTotal: 0,
+      // Start time of every commit still waiting for its `committed` event,
+      // oldest first.
+      commitStartedAt: [],
+      commitCount: 0,
+    };
+    this.streams.set(dictationId, state);
+
+    const provider = startOptions.provider === 'openai-compatible' ? 'openai-compatible' : 'local';
+    const model =
+      provider === 'openai-compatible'
+        ? startOptions.openaiCompatible?.model ?? 'default'
+        : startOptions.localModel ?? 'default';
+    this.logLine(
+      `[dictation] ${dictationId} start inputRate=${inputRate} outputRate=${stt.requiredSampleRate}` +
+        ` provider=${provider} model=${model} language=${startOptions.language || 'auto'}` +
+        ` correct=${state.correction ? 'true' : 'false'}`,
+    );
 
     this.emitAck(dictationId, -1);
   }
@@ -374,6 +424,13 @@ export class DictationStreamManager {
     state.finishRequested = true;
     state.finalSeq = finalSeq;
 
+    this.logLine(
+      `[dictation] ${dictationId} finish finalSeq=${finalSeq} ackSeq=${state.ackSeq}` +
+        ` unackedChunks=${finalSeq >= 0 ? Math.max(0, finalSeq - state.ackSeq) : 0}` +
+        ` bufferedChunks=${state.receivedChunks.size} committedSegments=${state.committedSegmentIds.length}` +
+        ` pendingCommits=${state.pendingCommits} audioSeconds=${this.streamAudioSeconds(state)}`,
+    );
+
     if (
       finalSeq >= 0 &&
       state.ackSeq < 0 &&
@@ -385,7 +442,7 @@ export class DictationStreamManager {
         'Dictation finished but no audio chunks were received',
         true,
       );
-      this.cleanupStream(dictationId);
+      this.cleanupStream(dictationId, 'error');
       return;
     }
 
@@ -402,14 +459,15 @@ export class DictationStreamManager {
       clearTimeout(updatedState.finalTimeout);
     }
     updatedState.finalTimeout = setTimeout(() => {
-      this.failAndCleanupStream(dictationId, 'Timed out waiting for final transcription', true);
+      this.failStream(dictationId, 'Timed out waiting for final transcription', true);
+      this.cleanupStream(dictationId, 'timeout');
     }, timeoutMs);
 
     this.emit({ type: 'finish_accepted', payload: { dictationId, timeoutMs } });
   }
 
   handleCancel(dictationId) {
-    this.cleanupStream(dictationId);
+    this.cleanupStream(dictationId, 'cancel');
   }
 
   emitAck(dictationId, ackSeq) {
@@ -417,6 +475,12 @@ export class DictationStreamManager {
   }
 
   failStream(dictationId, error, retryable, reasonCode) {
+    const state = this.streams.get(dictationId);
+    this.logLine(
+      `[dictation] ${dictationId} error message="${error}" retryable=${retryable ? 'true' : 'false'}` +
+        ` committedSegments=${state ? state.committedSegmentIds.length : 0}` +
+        ` missingSeqs=${state && state.finalSeq !== null ? Math.max(0, state.finalSeq - state.ackSeq) : 'unknown'}`,
+    );
     this.emit({
       type: 'error',
       payload: {
@@ -430,10 +494,10 @@ export class DictationStreamManager {
 
   failAndCleanupStream(dictationId, error, retryable) {
     this.failStream(dictationId, error, retryable);
-    this.cleanupStream(dictationId);
+    this.cleanupStream(dictationId, 'error');
   }
 
-  cleanupStream(dictationId) {
+  cleanupStream(dictationId, reason = 'cancel') {
     const state = this.streams.get(dictationId);
     if (!state) {
       return;
@@ -446,6 +510,11 @@ export class DictationStreamManager {
     } catch {
       // no-op
     }
+    this.logLine(
+      `[dictation] ${dictationId} cleanup reason=${reason} committedSegments=${state.committedSegmentIds.length}` +
+        ` audioSeconds=${this.streamAudioSeconds(state)}` +
+        ` durationMs=${Date.now() - state.startedAt} finishSealed=${state.finishSealed ? 'true' : 'false'}`,
+    );
     this.streams.delete(dictationId);
   }
 
@@ -503,27 +572,44 @@ export class DictationStreamManager {
     }
     state.stt.appendPcm16(pcm16);
     state.bytesSinceCommit += pcm16.length;
+    state.audioSecondsTotal += pcm16.length / Math.max(1, state.outputRate * 2);
     state.peakSinceCommit = Math.max(state.peakSinceCommit, pcm16lePeakAbs(pcm16));
   }
 
   /** Commit the current segment, or drop it when it holds only silence. */
   endSegment(state) {
     const silent = state.peakSinceCommit < SILENCE_PEAK_THRESHOLD;
+    const segmentBytes = state.bytesSinceCommit;
     state.bytesSinceCommit = 0;
     state.peakSinceCommit = 0;
     if (silent) {
       state.stt.clear();
       return;
     }
-    this.commitSegment(state);
+    this.commitSegment(state, segmentBytes);
   }
 
   /**
    * Issue a commit and record it as in flight. The session acknowledges with a
    * `committed` event; until then the manager must not finalize, or the
    * segment's transcript would be missing from the final text.
+   *
+   * @param {object} state
+   * @param {number} segmentBytes audio the committed segment carries
    */
-  commitSegment(state) {
+  commitSegment(state, segmentBytes) {
+    const now = Date.now();
+    const audioSeconds = segmentBytes / Math.max(1, state.outputRate * 2);
+    const previousStartedAt = state.commitStartedAt.length
+      ? state.commitStartedAt[state.commitStartedAt.length - 1]
+      : null;
+    const sinceLastCommitMs = previousStartedAt === null ? 0 : now - previousStartedAt;
+    state.commitCount += 1;
+    state.commitStartedAt.push(now);
+    this.logLine(
+      `[dictation] ${state.dictationId} commit segment=${state.commitCount}` +
+        ` audioSeconds=${audioSeconds.toFixed(1)} sinceLastCommitMs=${sinceLastCommitMs}`,
+    );
     state.pendingCommits += 1;
     try {
       state.stt.commit();
@@ -548,6 +634,8 @@ export class DictationStreamManager {
       return;
     }
 
+    let tailDropped = false;
+    let droppedTranscripts = 0;
     if (state.bytesSinceCommit > 0) {
       const silent = state.peakSinceCommit < SILENCE_PEAK_THRESHOLD;
       try {
@@ -557,11 +645,20 @@ export class DictationStreamManager {
         return;
       }
       if (silent) {
+        const before = state.transcriptsBySegmentId.size;
         this.dropUncommittedNonFinalTranscripts(state);
+        droppedTranscripts = before - state.transcriptsBySegmentId.size;
+        tailDropped = true;
       }
     }
 
     state.finishSealed = true;
+    this.logLine(
+      `[dictation] ${dictationId} seal silentTailDropped=${tailDropped ? 'true' : 'false'}` +
+        ` droppedTranscripts=${droppedTranscripts}` +
+        ` committedSegments=${state.committedSegmentIds.length}` +
+        ` pendingCommits=${state.pendingCommits}`,
+    );
   }
 
   dropUncommittedNonFinalTranscripts(state) {
@@ -602,8 +699,9 @@ export class DictationStreamManager {
     }
 
     if (orderedSegmentIds.length === 0) {
+      this.logFinal(dictationId, state, 0, '');
       this.emit({ type: 'final', payload: { dictationId, text: '' } });
-      this.cleanupStream(dictationId);
+      this.cleanupStream(dictationId, 'final');
       return;
     }
 
@@ -620,8 +718,9 @@ export class DictationStreamManager {
       .trim();
 
     if (!state.correction || !orderedText) {
+      this.logFinal(dictationId, state, orderedSegmentIds.length, orderedText);
       this.emit({ type: 'final', payload: { dictationId, text: orderedText } });
-      this.cleanupStream(dictationId);
+      this.cleanupStream(dictationId, 'final');
       return;
     }
 
@@ -633,8 +732,20 @@ export class DictationStreamManager {
         if (this.streams.get(dictationId) !== state) {
           return;
         }
+        this.logFinal(dictationId, state, orderedSegmentIds.length, text);
         this.emit({ type: 'final', payload: { dictationId, text } });
-        this.cleanupStream(dictationId);
+        this.cleanupStream(dictationId, 'final');
       });
+  }
+
+  /**
+   * Log a finished dictation: how many segments, how long the text is, and how
+   * long it took. The text itself is never logged, only its character count.
+   */
+  logFinal(dictationId, state, segmentCount, text) {
+    this.logLine(
+      `[dictation] ${dictationId} final segments=${segmentCount} chars=${typeof text === 'string' ? text.length : 0}` +
+        ` durationMs=${Date.now() - state.startedAt}`,
+    );
   }
 }
