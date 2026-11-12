@@ -528,7 +528,7 @@ function SessionProjectScrollerComponent({ model, view, actions }: SessionProjec
     }
     if (row.kind === 'search-archived-caption') return <SidebarSearchArchivedCaption />;
     if (row.kind === 'search-show-more') return <SidebarSearchShowMore section={row.section} hidden={row.hidden} onShow={model.search?.showMore} />;
-    if (row.kind === 'search-more') return <SidebarSearchMore onLoadMore={model.search?.loadMore} />;
+    if (row.kind === 'search-more') return <SidebarSearchMore onLoadMore={() => model.search?.loadMore(row.section)} />;
     if (row.kind === 'draft') {
       return <SessionDraftRow
         draft={row.draft} depth={row.depth} detailed={row.detailed} mixed={row.mixed}

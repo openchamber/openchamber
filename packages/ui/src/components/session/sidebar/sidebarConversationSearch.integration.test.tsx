@@ -17,13 +17,15 @@ let dom: Window;
 let root: Root;
 let originals: Map<string, PropertyDescriptor | undefined>;
 let requests: URL[];
+// What the active block's request answers with, and the archived block's.
 let response: GroupedSearchPage;
+let archivedResponse: GroupedSearchPage;
 let failRequest: boolean;
 let searchTimers: Map<ReturnType<Window['setTimeout']>, () => void>;
 let setQuery: (query: string) => void;
 let setScope: (scope: SearchScope) => void;
 let I18nProvider: typeof import('@/lib/i18n').I18nProvider;
-let useConversationSearch: typeof import('@/hooks/useConversationSearch').useConversationSearch;
+let useSidebarConversationSearch: typeof import('./useSidebarConversationSearch').useSidebarConversationSearch;
 let SidebarConversationRow: typeof import('./SidebarConversationRow').SidebarConversationRow;
 let SidebarSearchMore: typeof import('./SidebarConversationRow').SidebarSearchMore;
 let SidebarSearchArchivedCaption: typeof import('./SidebarConversationRow').SidebarSearchArchivedCaption;
@@ -34,6 +36,7 @@ beforeEach(async () => {
   dom = new Window({ url: 'http://localhost' });
   requests = [];
   response = { status: 'ok', hits: [], next: null, totals: null, index: null };
+  archivedResponse = { status: 'ok', hits: [], next: null, totals: { sessions: 0, byDirectory: {} }, index: null };
   failRequest = false;
   searchTimers = new Map();
   const originalSetTimeout = dom.setTimeout.bind(dom);
@@ -53,12 +56,12 @@ beforeEach(async () => {
     MouseEvent: dom.MouseEvent, PointerEvent: dom.PointerEvent, KeyboardEvent: dom.KeyboardEvent,
     ResizeObserver: dom.ResizeObserver, getComputedStyle: dom.getComputedStyle.bind(dom),
     requestAnimationFrame: dom.requestAnimationFrame.bind(dom), cancelAnimationFrame: dom.cancelAnimationFrame.bind(dom),
-    IS_REACT_ACT_ENVIRONMENT: true, fetch: async (input: RequestInfo | URL) => { requests.push(new URL(String(input), 'http://localhost')); if (failRequest) throw new Error('offline'); return Response.json(response); },
+    IS_REACT_ACT_ENVIRONMENT: true, fetch: async (input: RequestInfo | URL) => { const url = new URL(String(input), 'http://localhost'); requests.push(url); if (failRequest) throw new Error('offline'); return Response.json(url.searchParams.get('lifecycle') === 'archived' ? archivedResponse : response); },
   };
   originals = new Map(Object.keys(globals).map((key) => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
   for (const [key, value] of Object.entries(globals)) Object.defineProperty(globalThis, key, { value, configurable: true, writable: true });
   ({ I18nProvider } = await import('@/lib/i18n'));
-  ({ useConversationSearch } = await import('@/hooks/useConversationSearch'));
+  ({ useSidebarConversationSearch } = await import('./useSidebarConversationSearch'));
   ({ SidebarConversationRow, SidebarSearchMore, SidebarSearchArchivedCaption, SidebarSearchShowMore } = await import('./SidebarConversationRow'));
   ({ useUIStore } = await import('@/stores/useUIStore'));
   useUIStore.setState({ messageSearchEnabled: false });
@@ -96,9 +99,9 @@ function Search({ mobile = false, vscode = false }: { mobile?: boolean; vscode?:
   const scope = React.useMemo(() => resolveSidebarSearchScope({ projects, worktrees, knownDirectories: vscode ? new Set(['/repo/a']) : knownDirectories, isVSCode: vscode }), [vscode]);
   const metadata = React.useMemo(() => sidebarSearchMetadata({ sessions: [...sessions, ...archivedSessions], isAdmitted: scope.isAdmitted, owners: fixture.sessionOwnerById, projects, worktrees }), [scope]);
   const query = searchScopeQuery(scopeChoice);
-  const search = useConversationSearch({ enabled: scope.available, text, lifecycle: 'all', searchIn: query.searchIn, author: query.author, metadataItems: metadata, directories: scope.directories, isAdmitted: scope.isAdmitted });
+  const search = useSidebarConversationSearch({ enabled: scope.available, text, searchIn: query.searchIn, author: query.author, metadataItems: metadata, directories: scope.directories, isAdmitted: scope.isAdmitted });
   const model = buildSessionSidebarRowModel({ ...fixture, mode: 'search', contentSearchResults: search.results, revealedSearchSections: archivedShown ? new Set(['archived'] as const) : undefined,
-    hasMoreSearchResults: search.contentStatus.kind === 'ready' && search.contentStatus.hasMore,
+    searchSectionsWithMore: search.sectionsWithMore,
     searchIncomplete: search.contentStatus.kind === 'loading' || (search.contentStatus.kind === 'ready' && Boolean(search.contentStatus.indexing)),
   });
   const presentation = { query: text, author: query.author, searchIn: query.searchIn, loadMore: search.loadMore, showMore: () => setArchivedShown(true) };
@@ -106,7 +109,7 @@ function Search({ mobile = false, vscode = false }: { mobile?: boolean; vscode?:
     {model.rows.map((row) => row.kind === 'search-result' ? <SidebarConversationRow key={row.key} result={row.result} context={row.context} mobile={mobile} search={presentation} />
       : row.kind === 'search-archived-caption' ? <SidebarSearchArchivedCaption key={row.key} />
       : row.kind === 'search-show-more' ? <SidebarSearchShowMore key={row.key} mobile={mobile} section={row.section} hidden={row.hidden} onShow={presentation.showMore} />
-      : row.kind === 'search-more' ? <SidebarSearchMore key={row.key} mobile={mobile} onLoadMore={search.loadMore} />
+      : row.kind === 'search-more' ? <SidebarSearchMore key={row.key} mobile={mobile} onLoadMore={() => search.loadMore(row.section)} />
       : row.kind === 'empty' ? <div key={row.key} data-search-empty /> : null)}
   </div>;
 }
@@ -156,9 +159,37 @@ test('a conversation found only by its messages joins the list with its excerpt,
   expect(row('a-0').querySelector('[data-conversation-excerpt-action]')).not.toBeNull();
   expect(row('a-0').querySelector('[data-conversation-more-matches]')?.textContent).toBe('+2');
   expect(row('b-0').querySelector('[data-conversation-excerpt-action]')).toBeNull();
-  // Every lifecycle, every directory, and no title match asked for twice.
-  expect(requests.at(-1)?.searchParams.get('lifecycle')).toBe('all');
+  // Each block asks for its own lifecycle, in every directory.
+  expect(requests.map((request) => request.searchParams.get('lifecycle'))).toEqual(['active', 'archived']);
   expect(requests.at(-1)?.searchParams.getAll('directory')).toEqual([]);
+});
+
+for (const mobile of [false, true]) test(`${mobile ? 'phone' : 'desktop'} lists an archived conversation found by a message at once, however many active ones match, and pages each block on its own`, async () => {
+  useUIStore.setState({ messageSearchEnabled: true });
+  response = { status: 'ok', hits: [contentHit('by-message')], next: '1:by-message', totals: null, index: null };
+  archivedResponse = { status: 'ok', hits: [contentHit('old-by-message', { archived: true })], next: '1:old-by-message', totals: null, index: null };
+  await render(<Search mobile={mobile} />);
+  await runContentSearch();
+
+  expect(listed()).toEqual(['a-0', 'b-0', 'b-1', 'by-message', 'MORE', 'ARCHIVED', 'a-1', 'old-by-message', 'MORE']);
+
+  archivedResponse = { status: 'ok', hits: [contentHit('older-by-message', { archived: true })], next: null, totals: null, index: null };
+  await act(async () => { [...document.querySelectorAll<HTMLElement>('[data-sidebar-search-more]')].at(-1)!.click(); await new Promise<void>((resolve) => setImmediate(resolve)); });
+  expect(requests.at(-1)?.searchParams.get('lifecycle')).toBe('archived');
+  expect(requests.at(-1)?.searchParams.get('before')).toBe('1:old-by-message');
+  expect(listed()).toEqual(['a-0', 'b-0', 'b-1', 'by-message', 'MORE', 'ARCHIVED', 'a-1', 'old-by-message', 'older-by-message']);
+});
+
+test('a listed conversation whose title does not match is found by its message, once', async () => {
+  useUIStore.setState({ messageSearchEnabled: true });
+  response = { status: 'ok', hits: [contentHit('a-0', { directory: '/repo/a' }), contentHit('a-1', { directory: '/repo/a' })], next: null, totals: null, index: null };
+  // Archived a moment ago: the index lists it under both lifecycles for a beat.
+  archivedResponse = { status: 'ok', hits: [contentHit('a-1', { directory: '/repo/a', archived: true })], next: null, totals: null, index: null };
+  await render(<Search />);
+  await act(async () => setQuery('target'));
+  await runContentSearch();
+
+  expect(listed()).toEqual(['a-0', 'a-1']);
 });
 
 test('a content hit outside the admitted directories is left out', async () => {

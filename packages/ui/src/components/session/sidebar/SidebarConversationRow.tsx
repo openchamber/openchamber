@@ -20,7 +20,7 @@ import { isVSCodeRuntime } from '@/lib/desktop';
 import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
 import type { ConversationResultContext } from '@/components/search/conversationResultContext';
 
-export type SidebarSearchPresentation = { query: string; author: OmniAuthor; searchIn?: OmniSearchIn; loadMore: () => void; showMore: (section: SearchResultSection) => void };
+export type SidebarSearchPresentation = { query: string; author: OmniAuthor; searchIn?: OmniSearchIn; loadMore: (section: SearchResultSection) => void; showMore: (section: SearchResultSection) => void };
 
 const subscribeRuntime = (notify: () => void) => subscribeRuntimeEndpointChanged(() => notify());
 

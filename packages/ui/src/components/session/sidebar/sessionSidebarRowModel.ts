@@ -144,7 +144,8 @@ export type SessionSidebarRow =
   | (RowBase & { kind: 'search-archived-caption' })
   // Matches beyond the first batch of the active or the archived block wait behind this row.
   | (RowBase & { kind: 'search-show-more'; section: SearchResultSection; hidden: number })
-  | (RowBase & { kind: 'search-more' });
+  // Asks the server for the block's next message matches.
+  | (RowBase & { kind: 'search-more'; section: SearchResultSection });
 
 export type SessionSidebarStickyHeader = {
   rowIndex: number;
@@ -211,7 +212,8 @@ export type SessionSidebarRowModelArgs = {
   contentSearchResults?: readonly ConversationResult[];
   /** The blocks the user asked to see whole, past their first batch. */
   revealedSearchSections?: ReadonlySet<SearchResultSection>;
-  hasMoreSearchResults?: boolean;
+  /** The blocks whose message matches have a further page to ask for. */
+  searchSectionsWithMore?: ReadonlySet<SearchResultSection>;
   searchIncomplete?: boolean;
   collapsedProjects: ReadonlySet<string>;
   collapsedGroups: ReadonlySet<string>;
@@ -1370,7 +1372,7 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
 
   // A search answers with one flat list, best match first, each row marked
   // with its project. Archived matches follow under their own caption, the
-  // first few shown.
+  // first few shown. Each block ends with its own pager.
   const appendFlatSearch = (): void => {
     const results = args.contentSearchResults ?? [];
     const appendResult = (result: ConversationResult): void => {
@@ -1383,10 +1385,12 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
       const shown = args.revealedSearchSections?.has(section) ? sectionResults.length : Math.min(sectionResults.length, initial);
       for (let index = 0; index < shown; index += 1) appendResult(sectionResults[index]);
       if (shown < sectionResults.length) push({ kind: 'search-show-more', key: `search:${section}:more`, estimateSize: STATUS_ESTIMATE, section, hidden: sectionResults.length - shown });
+      if (args.searchSectionsWithMore?.has(section)) push({ kind: 'search-more', key: `search:${section}:page`, estimateSize: 36, section });
     };
     appendSection('active', results.filter((result) => !result.archived), ACTIVE_SEARCH_INITIAL);
     const archived = results.filter((result) => result.archived);
-    if (archived.length === 0) return;
+    // A page whose matches were all left out still has a next one to ask for.
+    if (archived.length === 0 && !args.searchSectionsWithMore?.has('archived')) return;
     push({ kind: 'search-archived-caption', key: 'search:archived', estimateSize: SECTION_HEADER_ESTIMATE });
     appendSection('archived', archived, ARCHIVED_SEARCH_INITIAL);
   };
@@ -1403,8 +1407,6 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
       case 'projects': appendProjects(block); break;
     }
   }
-
-  if (search && args.hasMoreSearchResults) push({ kind: 'search-more', key: 'search:more', estimateSize: 36 });
 
   if ((!search || !args.searchIncomplete) && rows.length === pageRowCount) {
     push({ kind: 'empty', key: search ? 'sidebar:search-empty' : 'sidebar:empty', estimateSize: 72, emptyKind: search ? 'search' : 'sidebar' });

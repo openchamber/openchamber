@@ -23,8 +23,8 @@ in search mode lists the active matches best first (titles that hold the words
 as typed, newest first; then conversations on a branch that holds them; then
 conversations found only by a message), the first fifty with a Show more row for the rest, then an
 Archived caption with the first five archived matches and its own Show more
-row, then the pager for more message matches. A block shown whole folds again
-when the search is cleared or changed. What a session started (a subagent, a
+row. Each block ends with its own pager for more message matches. A block shown
+whole folds again when the search is cleared or changed. What a session started (a subagent, a
 workflow's agent: any session with a `parentID`) is left out, by title and by
 message: it is part of its parent, and such sessions outnumber the user's own.
 Project and folder names are not searched: every row already shows its
@@ -76,6 +76,24 @@ user rarely knows whether they archived it. A lifecycle filter made them
 guess, and remembered its last value. Archived matches are always found and
 listed after the active ones, five at a time, so they never push the active
 ones down.
+
+### Why each block asks for its own message matches
+
+`useSidebarConversationSearch` runs the shared hook twice, once per lifecycle.
+One request for both answers newest first, twenty at a time, and archived
+conversations are usually the oldest: they arrived only after paging past
+every active match, so the Archived block looked empty for a conversation
+found by a message. With a request each, the block fills at once and pages on
+its own.
+
+### Why a rebuilt session list starts no new content request
+
+Any session changing (a running one does several times a second) rebuilds the
+metadata list passed to `useConversationSearch`. The hook keys its request on
+what the list holds, the matched ids, and reads the list itself through a ref.
+Depending on the array restarted the request on every rebuild: the message
+matches left the list and came back, and the shorter list pulled the scroll
+position to the top.
 
 ### Why search ownership has its own index
 

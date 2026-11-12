@@ -93,12 +93,22 @@ test('five archived results need no Show more, and none need no caption', () => 
   expect(buildSessionSidebarRowModel(input).rows.map(describeRow)).toEqual(['a-0']);
 });
 
-test('the pager closes the list, after the archived results', () => {
+test('each block ends with its own pager', () => {
   const input = searchFixture();
   input.contentSearchResults = [searchResult('a-0'), ...archivedResults(ARCHIVED_SEARCH_INITIAL + 1)];
-  input.hasMoreSearchResults = true;
+  input.searchSectionsWithMore = new Set(['active', 'archived']);
 
-  expect(buildSessionSidebarRowModel(input).rows.map(describeRow).slice(-2)).toEqual(['more:1', 'search-more']);
+  const rows = buildSessionSidebarRowModel(input).rows;
+  expect(rows.map(describeRow)).toEqual(['a-0', 'search-more', 'search-archived-caption', 'old-0', 'old-1', 'old-2', 'old-3', 'old-4', 'more:1', 'search-more']);
+  expect(rows.flatMap((row) => (row.kind === 'search-more' ? [row.section] : []))).toEqual(['active', 'archived']);
+});
+
+test('archived matches still to ask for keep the caption and the pager with no row to show', () => {
+  const input = searchFixture();
+  input.contentSearchResults = [searchResult('a-0')];
+  input.searchSectionsWithMore = new Set(['archived']);
+
+  expect(buildSessionSidebarRowModel(input).rows.map(describeRow)).toEqual(['a-0', 'search-archived-caption', 'search-more']);
 });
 
 test('a finished search with no results says so, and an unfinished one never claims empty', () => {
@@ -108,7 +118,7 @@ test('a finished search with no results says so, and an unfinished one never cla
 
   input.searchIncomplete = true;
   expect(buildSessionSidebarRowModel(input).rows).toEqual([]);
-  input.hasMoreSearchResults = true;
+  input.searchSectionsWithMore = new Set(['active']);
   expect(buildSessionSidebarRowModel(input).rows.map((row) => row.kind)).toEqual(['search-more']);
 });
 
