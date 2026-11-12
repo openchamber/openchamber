@@ -106,8 +106,8 @@ type SettingsDocument = z.infer<typeof settingsDocumentSchema>;
 /** The legacy `wideChatLayoutEnabled` switch: only a literal boolean is one. */
 const legacyChatWidthSwitchSchema = z.boolean();
 
-/** `true` → `full`, `false` → `compact`; anything else has no level. */
-const chatWidthLevelOfSwitch = (enabled: boolean): 'full' | 'compact' => (enabled ? 'full' : 'compact');
+/** `true` → `full-width`, `false` → `compact`; anything else has no level. */
+const chatWidthLevelOfSwitch = (enabled: boolean): 'full-width' | 'compact' => (enabled ? 'full-width' : 'compact');
 
 /**
  * `chatWidth` replaced the `wideChatLayoutEnabled` switch. Older files keep

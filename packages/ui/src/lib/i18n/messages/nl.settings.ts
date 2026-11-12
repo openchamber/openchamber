@@ -2465,6 +2465,7 @@ export const settingsDict = {
   'settings.openchamber.visual.option.chatWidth.compact.label': 'Compact',
   'settings.openchamber.visual.option.chatWidth.standard.label': 'Standaard',
   'settings.openchamber.visual.option.chatWidth.wide.label': 'Breed',
+  'settings.openchamber.visual.option.chatWidth.fullWidth.label': 'Volledig (alleen berichten)',
   'settings.openchamber.visual.option.chatWidth.full.label': 'Volledig (berichten en invoerveld)',
   'settings.openchamber.visual.field.codeBlockLineWrapAria': 'Regels in codeblokken afbreken',
   'settings.openchamber.visual.field.codeBlockLineWrap': 'Regels in codeblokken afbreken',

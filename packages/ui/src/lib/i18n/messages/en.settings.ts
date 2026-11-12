@@ -2487,6 +2487,7 @@ export const settingsDict = {
   'settings.openchamber.visual.option.chatWidth.compact.label': 'Compact',
   'settings.openchamber.visual.option.chatWidth.standard.label': 'Standard',
   'settings.openchamber.visual.option.chatWidth.wide.label': 'Wide',
+  'settings.openchamber.visual.option.chatWidth.fullWidth.label': 'Full (messages only)',
   'settings.openchamber.visual.option.chatWidth.full.label': 'Full (messages and composer)',
   'settings.openchamber.visual.field.codeBlockLineWrapAria': 'Wrap code block lines',
   'settings.openchamber.visual.field.codeBlockLineWrap': 'Wrap code block lines',

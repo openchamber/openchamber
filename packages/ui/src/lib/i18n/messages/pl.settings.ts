@@ -1433,6 +1433,7 @@ export const settingsDict = {
   'settings.openchamber.visual.option.chatWidth.compact.label': 'Kompakt',
   'settings.openchamber.visual.option.chatWidth.standard.label': 'Standardowy',
   'settings.openchamber.visual.option.chatWidth.wide.label': 'Szeroki',
+  'settings.openchamber.visual.option.chatWidth.fullWidth.label': 'Pełny (tylko wiadomości)',
   'settings.openchamber.visual.option.chatWidth.full.label': 'Pełny (wiadomości i pole wiadomości)',
   'settings.openchamber.visual.option.activityRenderMode.collapsed.description': 'Domyślnie utrzymuj aktywność zwiniętą.',
   'settings.openchamber.visual.option.activityRenderMode.collapsed.label': 'Zwinięta',

@@ -2442,6 +2442,7 @@ export const settingsDict = {
   "settings.openchamber.visual.option.chatWidth.compact.label": "Compacto",
   "settings.openchamber.visual.option.chatWidth.standard.label": "Padrão",
   "settings.openchamber.visual.option.chatWidth.wide.label": "Largo",
+  "settings.openchamber.visual.option.chatWidth.fullWidth.label": "Total (somente mensagens)",
   "settings.openchamber.visual.option.chatWidth.full.label": "Total (mensagens e campo de mensagem)",
   "settings.openchamber.visual.field.showSplitAssistantMessageActionsAria": "Ações inline do assistente",
   "settings.openchamber.visual.field.showSplitAssistantMessageActions": "Ações inline do assistente",

@@ -3656,12 +3656,12 @@ export const useUIStore = create<UIStore>()(
           }
 
           // v28 -> v29: the wide-layout switch became a chat width level. A
-          // saved switch reads as full so the transcript still fills the chat area; off
+          // saved switch reads as full width so the layout does not change; off
           // is today's compact column. The switch is gone from the persisted shape.
           if (version < 29) {
             // A store written before v29 only ever held the switch, so it is
             // the authoritative value here.
-            if (state.wideChatLayoutEnabled === true) state.chatWidth = 'full';
+            if (state.wideChatLayoutEnabled === true) state.chatWidth = 'full-width';
             else if (state.wideChatLayoutEnabled === false) state.chatWidth = 'compact';
             else {
               const stored = chatWidthLevelSchema.safeParse(state.chatWidth);

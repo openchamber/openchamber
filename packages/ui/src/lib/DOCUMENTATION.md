@@ -30,7 +30,7 @@ A rotated phone's viewport and `screen.width` both report the long side, so a wi
 
 ### Ownership
 
-`chatWidth.ts` owns the four width levels (`compact`, `standard`, `wide`, `full`), their column values, and the document-root application. `App.tsx`, `apps/MobileApp.tsx`, `apps/VSCodeApp.tsx` and `apps/ElectronMiniChatApp.tsx` call `applyChatWidth` for their shell. `styles/typography.css` reads the two root properties it writes for `.chat-column`, `.chat-input-column` and `.chat-message-column`. The settings registry parses the stored level (`lib/settings/registry.ts`) and the server sanitizes it (`packages/web/server/lib/opencode/settings-helpers.js`).
+`chatWidth.ts` owns the five width levels (`compact`, `standard`, `wide`, `full-width`, `full`), their column values, and the document-root application. `App.tsx`, `apps/MobileApp.tsx`, `apps/VSCodeApp.tsx` and `apps/ElectronMiniChatApp.tsx` call `applyChatWidth` for their shell. `styles/typography.css` reads the two root properties it writes for `.chat-column`, `.chat-input-column` and `.chat-message-column`. The settings registry parses the stored level (`lib/settings/registry.ts`) and the server sanitizes it (`packages/web/server/lib/opencode/settings-helpers.js`).
 
 ### Invariants
 
@@ -38,10 +38,10 @@ A rotated phone's viewport and `screen.width` both report the long side, so a wi
 - `applyChatWidth` validates the level it is given and falls back to `compact`: a store written by a build with more levels can carry one this build does not define after a downgrade, and hydration skips the migrate hook.
 - `components/chat/MessageList.tsx` estimates unmeasured rows from `readChatMessageColumnWidthPx`, which resolves `--chat-message-column-width` the same way the stylesheet does (`rem` against the root font size, `100%` as the window width, the compact column when unset or unparseable). Its root observer refreshes the cached estimate when the property changes, because the scroller's own box does not resize with it.
 - The same estimate subtracts `readChatColumnPaddingPx`, which mirrors the stylesheet's `clamp()` padding rules, the 1024px switch between them, the root font size and `--padding-scale`. A fixed 48/32px subtraction would drift with the interface font size and the padding scale.
-- A saved `wideChatLayoutEnabled` switch reads as `full` and a saved `false` as `compact`, so a settings file from an older build keeps a full-width transcript or the default column.
+- A saved `wideChatLayoutEnabled` switch reads as `full-width` and a saved `false` as `compact`, so a settings file from an older build keeps the user's choice.
 
 ### Decisions
 
-#### Why wide moves both columns
+#### Why wide moves both columns and full-width keeps the old switch layout
 
-`wide` widens the transcript and the composer together to 80rem, so the composer never sits narrower than the messages. `full` fills the chat area with both.
+`wide` widens the transcript and the composer together to 80rem, so the composer never sits narrower than the messages. `full-width` is the layout the old wide-layout switch produced: the transcript fills the chat width while the composer and docked rows stay on the chosen column, kept as its own level so nobody's layout changes on upgrade. `full` fills the chat area with both.

@@ -85,6 +85,7 @@ const CHAT_WIDTH_OPTION_LABEL_KEYS = {
   compact: 'settings.openchamber.visual.option.chatWidth.compact.label',
   standard: 'settings.openchamber.visual.option.chatWidth.standard.label',
   wide: 'settings.openchamber.visual.option.chatWidth.wide.label',
+  'full-width': 'settings.openchamber.visual.option.chatWidth.fullWidth.label',
   full: 'settings.openchamber.visual.option.chatWidth.full.label',
 } satisfies Record<ChatWidthLevel, I18nKey>;
 

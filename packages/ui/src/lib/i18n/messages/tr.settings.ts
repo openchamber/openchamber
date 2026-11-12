@@ -2332,6 +2332,7 @@ export const settingsDict = {
   'settings.openchamber.visual.option.chatWidth.compact.label': 'Kompakt',
   'settings.openchamber.visual.option.chatWidth.standard.label': 'Standart',
   'settings.openchamber.visual.option.chatWidth.wide.label': 'Geniş',
+  'settings.openchamber.visual.option.chatWidth.fullWidth.label': 'Tam (yalnızca mesajlar)',
   'settings.openchamber.visual.option.chatWidth.full.label': 'Tam (mesajlar ve mesaj kutusu)',
   'settings.openchamber.visual.field.codeBlockLineWrapAria': 'Kod bloğu satırlarını kaydır',
   'settings.openchamber.visual.field.codeBlockLineWrap': 'Kod Bloğu Satırlarını Kaydır',
