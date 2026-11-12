@@ -20,7 +20,7 @@ describe('wide chat layout migration', () => {
 
     expect(fields.wideChatLayoutEnabled).toBeUndefined();
     expect(flattenPreferences(fields)).toEqual({ chatWidth: 'compact' });
-    expect(flattenPreferences(fields, 'desktop')).toEqual({ chatWidth: 'full' });
+    expect(flattenPreferences(fields, 'desktop')).toEqual({ chatWidth: 'full-width' });
     expect(fields.chatWidth.updatedAt).toBe(5);
   });
 
@@ -35,7 +35,7 @@ describe('wide chat layout migration', () => {
   });
 
   test('converts the switch in a plain settings document', () => {
-    expect(migrateWideChatLayoutDocument({ wideChatLayoutEnabled: true })).toEqual({ chatWidth: 'full' });
+    expect(migrateWideChatLayoutDocument({ wideChatLayoutEnabled: true })).toEqual({ chatWidth: 'full-width' });
     expect(migrateWideChatLayoutDocument({ chatWidth: 'full', wideChatLayoutEnabled: false })).toEqual({ chatWidth: 'full' });
     expect(migrateWideChatLayoutDocument({ locale: 'fr' })).toEqual({ locale: 'fr' });
   });
@@ -59,7 +59,7 @@ describe('wide chat layout migration', () => {
 
     expect(fields).toEqual({
       chatWidth: {
-        surfaces: { desktop: { value: 'full', updatedAt: 3 } },
+        surfaces: { desktop: { value: 'full-width', updatedAt: 3 } },
         updatedAt: 4,
       },
     });

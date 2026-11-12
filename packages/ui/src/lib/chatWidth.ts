@@ -8,7 +8,7 @@ import { z } from 'zod';
  * `styles/typography.css` reads for `.chat-column`, `.chat-input-column` and
  * `.chat-message-column`.
  */
-export const CHAT_WIDTH_LEVELS = ['compact', 'standard', 'wide', 'full'] as const;
+export const CHAT_WIDTH_LEVELS = ['compact', 'standard', 'wide', 'full-width', 'full'] as const;
 
 export type ChatWidthLevel = (typeof CHAT_WIDTH_LEVELS)[number];
 
@@ -22,12 +22,14 @@ export const DEFAULT_CHAT_WIDTH: ChatWidthLevel = 'compact';
 
 /**
  * The column width each level gives the chat and the composer. `wide` widens
- * both columns and `full` fills the chat area with both.
+ * both columns; `full-width` fills the transcript as the old wide layout did
+ * and keeps the composer at Standard, and `full` fills both.
  */
 export const CHAT_WIDTH_CSS = {
   compact: { column: '48rem', messageColumn: '48rem' },
   standard: { column: '64rem', messageColumn: '64rem' },
   wide: { column: '80rem', messageColumn: '80rem' },
+  'full-width': { column: '64rem', messageColumn: '100%' },
   full: { column: '100%', messageColumn: '100%' },
 } satisfies Record<ChatWidthLevel, { column: string; messageColumn: string }>;
 

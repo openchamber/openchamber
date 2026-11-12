@@ -2387,6 +2387,7 @@ export const settingsDict = {
   'settings.openchamber.visual.option.chatWidth.compact.label': 'Kompakt',
   'settings.openchamber.visual.option.chatWidth.standard.label': 'Standard',
   'settings.openchamber.visual.option.chatWidth.wide.label': 'Breit',
+  'settings.openchamber.visual.option.chatWidth.fullWidth.label': 'Voll (Nachrichten)',
   'settings.openchamber.visual.option.chatWidth.full.label': 'Voll (Nachrichten + Eingabe)',
   'settings.openchamber.visual.field.codeBlockLineWrapAria': 'Codeblock-Zeilen umbrechen',
   'settings.openchamber.visual.field.codeBlockLineWrap': 'Codeblock-Zeilen umbrechen',

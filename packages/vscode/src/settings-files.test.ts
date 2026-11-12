@@ -99,7 +99,7 @@ describe('wide chat layout migration', () => {
 
     assert.equal(fields.wideChatLayoutEnabled, undefined);
     assert.deepEqual(flattenPreferences(fields), { chatWidth: 'compact' });
-    assert.deepEqual(flattenPreferences(fields, 'desktop'), { chatWidth: 'full' });
+    assert.deepEqual(flattenPreferences(fields, 'desktop'), { chatWidth: 'full-width' });
     assert.equal(fields.chatWidth.updatedAt, 5);
   });
 
@@ -114,7 +114,7 @@ describe('wide chat layout migration', () => {
   });
 
   test('converts the switch in a plain settings document so it leaves the instance part', () => {
-    assert.deepEqual(migrateWideChatLayoutDocument({ wideChatLayoutEnabled: true }), { chatWidth: 'full' });
+    assert.deepEqual(migrateWideChatLayoutDocument({ wideChatLayoutEnabled: true }), { chatWidth: 'full-width' });
     assert.deepEqual(migrateWideChatLayoutDocument({ chatWidth: 'full', wideChatLayoutEnabled: false }), { chatWidth: 'full' });
     assert.deepEqual(migrateWideChatLayoutDocument({ locale: 'fr' }), { locale: 'fr' });
     // The switch must not survive as an unknown instance key in settings.json.
@@ -129,7 +129,7 @@ describe('wide chat layout migration', () => {
     );
 
     assert.equal('wideChatLayoutEnabled' in merged, false);
-    assert.deepEqual(merged, { chatWidth: 'full', opencodeBinary: '/bin/oc' });
+    assert.deepEqual(merged, { chatWidth: 'full-width', opencodeBinary: '/bin/oc' });
     // Writing that view back keeps the switch out of settings.json.
     assert.deepEqual(instancePartOf(merged), { opencodeBinary: '/bin/oc' });
   });
@@ -158,7 +158,7 @@ describe('wide chat layout migration', () => {
 
     assert.deepEqual(fields, {
       chatWidth: {
-        surfaces: { desktop: { value: 'full', updatedAt: 3 } },
+        surfaces: { desktop: { value: 'full-width', updatedAt: 3 } },
         updatedAt: 4,
       },
     });

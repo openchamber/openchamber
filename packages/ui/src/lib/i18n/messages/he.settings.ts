@@ -2449,6 +2449,7 @@ export const settingsDict = {
   'settings.openchamber.visual.option.chatWidth.compact.label': 'קומפקטי',
   'settings.openchamber.visual.option.chatWidth.standard.label': 'רגיל',
   'settings.openchamber.visual.option.chatWidth.wide.label': 'רחב',
+  'settings.openchamber.visual.option.chatWidth.fullWidth.label': 'מלא (הודעות בלבד)',
   'settings.openchamber.visual.option.chatWidth.full.label': 'מלא (הודעות + תיבת כתיבה)',
   'settings.openchamber.visual.field.codeBlockLineWrapAria': 'גלישת שורות בבלוקי קוד',
   'settings.openchamber.visual.field.codeBlockLineWrap': 'גלישת שורות בבלוקי קוד',

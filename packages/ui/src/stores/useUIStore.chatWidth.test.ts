@@ -33,9 +33,9 @@ describe('chat width', () => {
     expect(useUIStore.getState().chatWidth).toBe('full');
   });
 
-  test('reads a stored wide-layout switch as full', async () => {
+  test('reads a stored wide-layout switch as full width', async () => {
     await hydrateFrom(28, { wideChatLayoutEnabled: true });
-    expect(useUIStore.getState().chatWidth).toBe('full');
+    expect(useUIStore.getState().chatWidth).toBe('full-width');
     expect('wideChatLayoutEnabled' in useUIStore.getState()).toBe(false);
   });
 

@@ -2442,6 +2442,7 @@ export const settingsDict = {
   "settings.openchamber.visual.option.chatWidth.compact.label": "Компактний",
   "settings.openchamber.visual.option.chatWidth.standard.label": "Стандартний",
   "settings.openchamber.visual.option.chatWidth.wide.label": "Широкий",
+  "settings.openchamber.visual.option.chatWidth.fullWidth.label": "Повний (лише повідомлення)",
   "settings.openchamber.visual.option.chatWidth.full.label": "Повний (повідомлення + введення)",
   "settings.openchamber.visual.field.showSplitAssistantMessageActionsAria": "Вбудовані дії асистента",
   "settings.openchamber.visual.field.showSplitAssistantMessageActions": "Вбудовані дії асистента",

@@ -2442,6 +2442,7 @@ export const settingsDict = {
   'settings.openchamber.visual.option.chatWidth.compact.label': '컴팩트',
   'settings.openchamber.visual.option.chatWidth.standard.label': '표준',
   'settings.openchamber.visual.option.chatWidth.wide.label': '넓게',
+  'settings.openchamber.visual.option.chatWidth.fullWidth.label': '전체 (메시지만)',
   'settings.openchamber.visual.option.chatWidth.full.label': '전체 (메시지＋입력창)',
   'settings.openchamber.visual.field.showSplitAssistantMessageActionsAria': '인라인 어시스턴트 작업',
   'settings.openchamber.visual.field.showSplitAssistantMessageActions': '인라인 어시스턴트 작업',

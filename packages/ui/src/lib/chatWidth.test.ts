@@ -40,6 +40,7 @@ describe('chat width', () => {
   test('maps every level onto its column width', () => {
     expect(CHAT_WIDTH_CSS.standard).toEqual({ column: '64rem', messageColumn: '64rem' });
     expect(CHAT_WIDTH_CSS.wide).toEqual({ column: '80rem', messageColumn: '80rem' });
+    expect(CHAT_WIDTH_CSS['full-width']).toEqual({ column: '64rem', messageColumn: '100%' });
     expect(CHAT_WIDTH_CSS.full).toEqual({ column: '100%', messageColumn: '100%' });
   });
 
@@ -53,6 +54,9 @@ describe('chat width', () => {
     expect(root.properties.get('--chat-column-width')).toBe('80rem');
     expect(root.properties.get('--chat-message-column-width')).toBe('80rem');
 
+    applyChatWidth('full-width', root);
+    expect(root.properties.get('--chat-column-width')).toBe('64rem');
+    expect(root.properties.get('--chat-message-column-width')).toBe('100%');
 
     applyChatWidth('full', root);
     expect(root.properties.get('--chat-column-width')).toBe('100%');
@@ -73,9 +77,10 @@ describe('chat width', () => {
     expect(root.properties.get('--chat-message-column-width')).toBe('48rem');
   });
 
-  test('accepts only the four levels', () => {
+  test('accepts only the five levels', () => {
     expect(isChatWidthLevel('compact')).toBe(true);
     expect(isChatWidthLevel('wide')).toBe(true);
+    expect(isChatWidthLevel('full-width')).toBe(true);
     expect(isChatWidthLevel('full')).toBe(true);
     expect(isChatWidthLevel('huge')).toBe(false);
   });

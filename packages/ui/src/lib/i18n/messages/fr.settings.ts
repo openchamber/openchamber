@@ -2331,6 +2331,7 @@ export const settingsDict = {
   'settings.openchamber.visual.option.chatWidth.compact.label': 'Compact',
   'settings.openchamber.visual.option.chatWidth.standard.label': 'Standard',
   'settings.openchamber.visual.option.chatWidth.wide.label': 'Large',
+  'settings.openchamber.visual.option.chatWidth.fullWidth.label': 'Complet (messages)',
   'settings.openchamber.visual.option.chatWidth.full.label': 'Complet (messages + saisie)',
   'settings.openchamber.visual.field.showSplitAssistantMessageActionsAria': 'Actions intégrées de l\'assistant',
   'settings.openchamber.visual.field.showSplitAssistantMessageActions': 'Actions intégrées de l\'assistant',

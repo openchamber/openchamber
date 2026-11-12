@@ -93,8 +93,8 @@ export const parsePreferencesDocument = (raw) => {
 
 export const serializePreferencesDocument = (fields) => JSON.stringify({ version: PREFERENCES_DOCUMENT_VERSION, fields }, null, 2);
 
-/** `true` → `full`, `false` → `compact`; anything else has no level. */
-const chatWidthLevelOf = (value) => (value === true ? 'full' : value === false ? 'compact' : undefined);
+/** `true` → `full-width`, `false` → `compact`; anything else has no level. */
+const chatWidthLevelOf = (value) => (value === true ? 'full-width' : value === false ? 'compact' : undefined);
 
 /**
  * `chatWidth` replaced the `wideChatLayoutEnabled` switch. Older files keep

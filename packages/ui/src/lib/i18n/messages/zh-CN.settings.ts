@@ -2442,6 +2442,7 @@ export const settingsDict = {
   'settings.openchamber.visual.option.chatWidth.compact.label': '紧凑',
   'settings.openchamber.visual.option.chatWidth.standard.label': '标准',
   'settings.openchamber.visual.option.chatWidth.wide.label': '宽',
+  'settings.openchamber.visual.option.chatWidth.fullWidth.label': '全部（仅消息）',
   'settings.openchamber.visual.option.chatWidth.full.label': '全部（消息＋输入框）',
   'settings.openchamber.visual.field.showSplitAssistantMessageActionsAria': '内联助手操作',
   'settings.openchamber.visual.field.showSplitAssistantMessageActions': '内联助手操作',

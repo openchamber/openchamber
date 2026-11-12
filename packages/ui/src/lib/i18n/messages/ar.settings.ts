@@ -2449,6 +2449,7 @@ export const settingsDict = {
   'settings.openchamber.visual.option.chatWidth.compact.label': 'مضغوط',
   'settings.openchamber.visual.option.chatWidth.standard.label': 'قياسي',
   'settings.openchamber.visual.option.chatWidth.wide.label': 'عريض',
+  'settings.openchamber.visual.option.chatWidth.fullWidth.label': 'كامل (الرسائل فقط)',
   'settings.openchamber.visual.option.chatWidth.full.label': 'كامل (الرسائل + مربع الكتابة)',
   'settings.openchamber.visual.field.codeBlockLineWrapAria': 'التفاف أسطر كتل الشيفرة',
   'settings.openchamber.visual.field.codeBlockLineWrap': 'التفاف أسطر كتل الشيفرة',

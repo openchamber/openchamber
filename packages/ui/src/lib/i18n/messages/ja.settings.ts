@@ -2475,6 +2475,7 @@ export const settingsDict = {
   'settings.openchamber.visual.option.chatWidth.compact.label': 'コンパクト',
   'settings.openchamber.visual.option.chatWidth.standard.label': '標準',
   'settings.openchamber.visual.option.chatWidth.wide.label': '広い',
+  'settings.openchamber.visual.option.chatWidth.fullWidth.label': '全体（メッセージのみ）',
   'settings.openchamber.visual.option.chatWidth.full.label': '全体（メッセージ＋入力欄）',
   'settings.openchamber.visual.field.showSplitAssistantMessageActionsAria': 'インラインアシスタントアクション',
   'settings.openchamber.visual.field.showSplitAssistantMessageActions': 'インラインアシスタントアクション',

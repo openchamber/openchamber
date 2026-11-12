@@ -198,14 +198,14 @@ const parseDraftStarters: SettingsParser<DraftStarterRef[]> = mapParser(fromSche
 const parseWorkStatusHiddenSections: SettingsParser<string[]> = mapParser(fromSchema(z.array(z.unknown())), (value) => sanitizeWorkStatusHiddenSections(value));
 /**
  * The chat width level. Builds before it existed saved a
- * `wideChatLayoutEnabled` switch: `true` reads as `full` so the
- * transcript still fills the chat area, `false` as today's compact default. The switch is never
+ * `wideChatLayoutEnabled` switch: `true` reads as `full-width` so nobody's
+ * layout jumps, `false` as today's compact default. The switch is never
  * returned.
  */
 const parseChatWidth: SettingsParser<ChatWidthLevel> = (value, raw) => {
   const level = chatWidthLevelSchema.safeParse(value);
   if (level.success) return level.data;
-  if (raw.wideChatLayoutEnabled === true) return 'full';
+  if (raw.wideChatLayoutEnabled === true) return 'full-width';
   if (raw.wideChatLayoutEnabled === false) return 'compact';
   return undefined;
 };
