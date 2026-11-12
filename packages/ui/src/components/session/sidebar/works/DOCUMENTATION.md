@@ -39,6 +39,11 @@ view, In work, Drafts, Folders with worktrees) describes how they are laid out.
 
 Invariants:
 
+- Display as Sessions projects each root conversation into its own work ref,
+  retaining its origin group for inherited folder and pin-list membership.
+  Worktrees and Branches retain grouped work refs and their group actions.
+  Empty groups remain available for drafts and workspace actions in every mode.
+
 - Display lineage belongs to `lib/sessionWorkLineage.ts`. Archive, delete and
   restore follow OpenCode's `parentID` plus linked reviews. Forks and promoted
   `/btw` conversations remain independent; move also carries the rendered tree.

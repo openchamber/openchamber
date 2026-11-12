@@ -180,6 +180,8 @@ export type SessionSidebarRowModel = {
 };
 
 export type SessionSidebarRowModelArgs = {
+  /** List conversations directly, retaining empty workspace rows for drafts and creation. */
+  sessionRows?: boolean;
   mode: 'normal' | 'search';
   sections: readonly ProjectSection[];
   authoritativeSections: readonly ProjectSection[];
@@ -540,6 +542,15 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
     ...(args.chatGroup?.sessions ?? []),
     ...(args.archivedChatGroup?.sessions ?? []),
   ];
+  // Session rows still finish a whole work when every conversation is done.
+  // Its lifecycle must not depend on whether its project happens to be open.
+  if (args.sessionRows && !search) {
+    for (const section of args.authoritativeSections) {
+      for (const group of section.groups) {
+        if (isGroupWork(group)) selectionWorks.set(`${section.project.id}:${group.id}`, Object.freeze({ group, projectId: section.project.id }));
+      }
+    }
+  }
   const authorityStack = [...authoritativeRoots];
   while (authorityStack.length > 0) {
     const node = authorityStack.pop();
@@ -773,6 +784,8 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
     // Row keys carry the placement, so a worktree listed in In work and kept
     // under its project too does not collide; collapse and Show more state
     // stay keyed by the group alone and are shared.
+    const sessionGroup = args.sessionRows === true && isGroupWork(group) && group.sessions.length > 0;
+    hideHeader = hideHeader || sessionGroup;
     const rowKeyBase = `${placement.keyPrefix}${groupKey}`;
     const sourceNodes = group.sessions
       .filter((node) => !isMovedToZone(node.session.id))
@@ -783,11 +796,11 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
     for (const [id, session] of indexed.sessionsById) sessionById.set(id, session);
     if (projectId && isGroupWork(group) && !selectionWorks.has(groupKey)) selectionWorks.set(groupKey, Object.freeze({ group, projectId }));
     const ownerKey = getGroupFolderOwnerKey(projectId, group);
-    const storedCollapsed = args.collapsedGroups.has(groupKey);
+    const storedCollapsed = !hideHeader && args.collapsedGroups.has(groupKey);
     // A worktree, space or archive header is a tree node of its own: its
     // folders and sessions sit one level under it. The project root group has
     // no header, so its contents sit right under the project.
-    const contentDepth = hideHeader ? 0 : placement.depth + 1;
+    const contentDepth = hideHeader ? placement.depth : placement.depth + 1;
     const status = args.groupStatusByKey.get(groupKey);
     const groupLoaded = !status || status.state === 'ready';
     // Nothing to list: no sessions, no folders, and no loading or failure
@@ -797,11 +810,11 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
     // its sessions and drafts, in its folders as well. A worktree's own
     // sessions and drafts are part of its work and stay one line, and so do
     // Chats, which are one-line rows whatever the setting.
-    const detailedWorks = args.detailedZoneRows === true && group.isMain === true && limits?.renderContext !== 'tree-chat';
+    const detailedWorks = args.detailedZoneRows === true && (group.isMain === true || sessionGroup) && limits?.renderContext !== 'tree-chat';
     // Their second line names the branch as a zone row's does: the project
     // root's, which every session there shares.
     const detailedMeta = detailedWorks && group.branch ? { branchLabel: group.branch } : undefined;
-    const insideWork = isGroupWork(group);
+    const insideWork = isGroupWork(group) && !sessionGroup;
     const empty = sourceNodes.length === 0
       && groupDrafts.length === 0
       && groupLoaded
@@ -1316,15 +1329,21 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
     if (timeEntries) {
       // One list of every other work of every project, most recent first, under
       // one zone header. It is virtualized, so it reveals all of them at once.
-      const entries = timeEntries;
       // Folders lead the list, as folders lead files in a file manager, in the
       // projects' order.
       const foldered = args.sections.flatMap((section) => {
-        const rootGroup = section.groups.find((group) => group.isMain);
-        const hasFolders = rootGroup && !excluded?.has(section.project.id)
-          && getSessionFolderScopes(rootGroup).some(({ scopeKey }) => (args.foldersMap[scopeKey] ?? EMPTY_FOLDERS).length > 0);
-        return hasFolders ? [{ section, rootGroup }] : [];
+        if (excluded?.has(section.project.id)) return [];
+        const filed = collectFiledWorktrees(buildGroupRenderDescriptors(section, { mainWorkspaceOnly: false }));
+        return section.groups.flatMap((rootGroup) => {
+          if (!rootGroup.isMain && (!args.sessionRows || rootGroup.sessions.length === 0 || !isGroupWork(rootGroup)
+            || filed.has(worktreeFolderMemberId(rootGroup.directory) ?? ''))) return [];
+          const hasFolders = getSessionFolderScopes(rootGroup).some(({ scopeKey }) => (args.foldersMap[scopeKey] ?? EMPTY_FOLDERS).length > 0);
+          return hasFolders ? [{ section, rootGroup }] : [];
+        });
       });
+      const folderMembers = new Set(foldered.flatMap(({ rootGroup }) => getSessionFolderScopes(rootGroup)
+        .flatMap(({ scopeKey }) => (args.foldersMap[scopeKey] ?? EMPTY_FOLDERS).flatMap((folder) => folder.sessionIds))));
+      const entries = timeEntries.filter((entry) => entry.kind !== 'session' || !folderMembers.has(entry.item.node.session.id));
       if (entries.length > 0 || foldered.length > 0) {
         const collapsed = appendActivityHeader('timeline');
         if (!collapsed) {

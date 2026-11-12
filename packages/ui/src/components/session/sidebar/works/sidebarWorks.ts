@@ -11,7 +11,7 @@ import type { ProjectSection } from '../projects/sessionProjectRender';
  */
 export type SidebarWorkRef =
   | { kind: 'group'; key: string; projectId: string; group: SessionGroup }
-  | { kind: 'session'; key: string; projectId: string | null; rootSessionId: string };
+  | { kind: 'session'; key: string; projectId: string | null; rootSessionId: string; originGroup?: SessionGroup };
 
 type SidebarGroupWorkRef = Extract<SidebarWorkRef, { kind: 'group' }>;
 
@@ -40,7 +40,10 @@ export type SidebarFolderMembership = { folderId: string; projectId: string };
 export const findWorkFolderId = (ref: SidebarWorkRef, folderByMember: ReadonlyMap<string, SidebarFolderMembership>): string | null => {
   const memberId = ref.kind === 'group' ? worktreeFolderMemberId(ref.group.directory) : ref.rootSessionId;
   const membership = memberId ? folderByMember.get(memberId) : undefined;
-  return membership?.projectId === ref.projectId ? membership?.folderId ?? null : null;
+  if (membership?.projectId === ref.projectId) return membership.folderId;
+  const inheritedId = ref.kind === 'session' && ref.originGroup ? worktreeFolderMemberId(ref.originGroup.directory) : null;
+  const inherited = inheritedId ? folderByMember.get(inheritedId) : undefined;
+  return inherited?.projectId === ref.projectId ? inherited.folderId : null;
 };
 
 export const isFiledInFolder = (ref: SidebarWorkRef, folderByMember: ReadonlyMap<string, SidebarFolderMembership>): boolean => (
@@ -79,7 +82,7 @@ export const worktreeFolderMemberId = (directory: string | null): string | null 
 const sessionWorkKey = (rootSessionId: string): string => `session:${rootSessionId}`;
 
 /** Which work each listed session belongs to, from the project sections. */
-export const buildSidebarWorkIndex = (sections: readonly ProjectSection[]): SidebarWorkIndex => {
+export const buildSidebarWorkIndex = (sections: readonly ProjectSection[], sessionRows = false): SidebarWorkIndex => {
   const bySessionId = new Map<string, SidebarWorkRef>();
   const groupWorks: SidebarGroupWorkRef[] = [];
   const claim = (node: SessionNode, ref: SidebarWorkRef): void => {
@@ -98,7 +101,9 @@ export const buildSidebarWorkIndex = (sections: readonly ProjectSection[]): Side
       if (isGroupWork(group)) {
         const ref: SidebarGroupWorkRef = { kind: 'group', key: worktreeWorkGroupKey(projectId, group), projectId, group };
         groupWorks.push(ref);
-        group.sessions.forEach((node) => claim(node, ref));
+        group.sessions.forEach((node) => claim(node, sessionRows
+          ? { kind: 'session', key: sessionWorkKey(node.session.id), projectId, rootSessionId: node.session.id, originGroup: group }
+          : ref));
         continue;
       }
       for (const node of group.sessions) {

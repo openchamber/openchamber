@@ -43,6 +43,11 @@
 
 ## Decisions
 
+`sidebarRowDisplayMode` accepts `sessions`, `worktrees`, or `branches`.
+Omission preserves the legacy branch naming preference until a mode is chosen.
+Sidebar controls persist it explicitly, like other session display preferences;
+Detailed rows remains a separate per-surface setting.
+
 ### Why the Settings view passes its voice availability snapshot
 
 Search and new-setting badges receive the voice fields the view subscribes to, so memoized results refresh when those fields change. Non-React callers can omit the snapshot and read the current config store; separate invalidation-only dependencies hid this relationship from hook checks.

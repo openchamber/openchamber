@@ -49,7 +49,7 @@ import { cn } from '@/lib/utils';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { refreshGlobalSessions, useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
-import { resolveSidebarGrouping, useSessionDisplayStore, type ProjectSortOrder } from '@/stores/useSessionDisplayStore';
+import { resolveSidebarGrouping, resolveSidebarRowDisplayMode, useSessionDisplayStore, type ProjectSortOrder } from '@/stores/useSessionDisplayStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { GuestIcon } from '@/components/layout/GuestRailIcon';
 import { useGuestPages } from '@/hooks/useGuestSurfaces';
@@ -204,8 +204,8 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
   const setKeepPinnedInPlace = useSessionDisplayStore((state) => state.setKeepPinnedInPlace);
   const detailedZoneRows = useSessionDisplayStore((state) => state.detailedZoneRows);
   const setDetailedZoneRows = useSessionDisplayStore((state) => state.setDetailedZoneRows);
-  const worktreeNameByBranch = useSessionDisplayStore((state) => state.worktreeNameByBranch);
-  const setWorktreeNameByBranch = useSessionDisplayStore((state) => state.setWorktreeNameByBranch);
+  const rowDisplayMode = useSessionDisplayStore(resolveSidebarRowDisplayMode);
+  const setRowDisplayMode = useSessionDisplayStore((state) => state.setRowDisplayMode);
   const sessionWorkEnabled = useUIStore((state) => state.sessionWorkEnabled);
   const savedSections = useSessionDisplayStore((state) => state.sections);
   const customSections = React.useMemo(() => savedSections.filter((entry) => entry.kind === 'custom'), [savedSections]);
@@ -410,8 +410,15 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
         {renderMenuChoice('detailed', 'sessions.sidebar.header.displayMode.detailedZoneRows', detailedZoneRows, toggleSetting(detailedZoneRows, setDetailedZoneRows, (next) => {
           void updateDesktopSettings({ sidebarDetailedZoneRows: next });
         }))}
-        {renderMenuChoice('branch-names', 'sessions.sidebar.header.displayMode.worktreeNameByBranch', worktreeNameByBranch, toggleSetting(worktreeNameByBranch, setWorktreeNameByBranch, (next) => {
-          void updateDesktopSettings({ sidebarWorktreeNameByBranch: next });
+        <DropdownMenuSeparator />
+        <DropdownMenuLabel>{t('sessions.sidebar.header.displayMode.displayAs')}</DropdownMenuLabel>
+        {([
+          ['sessions', 'sessions.sidebar.header.displayMode.sessions'],
+          ['worktrees', 'sessions.sidebar.header.displayMode.worktrees'],
+          ['branches', 'sessions.sidebar.header.displayMode.branches'],
+        ] as const).map(([mode, labelKey]) => renderMenuChoice(mode, labelKey, rowDisplayMode === mode, () => {
+          setRowDisplayMode(mode);
+          void updateDesktopSettings({ sidebarRowDisplayMode: mode });
         }))}
         <DropdownMenuSeparator />
         {canEditOrder ? (

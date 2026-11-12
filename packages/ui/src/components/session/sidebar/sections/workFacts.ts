@@ -108,7 +108,7 @@ const collectWorkSessions = (ref: SidebarWorkRef, context: FactsContext) => {
 
 export const buildSidebarWorkFacts = (ref: SidebarWorkRef, context: FactsContext): SidebarWorkFacts => {
   const { all, top } = collectWorkSessions(ref, context);
-  const worktree = ref.kind === 'group' ? ref.group.worktree : null;
+  const worktree = ref.kind === 'group' ? ref.group.worktree : ref.originGroup?.worktree ?? null;
   const root = ref.kind === 'session' ? context.sessionById.get(ref.rootSessionId) ?? null : null;
   const topFacts = top.map(recordFacts);
   const inWork = topFacts.some((facts) => facts.work === 'open');
@@ -117,7 +117,8 @@ export const buildSidebarWorkFacts = (ref: SidebarWorkRef, context: FactsContext
   else if (context.runKeyBySessionId.has(ref.rootSessionId)) kind = 'run';
   let pin: string | null = null;
   if (ref.kind === 'group') pin = worktree?.pinnedAt !== undefined ? worktree.pinList ?? DEFAULT_PIN_LIST : null;
-  else pin = root ? recordFacts(root).pin : null;
+  else pin = (root ? recordFacts(root).pin : null)
+    ?? (worktree?.pinnedAt !== undefined ? worktree.pinList ?? DEFAULT_PIN_LIST : null);
   return {
     kind,
     scheduled: topFacts.some((facts) => facts.scheduled),

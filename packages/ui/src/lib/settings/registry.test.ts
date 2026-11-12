@@ -6,6 +6,7 @@ import { z } from 'zod';
 
 import { useUIStore } from '@/stores/useUIStore';
 import { useConfigStore } from '@/stores/useConfigStore';
+import { resolveSidebarRowDisplayMode, useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { installHookTestDom } from '@/components/session/sidebar/test-utils/testDom';
 import {
   AUTO_SAVE_KEYS,
@@ -24,6 +25,31 @@ import { renderSettingsRegistrySnapshot, SETTINGS_REGISTRY_SNAPSHOT_PATHS } from
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', '..', '..');
 
 describe('settings registry', () => {
+  test('sidebar row display preserves legacy preference and validates explicit persisted modes', () => {
+    const original = useSessionDisplayStore.getState();
+    try {
+      for (const worktreeNameByBranch of [true, false]) {
+        expect(resolveSidebarRowDisplayMode({ rowDisplayMode: null, worktreeNameByBranch }))
+          .toBe(worktreeNameByBranch ? 'branches' : 'worktrees');
+      }
+      for (const mode of ['sessions', 'worktrees', 'branches'] as const) {
+        const parsed = parseSettingsDocument({ sidebarRowDisplayMode: mode });
+        expect(parsed).toEqual({ sidebarRowDisplayMode: mode });
+        if (!parsed) throw new Error('Expected valid settings');
+        applySettingsToStores(parsed);
+        expect(resolveSidebarRowDisplayMode(useSessionDisplayStore.getState())).toBe(mode);
+        expect(MIRRORED_KEYS).toContain('sidebarRowDisplayMode');
+        expect(AUTO_SAVE_KEYS).not.toContain('sidebarRowDisplayMode');
+      }
+      for (const invalid of ['unknown', '', false, null]) {
+        expect(parseSettingsDocument({ sidebarRowDisplayMode: invalid })).toEqual({});
+      }
+      applySettingsToStores({});
+      expect(useSessionDisplayStore.getState().rowDisplayMode).toBe('branches');
+    } finally {
+      useSessionDisplayStore.setState(original, true);
+    }
+  });
   test('round-trips custom selection approval text and clearing it without resetting omitted preferences', async () => {
     const options = useUIStore.persist.getOptions();
     const original = useUIStore.getState();
