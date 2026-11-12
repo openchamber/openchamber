@@ -259,7 +259,7 @@ describe('TerminalView project action tab indicator', () => {
 
   test('a draft waiting for a new space opens no shell until the space runs, then opens it in the space', async () => {
     const space: SpaceEntry = {
-      id: 'a1b2c3d4e5f6', name: 'Fix login', placeId: 'docker', machine: null,
+      id: 'a1b2c3d4e5f6', kind: 'docker', name: 'Fix login', placeId: 'docker', machine: null,
       projectDirectory: '/repo', projectFolder: { path: '/repo', found: null }, directory: '/spaces/a1b2c3d4e5f6/repo',
       state: 'preparing', stoppedIdle: false, step: 'creating', failure: null, network: { mode: 'allowlist', domains: [] },
       grants: [], access: null, needsAccess: [], accessFailures: [], damage: null, setup: null,

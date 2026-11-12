@@ -18,6 +18,7 @@ import { SpaceError } from './errors.js';
 import { tail } from './exec-http.js';
 import { requireSpaceId } from './labels.js';
 import { IMAGE_GIT, IMAGE_ONLY_PATH, IMAGE_SH, IMAGE_TIMEOUT, requireSpaceProjectPath, spaceHistoryPath, spaceProjectPath } from './layout.js';
+import { createAgentCodeIn } from './agent-code-transfer.js';
 
 const SNAPSHOT_TIMEOUT_MS = 10 * 60_000;
 const LIST_MAX_OUTPUT_BYTES = 64 * 1024 * 1024;
@@ -116,7 +117,8 @@ const asHistoryFailure = (error, step) => {
   return new SpaceError('history_transfer_failed', ours ? error.message : `The history failed on the host: ${error.message}`, details);
 };
 
-export function createCodeIn({ git, place, temporaryDirectory = os.tmpdir(), removeDirectory }) {
+export function createCodeIn({ git, place, temporaryDirectory = os.tmpdir(), removeDirectory, snapshotSource, upstream, dataDir, gitPath, environment, runCommand }) {
+  if (upstream) return createAgentCodeIn({ upstream, dataDir, gitPath, environment, runCommand, place, localCodeIn: createCodeIn });
   const { withHostGit, requireGitVersion, requireWorkTree } = createTransferSession({ git, temporaryDirectory, removeDirectory, name: 'code in' });
 
   /** What a transfer needs to know about the repository, after the refusals that come first. */
@@ -361,7 +363,7 @@ export function createCodeIn({ git, place, temporaryDirectory = os.tmpdir(), rem
     requireTimeout(timeoutMs);
     let taken;
     try {
-      taken = await snapshot(g, directory, { repository, spaceId, mode });
+      taken = snapshotSource ? await snapshotSource({ repository, spaceId, mode }) : await snapshot(g, directory, { repository, spaceId, mode });
     } catch (error) {
       throw asBringFailure(error, SNAPSHOT_REFUSALS, 'take the snapshot');
     }

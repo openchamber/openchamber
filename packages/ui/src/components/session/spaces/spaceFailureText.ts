@@ -40,6 +40,21 @@ const KNOWN: ReadonlyMap<string, I18nKey> = new Map<string, I18nKey>([
   ['space_setup_shared_skipped', 'spaces.group.setup.sharedSkipped'],
   ['image_pull_failed', 'spaces.failure.imagePull'],
   ['image_pulling', 'spaces.failure.imagePulling'],
+  ['agent_separation_missing', 'spaces.failure.agentSeparationMissing'],
+  ['no_passkey_approved', 'spaces.failure.noRootPasskey'],
+  ['hostd_unavailable', 'spaces.failure.hostdUnavailable'],
+  ['root_activation_unavailable', 'spaces.failure.rootUnavailable'],
+  ['root_activation_required', 'spaces.failure.rootActivationRequired'],
+  ['root_passkey_not_approved', 'spaces.failure.rootPasskeyNotApproved'],
+  ['root_activation_refused', 'spaces.failure.rootActivationRefused'],
+  ['root_activation_challenge_unknown', 'spaces.failure.rootChallengeUnknown'],
+  ['ui_passkey_missing', 'spaces.failure.uiPasskeyMissing'],
+  ['approval_code_wrong', 'spaces.failure.approvalCodeWrong'],
+  ['approval_expired', 'spaces.failure.approvalExpired'],
+  ['approval_awaiting_confirmation', 'spaces.failure.approvalAwaitingConfirmation'],
+  ['mcp_grant_unsupported_place', 'spaces.failure.mcpUnsupportedPlace'],
+  ['root_place_not_allowed', 'spaces.failure.rootPlaceNotAllowed'],
+  ['root_activation_cancelled', 'spaces.failure.rootCancelled'],
 ]);
 
 // The same two failures on another machine: what to do there, not on this computer.
@@ -56,6 +71,7 @@ type Translate = (key: I18nKey, params?: I18nParams) => string;
  * failure is about another machine passes it as `machine`, so Docker's absence is placed there.
  */
 export const spaceFailureText = (t: Translate, failure: SpaceFailure, params?: I18nParams): string => {
+  if (failure.code === 'root_activation_origin') return t('spaces.failure.rootOrigin', { origin: window.location.origin, origins: failure.message });
   const key = (params?.machine ? ON_MACHINE.get(failure.code) : undefined) ?? KNOWN.get(failure.code);
   return key ? t(key, params) : t('spaces.failure.unexpected', { message: failure.message || failure.code });
 };

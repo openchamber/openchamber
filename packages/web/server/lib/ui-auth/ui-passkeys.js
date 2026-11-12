@@ -255,6 +255,26 @@ export const createUiPasskeys = ({
     }));
   };
 
+  /**
+   * The sign-in passkeys at this address with their public keys, for proving one of them to the
+   * root component when it approves a passkey for root spaces. A public key is no secret.
+   */
+  const listCredentials = (req) => {
+    const rpID = getCurrentRpId(req);
+    if (!passwordBinding || !rpID) {
+      return { rpID: rpID || null, passkeys: [] };
+    }
+    return {
+      rpID,
+      passkeys: getPasskeysForRpId(loadStore(), rpID).map((passkey) => ({
+        id: passkey.id,
+        label: passkey.customLabel ?? passkey.label,
+        publicKey: passkey.publicKey,
+        rpID: passkey.rpID,
+      })),
+    };
+  };
+
   const revokePasskey = (req, passkeyId) => {
     assertEnabled();
 
@@ -590,6 +610,7 @@ export const createUiPasskeys = ({
     enabled: Boolean(passwordBinding),
     getStatus,
     listPasskeys,
+    listCredentials,
     revokePasskey,
     renamePasskey,
     clearAllPasskeys,

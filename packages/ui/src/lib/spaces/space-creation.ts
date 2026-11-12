@@ -23,6 +23,7 @@ import { useSessionUIStore } from '@/sync/session-ui-store';
 import { noteSpaceModelAccess } from './space-model-access';
 import type { SpaceSetupPlan } from './space-setup';
 import { forgetSpaceCreationRequest, noteSpaceCreationRequest } from './space-creation-requests';
+import { createRootSpace, type RootPasskeyDependencies } from './root-activation';
 
 export type SpaceModelAccess = Extract<GrantRequest, { kind: 'model' | 'login' | 'custom' }>;
 
@@ -81,6 +82,9 @@ type StartSpaceCreationOptions = {
   access: readonly SpaceModelAccess[];
   /** The text a waiting message is refused with when the space cannot take it, already translated. */
   refusalMessage: string;
+  /** Present only after the user explicitly picked the host-root place. */
+  rootOrigins?: readonly string[];
+  rootPasskey?: RootPasskeyDependencies;
 };
 
 /**
@@ -88,8 +92,9 @@ type StartSpaceCreationOptions = {
  * the request itself (Docker gone since the dialog checked, a project the host lost) throws here,
  * for the dialog to show. Everything after that runs on its own and ends in the space's group.
  */
-export const startSpaceCreation = async ({ projectId, request, setup, access, refusalMessage }: StartSpaceCreationOptions): Promise<SpaceEntry> => {
-  const entry = await createSpace({ ...request, setupCommands: setup.commands, grants: [...access] });
+export const startSpaceCreation = async ({ projectId, request, setup, access, refusalMessage, rootOrigins, rootPasskey }: StartSpaceCreationOptions): Promise<SpaceEntry> => {
+  const body = { ...request, setupCommands: setup.commands, grants: [...access] };
+  const entry = rootOrigins === undefined ? await createSpace(body) : await createRootSpace(body, rootOrigins, rootPasskey);
   useSpacesStore.getState().addJourneyEntry(entry);
 
   const requestId = createPendingDraftWorktreeRequest();

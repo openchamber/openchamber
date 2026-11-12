@@ -94,7 +94,7 @@ export const createBootstrapRuntime = (dependencies) => {
     }
 
     // Dedicated credentials must never reach common parsers or auth fallbacks.
-    registerIntegrationControlRoutes(app, {
+    if (!options.frontDoor) registerIntegrationControlRoutes(app, {
       controlService: openChamberControlService,
       readSettingsFromDiskMigrated,
       sanitizeProjects,
@@ -120,7 +120,7 @@ export const createBootstrapRuntime = (dependencies) => {
 
     registerCommonRequestMiddleware(app, { express, verboseRequestLogs, skipBodyParsing });
 
-    registerAgentToolRoutes(app, { express, agentToolRuntime });
+    if (!options.frontDoor) registerAgentToolRoutes(app, { express, agentToolRuntime });
     limitFailoverRuntime?.registerRoutes(app, express);
 
     const notificationEmitRoutes = registerNotificationEmitRoutes(app, {
@@ -146,6 +146,8 @@ export const createBootstrapRuntime = (dependencies) => {
       readSettingsFromDiskMigrated,
       normalizeTunnelSessionTtlMs,
     });
+
+    options.afterApiAuth?.(uiAuthController);
 
     notificationEmitRoutes.registerApiRoute();
 

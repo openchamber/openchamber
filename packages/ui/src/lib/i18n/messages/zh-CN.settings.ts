@@ -5,6 +5,18 @@ import { firstPartyIntegrationsI18n } from './first-party-integrations.i18n';
 import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
 import { extensionCatalogI18n } from './extension-catalog.i18n';
 export const settingsDict = {
+  'settings.openchamber.spaces.host.installation': '由安装在主机上的 OpenChamber 提供。',
+  'settings.openchamber.spaces.root.title': 'root 空间',
+  'settings.openchamber.spaces.root.available': 'root 空间可用。每次创建、启动和重启都需要已批准的通行密钥。',
+  'settings.openchamber.spaces.root.approve': '批准通行密钥',
+  'settings.openchamber.spaces.root.commandInfo': '请在服务器上以 root 运行此命令，并输入命令输出的代码。',
+  'settings.openchamber.spaces.root.code': '批准码',
+  'settings.openchamber.spaces.root.label': '通行密钥标签，选填',
+  'settings.openchamber.spaces.root.confirm': '在服务器终端中确认此通行密钥',
+  'settings.openchamber.spaces.root.confirmInfo': '请将此指纹与终端中的指纹进行比较，并在终端中确认。只有终端接受后，批准才算完成。',
+  'settings.openchamber.spaces.root.empty': '没有获准用于 root 空间的通行密钥。',
+  'settings.openchamber.spaces.root.approvedAt': '于 {date} 批准',
+  'settings.openchamber.spaces.root.revoke': '在服务器上撤销',
   'settings.openchamber.sessionRetention.field.archivedDescription': '保留期限从归档时开始计算。过期会话会被删除。',
   'settings.openchamber.sessionRetention.field.unarchivedArchiveDescription': '保留期限从会话的最后活动时间开始计算。过期会话会被归档。',
   'settings.openchamber.sessionRetention.field.unarchivedDeleteDescription': '保留期限从会话的最后活动时间开始计算。过期会话会被删除。',

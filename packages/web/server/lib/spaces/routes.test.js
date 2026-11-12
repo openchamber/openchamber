@@ -16,7 +16,7 @@ afterEach(async () => {
 });
 
 /** An app with the routes over `journey`, or with the feature off when `journey` is null. */
-const serve = async ({ journey, places = [], switchState = { enabled: true }, machinePlace = null, dockerSetup = null } = {}) => {
+const serve = async ({ journey, places = [], switchState = { enabled: true }, machinePlace = null, dockerSetup = null, uiPasskeys = { rpID: null, passkeys: [] } } = {}) => {
   const app = express();
   app.use(express.json());
   const calls = [];
@@ -34,6 +34,7 @@ const serve = async ({ journey, places = [], switchState = { enabled: true }, ma
       return { enabled, stopped: enabled ? [] : [{ id: ID, name: 'One' }], stillRunning: [] };
     },
     setMachine: async (machine) => { calls.push(['setMachine', machine]); return machinePlace; },
+    getUiPasskeys: () => uiPasskeys,
   });
   const server = http.createServer(app);
   servers.push(server);
@@ -127,9 +128,9 @@ describe('space routes', () => {
     ];
     const { call } = await serve({ journey: journeyOf(), places, dockerSetup });
     expect(await call('GET', `${SPACES_ROUTE}/places`)).toEqual({ status: 200, body: { places: [
-      { id: 'docker', machine: null, available: false, code: 'docker_daemon_unreachable', message: 'down', setup: { remedy: 'start_colima', job: null, memory: null } },
+      { id: 'docker', kind: 'docker', machine: null, available: false, code: 'docker_daemon_unreachable', message: 'down', setup: { remedy: 'start_colima', job: null, memory: null }, rootActivation: null },
       // The other machine is the user's to set up.
-      { id: 'docker-ssh', machine: 'box', available: false, code: 'docker_daemon_unreachable', message: 'down there', setup: null },
+      { id: 'docker-ssh', kind: 'docker', machine: 'box', available: false, code: 'docker_daemon_unreachable', message: 'down there', setup: null, rootActivation: null },
     ] } });
     expect(await call('GET', `${SPACES_ROUTE}/places/local/setup`)).toEqual({ status: 200, body: { job: { action: 'start_colima', running: true, failure: null } } });
     expect(await call('POST', `${SPACES_ROUTE}/places/local/setup`, { action: 'start_colima' })).toEqual({ status: 202, body: { job: { action: 'start_colima', running: true, failure: null } } });
@@ -152,8 +153,8 @@ describe('space routes', () => {
     const machinePlace = { id: 'docker-ssh', machine: 'other', available: true, version: '29.2.1', hostIsolation: true };
     const { call, calls } = await serve({ journey, places, machinePlace });
     expect(await call('GET', `${SPACES_ROUTE}/places`)).toEqual({ status: 200, body: { places: [
-      { id: 'docker', machine: null, available: true, version: '29.2.1', hostIsolation: true, setup: null },
-      { id: 'docker-ssh', machine: 'box', available: false, code: 'place_unreachable', message: 'box did not answer', setup: null },
+      { id: 'docker', kind: 'docker', machine: null, available: true, version: '29.2.1', hostIsolation: true, setup: null, rootActivation: null },
+      { id: 'docker-ssh', kind: 'docker', machine: 'box', available: false, code: 'place_unreachable', message: 'box did not answer', setup: null, rootActivation: null },
     ] } });
     expect(await call('PUT', `${SPACES_ROUTE}/machine`, { machine: 'other' })).toEqual({ status: 200, body: { place: machinePlace } });
     expect(await call('PUT', `${SPACES_ROUTE}/machine`, { machine: 7 })).toMatchObject({ status: 400, body: { code: 'invalid_request_body' } });
@@ -179,8 +180,54 @@ describe('space routes', () => {
     expect(await call('GET', `${SPACES_ROUTE}/${ID}/setup`)).toEqual({ status: 200, body: { setup: null, output: null } });
     expect(await call('DELETE', `${SPACES_ROUTE}/${ID}`)).toEqual({ status: 200, body: { id: ID, removed: true } });
     expect(journey.calls).toEqual([
-      ['listSpaces', { access: true }], ['readDisk', 'docker'], ['cleanUpDisk', 'docker'], ['pullImage', 'docker'], ['createSpace', request], ['startSpace', ID], ['stopSpace', ID], ['restartSpace', ID], ['restartOpenCode', ID], ['grantAccess', ID, { kind: 'domain', upstream: 'https://registry.example.com/' }], ['openDomain', ID, { domain: 'registry.npmjs.org' }], ['readHostLogins'], ['readHostCustomProviders', '/home/me/project'], ['readJournal', ID], ['previewApply', ID], ['applySpace', ID, { as: 'branch', branch: 'b' }], ['runSetup', ID, { commands: ['npm ci'] }], ['readSetup', ID], ['removeSpace', ID, { allowUnsaved: false }],
+      ['listSpaces', { access: true }], ['readDisk', 'docker'], ['cleanUpDisk', 'docker'], ['pullImage', 'docker'], ['createSpace', request], ['startSpace', ID, { rootActivation: null }], ['stopSpace', ID], ['restartSpace', ID, { rootActivation: null }], ['restartOpenCode', ID], ['grantAccess', ID, { kind: 'domain', upstream: 'https://registry.example.com/' }], ['openDomain', ID, { domain: 'registry.npmjs.org' }], ['readHostLogins'], ['readHostCustomProviders', '/home/me/project'], ['readJournal', ID], ['previewApply', ID], ['applySpace', ID, { as: 'branch', branch: 'b' }], ['runSetup', ID, { commands: ['npm ci'] }], ['readSetup', ID], ['removeSpace', ID, { allowUnsaved: false }],
     ]);
+  });
+
+  it('carries root spaces between the browser and the root component: places, passkey approval and each confirmation', async () => {
+    const assertion = { id: 'cred-1', rawId: 'cred-1', type: 'public-key', response: { clientDataJSON: 'e30', authenticatorData: 'AA', signature: 'AA' } };
+    const approved = [{ id: 'cred-1', label: 'Laptop', origin: 'https://chamber.example.com', rpID: 'chamber.example.com', approvedAt: 1, fingerprint: 'AAAA-BBBB-CCCC-DDDD' }];
+    const journey = journeyOf({
+      readRootPasskeys: async () => ({ available: true, reason: null, passkeys: approved }),
+      rootApprovalChallenge: async (body) => { journey.calls.push(['rootApprovalChallenge', body]); return { challenge: 'approval-challenge' }; },
+      completeRootApproval: async (body, credentialOf) => { journey.calls.push(['completeRootApproval', body, credentialOf('cred-1'), credentialOf('other')]); return { awaitingConfirmation: true, fingerprint: 'AAAA-BBBB-CCCC-DDDD', label: 'Laptop', origin: 'https://chamber.example.com' }; },
+      rootActivationOptions: async (request) => { journey.calls.push(['rootActivationOptions', request]); return { spaceId: request.op === 'create' ? ID : undefined, challenge: 'activation', expiresAt: 5, credentials: approved }; },
+    });
+    const places = [
+      { id: 'host', kind: 'host', machine: null, check: async () => ({ available: true, hostIsolation: true }) },
+      { id: 'host-root', kind: 'host-root', machine: null, check: async () => ({ available: true, hostIsolation: false }) },
+    ];
+    const signIn = { id: 'cred-1', label: 'Laptop', publicKey: 'cHVibGlj', rpID: 'chamber.example.com' };
+    const { call } = await serve({ journey, places, uiPasskeys: { rpID: 'chamber.example.com', passkeys: [signIn] } });
+    expect(await call('GET', `${SPACES_ROUTE}/places`)).toEqual({ status: 200, body: { places: [
+      { id: 'host', kind: 'host', machine: null, available: true, hostIsolation: true, setup: null, rootActivation: null },
+      { id: 'host-root', kind: 'host-root', machine: null, available: true, hostIsolation: false, setup: null, rootActivation: { available: true, reason: null, origins: ['https://chamber.example.com'] } },
+    ] } });
+    expect(await call('GET', `${SPACES_ROUTE}/root-passkeys`)).toEqual({ status: 200, body: { available: true, reason: null, passkeys: approved } });
+    // The browser proves one of the owner's sign-in passkeys; its public key goes to the root component from the host's own store.
+    expect(await call('POST', `${SPACES_ROUTE}/root-passkeys/approval-challenge`, { code: 'ABCD-EFGH' })).toEqual({ status: 200, body: { challenge: 'approval-challenge', rpID: 'chamber.example.com', allowCredentials: [{ id: 'cred-1', label: 'Laptop' }] } });
+    expect(await call('POST', `${SPACES_ROUTE}/root-passkeys/approval`, { code: 'ABCD-EFGH', response: assertion })).toMatchObject({ status: 200, body: { awaitingConfirmation: true } });
+    const request = { projectDirectory: '/home/me/project', name: 'Root', placeId: 'host-root', network: { mode: 'open' } };
+    expect(await call('POST', `${SPACES_ROUTE}/root-activation`, { op: 'create', request })).toEqual({ status: 200, body: { spaceId: ID, challenge: 'activation', expiresAt: 5, rpID: 'chamber.example.com', allowCredentials: [{ id: 'cred-1', label: 'Laptop', origin: 'https://chamber.example.com' }] } });
+    expect(await call('POST', `${SPACES_ROUTE}/root-activation`, { op: 'start' })).toMatchObject({ status: 400, body: { code: 'root_activation_invalid' } });
+    expect(await call('POST', `${SPACES_ROUTE}/${ID}/root-activation`, { op: 'start' })).toMatchObject({ status: 200, body: { challenge: 'activation' } });
+    expect(await call('POST', `${SPACES_ROUTE}/${ID}/start`, { rootActivation: assertion })).toMatchObject({ status: 200 });
+    expect(await call('POST', `${SPACES_ROUTE}/${ID}/restart`, { rootActivation: assertion })).toMatchObject({ status: 200 });
+    expect(journey.calls).toEqual([
+      ['rootApprovalChallenge', { code: 'ABCD-EFGH' }],
+      ['completeRootApproval', { code: 'ABCD-EFGH', response: assertion }, signIn, null],
+      ['rootActivationOptions', { op: 'create', request }],
+      ['rootActivationOptions', { op: 'start', spaceId: ID }],
+      ['startSpace', ID, { rootActivation: assertion }],
+      ['restartSpace', ID, { rootActivation: assertion }],
+    ]);
+  });
+
+  it('refuses a root passkey approval at an address with no sign-in passkey, before the root component is asked', async () => {
+    const journey = journeyOf({ rootApprovalChallenge: async () => { journey.calls.push(['rootApprovalChallenge']); return { challenge: 'x' }; } });
+    const { call } = await serve({ journey });
+    expect(await call('POST', `${SPACES_ROUTE}/root-passkeys/approval-challenge`, { code: 'ABCD-EFGH' })).toMatchObject({ status: 409, body: { code: 'ui_passkey_missing' } });
+    expect(journey.calls).toEqual([]);
   });
 
   it('reads and changes the idle stop setting through the journey, and refuses a body that is not an object', async () => {
@@ -216,6 +263,8 @@ describe('space routes', () => {
       ['invalid_setup_commands', 400], ['space_setup_running', 409],
       ['space_approval_model_unreviewed', 400], ['space_approval_model_unsupported', 400], ['space_purpose_immutable', 409],
       ['space_remove_incomplete', 502], ['docker_command_failed', 502], ['code_out_failed', 502],
+      ['root_activation_required', 409], ['root_activation_refused', 403], ['root_place_not_allowed', 400], ['agent_separation_missing', 409],
+      ['mcp_grant_unsupported_place', 400], ['protected_mcp_unavailable', 503], ['ui_passkey_missing', 409], ['approval_code_wrong', 403],
     ];
     for (const [code, status] of cases) {
       answerFailure(res, new SpaceError(code, `about ${code}`, { step: 'x' }));

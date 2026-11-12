@@ -12,6 +12,21 @@ export const PLACE_RETRY_CAP_MS = 5 * 60_000;
 const retryDelayAfter = (failures) => Math.min(PLACE_RETRY_CAP_MS, PLACE_RETRY_BASE_MS * 2 ** Math.max(0, failures - 1));
 
 /**
+ * What a new space is made with, the creation time aside. A root place binds its passkey
+ * confirmation to exactly these fields, so the confirmation is asked for with this same spec.
+ */
+export function activationSpecOf({ id, projectDirectory, name, purpose = 'general' }) {
+  const spec = {
+    id: requireSpaceId(id),
+    name: normalizeSpaceName(name),
+    project: hashProjectDirectory(projectDirectory),
+    memoryBytes: DEFAULT_SPACE_MEMORY_BYTES,
+  };
+  if (requireSpacePurpose(purpose) !== 'general') spec.purpose = purpose;
+  return spec;
+}
+
+/**
  * Thin orchestration over places. It keeps no record of spaces: every answer
  * comes from the place at the time of the call.
  *
@@ -97,17 +112,11 @@ export function createSpaceManager({ registry, locate = async () => null, recall
   // `id` may be given, so a caller that announces a creation before it is done names the same space.
   // `onStep(step)` hears the slow parts of the place's create as they begin, see the place contract.
   // `startConfig` is OpenCode's start configuration for the space container, or null.
-  const createSpace = async ({ placeId, projectDirectory, name, id = createSpaceId(), purpose = 'general', onStep, startConfig = null }) => {
+  // `activation` is the passkey confirmation a root place requires, made for this very spec.
+  const createSpace = async ({ placeId, projectDirectory, name, id = createSpaceId(), purpose = 'general', onStep, startConfig = null, activation = null }) => {
     const place = requirePlace(placeId);
-    const spec = {
-      id: requireSpaceId(id),
-      name: normalizeSpaceName(name),
-      project: hashProjectDirectory(projectDirectory),
-      created: now().toISOString(),
-      memoryBytes: DEFAULT_SPACE_MEMORY_BYTES,
-    };
-    if (requireSpacePurpose(purpose) !== 'general') spec.purpose = purpose;
-    await place.create(spec, { onStep, startConfig });
+    const spec = { ...activationSpecOf({ id, projectDirectory, name, purpose }), created: now().toISOString() };
+    await place.create(spec, { onStep, startConfig, activation });
 
     // A space that cannot be verified is never handed out. It is removed instead.
     const discard = async () => {
@@ -182,7 +191,7 @@ export function createSpaceManager({ registry, locate = async () => null, recall
 
   const stopSpace = async ({ placeId, spaceId }) => (await resolve({ placeId, spaceId })).stop(spaceId);
 
-  const startSpace = async ({ placeId, spaceId }) => (await resolve({ placeId, spaceId })).start(spaceId);
+  const startSpace = async ({ placeId, spaceId, activation = null }) => (await resolve({ placeId, spaceId })).start(spaceId, { activation });
 
   // The per-space operations of the place contract, each on the space's own place.
   const exec = async (spaceId, argv, options) => (await placeOf(spaceId)).exec(spaceId, argv, options);

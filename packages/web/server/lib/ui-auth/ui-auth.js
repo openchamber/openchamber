@@ -688,6 +688,7 @@ export const createUiAuth = ({
       handleResetAuth: (_req, res) => {
         res.status(400).json({ error: 'UI password not configured' });
       },
+      passkeyCredentials: () => ({ rpID: null, passkeys: [] }),
       ensureSessionToken: async (req, res) => {
         const clientAuth = await authenticateClientRequest(req);
         if (clientAuth) return clientSessionToken(clientAuth);
@@ -1163,6 +1164,7 @@ export const createUiAuth = ({
     handlePasskeyRevoke,
     handlePasskeyRename,
     handleResetAuth,
+    passkeyCredentials: (req) => passkeyController.listCredentials(req),
     ensureSessionToken: (req, _res) => {
       const urlAuth = authenticateUrlAuthToken(req);
       if (urlAuth) return clientSessionToken(urlAuth);

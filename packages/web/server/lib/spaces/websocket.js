@@ -67,14 +67,14 @@ export const closeFrame = (code, reason) => {
 const headerValue = (value) => (Array.isArray(value) ? value.join(', ') : value);
 
 /** The handshake as the server inside gets it: the request line, then the forwarded headers. */
-export const buildHandshake = ({ innerPath, search, requestHeaders, cookie }) => {
-  const headers = forwardRequestHeaders(requestHeaders, cookie);
+export const buildHandshake = ({ innerPath, search, requestHeaders, cookie, host = `${SPACE_SERVER_HOST}:${SPACE_SERVER_PORT}` }) => {
+  const headers = forwardRequestHeaders(requestHeaders, cookie, host);
   headers.connection = 'Upgrade';
   headers.upgrade = 'websocket';
   // The server inside checks the origin of an upgrade against its own host, as the host does.
   // The client's origin is not what it gets: the loopback origin is, the same one the relay
   // host presents when it dials the host's loopback.
-  headers.origin = `http://${SPACE_SERVER_HOST}:${SPACE_SERVER_PORT}`;
+  headers.origin = `http://${host}`;
   for (const name of HANDSHAKE_REQUEST_HEADERS) {
     const value = headerValue(requestHeaders[name]);
     if (value !== undefined) headers[name] = value;
@@ -108,7 +108,7 @@ export const parseHandshakeAnswer = (buffer) => {
  * `dispatcher` is the space dispatcher, for its list and its sessions; `connect` is the place's.
  * `uiAuthController`, `isRequestOriginAllowed` and `logger` are the host's.
  */
-export function createSpaceWebSocketForwarder({ dispatcher, connect, uiAuthController, isRequestOriginAllowed, logger = console, maxSocketsPerSpace = MAX_SOCKETS_PER_SPACE }) {
+export function createSpaceWebSocketForwarder({ dispatcher, connect, target = null, uiAuthController, isRequestOriginAllowed, logger = console, maxSocketsPerSpace = MAX_SOCKETS_PER_SPACE }) {
   const open = new Map();
 
   // Handshakes under way count against the cap too: each one is a `docker exec` already.
@@ -260,7 +260,7 @@ export function createSpaceWebSocketForwarder({ dispatcher, connect, uiAuthContr
     socket.on('end', onLeave);
     socket.on('close', onLeave);
     try {
-      const attempt = async (cookie) => handshake(route.spaceId, buildHandshake({ innerPath: route.path, search, requestHeaders: req.headers, cookie }), gone.signal);
+        const attempt = async (cookie) => handshake(route.spaceId, buildHandshake({ innerPath: route.path, search, requestHeaders: req.headers, cookie, host: target?.host }), gone.signal);
       let result = await attempt(await dispatcher.spaceSessions.cookieFor(route.spaceId));
       if (result.answer.status === 401) {
         // The server inside refused the session: renewed once, as for HTTP. An upgrade has no
@@ -293,14 +293,14 @@ export function createSpaceWebSocketForwarder({ dispatcher, connect, uiAuthContr
    */
   const upgradeHandler = (req, socket, head) => {
     const url = new URL(req.url ?? '/', 'http://localhost');
-    const route = spaceRouteOf(req, url);
+    const route = target ? target.routeOf(req, url) : spaceRouteOf(req, url);
     if (!route) return;
-    if (!url.pathname.toLowerCase().startsWith('/api/spaces/')) {
+    if (!target && !url.pathname.toLowerCase().startsWith('/api/spaces/')) {
       req.url = `/api/spaces/${encodeURIComponent(route.spaceId)}${url.pathname.slice('/api'.length)}${url.search}`;
     }
     socket.on('error', () => {});
-    if (!isSpaceId(route.spaceId)) { refuse(socket, 404, 'space_not_found', 'There is no such space.'); return; }
-    const rule = classifySpacePath(route.path);
+    if (!target && !isSpaceId(route.spaceId)) { refuse(socket, 404, 'space_not_found', 'There is no such space.'); return; }
+    const rule = target ? null : classifySpacePath(route.path);
     if (rule === 'host_only') { refuse(socket, 403, 'host_only_route', 'This route exists on the host only and is not forwarded to a space.'); return; }
     if (rule === 'refused_across_boundary') { refuse(socket, 403, 'refused_across_boundary', 'This action does not cross the boundary of an isolated space.'); return; }
     const innerPath = route.path.toLowerCase();
@@ -309,7 +309,7 @@ export function createSpaceWebSocketForwarder({ dispatcher, connect, uiAuthContr
       try {
         const denied = await authorize(req, innerPath);
         if (denied) { refuse(socket, denied.status, denied.code, denied.message); return; }
-        if (requestedDirectories(req, url).some((directory) => !isDirectoryOfSpace(directory, route.spaceId))) {
+        if (!target && requestedDirectories(req, url).some((directory) => !isDirectoryOfSpace(directory, route.spaceId))) {
           refuse(socket, 400, 'directory_outside_space', `A request to space ${route.spaceId} may name a directory under ${spaceWorkPath(route.spaceId)} only.`);
           return;
         }
@@ -321,7 +321,7 @@ export function createSpaceWebSocketForwarder({ dispatcher, connect, uiAuthContr
           refuse(socket, error.details.status, error.code, error.message);
           return;
         }
-        const failure = describeFailure(error);
+        const failure = target ? { status: 502, code: 'agent_unreachable', message: 'agent_unreachable' } : describeFailure(error);
         logger.warn?.(`[spaces] socket to space ${route.spaceId} failed: ${failure.code}`);
         refuse(socket, failure.status, failure.code, failure.message);
       }

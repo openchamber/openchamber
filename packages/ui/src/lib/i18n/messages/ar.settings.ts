@@ -5,6 +5,18 @@ import { firstPartyIntegrationsI18n } from './first-party-integrations.i18n';
 import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
 import { extensionCatalogI18n } from './extension-catalog.i18n';
 export const settingsDict = {
+  'settings.openchamber.spaces.host.installation': 'توفره نسخة OpenChamber المثبّتة على الجهاز المضيف.',
+  'settings.openchamber.spaces.root.title': 'مساحات root',
+  'settings.openchamber.spaces.root.available': 'مساحات root متاحة. تتطلب كل عملية إنشاء أو تشغيل أو إعادة تشغيل مفتاح مرور معتمدًا.',
+  'settings.openchamber.spaces.root.approve': 'اعتماد مفتاح مرور',
+  'settings.openchamber.spaces.root.commandInfo': 'شغّل هذا الأمر على الخادم بصلاحيات root وأدخل الرمز الذي يطبعه.',
+  'settings.openchamber.spaces.root.code': 'رمز الاعتماد',
+  'settings.openchamber.spaces.root.label': 'تسمية مفتاح المرور (اختيارية)',
+  'settings.openchamber.spaces.root.confirm': 'أكّد مفتاح المرور هذا في طرفية الخادم',
+  'settings.openchamber.spaces.root.confirmInfo': 'قارن هذه البصمة بما يظهر في الطرفية وأكّدها هناك. لا يكتمل الاعتماد إلا بعد قبول الطرفية للتأكيد.',
+  'settings.openchamber.spaces.root.empty': 'لا توجد مفاتيح مرور معتمدة لمساحات root.',
+  'settings.openchamber.spaces.root.approvedAt': 'اعتُمد في {date}',
+  'settings.openchamber.spaces.root.revoke': 'إلغاء الاعتماد على الخادم',
   'settings.openchamber.sessionRetention.field.archivedDescription': 'تُحسب مدة الاحتفاظ من وقت الأرشفة. تُحذف الجلسات التي انتهت مدتها.',
   'settings.openchamber.sessionRetention.field.unarchivedArchiveDescription': 'تُحسب مدة الاحتفاظ من آخر نشاط للجلسة. تُؤرشف الجلسات التي انتهت مدتها.',
   'settings.openchamber.sessionRetention.field.unarchivedDeleteDescription': 'تُحسب مدة الاحتفاظ من آخر نشاط للجلسة. تُحذف الجلسات التي انتهت مدتها.',

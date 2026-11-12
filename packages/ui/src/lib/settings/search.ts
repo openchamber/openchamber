@@ -946,6 +946,14 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     isAvailable: (ctx) => !ctx.isVSCode && useUIStore.getState().isolatedSpacesEnabled,
   },
   {
+    id: 'general.isolated-spaces-root-passkeys',
+    page: 'isolated-spaces',
+    titleKey: 'settings.openchamber.spaces.root.title',
+    descriptionKey: 'settings.openchamber.spaces.root.commandInfo',
+    keywords: ['root', 'space', 'spaces', 'host', 'passkey', 'approve', 'fingerprint'],
+    isAvailable: (ctx) => !ctx.isVSCode && useUIStore.getState().isolatedSpacesEnabled,
+  },
+  {
     id: 'sessions.agent-memory-tool',
     page: 'general',
     titleKey: 'settings.openchamber.tools.field.agentMemoryTool',

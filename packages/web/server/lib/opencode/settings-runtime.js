@@ -1,4 +1,6 @@
 import { createProjectIdFromPath, projectConfigFileStemOf } from '../projects/project-id.js';
+import { createProjectRegistry, normalizeRegistryProjectPath, sanitizeRegistryProjects } from '../agent-server/project-registry.js';
+import { isRecord, isString } from '../shared/guards.js';
 import {
   buildPreferencesFields,
   flattenPreferences,
@@ -90,12 +92,12 @@ export const createSettingsRuntime = (deps) => {
     path,
     crypto,
     SETTINGS_FILE_PATH,
-    sanitizeProjects,
-    sanitizeSettingsUpdate,
+    sanitizeProjects: sanitizeLocalProjects,
+    sanitizeSettingsUpdate: sanitizeLocalSettingsUpdate,
     mergePersistedSettings,
-    normalizeSettingsPaths,
+    normalizeSettingsPaths: normalizeLocalSettingsPaths,
     normalizeStringArray,
-    formatSettingsResponse,
+    formatSettingsResponse: formatLocalSettingsResponse,
     resolveDirectoryCandidate,
     normalizeManagedRemoteTunnelHostname,
     normalizeManagedRemoteTunnelPresets,
@@ -108,9 +110,65 @@ export const createSettingsRuntime = (deps) => {
     onMessageSearchReasoningChanged = () => {},
     onPermissionDefaultModeChanged = () => {},
     onLastDirectoryChanged = () => {},
+    frontDoor = false,
+    beforeProjectsSave = frontDoor ? createProjectRegistry().beforeProjectsSave : async () => {},
+    onSettingsWritten = async () => {},
   } = deps;
 
   let persistSettingsLock = Promise.resolve();
+  const withSettingsLock = (operation) => {
+    const result = persistSettingsLock.then(operation);
+    persistSettingsLock = result.catch(() => {});
+    return result;
+  };
+
+  const pathKeys = ['projects', 'lastDirectory', 'homeDirectory', 'pinnedDirectories', 'opencodeBinary'];
+  const withoutPaths = (settings) => Object.fromEntries(Object.entries(settings || {}).filter(([key]) => !pathKeys.includes(key)));
+  const lexicalPaths = (settings) => {
+    const result = {};
+    if (settings?.projects !== undefined) result.projects = sanitizeRegistryProjects(settings.projects);
+    for (const key of ['lastDirectory', 'homeDirectory']) {
+      if (isString(settings?.[key])) {
+        result[key] = settings[key] === '' ? '' : normalizeRegistryProjectPath(settings[key]);
+      }
+    }
+    if (Array.isArray(settings?.pinnedDirectories)) {
+      result.pinnedDirectories = [...new Set(settings.pinnedDirectories.map(normalizeRegistryProjectPath))];
+    }
+    // The agent resolves its own CLI override, including ~ and bare binaries.
+    if (isString(settings?.opencodeBinary)) result.opencodeBinary = settings.opencodeBinary.trim();
+    return result;
+  };
+  // Both injected helpers sanitize paths with realpath in a normal install.
+  // Do not pass project paths to either helper in a front door.
+  const sanitizeSettingsUpdate = frontDoor
+    ? (settings) => ({ ...sanitizeLocalSettingsUpdate(withoutPaths(settings)), ...lexicalPaths(settings) })
+    : sanitizeLocalSettingsUpdate;
+  const formatSettingsResponse = frontDoor
+    ? (settings) => ({ ...formatLocalSettingsResponse(withoutPaths(settings)), ...lexicalPaths(settings) })
+    : formatLocalSettingsResponse;
+  const sanitizeProjects = frontDoor ? sanitizeRegistryProjects : sanitizeLocalProjects;
+  const normalizeSettingsPaths = frontDoor ? (settings) => {
+    const next = { ...settings, ...lexicalPaths(settings) };
+    return { settings: next, changed: JSON.stringify(next) !== JSON.stringify(settings) };
+  } : normalizeLocalSettingsPaths;
+
+  const checkProjectsBeforeSave = async (settings, current) => {
+    const projects = settings.projects === undefined ? [] : settings.projects;
+    const currentProjects = current.projects ?? [];
+    if (frontDoor) sanitizeRegistryProjects(projects);
+    if (JSON.stringify(projects) !== JSON.stringify(currentProjects)) {
+      await beforeProjectsSave(structuredClone(projects), structuredClone(currentProjects));
+    }
+  };
+  const notifySettingsWritten = async (settings) => {
+    try {
+      await onSettingsWritten(structuredClone(settings));
+    } catch {
+      // A downstream mirror cannot change the outcome of an owner save.
+      console.warn('settings_written_hook_failed');
+    }
+  };
 
   const PREFERENCES_FILE_PATH = preferencesFilePathFor(SETTINGS_FILE_PATH, path);
   // True while preferences.json exists but cannot be read. Profile writes are
@@ -628,8 +686,8 @@ export const createSettingsRuntime = (deps) => {
   // seed preferences.json. settings.json keeps a copy of the profile's base
   // values on every write too, so an older build (which reads only that file)
   // still finds everything where it used to be.
-  const readSettingsFromDisk = async ({ surface = null } = {}) => {
-    const instance = await readInstanceSettingsFromDisk();
+  const readSettingsFromDisk = async ({ surface = null, seedPreferences = true } = {}) => {
+    const instance = frontDoor ? await readSettingsFromDiskStrict() : await readInstanceSettingsFromDisk();
     const preferences = await readPreferenceFields();
     if (preferences.status === 'failed') {
       preferencesUnavailable = true;
@@ -637,9 +695,11 @@ export const createSettingsRuntime = (deps) => {
     }
     preferencesUnavailable = false;
     if (preferences.status === 'missing') {
+      if (!seedPreferences || frontDoor) return instance;
       const seeded = seedPreferencesFrom(instance, Date.now());
       try {
         await writePreferencesToDisk(seeded);
+        await notifySettingsWritten(instance);
       } catch (error) {
         console.warn('Failed to seed preferences file:', error);
       }
@@ -666,7 +726,7 @@ export const createSettingsRuntime = (deps) => {
       throw error;
     }
     const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== 'object') {
+    if (!isRecord(parsed)) {
       throw new Error('Settings file is malformed (non-object payload)');
     }
     return parsed;
@@ -753,17 +813,19 @@ export const createSettingsRuntime = (deps) => {
    * when their value changed), everything else to settings.json. While
    * preferences.json is unreadable its part is skipped rather than replaced.
    */
-  const writeSettingsToDisk = async (settings, { surface = null, changedKeys = null } = {}) => {
+  const writeSettingsFiles = async (settings, { surface = null, changedKeys = null } = {}) => {
     const current = preferencesUnavailable ? { status: 'failed' } : await readPreferenceFields();
     if (current.status === 'failed') {
       // The profile part is not saved; settings.json keeps whatever legacy
       // profile copy it already holds rather than losing it too.
       preferencesUnavailable = true;
       const onDisk = await readInstanceSettingsFromDisk();
-      await writeJsonFileAtomic(SETTINGS_FILE_PATH, JSON.stringify({
+      const saved = {
         ...instancePartOf(settings),
         ...profilePartOf(onDisk),
-      }, null, 2));
+      };
+      await writeJsonFileAtomic(SETTINGS_FILE_PATH, JSON.stringify(saved, null, 2));
+      await notifySettingsWritten(saved);
       return;
     }
     const previousFields = current.status === 'ok' ? current.fields : {};
@@ -773,6 +835,16 @@ export const createSettingsRuntime = (deps) => {
     });
     await writeJsonFileAtomic(SETTINGS_FILE_PATH, JSON.stringify(legacySettingsDocumentOf(settings, nextFields), null, 2));
     await writePreferencesToDisk(nextFields);
+    await notifySettingsWritten({ ...instancePartOf(settings), ...flattenPreferences(nextFields) });
+  };
+
+  const writeSettingsToDisk = (settings, options = {}) => {
+    const snapshot = structuredClone(settings);
+    const writeOptions = structuredClone(options);
+    return withSettingsLock(async () => {
+      await checkProjectsBeforeSave(snapshot, await readSettingsFromDiskStrict());
+      await writeSettingsFiles(snapshot, writeOptions);
+    });
   };
 
   const validateProjectEntries = async (projects) => {
@@ -1101,36 +1173,39 @@ export const createSettingsRuntime = (deps) => {
 
   let hasCleanedOrphanedTempFiles = false;
 
-  const readSettingsFromDiskMigrated = async ({ surface = null } = {}) => {
+  const readSettingsFromDiskMigrated = ({ surface = null } = {}) => withSettingsLock(async () => {
     if (!hasCleanedOrphanedTempFiles) {
       hasCleanedOrphanedTempFiles = true;
       await cleanupOrphanedSettingsTempFiles(path.dirname(SETTINGS_FILE_PATH));
     }
-    const current = await readSettingsFromDisk();
-    const migration1 = await migrateSettingsFromLegacyLastDirectory(current);
+    const current = await readSettingsFromDisk({ seedPreferences: false });
+    const migration1 = frontDoor ? { settings: current, changed: false } : await migrateSettingsFromLegacyLastDirectory(current);
     const migration2 = await migrateSettingsFromLegacyThemePreferences(migration1.settings);
     const migration3 = await migrateSettingsFromLegacyCollapsedProjects(migration2.settings);
     const migration4 = await migrateSettingsNotificationDefaults(migration3.settings);
     const migration5 = await migrateSettingsFromLegacyNamedTunnelKeys(migration4.settings);
     const migration6 = normalizeSettingsPaths(migration5.settings);
-    const migration7 = await migrateSettingsToDeterministicProjectIds(migration6.settings);
+    const migration7 = frontDoor ? migration6 : await migrateSettingsToDeterministicProjectIds(migration6.settings);
     const migration8 = migrateSettingsRemoveApprovedDirectories(migration7.settings);
     const migration9 = migrateSettingsScheduleToolFromControl(migration8.settings);
     if (migration1.changed || migration2.changed || migration3.changed || migration4.changed || migration5.changed || migration6.changed || migration7.changed || migration8.changed || migration9.changed) {
-      await writeSettingsToDisk(migration9.settings);
+      await checkProjectsBeforeSave(migration9.settings, current);
+      await writeSettingsFiles(migration9.settings);
     }
     // Migrations run on the base view; a surface asks for its own resolution
     // of the per-surface keys on top of the migrated files.
     return normalizeSettingsSurface(surface) ? readSettingsFromDisk({ surface }) : migration9.settings;
-  };
+  });
 
-  const persistSettings = async (changes, { surface = null } = {}) => {
-    const result = persistSettingsLock.then(async () => {
+  const persistSettings = async (changes, { surface = null, replaceKeys = [] } = {}) => {
+    const snapshot = structuredClone(changes);
+    let managedPluginSettings = null;
+    const result = await withSettingsLock(async () => {
       // Log field names only — changes can carry credentials (UI password,
       // client tokens, tunnel tokens) that must never reach the log file.
-      console.log('[persistSettings] Updating fields:', Object.keys(changes || {}).join(', ') || '(none)');
-      const current = await readSettingsFromDisk({ surface });
-      const sanitized = sanitizeSettingsUpdate(changes);
+      console.log('[persistSettings] Updating fields:', Object.keys(snapshot || {}).join(', ') || '(none)');
+      const current = await readSettingsFromDisk({ surface, seedPreferences: false });
+      const sanitized = sanitizeSettingsUpdate(snapshot);
       for (const key of Object.keys(sanitized)) {
         // Device state belongs to the install in front of the user, never to
         // the instance; a client that still sends it is simply ignored.
@@ -1141,14 +1216,17 @@ export const createSettingsRuntime = (deps) => {
           delete sanitized[key];
         }
       }
-      let next = mergePersistedSettings(current, sanitized);
+      const base = { ...current };
+      const removedKeys = replaceKeys.filter((key) => !Object.hasOwn(snapshot, key));
+      for (const key of removedKeys) delete base[key];
+      let next = mergePersistedSettings(base, sanitized);
 
       const normalizedState = normalizeSettingsPaths(next);
       if (normalizedState.changed) {
         next = normalizedState.settings;
       }
 
-      const deterministicProjectIdMigration = await migrateSettingsToDeterministicProjectIds(next);
+      const deterministicProjectIdMigration = frontDoor ? { changed: false } : await migrateSettingsToDeterministicProjectIds(next);
       if (deterministicProjectIdMigration.changed) {
         next = deterministicProjectIdMigration.settings;
       }
@@ -1161,7 +1239,7 @@ export const createSettingsRuntime = (deps) => {
       // Validating project paths hits the filesystem for every entry, so only
       // do it when the incoming update actually touches the projects list —
       // not on every theme/window-state/etc. save.
-      if (Object.prototype.hasOwnProperty.call(sanitized, 'projects') && Array.isArray(next.projects)) {
+      if (!frontDoor && Object.prototype.hasOwnProperty.call(sanitized, 'projects') && Array.isArray(next.projects)) {
         const validated = await validateProjectEntries(next.projects);
         next = { ...next, projects: validated };
       }
@@ -1177,6 +1255,8 @@ export const createSettingsRuntime = (deps) => {
         console.log(`[persistSettings] No projects found, clearing activeProjectId ${next.activeProjectId}`);
         next = { ...next, activeProjectId: undefined };
       }
+
+      await checkProjectsBeforeSave(next, current);
 
       if (Object.prototype.hasOwnProperty.call(sanitized, 'managedRemoteTunnelPresets')) {
         await syncManagedRemoteTunnelConfigWithPresets(next.managedRemoteTunnelPresets);
@@ -1204,57 +1284,60 @@ export const createSettingsRuntime = (deps) => {
         }
       }
 
-      const changedKeys = Object.keys(sanitized);
-      await writeSettingsToDisk(next, { surface, changedKeys });
+      const changedKeys = [...new Set([...Object.keys(sanitized), ...removedKeys])];
+      await writeSettingsFiles(next, { surface, changedKeys });
       // OpenChamber's own OpenCode plugins live in a config file OpenCode
       // watches, so flipping one of these switches takes effect in the running
       // process instead of waiting for a restart.
-      if (changedKeys.some((key) => MANAGED_PLUGIN_SETTINGS_KEYS.has(key))) {
-        await Promise.resolve(onManagedPluginSettingsChanged(next)).catch((error) => {
-          console.warn('Failed to refresh the managed OpenCode config:', error?.message ?? error);
-        });
+      if (!frontDoor && changedKeys.some((key) => MANAGED_PLUGIN_SETTINGS_KEYS.has(key))) {
+        managedPluginSettings = next;
       }
       // The search index starts or stops in the background; the save does not wait for it.
-      if (changedKeys.includes('messageSearchEnabled')) {
+      if (!frontDoor && changedKeys.includes('messageSearchEnabled')) {
         onMessageSearchEnabledChanged(next.messageSearchEnabled === true);
       }
-      if (changedKeys.includes('messageSearchReasoningEnabled')) {
+      if (!frontDoor && changedKeys.includes('messageSearchReasoningEnabled')) {
         onMessageSearchReasoningChanged(next.messageSearchReasoningEnabled === true);
       }
       if (changedKeys.includes('permissionDefaultMode') && next.permissionDefaultMode !== current.permissionDefaultMode) {
         onPermissionDefaultModeChanged(next.permissionDefaultMode);
       }
-      if (changedKeys.includes('lastDirectory') && next.lastDirectory !== current.lastDirectory) {
+      if (!frontDoor && changedKeys.includes('lastDirectory') && next.lastDirectory !== current.lastDirectory) {
         onLastDirectoryChanged(next.lastDirectory);
       }
       return formatSettingsResponse(next);
     });
-    // A failed write (a full disk) rejects only its own caller; the next
-    // save still runs instead of replaying that error until a restart.
-    persistSettingsLock = result.catch(() => {});
+    // Managed config re-reads settings, including migrations. Never await that
+    // reader while this write owns the settings lock.
+    if (managedPluginSettings) {
+      await Promise.resolve(onManagedPluginSettingsChanged(managedPluginSettings)).catch((error) => {
+        console.warn('Failed to refresh the managed OpenCode config:', error?.message ?? error);
+      });
+    }
     return result;
   };
 
   // A background session may discover a project while another window saves
   // settings. Resolve the append inside the settings queue, without activation.
-  const registerSessionProject = (resolveProject) => {
-    const result = persistSettingsLock.then(async () => {
-      const current = await readSettingsFromDiskStrict();
-      if (Array.isArray(current) || (current.projects !== undefined && !Array.isArray(current.projects))) {
-        throw new Error('Project registry is malformed');
-      }
-      const projects = sanitizeProjects(current.projects) || [];
-      const project = await resolveProject(projects);
-      if (!projects.some((entry) => entry.id === project.id)) {
-        await writeJsonFileAtomic(SETTINGS_FILE_PATH, JSON.stringify({ ...current, projects: [...(current.projects || []), project] }, null, 2));
-      }
-      return project;
-    });
-    persistSettingsLock = result.catch(() => {});
-    return result;
-  };
+  const registerSessionProject = (resolveProject) => withSettingsLock(async () => {
+    const current = await readSettingsFromDiskStrict();
+    if (current.projects !== undefined && !Array.isArray(current.projects)) {
+      throw new Error('Project registry is malformed');
+    }
+    const projects = sanitizeProjects(current.projects ?? []) || [];
+    const project = await resolveProject(projects);
+    if (!projects.some((entry) => entry.id === project.id)) {
+      const next = { ...current, projects: [...(current.projects || []), project] };
+      await checkProjectsBeforeSave(next, current);
+      await writeJsonFileAtomic(SETTINGS_FILE_PATH, JSON.stringify(next, null, 2));
+      await notifySettingsWritten(await readSettingsFromDisk({ seedPreferences: false }));
+    }
+    return project;
+  });
 
   return {
+    formatSettingsResponse,
+    sanitizeProjects,
     readSettingsFromDisk,
     readSettingsFromDiskStrict,
     readSettingsFromDiskMigrated,

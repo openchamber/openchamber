@@ -5,6 +5,18 @@ import { firstPartyIntegrationsI18n } from './first-party-integrations.i18n';
 import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
 import { extensionCatalogI18n } from './extension-catalog.i18n';
 export const settingsDict = {
+  'settings.openchamber.spaces.host.installation': 'Надається встановленим хостом OpenChamber.',
+  'settings.openchamber.spaces.root.title': 'Простори root',
+  'settings.openchamber.spaces.root.available': 'Простори root доступні. Кожне створення, запуск і перезапуск вимагає схваленого ключа доступу.',
+  'settings.openchamber.spaces.root.approve': 'Схвалити ключ доступу',
+  'settings.openchamber.spaces.root.commandInfo': 'Виконайте цю команду на сервері як root і введіть код, який вона виведе.',
+  'settings.openchamber.spaces.root.code': 'Код схвалення',
+  'settings.openchamber.spaces.root.label': 'Мітка ключа доступу, необов\'язкова',
+  'settings.openchamber.spaces.root.confirm': 'Підтвердьте цей ключ доступу в терміналі сервера',
+  'settings.openchamber.spaces.root.confirmInfo': 'Порівняйте цей відбиток ключа з відбитком у терміналі та підтвердьте його там. Схвалення завершується лише після прийняття в терміналі.',
+  'settings.openchamber.spaces.root.empty': 'Немає схвалених ключів доступу для просторів root.',
+  'settings.openchamber.spaces.root.approvedAt': 'Схвалено {date}',
+  'settings.openchamber.spaces.root.revoke': 'Відкликати на сервері',
   'settings.openchamber.sessionRetention.field.archivedDescription': 'Період зберігання рахується від архівації. Сесії, строк яких минув, видаляються.',
   'settings.openchamber.sessionRetention.field.unarchivedArchiveDescription': 'Період зберігання рахується від останньої активності сесії. Сесії, строк яких минув, архівуються.',
   'settings.openchamber.sessionRetention.field.unarchivedDeleteDescription': 'Період зберігання рахується від останньої активності сесії. Сесії, строк яких минув, видаляються.',

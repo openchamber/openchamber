@@ -14,6 +14,7 @@ export const createStaticRoutesRuntime = (dependencies) => {
     normalizePwaAppName,
     normalizePwaOrientation,
     isRequestAuthorized,
+    fetchImpl = fetch,
   } = dependencies;
 
   const resolveDistPath = () => {
@@ -46,7 +47,8 @@ export const createStaticRoutesRuntime = (dependencies) => {
         },
       }));
 
-      registerPwaManifestRoute(app, {
+    registerPwaManifestRoute(app, {
+      fetchImpl,
         process,
         resolveProjectDirectory,
         buildOpenCodeUrl,

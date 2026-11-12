@@ -1,12 +1,12 @@
 # Spaces module
 
-An isolated space lets an agent work inside a container, on a copy of the project; when the task is done, the user applies the result to their own repository or discards it. The motives, all in scope: protect the user's machine, let the agent run without permission prompts, keep host secrets away from the agent, and keep project tooling off the host. This file is the module's contract: the design it follows, what each part owns, and what was measured.
+An isolated space lets an agent work inside a container or a hardened Linux service, on a copy of the project; when the task is done, the user applies the result to their own repository or discards it. The motives, all in scope: protect the user's machine, let the agent run without permission prompts, keep host secrets away from the agent, and keep project tooling off the host. This file is the module's contract: the design it follows, what each part owns, and what was measured. The exceptional root place has no isolation promise and remains blocked until root activation is installed.
 
 ## Design
 
 **The boundary rule.** Every limit is a restriction the agent cannot undo from inside; a promise is worthless. Everything that crosses the boundary crosses because the user decided it, one item at a time. The host treats everything that comes out of a space as untrusted data to display, never as a command. Apply this to every change: a choice that relies on the agent behaving is wrong.
 
-**Words.** A *space* is one container with the agent and a copy of the code; it holds several sessions, like a worktree, and a new space always gets a new container. A *place* is where spaces run: local Docker today, Docker on another machine over SSH, a cluster and Apple `container` later. The *gatekeeper* is a small separate container next to each space, the space's only way out. The *space manager* is this module: it creates, finds, stops and removes spaces, moves code in and out, and delivers grants. The *dispatcher* is the thin layer in front of the host's server that forwards requests addressed to a space to the server inside it. A *grant* is a credential or an opened domain the user gives a space, in one of two grades the dialogs name in plain words: *uses without seeing*, where the gatekeeper holds the secret and adds it to requests (model keys, the OpenAI login token, the Copilot token), and *handed over*, a file or variable inside the space the agent can read.
+**Words.** A *space* is one runtime with the agent and a copy of the code; it holds several sessions, like a worktree, and a new space always gets its own runtime. A *place* is where spaces run: local Docker, Docker over SSH or Linux host services, with a cluster and Apple `container` left for later. The *gatekeeper* is a small separate container or service next to each space, the space's only way out. The Docker sections keep using the word container for their own mechanisms. The *space manager* is this module: it creates, finds, stops and removes spaces, moves code in and out, and delivers grants. The *dispatcher* is the thin layer in front of the host's server that forwards requests addressed to a space to the server inside it. A *grant* is a credential or an opened domain the user gives a space, in one of two grades the dialogs name in plain words: *uses without seeing*, where the gatekeeper holds the secret and adds it to requests (model keys, the OpenAI login token, the Copilot token), and *handed over*, a file or variable inside the space the agent can read.
 
 **Product decisions**, the maintainer's, numbered as the code and this file cite them:
 
@@ -122,9 +122,25 @@ What the machine needs: `ssh <machine>` from the user account the server runs un
 
 **Known limits.** The gatekeeper refuses the remote machine's private addresses as it does the local ones, but the remote machine's own network is what "private" means there: a space on the remote reaches nothing on the user's machine and nothing on the remote's LAN, and an allowlist name that resolves inside that LAN is refused by address, as locally. The docker CLI gives up on a machine that does not answer only after its own retries, 92 seconds measured for `docker --host ssh://<unrouted address> version` on 2026-10-12, so what bounds the wait is the place's command timeout: 10 seconds for the check, 30 for a list. A machine that is off costs the check its full 10 seconds every time the funnel or the page asks, and costs the list that first finds it gone, and the one attempt after each pause, 30 seconds; the session list of the whole app waits on that list, as it waits on the local daemon today. A machine that is off on the same LAN is usually refused at once instead, with "Host is down".
 
+### Linux host places
+
+On Linux the server registers `host`, local Docker, configured Docker over SSH, then `host-root`. Construction opens no socket and runs no command. Other platforms keep their Docker registration. A host daemon that is absent or lacks a requirement produces an explicit unavailable result. No operation falls back to Docker.
+
+`places/host.js` implements the same place contract through the root daemon in `../hostd/`. The daemon owns systemd, namespace topology, root-only records and sealed tools; its [module contract](../hostd/DOCUMENTATION.md) defines the protocol and enforcement. Work, home, environment, server command, gatekeeper program and exec channels keep the shared layout. The owner reaches the space's loopback HTTP server through a framed Duplex. Git receives an attach-client argv using the same configured Unix socket. No listener is published on the host.
+
+The ordinary host place uses separate DynamicUsers for the space and gatekeeper, a capability-free slirp account, a route-less veth pair and the target's full hardening on every exec. Both backing state-directory aliases are read-only, so the agent cannot replace a later exec's bind sources; its permitted work and home binds stay writable. Tools live in a sealed root-owned directory and mount read-only. Host PATH selects those tools before global programs. Their key includes the daemon's Node version and architecture. A stopped space selects the current prepared tools on its next start. Reboot leaves records and files but stops all runtime units. The existing journey restores corridor policy and grants after start as it does for Docker.
+
+The root place advertises no host isolation and never stands in for the isolated places: it is listed last, never a default, and makes no promise about secrets or MCP credentials. Its spaces run as root with no sandbox. A root space is created and started only with a passkey confirmation made for that operation on that space, which hostd checks before anything runs (see "Root spaces" under "The journey" and the [hostd contract](../hostd/DOCUMENTATION.md)). hostd refuses every root space while OpenChamber and its agents share one account. An approval worker never runs there.
+
+A space on a host place can be given protected MCP connections; a Docker space cannot, since nothing in it reaches the protected MCP service (see "MCP grants").
+
+The host adapter refuses window upstreams on normalized loopback addresses and Docker host aliases with `host_loopback_unavailable`, because slirp disables host loopback. It keeps explicit grants to reachable private-network providers allowed. This preflight runs before delivering any grant, including a grant restored after restart. Docker's window behavior is unchanged.
+
+Host places use the same web server on Linux desktop and web. Hosted mobile and Capacitor operate the selected server's places. VS Code continues to expose no Spaces feature. The daemon's Unix listener and namespace-only TCP listeners stay on this machine, so they add no external listener or provider-entry path.
+
 ## Labels
 
-Labels are the only record of a space. Every container, network, and volume carries all of them. Since stage 2 that includes the gatekeeper container and the outer network.
+On Docker, labels are the only runtime record of a space. Every container, network, and volume carries all of them. Since stage 2 that includes the gatekeeper container and the outer network. Host places keep equivalent immutable intent in the daemon's root-only metadata instead.
 
 | Label | Value |
 |---|---|
@@ -213,6 +229,7 @@ The Docker place gets its source at construction, `createDockerPlace({ ..., tool
 
 - `createRegistryToolsSource({ webVersion, openCodeVersion })` asks the registry for exact versions of the three packages. `readHostToolVersions()` reads them from `packages/web/package.json`: the version of `web`, and the version of its `@opencode/client` dependency for OpenCode. A range or a URL is rejected.
 - `createPackedToolsSource({ webTarballPath, sdkTarballPath, openCodeVersion })` is a development build. Its `package.json` uses `file:` dependencies for both tarballs and `"overrides": { "@openchamber/sdk": "$@openchamber/sdk" }`, so every sdk in the tree is the local one. The tarballs are read and hashed once, when the source is made.
+- A release built from a fork is not on npm, and npm can hold another build under the same version number. Its own package.json names the sdk by the URL of its GitHub release (`https://github.com/<owner>/<repo>/releases/download/v<version>/openchamber-sdk-<version>.tgz`), so `readHostToolVersions()` then also answers `webTarballUrl`, the web package of that same release, and the registry source asks npm for that URL instead of the version. Nothing else is taken as a URL: the address must have exactly that form, for the host's own version. The filler reaches GitHub's release downloads already. GitHub keeps a published asset as it is unless the release's owner replaces it; the host installer checked the same asset's digest when it installed the release.
 - Both take an optional `revision`. It changes the key and nothing that gets installed, for the day the same packages must be filled again.
 
 The place accepts only an object that one of the two functions made.
@@ -486,6 +503,29 @@ The decisions are `allow`, `failed:<error code>` for a host that was allowed and
 
 ## Dispatcher
 
+### Agent target reuse
+
+The front door can supply an authenticated loopback `upstream` to the dispatcher
+and a `target` to the socket forwarder. These replace connection/session
+selection only; the existing header stripping, streaming body, response
+allowlist, auth/origin checks and bidirectional socket teardown still apply.
+Default Spaces transport and route rules remain unchanged. Target failures use
+`agent_unreachable`, `agent_login_failed`, `agent_session_expired` and
+`agent_redirected`; an expired mutation is renewed but never replayed.
+
+For the agent target, already-sandboxed preview and guest-page families retain
+an owner-imposed opaque-origin sandbox, never the agent's raw CSP. Other
+renderable answers retain the dispatcher's content neutralization.
+
+### Why front-door transfer uses an agent bundle
+
+In front-door mode the code-in/out constructors receive the authenticated agent
+transport. Snapshotting, project refs, apply state and both apply operations run
+on that agent server. The front door runs git only in private transfer folders.
+The journey still reports project-folder existence as unknown locally. An agent
+failure has no project-git fallback. Provider and login delegation has its own
+contract and does not depend on code transfer.
+
 4a built HTTP and SSE forwarding under `/api/spaces/<id>/`, the two guards, and the route rules; 4b added the WebSocket forwarding, see "Sockets" below, and the merged session list with the event connection of every space, see "Sessions and events". 4c made the UI address a space through the prefix; the list the sidebar reads per project is the host's alone, and the global list, without a directory, carries the spaces. Since then a request also reaches a space by the space directory it names, and the UI addresses a space that way only; the prefix stays for the clients of earlier versions, a phone with an older app among them.
 
 ### The switch
@@ -586,14 +626,19 @@ All under `/api/openchamber/spaces`, a namespace of the host's beside `/api/open
 | Route | What it does |
 |---|---|
 | `GET /switch`, `PUT /switch` | The switch, see "The switch" above. |
-| `GET /places` | Every place asked `check()` now, because the user is looking: `{ places: [{ id, machine, available, version, os, arch, hostIsolation, setup }] }`, or `{ id, machine, available: false, code, message, setup }`. `machine` is the SSH destination of the Docker over SSH place, null for this computer. `setup` is `{ remedy, job, memory }` for this computer's place and null for any other, see "Docker on this computer". |
+| `GET /places` | Every place asked `check()` now, because the user is looking: `{ places: [{ id, kind, machine, available, version, os, arch, hostIsolation, setup, rootActivation }] }`, or `{ id, kind, machine, available: false, code, message, setup, rootActivation }`. `kind` is `docker`, `host` or `host-root`. `machine` is the SSH destination of the Docker over SSH place, null for this computer. `setup` is `{ remedy, job, memory }` for this computer's Docker place and null for any other, see "Docker on this computer". `rootActivation` is `{ available, reason, origins }` for `host-root` and null for any other: `reason` is `agent_separation_missing`, `no_passkey_approved` or `hostd_unavailable`, `origins` the origins the approved passkeys were approved at. |
+| `GET /root-passkeys` | `{ available, reason, passkeys: [{ id, label, origin, rpID, approvedAt, fingerprint }] }`, as `rootActivation` above with the approved passkeys, never their keys. See "Root spaces". |
+| `POST /root-passkeys/approval-challenge` | `{ code }`, the code the root command printed. Answers `{ challenge, rpID, allowCredentials: [{ id, label }] }` with the owner's OpenChamber sign-in passkeys at this address; 409 `ui_passkey_missing` when there is none. |
+| `POST /root-passkeys/approval` | `{ code, response, label? }`, the browser's assertion with one of those passkeys. Answers `{ awaitingConfirmation, fingerprint, label, origin }`: nothing is approved until the person confirms the same fingerprint on the root terminal. |
+| `POST /root-activation` | `{ op: 'create', request }`, `request` the create body for `host-root`. Answers `{ spaceId, challenge, expiresAt, rpID, allowCredentials: [{ id, label, origin }] }`; the creation must then carry that `spaceId` and the assertion as `rootActivation`. |
+| `POST /<id>/root-activation` | `{ op: 'start' }`: the same for a start or a restart of that root space, without `spaceId`. |
 | `GET /places/local/setup`, `POST /places/local/setup` | Since 2026-10-15: `{ job }`, the Docker setup action under way or the last one that failed, read while the screen waits; the POST takes `{ action }` and answers 202 at once. 409 `docker_setup_not_offered` when the place's state offers another action now, 409 `docker_setup_running` while one runs. See "Docker on this computer". |
 | `PUT /machine` | Since the screens of Docker over SSH: `{ machine }`, the SSH destination or the empty string for none. Keeps the setting, rebuilds the host with the new places, and answers `{ place }`, the Docker over SSH place as `GET /places` lists it, checked, or null. 400 `invalid_machine`, 409 `place_has_spaces` while spaces are on the machine, `space_busy` while a creation or an action runs. See "Docker over SSH". |
 | `GET /` | `{ spaces }`: the place's list with what the host remembers about each, the creations under way in their place, and the failed ones after it. Since 5e-3 each names `projectFolder`, `{ path, found }`: the folder it was made for, from the record, and whether that is a folder on the host now, `found` null while a creation is under way. |
-| `POST /` | `{ projectDirectory, name, start, network, setupCommands, placeId, purpose, approvalModel, grants }`, `placeId` optional, the first place without it. `purpose` defaults to `general`; `pr-fix-loop-approval` requires `approvalModel: { providerID, modelID }`. `grants` carries at most 16 model keys, logins or custom providers in the grant route's format, subject to the purpose's restrictions. Answers 202 at once with the entry the list carries, including `purpose` and `approvalModel`; the steps follow as events. |
-| `POST /<id>/start`, `POST /<id>/stop` | The place's start and stop; start says the network again. Answers the listed entry, start with `networkRestored`. |
+| `POST /` | `{ projectDirectory, name, start, network, setupCommands, placeId, purpose, approvalModel, grants }`, `placeId` optional, the first place without it. `purpose` defaults to `general`; `pr-fix-loop-approval` requires `approvalModel: { providerID, modelID }`. `grants` carries at most 16 model keys, logins or custom providers in the grant route's format, subject to the purpose's restrictions. For `host-root` also `spaceId` and `rootActivation`, see `POST /root-activation`; 409 `root_activation_required` without them, 400 `root_activation_unexpected` with them on any other place, 400 `root_place_not_allowed` for an approval worker. Answers 202 at once with the entry the list carries, including `kind`, `purpose` and `approvalModel`; the steps follow as events. |
+| `POST /<id>/start`, `POST /<id>/stop` | The place's start and stop; start says the network again. A root space's start takes `{ rootActivation }`, 409 `root_activation_required` without it. Answers the listed entry, start with `networkRestored`. |
 | `POST /<id>/restart-opencode` | Since 5d-2: asks the server inside a running space to restart its OpenCode, and answers the listed entry once it is ready again. See "Repair". |
-| `POST /<id>/restart` | Since 5d-2: restarts the container of a running space with a fresh token, then says the network and the grants again as a start does. Answers as start does. See "Repair". |
+| `POST /<id>/restart` | Since 5d-2: restarts the container of a running space with a fresh token, then says the network and the grants again as a start does. A root space takes `{ rootActivation }` as a start does, checked before the stop. Answers as start does. See "Repair". |
 | `DELETE /<id>` | Saves the space's chats to the archive, then removes the containers, networks and volumes, the service refs in the user's repository and the record; forgets a failed creation. `{ id, removed, refsRemoved, failures, chats }`. 409 `chats_not_saved` when the chats cannot all be saved, and `?unsavedChats=delete` deletes anyway. See "Chat archive". |
 | `GET /places/<place>/disk` | Since 5e-4: `{ imageBytes, imagePulling, imageFailure, toolsBytes, spacesBytes, bytesBySpace, freeBytes, freesImage }`, the disk the place's spaces take (`bytesBySpace`: each space's work and home volumes by its id, what deleting it gives back), whether the image is being downloaded and why the last download failed, and what a clean-up would free now. See "Places page". |
 | `POST /places/<place>/clean-up` | Since 5e-4: removes what OpenChamber can make again; `{ freedBytes, kept: [{ kind, reason }], disk }`. 409 `space_preparing` while a space is being made, 409 `image_pulling` while the image is being downloaded. See "Places page". |
@@ -602,7 +647,7 @@ All under `/api/openchamber/spaces`, a namespace of the host's beside `/api/open
 | `POST /<id>/setup` | Since 5d-4: `{ commands }`. Runs the project's setup commands again in a running space; answers the listed entry once the run began. See "Setup commands". |
 | `GET /<id>/setup` | Since 5d-4: `{ setup, output }`, the setup as the list carries it and the end of the failed command's output, or null. |
 | `GET /idle-stop`, `PUT /idle-stop` | Since 5d-3: the idle stop setting, `{ enabled, hours }`, kept in the host's settings and told to every running space. See "Idle stop". |
-| `POST /<id>/grants` | Since 5b: `{ kind: 'model', provider, upstream, secret: { kind: 'typed', value } \| { kind: 'env', name } }` or `{ kind: 'domain', upstream }`; since 7a `{ kind: 'login', provider }`. Answers `{ grant }`, the grant as the list carries it, with its window URL and never a value. See "Grants". |
+| `POST /<id>/grants` | Since 5b: `{ kind: 'model', provider, upstream, secret: { kind: 'typed', value } \| { kind: 'env', name } }` or `{ kind: 'domain', upstream }`; since 7a `{ kind: 'login', provider }`; on a host place `{ kind: 'mcp', connection, name }`, see "MCP grants". Answers `{ grant }`, the grant as the list carries it, with its window URL (none for an MCP grant) and never a value. See "Grants". |
 | `GET /logins` | Since 7c: `{ logins: [{ provider, method, expires, state }] }`, the host's own browser logins a space can be given, `state` one of `usable`, `expired` and `unsupported`, never a token; a host whose OpenCode cannot be asked fails rather than answering none. See "Grants". |
 | `GET /custom-providers?directory=<project>` | `{ providers: [{ id, name, package, baseURL, loopback, models, hasKey, supported }] }`, the providers the user defined in the host's OpenCode configuration for that project, as a space can be given them, never a key; a catalog provider overridden there is left to its own row. See "Grants". |
 | `POST /<id>/network/domains` | Since 5d: `{ domain }`. Adds a name to a running space's allowlist, live, then to the record, so every later start says it again. Answers `{ network }`. See "Grants". |
@@ -840,6 +885,33 @@ Built in 5d-4. `space-setup.js`.
 
 ### Grants
 
+In front-door mode the host reads custom providers and named model-key environment
+variables from the agent server's authenticated `host-credentials` routes.
+Directories must be registered on the agent server. Environment names follow the
+grant name syntax and exclude application and process controls, documented in
+`../agent-server/DOCUMENTATION.md`. Both initial delivery and restoration await
+the environment read. Agent answers are bounded and schema-reconstructed; a
+definition with another provider id is refused. Discovery still exposes only
+model names and key availability. The owner-selected grant id, space and approval
+profile stay authoritative on the front door.
+
+`getProviderAuth`, `getStoredLogin` and `renewStoredLogin` use the agent server's
+private credential read and existing-login renewal routes through an authenticated
+SDK fetch. The public credential-list proxy remains refused, and owner clients
+cannot reach the private credential namespace. The login
+keeper still owns renewal and gatekeeper delivery. Replacement creates the new
+active row in the agent OpenCode before removing the prior row, preserving the
+existing concurrent-refresh check. A failed read, exchange or create leaves the
+existing credential intact; a failed removal can leave the old inactive row.
+No failure authorizes owner-side environment or file access. A failed source
+read before an initial grant changes no record or gatekeeper state; failed environment restoration
+leaves that grant in `needsAccess`, and later starts can retry. Source values
+remain transient and never enter Space records. The single-account path retains
+its existing sources and key precedence.
+
+Web, Electron desktop, hosted mobile and Capacitor use this behavior when
+connected to a front-door server. VS Code has no Spaces entry point.
+
 Decisions 4, 5 and 13, and "Words" in the design above. Stage 5b takes two kinds, decided with the maintainer on 2026-09-26: a model API key for a provider, a "uses without seeing" grant, and an opened domain with no credential, for a private registry or a mirror that the corridor would refuse by address. Git over https and npm tokens wait for the stage that verifies npm through the window end to end.
 
 - A model grant names the provider as the host's catalog does, `anthropic`, `openai` and so on, and its id is the provider id, so a second grant for the same provider replaces the first: that is how a key is changed, and a grant is never taken back. The upstream is the provider's API. The create dialog takes it from each provider's own SDK default, listed in the UI's `lib/spaces/model-access.ts` and matching what the bundled OpenCode uses, and never from the host's catalog: a catalog entry can be a browser login that points somewhere else. The header is decided here by provider, `x-api-key` for Anthropic, `x-goog-api-key` for Google, a bearer token for the rest. The key comes typed once, or as the name of an environment variable of the host's, read from the host's own environment now; OpenChamber remembers the name and never the value, and a variable that is not set is refused with `secret_source_missing`.
@@ -867,6 +939,22 @@ Decisions 4, 5 and 13, and "Words" in the design above. Stage 5b takes two kinds
 - A custom grant, `{ kind: 'custom', provider }`, is a provider the user defined in the host's OpenCode configuration, "custom" in Settings → Providers: a self-hosted gateway or a model server on the user's own machine or network, which the catalog does not know, with the models the user listed for it. The maintainer's call of 2026-10-14, for openchamber/openchamber#4846: the provider is defined once, in Settings, and the dialogs offer it from there under its own name, with no key to type, so the record names only the provider, `{ kind: 'custom', id, provider }`, and everything else is read from the host again at every grant and every start, like a login's token. `host-providers.js` reads the winning layer of the project's configuration, custom over project over the user's files, in either spelling, and takes only an entry that names its SDK in `package`; the key is resolved as OpenCode resolves it for the host, measured on 2.0.26: the credential OpenCode stores for the provider, then the first set variable the entry's `env` names, then a literal `apiKey` in its settings, and a provider with none is given with no key, so the window forwards the request as the space made it, less its credential headers. The header is the SDK's, `authorization` for `@ai-sdk/openai-compatible` and `@ai-sdk/openai`, `x-api-key` for `@ai-sdk/anthropic`; any other SDK is refused with `provider_not_supported`, a provider the configuration no longer defines with `provider_not_found`, and a provider's own headers, the ones its entry in Settings sets on every request, go to the gatekeeper with the key and stay there: the window sets them beside the credential, over whatever the space sent under their names, so the space can neither read nor override them, and the record and the configuration inside name none of them. "This machine" in the base URL, `localhost`, `127.0.0.1`, `::1` or `0.0.0.0`, names the gatekeeper itself from inside, so `windowUpstreamOf` sends it to `host.docker.internal`, the Docker host, which the gatekeeper is created with (see "The gatekeeper container"); measured on 2026-10-14 on Colima: a container reached Ollama on the user's Mac, listening on the Mac's loopback only, through that name with no change to Ollama. On a Docker over SSH place the Docker host is that machine, so a loopback address there names the machine's own services and never the user's computer; the dialogs say so under such a provider when the space runs on a machine, and a provider on the user's computer is reached from there by its network address, with the server listening on it. Inside, the configuration carries the entry as the host's does, in OpenCode 2's own spelling under `providers`: the name, the SDK, the models, and `settings.baseURL` at the window with the placeholder key; the catalog providers keep the spelling measured on 2.0.25 under `provider`, and OpenCode reads both in one file. A definition the host cannot read at a start leaves that grant in `needsAccess` and its entry out of the configuration; a provider edited in Settings reaches the space at its next start, or at "Grant again" in the dialog. The UI reads `GET /custom-providers` for every project its spaces belong to when the journey list arrives, so the composer's rule on a model the space has no access to knows the user's own providers; a project not read yet refuses nothing. A custom provider defined in the project's own `opencode.json` travels into the space with the code, with its real address, which nothing inside can reach; the host's entry beside the project wins over that copy, see the model grant above, so the turn goes through the window. Measured on 2026-10-14 before the entry moved there: written in the home directory it lost, OpenCode inside connected to `localhost` from within the container, the turn retried without end, the journal stayed empty and the Access dialog said "Has access". A provider defined in the project's own `.opencode/opencode.json` would still win over that file, since the project's own folder is the strongest file layer, so a custom provider given at creation also goes to OpenCode at its start: the space container carries its window address and the placeholder key in `OPENCODE_CONFIG_CONTENT`, which OpenCode 2.0.32 reads after every file, measured with a project whose `.opencode/opencode.json` names Ollama at `localhost`: the provider's address inside was the window with the variable and `localhost` without it. The container keeps the variable for good, so it carries nothing else: the SDK, the name and the models stay in the file, and a provider edited in Settings still arrives at the next start. A provider deleted in Settings stays in the variable with no SDK and no models; OpenCode 2.0.32 lists it with no model and works on, measured, and the window refuses it, since no grant names it. OpenCode reads that variable at its start and not again, and a plain start reuses the container, so a custom provider granted after the creation is in the file only. Known limit: a custom provider the project's own `.opencode/opencode.json` also defines works in a space only when it was given in the create dialog; granted later, OpenCode inside connects to the project's address and fails as above. Not yet: a key the user types for a custom provider, which Settings holds. The live grants test grants a custom provider of the project's own configuration with a key and a header of its own and proves both at the stand-in, as hashes, and absent from the record, the containers' metadata, the configuration inside and everything the space can read.
 - A grant for a catalog provider the host's catalog does not know is written inside all the same; OpenCode inside then has no `npm` package for it and the turn fails with a provider error. The grant dialog offers the host's catalog, so this is a request nothing in the app makes.
 
+### MCP grants
+
+A space on a host place can be given a protected MCP connection, `{ kind: 'mcp', connection, name }`: one of the connections of Settings → MCP, by its `pmcp_` id, under the name OpenCode inside knows it by. The credentials stay in the protected MCP service, and the boundary is that service's subject of the space, `space-<id>`: it opens exactly the connections of the space's MCP grants and nothing else, whatever the space asks for. The journey says the subject's whole set to the service's admin socket before the record keeps the grant, so a connection the service does not know is refused with `mcp_connection_not_found` and a service that cannot be asked with `protected_mcp_unavailable`, and nothing is remembered. The subject is said again before every start, so its socket's folder exists when hostd binds it into the space at `/run/openchamber-mcp`, and it is removed first when the space is deleted. OpenCode's configuration inside gets an `mcp` entry that starts the relay from the tools with `--socket /run/openchamber-mcp/engine.sock` and the connection id; like the provider entries, it cooperates and enforces nothing. The entry goes in OpenCode's global file in the space's home, `/home/space/.config/opencode/opencode.json`, not beside the project with the providers: the server inside checks the project's folder before OpenCode opens it, and a command there paused OpenCode with `opencode_trust_required` until someone trusted the host's own entry (measured in the harness). Global configuration is the user's, which that check skips, as OpenCode does. A provider write removes the global file and the MCP write that follows it puts the relays back. Global configuration is also OpenCode's weakest layer: a project whose own configuration defines an MCP server under the grant's name replaces the relay inside that project, and nothing on the host reports it. The name is the user's choice in the access dialog; a name the project does not use avoids it.
+
+The grant id is `mcp-<name>`, so a second grant under the same name replaces the connection. A Docker space is refused with `mcp_grant_unsupported_place`: nothing reaches the service from a container, and a socket shared into a container would be the only thing between it and every other subject. An approval worker takes none, as it takes no domain or custom grant. The gatekeeper holds no MCP grant, so the list never counts one as needing access.
+
+### Root spaces
+
+The `host-root` place runs a space as root with no sandbox, for the rare work that needs it. It is made and started only with a passkey confirmation, which the root component checks; nothing the front door or an agent says replaces it.
+
+- Approval, once per passkey: a person with root runs `openchamber-host approve-root-passkey`, which prints a code. In Settings, the person enters the code and proves one of their OpenChamber sign-in passkeys at this address; OpenChamber hands hostd the passkey's public key from its own store and the browser's assertion. The root terminal then shows the passkey's label, origin and fingerprint, the same fingerprint Settings shows, and approves it only after the person confirms there. The approval is bound to the exact origin it was made at.
+- Each creation: the dialog asks `POST /root-activation` with the creation it is about to make. The journey gives the space its id now and asks hostd for a challenge bound to the creation, the start, the id and a hash of what will run: place, name, project, purpose and memory. The browser signs it with an approved passkey at its origin, and the creation carries that id and the assertion. hostd consumes the challenge before it checks the signature, so an assertion works once.
+- Each start and restart: the same with `POST /<id>/root-activation`, whose spec hostd reads from its own record. A restart checks the confirmation before it stops the space.
+- A delete does not start a stopped root space to save its chats, since that would need a confirmation the delete does not ask for: its chats count as not saved, and the user deletes anyway or starts it first.
+- hostd refuses all of it while OpenChamber and its agents share one account, and the routes say why through `rootActivation.reason`.
+
 ### Preview
 
 Journey step 5 and decision 14; built in stage 6. The maintainer's calls of 2026-10-08: a space's dev servers are opened from the same place as the host's, the list on the empty "Browser" tab beside the chat, which for a chat of a space shows the servers listening inside that space; no port is granted, because the traffic goes into the space; the page opens on the desktop only, and in a browser tab or on the phone the list shows with its rows greyed and a computer icon that says the desktop app is needed; the agent inside a space cannot open or drive the panel; and a page from a space reaches nothing but the space, the internet included.
@@ -890,6 +978,77 @@ The "Open in browser" action of the toolbar is off for a space's tab: the system
 Known limits: the proof that Chromium reads the proxy rules as written is the live run, since the rules are text; a port the user hides from the list is hidden by number for the host and every space alike; and the tunnel's local port accepts any local connection, so a page opened by hand in another browser at that address has that browser's reach and not the panel's, which is why the panel does not offer it.
 
 ## Code in
+
+### Front-door source
+
+`agent-code-transfer.js` keeps the journey's existing code-in interface. The
+agent's authenticated, agent-mode-only `/api/openchamber/space-transfer/<id>/`
+routes accept an exact registered project after resolving both paths through
+`realpath`. A valid space id is 12 lowercase hexadecimal characters. Callers
+cannot choose ref names. Snapshotting uses the existing `takeSnapshot`, including
+the user's ignore rules and clean filters, and persists bounded version-1
+metadata beside the agent's data under `space-transfer/<id>.json`.
+
+The front door checks metadata, object formats, shallow boundary ids, the fixed start ref and the
+actual commit chain. Clean snapshots have equal base, staged and start ids.
+Uncommitted snapshots have exactly one parent at each step, start to staged to
+base. A bundle advertises exactly that space's start ref, with no prerequisite.
+Every imported object passes git's fetch fsck checks. A shallow source carries
+its bounded shallow-root list into the empty mirror before import; its history
+transfer reports `host_shallow`, as in single-account mode. If the source later
+gains history, a fresh metadata read uses its current shallow boundaries.
+
+Each operation creates a fresh mode-0700 folder under the front door's
+`spaces/transfers`. Its empty repository uses `--template=`, a private empty
+hooks folder, `core.fsmonitor=false`, empty global/system configuration and
+transfer/fetch/receive object checks. No configuration or alternates file travels
+from the project. The existing shallow sender reads only this imported mirror's
+objects. Its push flags, ext receive-pack argv, output caps and deadlines remain
+the single-account implementation's. The agent is ready after that shallow
+snapshot; the existing side-repository history transfer follows in the background.
+
+### Why the mirror contains full start history
+
+A prerequisite bundle cannot seed an empty repository. A complete start bundle
+lets the existing shallow sender and later history transfer share the same
+implementation. Every history or code-out call rebuilds its own mirror from a
+fresh agent bundle, including after a front-door restart. Mirrors are never
+shared between spaces or treated as persistent authority. Completion and failure
+remove their temporary folder. A process killed before cleanup can leave a folder
+for manual removal.
+
+Known cost: every operation transfers and temporarily stores the complete
+reachable start history, even though the space receives its snapshot shallow.
+Concurrent spaces multiply that disk cost. Partial clones and very large
+histories remain unverified.
+
+The startup-configured transfer limits apply on both sides:
+
+- `OPENCHAMBER_SPACE_BUNDLE_MAX_BYTES`, default 512 MiB, bounds each bundle.
+  Downloads and uploads stream through the limit. A git-written bundle is checked
+  while growing every 100 ms and at completion; its disk overshoot is one poll.
+- `OPENCHAMBER_SPACE_METADATA_MAX_BYTES`, default 16 KiB, bounds JSON reads,
+  persisted snapshot metadata and route replies. Bundle headers have a fixed
+  64 KiB cap and reject additional refs or capabilities.
+- `OPENCHAMBER_SPACE_AGENT_TIMEOUT_MS`, default 10 minutes, bounds each agent
+  request and stream. Git operations retain their existing shorter deadlines
+  where applicable. Invalid limits fail construction.
+
+The agent's start ref remains authoritative. Removing a space delegates ref
+removal to the agent and removes that snapshot's metadata. A failed creation
+attempt cleans its start ref through the same route. Transport, metadata and
+bundle failures have explicit `agent_*` codes and never invoke local project git.
+
+### Existing spaces without agent metadata
+
+The front door can supply the original base from its validated journey record
+or the history call. When the agent sidecar is missing, the agent reconstructs
+the snapshot from that base and the existing start ref, requiring equality for
+a clean snapshot or the exact two-parent-step uncommitted chain. It never takes
+a new snapshot of the current working tree. The reconstructed branch and identity
+are empty because history and code out do not use them. A malformed sidecar is
+refused instead of reconstructed. Metadata is published by an exclusive atomic
+link after writing a complete private temporary file.
 
 The project's code travels into a space as git objects over the place's exec channel: `git push` over `ext::`, with `docker exec` as the transport. No network, no ports, no archives, no shared folders. The host drives every step. The command sequences are below. Nothing calls this yet, and getting code out, quarantine and apply are stage 3b.
 
@@ -1037,6 +1196,33 @@ The live test plants the hanging hook above and checks that no host process name
 - Not verified: a partial clone, a sparse checkout, a repository over 1 GB, a slow link, and a newer git inside.
 
 ## Code out
+
+### Front-door result and apply
+
+The front door rebuilds a private start mirror, then runs the existing
+`bringCodeOut` against it. The quarantine's alternates point only to that mirror.
+The space is snapshotted, fetched and measured under the existing transfer,
+object, changed-byte and entry caps before any project receives its result.
+
+The front door streams a result bundle to the agent. Its only advertised ref is
+`refs/openchamber/spaces/<id>/result`; its only prerequisite is the recorded start
+commit. The agent checks that start against its own ref, imports into a separate
+quarantine, and reuses code out's measurement and promote checks. Apply state,
+apply as branch and apply as changes use the existing project implementation on
+the agent, including incremental applies, dry-run refusals and interrupted-apply
+refs. Failed imports do not move the project's result ref. A completed promotion
+survives a lost HTTP reply and can be fetched again safely.
+
+### Why the result bundle names the start as its prerequisite
+
+With an uncommitted start, the result's history can be a sibling of the snapshot
+commits. Git normally advertises their shared base as the prerequisite when
+excluding the start's reachable objects. The bundle writer preserves that pack
+and replaces its header prerequisites with the start. The project necessarily
+has the start and every excluded ancestor. This keeps one explicit prerequisite
+contract in both clean and uncommitted cases, including an unchanged result.
+The temporary result pack and rewritten bundle can coexist, adding up to two
+bundle-sized files beside the mirror and quarantine.
 
 The space's work travels back as git objects over the same exec channel, this time `git fetch` over `ext::`, and is applied to the user's repository in one of two ways. Everything that comes out of a space is untrusted data. The command sequences are below, most of them from the maintainer's probe of 2026-09-22 on macOS with Colima, on Debian 13 over `DOCKER_HOST=ssh://`, and on Windows 11 with Docker Desktop. Nothing calls this yet.
 
@@ -1331,6 +1517,10 @@ An escape test decides its verdict on this machine. A name from somebody else's 
 A new or changed protection is proved by removing it once: in a disposable copy, remove the protection, run the test that claims to prove it and watch it go red, then put it back and watch it go green. Evidence is command output, a screenshot, or a test run from the pull request's final commit; a checklist line is "passed, with evidence" or "blocked, with the reason", never "skipped".
 
 ### Suites
+
+The host entry files are `places/contract.host.live.test.js`, `places/escape.host.live.test.js`, `places/boundary.host.live.test.js`, `places/lifecycle.host.live.test.js` and `places/tools.host.live.test.js`, enabled only with `OPENCHAMBER_TEST_HOSTD=1` inside the disposable systemd harness. Run them serially with `--maxWorkers=1`. The harness requires its root-only daemon copy and separate test fixture; the unrestricted fixture is never a hostd operation. The tools test plants conflicting global binaries and requires startup and exec to use the selected sealed versions. Lifecycle also attempts bind-source replacement while the main unit remains running, through both exec and attach.
+
+Shared suites retain uid 1000 and Docker mechanisms by default. Host entries supply the observed DynamicUser uid and explicit host mechanisms: `/proc/self` aliases under ProcSubset, hostname syscall controls, a real held credential process and the same-property main-unit journal emitter. Kernel boundary tests separately exercise namespace ownership, veth confinement, slirp capabilities, shared memory, sibling files, exec hardening, slice membership, owner home, output limits and descendant cleanup. Removing each tested control in a disposable code copy must produce the promised assertion failure, followed by a restored passing run. Keep those outputs with the task evidence.
 
 The approval profile's focused suites are `approval-window.test.js`, `approval-body.test.js`, `approval-policy.test.js`, `approval-workflow.test.js`, `approval-storage.test.js` and the approval blocks in `journey.test.js`, `space-records.test.js`, `manager.test.js` and `places/docker.test.js`. Capability regressions use Chat Completions for intrinsic search, matching the provider's actual search-model protocol. Resource tests acknowledge bytes consumed by the server rather than counting client handshakes, use small body budgets instead of provoking an OOM, and include allowed inference controls. The storage test sends tiny fragments through the production reader in a separate Node process and collects its heap explicitly to measure retained chunk overhead. Structure tests prove excess data is refused before the JSON parse counter advances. Keep executed mutation results with the task evidence; the local HTTPS fixture does not establish Docker isolation.
 

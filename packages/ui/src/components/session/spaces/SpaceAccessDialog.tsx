@@ -32,6 +32,8 @@ import { ModelKeySource } from './ModelKeySource';
 import { isAccessChoiceComplete, modelGrantOf, usableHostLoginOf, useSpaceHostLogins, useSpaceModelProviders, type HostLoginOffer, type KeySourceChoice, type SpaceModelProviderOption } from './spaceModelKeys';
 import { failureOfError, spaceFailureText } from './spaceFailureText';
 import { useOpenSpaceDomain, useSpaceJournal } from './spaceNetwork';
+import { SpaceMcpAccess } from './SpaceMcpAccess';
+import { RootSpaceWarning } from './RootSpaceNotice';
 
 const REASON_TEXT = {
   not_on_list: 'spaces.access.reason.notOnList',
@@ -185,6 +187,7 @@ const NetworkSection: React.FC<{ entry: SpaceEntry; domains: ReturnType<typeof u
     if (await domains.open(domain)) setInput('');
   };
 
+  if (entry.kind === 'host-root') return <p className="typography-meta text-status-error">{t('spaces.root.network')}</p>;
   if (entry.network === null) return <p className="typography-meta text-muted-foreground">{t('spaces.access.network.unknown')}</p>;
   if (entry.network.mode === 'open') return <p className="typography-meta text-muted-foreground">{t('spaces.access.network.openMode')}</p>;
   return (
@@ -300,11 +303,11 @@ const SpaceAccessBody: React.FC<{ entry: SpaceEntry; focusProviderId: string | n
   const loginOnly = SPACE_LOGIN_ONLY_PROVIDERS.filter((id) => hostLogins.logins?.has(id) || entry.grants.some((grant) => grant.kind === 'login' && grant.provider === id));
   const providers = useSpaceModelProviders(entry.projectDirectory, loginOnly);
   const running = entry.state === 'running';
-  const journal = useSpaceJournal(entry.id, running);
+  const journal = useSpaceJournal(entry.id, running && entry.kind !== 'host-root');
   const domains = useOpenSpaceDomain(entry.id);
   return (
     <div className="space-y-5 pe-3">
-      <p className="typography-meta text-muted-foreground">{t('spaces.access.intro')}</p>
+      {entry.kind === 'host-root' ? <><RootSpaceWarning /><p className="typography-meta text-status-error">{t('spaces.root.grants')}</p></> : <p className="typography-meta text-muted-foreground">{t('spaces.access.intro')}</p>}
       {!running ? <StoppedNotice spaceId={entry.id} /> : null}
       <Section title={t('spaces.access.models.label')}>
         {providers.length === 0 ? <p className="typography-meta text-muted-foreground">{t('spaces.create.access.noneAvailable')}</p> : (
@@ -315,10 +318,11 @@ const SpaceAccessBody: React.FC<{ entry: SpaceEntry; focusProviderId: string | n
           </div>
         )}
       </Section>
+      <Section title={t('spaces.access.mcp.title')}><SpaceMcpAccess entry={entry} /></Section>
       <Section title={t('spaces.access.network.label')}>
         <NetworkSection entry={entry} domains={domains} />
       </Section>
-      <Section
+      {entry.kind !== 'host-root' ? <Section
         title={t('spaces.access.blocked.label')}
         action={running ? (
           <Button variant="ghost" size="xs" className="gap-1" onClick={journal.refresh} disabled={journal.state.kind === 'loading'}>
@@ -328,7 +332,7 @@ const SpaceAccessBody: React.FC<{ entry: SpaceEntry; focusProviderId: string | n
         ) : null}
       >
         <BlockedSection entry={entry} journal={journal} domains={domains} />
-      </Section>
+      </Section> : null}
     </div>
   );
 };

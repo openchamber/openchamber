@@ -94,7 +94,12 @@ const adminConnectionSchema = z.object({
   id: z.string().regex(/^pmcp_[0-9a-f]{16}$/), name: z.string(), revision: z.number().int(),
 }).passthrough();
 const outcomeSchema = z.enum(['authorized', 'oauth_denied', 'oauth_state_invalid', 'oauth_connection_changed', 'oauth_exchange_failed']);
+const subjectSchema = z.string().regex(/^(?:agent|space-[0-9a-f]{12})$/);
+const subjectViewSchema = z.object({ subject: subjectSchema, connections: z.array(z.string().regex(/^pmcp_[0-9a-f]{16}$/)) });
 const adminAnswerSchema = z.discriminatedUnion('type', [
+  subjectViewSchema.extend({ type: z.literal('subject') }),
+  z.object({ type: z.literal('subjects'), subjects: z.array(subjectViewSchema) }),
+  z.object({ type: z.literal('subject-removed'), subject: subjectSchema }),
   z.object({ type: z.literal('error'), status: z.number().int().min(400).max(599), code: z.string(), message: z.string() }),
   z.object({ type: z.literal('connections'), status: statusSchema, connections: z.array(adminConnectionSchema) }),
   z.object({ type: z.literal('connection'), connection: adminConnectionSchema }),
@@ -145,3 +150,7 @@ export async function requestAdmin({ clientConfigPath, frame, timeoutMs = 10000 
     });
   });
 }
+
+export const listSubjects = (options = {}) => requestAdmin({ clientConfigPath: resolveClientConfigPath(), ...options, frame: { type: 'subjects' } });
+export const setSubject = (subject, connections, options = {}) => requestAdmin({ clientConfigPath: resolveClientConfigPath(), ...options, frame: { type: 'subject-set', subject, connections } });
+export const removeSubject = (subject, options = {}) => requestAdmin({ clientConfigPath: resolveClientConfigPath(), ...options, frame: { type: 'subject-remove', subject } });

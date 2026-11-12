@@ -6,16 +6,21 @@ import { createLocalMcpReader } from '../opencode/mcp-local-reader.js';
 import { isBoolean, isPlainObject, isString } from '../shared/guards.js';
 import { withSourceControlFileLock } from '../source-control/file-lock.js';
 import { protectedSelectionReader } from './selections-reader.js';
+import { assertSelectionMirrorWriteFits, projectIdentitySchema, selectionDocumentName } from './selection-mirror-documents.js';
 
 /**
  * Which protected connections OpenCode starts, for every project or for one.
- * A selection holds an MCP name and a connection id; it grants nothing, since
- * every engine process can call every approved connection anyway.
+ * A selection holds an MCP name and a connection id. The front door pushes
+ * their enabled union to the service's shared agent subject after route writes.
  */
-export function createProtectedSelectionStore({ dataDir }) {
+export function createProtectedSelectionStore({ dataDir, resolveProjectIdentity, enforceMirrorCapacity = false }) {
   const local = createLocalMcpReader(dataDir);
   const reader = protectedSelectionReader(dataDir, { fs, path, isBoolean, isPlainObject, isString });
   const globalFile = path.join(dataDir, 'mcp-protected', 'global.json');
+  const resolveRemoteTarget = async (directory) => {
+    const identity = projectIdentitySchema.parse(await resolveProjectIdentity(directory));
+    return { global: globalFile, project: path.join(path.dirname(globalFile), selectionDocumentName({ identity })), identity };
+  };
 
   const read = (directory) => {
     if (!directory) {
@@ -23,6 +28,7 @@ export function createProtectedSelectionStore({ dataDir }) {
       const effective = Object.fromEntries(Object.entries(global).filter(([, entry]) => !entry.disabled));
       return { global, project: null, effective };
     }
+    if (resolveProjectIdentity) return resolveRemoteTarget(directory).then((target) => reader.readTarget(target));
     return reader.readTarget(reader.resolve(local.resolve(directory)));
   };
 
@@ -35,16 +41,22 @@ export function createProtectedSelectionStore({ dataDir }) {
     let file = globalFile;
     let identity = null;
     if (scope === 'project') {
-      const target = reader.resolve(local.resolve(directory));
+      const target = resolveProjectIdentity ? await resolveRemoteTarget(directory) : reader.resolve(local.resolve(directory));
       file = target.project;
       identity = target.identity;
     }
     await ensureLocalMcpDirectory(path.dirname(file));
-    return withSourceControlFileLock(`${file}.lock`, async () => {
+    const commit = () => withSourceControlFileLock(`${file}.lock`, async () => {
       const { servers } = reader.readDocument(file, identity);
       change(servers);
+      if (enforceMirrorCapacity) {
+        await assertSelectionMirrorWriteFits(dataDir, identity === null ? { version: 1, servers } : { version: 1, identity, servers });
+      }
       await writeDocument(file, identity, servers);
     });
+    return enforceMirrorCapacity
+      ? withSourceControlFileLock(path.join(dataDir, 'mcp-protected-capacity.lock'), commit)
+      : commit();
   };
 
   return {

@@ -5,6 +5,18 @@ import { firstPartyIntegrationsI18n } from './first-party-integrations.i18n';
 import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
 import { extensionCatalogI18n } from './extension-catalog.i18n';
 export const settingsDict = {
+  'settings.openchamber.spaces.host.installation': 'Fourni par l\'installation d\'OpenChamber sur la machine hôte.',
+  'settings.openchamber.spaces.root.title': 'Espaces root',
+  'settings.openchamber.spaces.root.available': 'Les espaces root sont disponibles. Chaque création, démarrage et redémarrage nécessite une clé d\'accès approuvée.',
+  'settings.openchamber.spaces.root.approve': 'Approuver une clé d\'accès',
+  'settings.openchamber.spaces.root.commandInfo': 'Exécutez cette commande sur le serveur en tant que root et saisissez le code qu\'elle affiche.',
+  'settings.openchamber.spaces.root.code': 'Code d\'approbation',
+  'settings.openchamber.spaces.root.label': 'Libellé de la clé d\'accès (facultatif)',
+  'settings.openchamber.spaces.root.confirm': 'Confirmez cette clé d\'accès dans le terminal du serveur',
+  'settings.openchamber.spaces.root.confirmInfo': 'Comparez cette empreinte avec celle du terminal et confirmez-la dans le terminal. L\'approbation n\'est complète que lorsque le terminal l\'accepte.',
+  'settings.openchamber.spaces.root.empty': 'Aucune clé d\'accès approuvée pour les espaces root.',
+  'settings.openchamber.spaces.root.approvedAt': 'Approuvée le {date}',
+  'settings.openchamber.spaces.root.revoke': 'Révoquer sur le serveur',
   'settings.openchamber.sessionRetention.field.archivedDescription': 'La durée de conservation commence à l\'archivage. Les sessions expirées sont supprimées.',
   'settings.openchamber.sessionRetention.field.unarchivedArchiveDescription': 'La durée de conservation commence à la dernière activité de la session. Les sessions expirées sont archivées.',
   'settings.openchamber.sessionRetention.field.unarchivedDeleteDescription': 'La durée de conservation commence à la dernière activité de la session. Les sessions expirées sont supprimées.',

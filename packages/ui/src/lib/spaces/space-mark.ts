@@ -5,6 +5,7 @@
 import { useI18n } from '@/lib/i18n';
 import { spaceIdOfDirectory } from './space-route';
 import { useSpacesStore } from './spaces-store';
+import { spacePlaceName } from './space-places';
 
 export const useSpaceMarkLabel = (directory: string | null | undefined): string | null => {
   const { t } = useI18n();
@@ -13,6 +14,6 @@ export const useSpaceMarkLabel = (directory: string | null | undefined): string 
   if (spaceId === null) return null;
   if (!entry) return t('contextPanel.browser.spaceAddress');
   // The place by the name the user knows it: this computer, or the machine as they wrote it.
-  const place = entry.machine ?? (entry.placeId === 'docker' ? t('spaces.create.place.localDocker') : entry.placeId);
+  const place = spacePlaceName(t, entry);
   return `${entry.name} · ${place}`;
 };

@@ -3,6 +3,34 @@
 ## Purpose
 This module contains the OpenChamber message-stream WebSocket protocol and runtime bridge. It keeps the browser-facing WebSocket transport separate from the upstream OpenCode SSE transport.
 
+## Connection-owned provenance
+
+Only the hub's local `injectEvent` API assigns a space id. Upstream SSE frames
+cannot provide `spaceId`, `origin` or provenance, including in ordinary
+single-server mode. An agent upstream is stamped `origin: 'agent'`,
+`spaceId: null`; its `openchamber:*` action frames and claimed space directories
+are dropped. Typed agent control/notification events enter through the separate
+agent-server readers, not through the raw OpenCode hub.
+
+Agent routing fields are checked throughout each native event, not just its
+envelope: nested locations, worktrees and session dictionaries cannot claim a
+Space directory or an already owner-indexed Space session. The index's claim
+lookup is constant-time; this validation does not scan all Space sessions per
+delta. Agent session lists pass the same boundary before the existing merge.
+
+Front-door SSE keeps the native event's `type` at the top level, as the pinned
+SDK yields its data unchanged. A bounded queue waits for response drain; one
+large healthy tool-result event does not force a disconnect. Only consumers
+that exceed the queue byte cap are dropped.
+
+### Why front-door directory sockets use the local hub
+
+A direct directory reader would bypass the provenance boundary. Both
+front-door message sockets subscribe to the local hub, with directory filtering
+on live and replayed events. The retained replay suffix records each entry's
+directory for that filter; ordinary single-server directory readers are
+unchanged. The authenticated agent transport bounds unfinished SSE events.
+
 ## Entrypoints and structure
 - `packages/web/server/lib/event-stream/index.js`: public entrypoint re-exporting protocol and runtime helpers.
 - `packages/web/server/lib/event-stream/global-hub.js`: shared global upstream SSE hub for server-side subscribers and browser WS fan-out.

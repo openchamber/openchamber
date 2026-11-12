@@ -41,6 +41,7 @@ function recordingSystem(overrides = {}) {
     removeGroup: record('removeGroup'),
     chown: async () => {},
     systemctl: record('systemctl'),
+    createTmpfiles: record('createTmpfiles'),
     nodeVersion: async () => 'v24.21.0\n',
     connect: async () => ({ protocol: 1, enforcement: { status: 'protected' } }),
     sockets: [],
@@ -75,7 +76,65 @@ describe('protected MCP installer', () => {
       ['removeFromGroup', 'dev', 'openchamber-mcp-clients'],
       ['removeFromGroup', 'dev', 'openchamber-mcp-admins'],
     ]);
-    expect(output.some((line) => line.includes('dev') && line.includes('removed') && line.includes('openchamber-mcp-clients') && line.includes('openchamber-mcp-admins'))).toBe(true);
+    expect(output.some((line) => line.includes('dev') && line.includes('neither') && line.includes('openchamber-mcp-clients') && line.includes('openchamber-mcp-admins'))).toBe(true);
+  });
+
+  it('puts OpenChamber in both groups and the agents\' account in neither when they run as separate accounts', async () => {
+    // Given a stage 1 installation, where OpenChamber and the agents share the account dev.
+    const { root } = await hostRoot();
+    await install(options(root, recordingSystem()));
+    const identities = { dev: { uid: 2_000_000_001, gids: [2_000_000_001] }, 'dev-agent': { uid: 2_000_000_002, gids: [2_000_000_002] } };
+    const system = recordingSystem({ identity: async (name) => identities[name] });
+    // When the agents get an account of their own.
+    await install(options(root, system, { engineUser: 'dev-agent', adminUser: 'dev', engineUnit: 'openchamber-agent.service' }));
+    // Then dev administers and calls status, and dev-agent joins no group of the service.
+    const memberships = system.calls.filter(([name]) => name === 'addToGroup' || name === 'removeFromGroup');
+    expect(memberships).toEqual([
+      ['addToGroup', 'dev', 'openchamber-mcp-clients'],
+      ['addToGroup', 'dev', 'openchamber-mcp-admins'],
+      ['removeFromGroup', 'dev-agent', 'openchamber-mcp-clients'],
+      ['removeFromGroup', 'dev-agent', 'openchamber-mcp-admins'],
+    ]);
+    const paths = layout(root);
+    expect(JSON.parse(await fs.readFile(paths.serviceConfig, 'utf8'))).toMatchObject({ engineUser: 'dev-agent', adminUser: 'dev', engineUnit: 'openchamber-agent.service' });
+    // The agents' client configuration names the subject socket their unit binds, never engine.sock.
+    expect(JSON.parse(await fs.readFile(paths.agentClientConfig, 'utf8'))).toEqual({
+      version: 1,
+      socket: '/run/openchamber-mcp/engine.sock',
+      adminSocket: '/run/openchamber-protected-mcp-admin/admin.sock',
+      relay: ['/usr/bin/node', '/usr/lib/openchamber-protected-mcp/current/lib/protected-mcp/service/relay.js'],
+    });
+    expect(JSON.parse(await fs.readFile(paths.clientConfig, 'utf8')).socket).toBe('/run/openchamber-protected-mcp/engine.sock');
+    // The agents' subject folder exists from every boot on, and now, before the agent unit restarts.
+    expect(await fs.readFile(paths.tmpfilesFile, 'utf8')).toBe([
+      'd /run/openchamber-protected-mcp 0750 openchamber-mcp openchamber-mcp -',
+      'd /run/openchamber-protected-mcp/subjects 0700 openchamber-mcp openchamber-mcp -',
+      'd /run/openchamber-protected-mcp/subjects/agent 0711 openchamber-mcp openchamber-mcp -',
+      '',
+    ].join('\n'));
+    const order = system.calls.map(([name, ...args]) => (name === 'systemctl' ? `systemctl ${args[0][0]}` : name));
+    expect(order.indexOf('createTmpfiles')).toBeGreaterThanOrEqual(0);
+    expect(order.indexOf('createTmpfiles')).toBeLessThan(order.indexOf('systemctl restart'));
+  });
+
+  it('goes back to one shared account and removes the agents\' client configuration', async () => {
+    // Given separate accounts.
+    const { root } = await hostRoot();
+    const identities = { dev: { uid: 2_000_000_001, gids: [2_000_000_001] }, 'dev-agent': { uid: 2_000_000_002, gids: [2_000_000_002] } };
+    await install(options(root, recordingSystem({ identity: async (name) => identities[name] }), { engineUser: 'dev-agent', adminUser: 'dev' }));
+    const system = recordingSystem({ identity: async (name) => identities[name] });
+    // When the installation runs without an administrator account of its own.
+    await install(options(root, system));
+    // Then dev is in both groups, the former agents' account in none, and no agents' configuration stays.
+    expect(system.calls.filter(([name]) => name === 'addToGroup' || name === 'removeFromGroup')).toEqual([
+      ['addToGroup', 'dev', 'openchamber-mcp-clients'],
+      ['addToGroup', 'dev', 'openchamber-mcp-admins'],
+      ['removeFromGroup', 'dev-agent', 'openchamber-mcp-clients'],
+      ['removeFromGroup', 'dev-agent', 'openchamber-mcp-admins'],
+    ]);
+    await expect(fs.stat(layout(root).agentClientConfig)).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(fs.stat(layout(root).tmpfilesFile)).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(JSON.parse(await fs.readFile(layout(root).serviceConfig, 'utf8')).adminUser).toBeNull();
   });
 
   it.each([null, '', '--no-start'])('refuses a missing engine account when its value is %s', async (engineUser) => {
@@ -128,13 +187,14 @@ describe('protected MCP installer', () => {
     const config = JSON.parse(await fs.readFile(paths.serviceConfig, 'utf8'));
     expect(config).toEqual({
       version: 1, serviceVersion: '2.5.3', stateDir: '/var/lib/openchamber-protected-mcp',
-      engineUser: 'dev', engineUnit: null, engineSocket: '/run/openchamber-protected-mcp/engine.sock', engineSocketGroup: 990,
+      engineUser: 'dev', adminUser: null, engineUnit: null, engineSocket: '/run/openchamber-protected-mcp/engine.sock', engineSocketGroup: 990,
       adminSocket: '/run/openchamber-protected-mcp-admin/admin.sock', adminSocketGroup: 992,
+      subjectsDir: '/run/openchamber-protected-mcp/subjects',
       workerPath: '/usr/local/bin:/usr/bin:/bin', node: '/usr/bin/node', npm: null,
       installDir: '/usr/lib/openchamber-protected-mcp', configDir: '/etc/openchamber/protected-mcp',
     });
     const unit = await fs.readFile(paths.unitFile, 'utf8');
-    for (const line of ['User=openchamber-mcp', 'SupplementaryGroups=openchamber-mcp-clients openchamber-mcp-admins', 'RuntimeDirectory=openchamber-protected-mcp openchamber-protected-mcp-admin', 'RuntimeDirectoryMode=0750', 'NoNewPrivileges=yes', 'ProtectSystem=strict', 'ProtectHome=yes', 'CapabilityBoundingSet=', 'UMask=0077', 'LimitCORE=0']) {
+    for (const line of ['User=openchamber-mcp', 'SupplementaryGroups=openchamber-mcp-clients openchamber-mcp-admins', 'RuntimeDirectory=openchamber-protected-mcp openchamber-protected-mcp-admin', 'RuntimeDirectoryMode=0750', 'RuntimeDirectoryPreserve=yes', 'NoNewPrivileges=yes', 'ProtectSystem=strict', 'ProtectHome=yes', 'CapabilityBoundingSet=', 'UMask=0077', 'LimitCORE=0']) {
       expect(unit.split('\n')).toContain(line);
     }
     expect((await fs.stat(paths.stateDir)).mode & 0o777).toBe(0o700);

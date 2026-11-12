@@ -83,6 +83,32 @@ const STATUS_BY_CODE = new Map([
   ['chats_not_saved', 409],
   ['invalid_machine', 400],
   ['place_has_spaces', 409],
+  ['host_loopback_unavailable', 400],
+  ['mcp_grant_unsupported_place', 400],
+  ['mcp_connection_not_found', 404],
+  ['protected_mcp_unavailable', 503],
+  ['agent_separation_missing', 409],
+  ['root_place_not_allowed', 400],
+  ['root_activation_invalid', 400],
+  ['root_activation_unexpected', 400],
+  ['root_activation_required', 409],
+  ['root_activation_challenge_unknown', 409],
+  ['root_activation_mismatch', 409],
+  ['root_activation_busy', 409],
+  ['root_activation_refused', 403],
+  ['root_passkey_not_approved', 409],
+  ['root_passkeys_busy', 409],
+  ['ui_passkey_missing', 409],
+  ['approval_code_invalid', 400],
+  ['approval_code_wrong', 403],
+  ['approval_not_started', 409],
+  ['approval_expired', 409],
+  ['approval_awaiting_confirmation', 409],
+  ['approval_challenge_missing', 409],
+  ['approval_credential_invalid', 400],
+  ['approval_credential_mismatch', 400],
+  ['approval_origin_refused', 403],
+  ['approval_assertion_refused', 403],
 ]);
 
 /** One JSON answer per failure, with a stable code. Details travel as data; a stack never does. */
@@ -202,11 +228,29 @@ export function createSwitchController({ getHost, setHost, buildHost, startHost,
 }
 
 /**
+ * A root confirmation as the browser asks for it: the approved passkeys with the origin each was
+ * approved at, and the RP ID of those approved at this address, else the first one's. The browser
+ * offers only the passkeys of its own origin; the root component checks the origin again.
+ */
+const describeRootActivation = ({ spaceId, challenge, expiresAt, credentials }, currentRpID) => {
+  const described = {
+    challenge,
+    expiresAt,
+    rpID: (credentials.find((credential) => credential.rpID === currentRpID) ?? credentials[0])?.rpID ?? null,
+    allowCredentials: credentials.map(({ id, label, origin }) => ({ id, label, origin })),
+  };
+  if (spaceId !== undefined) described.spaceId = spaceId;
+  return described;
+};
+
+/**
  * `getJourney()` is the journey of the running host or null, `getPlaces()` the places to check,
  * `getDockerSetup()` the local place's id with its Docker setup, or null, `readSwitch()` and `setSwitch(enabled)` the switch: `setSwitch(false)` stops the spaces and takes
  * the feature down, `setSwitch(true)` brings it up, and each resolves what the client shows.
+ * `getUiPasskeys(req)` answers the OpenChamber sign-in passkeys at the request's address,
+ * `{ rpID, passkeys: [{ id, label, publicKey, rpID }] }`, for a root passkey approval.
  */
-export function registerSpaceRoutes(app, { getJourney, getPlaces = () => [], getDockerSetup = () => null, readSwitch, setSwitch, setMachine = async () => null, getArchive = () => null }) {
+export function registerSpaceRoutes(app, { getJourney, getPlaces = () => [], getDockerSetup = () => null, readSwitch, setSwitch, setMachine = async () => null, getArchive = () => null, getUiPasskeys = () => ({ rpID: null, passkeys: [] }) }) {
   const withJourney = (handler) => async (req, res) => {
     const journey = getJourney();
     if (!journey) {
@@ -264,14 +308,43 @@ export function registerSpaceRoutes(app, { getJourney, getPlaces = () => [], get
 
   // The places funnel: each place asked what it can do, now, because the user is looking. This
   // computer's place also says what gets Docker going there, see `places/docker-setup.js`.
-  app.get(`${SPACES_ROUTE}/places`, withJourney(async (_journey, _req, res) => {
+  app.get(`${SPACES_ROUTE}/places`, withJourney(async (journey, _req, res) => {
     const local = getDockerSetup();
-    const places = await Promise.all(getPlaces().map(async (place) => {
+    const listed = getPlaces();
+    const root = listed.some((place) => place.kind === 'host-root') ? await journey.readRootPasskeys() : null;
+    const places = await Promise.all(listed.map(async (place) => {
       const checked = await place.check();
       const setup = local && place.id === local.placeId ? await local.setup.describe(checked) : null;
-      return { id: place.id, machine: place.machine ?? null, ...checked, setup };
+      const rootActivation = place.kind === 'host-root'
+        ? { available: root.available, reason: root.reason, origins: [...new Set(root.passkeys.map((passkey) => passkey.origin))] }
+        : null;
+      return { id: place.id, kind: place.kind ?? 'docker', machine: place.machine ?? null, ...checked, setup, rootActivation };
     }));
     res.json({ places });
+  }));
+
+  // Root spaces: whether they may run and the passkeys approved for them, the two halves of an
+  // approval the root command started, and the one-time challenge of a creation or a start.
+  app.get(`${SPACES_ROUTE}/root-passkeys`, withJourney(async (journey, _req, res) => {
+    res.json(await journey.readRootPasskeys());
+  }));
+  app.post(`${SPACES_ROUTE}/root-passkeys/approval-challenge`, withJourney(async (journey, req, res) => {
+    const { rpID, passkeys } = getUiPasskeys(req);
+    if (passkeys.length === 0) throw new SpaceError('ui_passkey_missing', 'Add a passkey for signing in to OpenChamber at this address first, then enter the code again.');
+    const { challenge } = await journey.rootApprovalChallenge(requireBody(req));
+    res.json({ challenge, rpID, allowCredentials: passkeys.map(({ id, label }) => ({ id, label })) });
+  }));
+  app.post(`${SPACES_ROUTE}/root-passkeys/approval`, withJourney(async (journey, req, res) => {
+    const { passkeys } = getUiPasskeys(req);
+    res.json(await journey.completeRootApproval(requireBody(req), (id) => passkeys.find((passkey) => passkey.id === id) ?? null));
+  }));
+  app.post(`${SPACES_ROUTE}/root-activation`, withJourney(async (journey, req, res) => {
+    const body = requireBody(req);
+    if (body.op !== 'create') throw new SpaceError('root_activation_invalid', 'A root space is confirmed here for a creation; a start is confirmed on the space.');
+    res.json(describeRootActivation(await journey.rootActivationOptions({ op: 'create', request: body.request }), getUiPasskeys(req).rpID));
+  }));
+  app.post(`${SPACES_ROUTE}/:id/root-activation`, withJourney(async (journey, req, res) => {
+    res.json(describeRootActivation(await journey.rootActivationOptions({ op: 'start', spaceId: spaceIdOf(req) }), getUiPasskeys(req).rpID));
   }));
   // Getting Docker ready on this computer: the action under way or the last one that failed, read
   // while the screen waits on it, and the start of the one action the place offers now.
@@ -314,8 +387,11 @@ export function registerSpaceRoutes(app, { getJourney, getPlaces = () => [], get
     res.status(202).json(await journey.createSpace(requireBody(req)));
   }));
 
+  // A root space's confirmation travels in the body; any other space starts without a body.
+  const rootActivationOf = (req) => (isObjectRecord(req.body) ? req.body.rootActivation ?? null : null);
+
   app.post(`${SPACES_ROUTE}/:id/start`, withJourney(async (journey, req, res) => {
-    res.json(await journey.startSpace(spaceIdOf(req)));
+    res.json(await journey.startSpace(spaceIdOf(req), { rootActivation: rootActivationOf(req) }));
   }));
 
   app.put(`${SPACES_ROUTE}/:id/task-title`, withJourney(async (journey, req, res) => {
@@ -334,7 +410,7 @@ export function registerSpaceRoutes(app, { getJourney, getPlaces = () => [], get
   }));
 
   app.post(`${SPACES_ROUTE}/:id/restart`, withJourney(async (journey, req, res) => {
-    res.json(await journey.restartSpace(spaceIdOf(req)));
+    res.json(await journey.restartSpace(spaceIdOf(req), { rootActivation: rootActivationOf(req) }));
   }));
 
   app.delete(`${SPACES_ROUTE}/:id`, withJourney(async (journey, req, res) => {

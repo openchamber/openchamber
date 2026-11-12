@@ -5,6 +5,18 @@ import { firstPartyIntegrationsI18n } from './first-party-integrations.i18n';
 import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
 import { extensionCatalogI18n } from './extension-catalog.i18n';
 export const settingsDict = {
+  'settings.openchamber.spaces.host.installation': 'Von der OpenChamber-Installation auf dem Host bereitgestellt.',
+  'settings.openchamber.spaces.root.title': 'root-Bereiche',
+  'settings.openchamber.spaces.root.available': 'root-Bereiche sind verfügbar. Für jede Erstellung, jeden Start und jeden Neustart ist ein genehmigter Passkey erforderlich.',
+  'settings.openchamber.spaces.root.approve': 'Passkey genehmigen',
+  'settings.openchamber.spaces.root.commandInfo': 'Führe diesen Befehl auf dem Server als root aus und gib den ausgegebenen Code ein.',
+  'settings.openchamber.spaces.root.code': 'Genehmigungscode',
+  'settings.openchamber.spaces.root.label': 'Passkey-Bezeichnung (optional)',
+  'settings.openchamber.spaces.root.confirm': 'Diesen Passkey im Serverterminal bestätigen',
+  'settings.openchamber.spaces.root.confirmInfo': 'Vergleiche diesen Fingerabdruck mit dem im Terminal und bestätige ihn dort. Die Genehmigung ist erst abgeschlossen, wenn das Terminal sie annimmt.',
+  'settings.openchamber.spaces.root.empty': 'Keine Passkeys für root-Bereiche genehmigt.',
+  'settings.openchamber.spaces.root.approvedAt': 'Genehmigt am {date}',
+  'settings.openchamber.spaces.root.revoke': 'Auf dem Server widerrufen',
   'settings.openchamber.sessionRetention.field.archivedDescription': 'Zählt die Aufbewahrungsdauer ab der Archivierung. Abgelaufene Sitzungen werden gelöscht.',
   'settings.openchamber.sessionRetention.field.unarchivedArchiveDescription': 'Zählt die Aufbewahrungsdauer ab der letzten Aktivität der Sitzung. Abgelaufene Sitzungen werden archiviert.',
   'settings.openchamber.sessionRetention.field.unarchivedDeleteDescription': 'Zählt die Aufbewahrungsdauer ab der letzten Aktivität der Sitzung. Abgelaufene Sitzungen werden gelöscht.',

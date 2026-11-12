@@ -259,6 +259,9 @@ const answer = (res, status, code, message) => {
 
 /** The status and code an error of the transport or of a place gets on the way back to the client. */
 export const describeFailure = (error) => {
+  if (['agent_unreachable', 'agent_login_failed', 'agent_session_expired', 'agent_redirected'].includes(error?.code)) {
+    return { status: error.code === 'agent_session_expired' ? 503 : 502, code: error.code, message: error.code };
+  }
   const code = error instanceof SpaceError ? error.code : null;
   switch (code) {
     case 'space_not_found':
@@ -302,14 +305,14 @@ const hasBody = (req) => 'content-length' in req.headers || 'transfer-encoding' 
  * The headers a request carries into a space: the client's, without the user's credentials and
  * the hop-by-hop ones, plus the space's session, the loopback host and identity encoding.
  */
-export const forwardRequestHeaders = (requestHeaders, cookie) => {
+export const forwardRequestHeaders = (requestHeaders, cookie, host = `${SPACE_SERVER_HOST}:${SPACE_SERVER_PORT}`) => {
   const headers = {};
   for (const [name, value] of Object.entries(requestHeaders)) {
     const lower = name.toLowerCase();
     if (DROPPED_REQUEST_HEADERS.has(lower) || DROPPED_REQUEST_HEADER_PREFIXES.some((prefix) => lower.startsWith(prefix))) continue;
     if (value !== undefined) headers[lower] = value;
   }
-  headers.host = `${SPACE_SERVER_HOST}:${SPACE_SERVER_PORT}`;
+  headers.host = host;
   headers.cookie = cookie;
   headers['accept-encoding'] = 'identity';
   return headers;
@@ -326,7 +329,7 @@ export const stripCredentialQuery = (url) => {
  * place's `connect`, and the token read back over `exec`. `now` and
  * `logger` are injectable for the tests.
  */
-export function createSpaceDispatcher({ transport, now = Date.now, logger = console, freeSocketTimeoutMs = FREE_SOCKET_TIMEOUT_MS }) {
+export function createSpaceDispatcher({ transport, upstream: agentUpstream = null, now = Date.now, logger = console, freeSocketTimeoutMs = FREE_SOCKET_TIMEOUT_MS }) {
   const agents = new Map();
   const tokens = new Map();
   const sessions = new Map();
@@ -349,6 +352,7 @@ export function createSpaceDispatcher({ transport, now = Date.now, logger = cons
    * be there, so it is never called gone on a guess.
    */
   const isKnownSpace = async (spaceId) => {
+    if (agentUpstream) return true;
     const age = now() - known.readAt;
     if (age >= LIST_TTL_MS || (!known.ids.has(spaceId) && age >= LIST_MISS_RETRY_MS)) {
       await readSpaceIds();
@@ -359,6 +363,7 @@ export function createSpaceDispatcher({ transport, now = Date.now, logger = cons
   };
 
   const agentFor = (spaceId) => {
+    if (agentUpstream) return agentUpstream.requestOptions.agent;
     let agent = agents.get(spaceId);
     if (!agent) {
       agent = new http.Agent({ keepAlive: true, maxSockets: MAX_SOCKETS_PER_SPACE, timeout: freeSocketTimeoutMs });
@@ -411,6 +416,7 @@ export function createSpaceDispatcher({ transport, now = Date.now, logger = cons
   };
 
   const logIn = (spaceId, { fresh }) => {
+    if (agentUpstream) return agentUpstream.renew();
     if (logins.has(spaceId)) return logins.get(spaceId);
     const login = (async () => {
       let attempt = await attemptLogin(spaceId, fresh);
@@ -431,6 +437,7 @@ export function createSpaceDispatcher({ transport, now = Date.now, logger = cons
   };
 
   const sessionFor = async (spaceId) => {
+    if (agentUpstream) return agentUpstream.cookieFor();
     const session = sessions.get(spaceId);
     if (session && now() < session.renewAt) return session.cookie;
     // The token is read again only when a login with the remembered one was refused.
@@ -503,6 +510,10 @@ export function createSpaceDispatcher({ transport, now = Date.now, logger = cons
         res.setHeader('content-type', 'application/octet-stream');
         res.setHeader('content-disposition', 'attachment');
       }
+    } else if (agentUpstream && /^\/api\/(?:fs\/(?:preview|serve)|preview\/proxy|guest-files)(?:\/|$)/i.test(innerPath)
+      && /(?:^|;)\s*sandbox\b/i.test(String(upstream.headers['content-security-policy'] ?? ''))) {
+      // The owner sets the policy. The agent cannot add allow-same-origin or remove sandbox.
+      res.setHeader('content-security-policy', 'sandbox allow-scripts allow-forms allow-popups allow-modals allow-downloads');
     } else if (contentType === '' || PAGE_CONTENT_TYPES.test(contentType)) {
       // A missing type is what a browser sniffs on a navigation; `nosniff` does not stop that.
       res.setHeader('content-type', 'text/plain; charset=utf-8');
@@ -550,9 +561,10 @@ export function createSpaceDispatcher({ transport, now = Date.now, logger = cons
     }
     const upstreamRequest = http.request({
       agent: agentFor(spaceId),
+      ...(agentUpstream?.requestOptions ?? {}),
       method: req.method,
       path: `${innerPath}${search}`,
-      headers: forwardRequestHeaders(req.headers, cookie),
+      headers: forwardRequestHeaders(req.headers, cookie, agentUpstream?.host),
     });
     let settled = false;
     const settle = (fn) => (value) => {
@@ -586,7 +598,7 @@ export function createSpaceDispatcher({ transport, now = Date.now, logger = cons
       if (upstream.statusCode >= 300 && upstream.statusCode < 400 && upstream.statusCode !== 304) {
         // A redirect from a space would send the user's next request wherever the agent says.
         upstream.resume();
-        fail(new SpaceError('space_redirected', 'The server inside the space answered with a redirect, which is not followed'));
+        fail(new SpaceError(agentUpstream ? 'agent_redirected' : 'space_redirected', 'The upstream answered with a redirect, which is not followed'));
         return;
       }
       res.status(upstream.statusCode);
@@ -638,7 +650,7 @@ export function createSpaceDispatcher({ transport, now = Date.now, logger = cons
         // A stream from the agent's pool can die between two requests: the server inside closed
         // it, or the space stopped. A request without a body is sent once more on a fresh stream,
         // which the place opens or refuses with its own code; a request with a body cannot be.
-        if (error?.code !== 'command_stream_failed' || hasBody(req) || res.headersSent) throw error;
+        if (!(error?.code === 'command_stream_failed' || agentUpstream && error?.code === 'ECONNRESET') || hasBody(req) || res.headersSent) throw error;
         outcome = await forwardOnce(req, res, { spaceId, innerPath, search, cookie, onUnauthorized: 'report' });
       }
       if (outcome !== 'unauthorized') return;
@@ -649,15 +661,17 @@ export function createSpaceDispatcher({ transport, now = Date.now, logger = cons
       if (hasBody(req)) {
         // The body went with the first attempt and cannot be sent again. The session is renewed
         // now, so the next request goes through; this one says why it did not.
-        answer(res, 503, 'space_session_expired', 'The session with the server inside the space had expired and was renewed. Send the request again.');
+        answer(res, 503, agentUpstream ? 'agent_session_expired' : 'space_session_expired', 'The upstream session expired and was renewed. Send the request again.');
         return;
       }
       const again = await forwardOnce(req, res, { spaceId, innerPath, search, cookie: renewed, onUnauthorized: 'report' });
       if (again === 'unauthorized') {
-        throw new SpaceError('space_login_failed', 'The server inside the space refused a session it had just issued');
+        throw new SpaceError(agentUpstream ? 'agent_login_failed' : 'space_login_failed', 'The upstream refused a session it had just issued');
       }
     } catch (error) {
-      const failure = describeFailure(error);
+      const failure = agentUpstream && !String(error?.code).startsWith('agent_')
+        ? { status: 502, code: 'agent_unreachable', message: 'agent_unreachable' }
+        : describeFailure(error);
       logger.warn?.(`[spaces] request to space ${spaceId} failed: ${failure.code}`);
       answer(res, failure.status, failure.code, failure.message);
     }
@@ -719,5 +733,7 @@ export function createSpaceDispatcher({ transport, now = Date.now, logger = cons
     },
   };
 
-  return { middleware, close, isSpaceDirectory, isSpaceRequest, requestInside, spaceSessions };
+  return { middleware, close, isSpaceDirectory, isSpaceRequest, requestInside, spaceSessions,
+    forwardRequest: (req, res, innerPath, search) => forward(req, res, 'agent', innerPath, search),
+  };
 }

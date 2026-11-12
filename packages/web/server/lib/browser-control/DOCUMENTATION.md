@@ -107,28 +107,29 @@ itself; it can only ask and wait.
 - The client half is `packages/ui/src/lib/browser/controlClient.ts`. Every
   mounted browser tab registers its pane under its context-panel tab id, with
   its project and the session whose agent opened it (`ownerSessionId` on the
-  tab, null for the user's own). An action with `tabId` runs in that tab,
-  whoever opened it. Without one it runs in the calling session's tab: the
+  tab, null for the user's own), and the actual session partition. Every
+  request on the control channel is an agent request. It requires a calling
+  session and may use only a tab with an agent owner in
+  `persist:openchamber-agent-browser`. An explicit `tabId` naming a user's
+  tab is refused before waking or driving it. Without one it runs in the calling session's tab: the
   shown tab if it is the session's, else the one the session last opened or
-  worked in, else its newest. A session with no tab of its own gets the browser
-  tab the user last had in front of them (`setShownBrowserTab`, set by
-  `ContextPanel` with the project on screen) only when that tab is the user's
-  and in the session's project, and claims it only after a short delay, so a
-  client that holds the session's own tab wins the claim; otherwise the agent
-  is told so, with the tabs it could name. A request with no session keeps the
-  earlier rule within the project on screen: the shown tab, else that
-  project's newest tab. An action
+  worked in, else its newest eligible tab. A session with no tab of its own
+  receives a refusal and must use `browser.open`. The user's shown tab is
+  never claimed. Requests without a session receive an explicit refusal. An action
   never switches the user to the tab it acts in. `browser.open` without `tabId`
   never navigates an existing tab: the registered opener (`ContextPanel`,
   `useUIStore.openAgentBrowserTab`) makes a new background tab in the calling
-  session's project, owned by that session, and the answer carries its `tabId`.
+  session's project, owned by that session, in the agent partition, and the
+  answer carries its `tabId`. The user's tabs retain
+  `persist:openchamber-browser`. Space previews retain their separate
+  proxy-restricted partitions and cannot be driven through this channel.
   `browser.close` removes a tab the calling session opened; on a provider the
   service applies the same rule to its own tabs (the built-in one closes only
   tabs its agent opened). In the in-app view closing is panel
   state rather than a page action, so the panel registers a closer the way it
   registers the opener; without `tabId` the session closes its own most recent
   tab, and a tab the user or another session opened is refused, never closed,
-  even when an action without `tabId` would otherwise have used it. A close
+  including when that tab is shown. A close
   with no calling session, which the `POST /api/openchamber/control` route can
   produce, owns no tab and is refused outright: a null session must not match
   an unowned (the user's) tab. When the named tab is gone, a client with the
@@ -138,11 +139,12 @@ itself; it can only ask and wait.
   sleeping), so a session keeps working its page while the user looks at
   another project. The user's own tabs, across every project together, keep
   their page while among the `liveBrowserTabLimit` most recently used (a
-  General setting, 5 by default, `lib/browser/liveTabs.ts`); the rest sleep, and
-  those of other projects are not offered to agents. `browser.snapshot` answers carry `tabs` (`id`, `title`, `url`,
-  `owner`: `you`, `user`, or `another session`, `active`: the tab an action
+  General setting, 5 by default, `lib/browser/liveTabs.ts`); the rest sleep.
+  The user's tabs are never offered to agents. `browser.snapshot` answers carry `tabs` (`id`, `title`, `url`,
+  `owner`: `you` or `another session`, `active`: the tab an action
   without `tabId` would use); a session sees its own tabs and the other tabs of
-  its project, never another project's. `ContextPanel` renders loaded tabs
+  its project in the agent partition, never another project's or a user's.
+  `ContextPanel` renders loaded tabs
   sorted by directory and tab id, so neither a project switch nor the store
   reordering directories moves a live webview, which would reload its page.
   A client without the named tab waits
@@ -220,21 +222,26 @@ itself; it can only ask and wait.
 The agent tool reaches the panel of the app the agent works from, so a change
 to `BrowserPane`, `controlClient` or `pageActions` shows there only after that
 app is rebuilt. Run it in `electron:dev` instead and send the actions to that
-instance's API port, the one its log prints after `OpenChamber server
-listening on`; the route has no session, so name the tab after the open:
+  instance's API port, the one its log prints after `OpenChamber server
+  listening on`. Supply the calling session; a sessionless request is refused:
 
 ```sh
 curl -s -X POST http://127.0.0.1:<api-port>/api/openchamber/control \
   -H 'content-type: application/json' \
-  -d '{"action":"browser.open","input":{"url":"http://localhost:<ui-port>/mobile.html","viewport":"mobile"},"contextDirectory":"<repo>"}'
+  -d '{"action":"browser.open","input":{"url":"https://example.com","viewport":"mobile"},"contextDirectory":"<repo>","contextSessionId":"<session-id>"}'
 ```
 
 `browser.capture`, `browser.snapshot` and the rest take `{"tabId": "<tabId from the open>"}`
-in `input`. The tab stays in the background, as an agent's does, and the page
+in `input`, with the same calling session. OpenChamber's own server origins
+are blocked by the Electron agent partition. The tab stays in the background, as an agent's does, and the page
 inside it is a `webview` target on the instance's debugging port for reading
 what the actions alone do not show (frame rate, animations).
 
 ## Invariants
+
+- Agent ownership and the dedicated partition are both required. Ownership
+  alone never authorizes use of a partition that can hold the user's cookies.
+  Checks run before waking a sleeping tab and again before each page action.
 
 - Capability belongs to the connection, not to configuration. A client declares
   it can drive a page by opening its event stream with `browser=1`, which only
@@ -275,3 +282,14 @@ what the actions alone do not show (frame rate, animations).
 - Clipboard contents never cross this broker. A page writes directly to the host
   clipboard and native paste reads from it, so neither request nor result payloads
   contain the copied value.
+
+## Decisions
+
+### Why agent tabs require a separate partition
+
+A user can sign into OpenChamber or another administration page in the
+Browser panel. Agent ownership metadata alone does not separate those
+cookies. Agent tabs use their own partition, and the Electron main process
+blocks requests to OpenChamber's known server origins for that partition.
+The control client also checks the partition before waking or driving a tab,
+so an owned tab registered against the user's session is refused.

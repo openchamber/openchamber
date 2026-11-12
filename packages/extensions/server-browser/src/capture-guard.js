@@ -1,3 +1,5 @@
+import { createOriginRefusal } from './origin-refusal.js';
+
 // Chrome runs with --auto-accept-this-tab-capture so the service can capture
 // the sound of a tab from its own isolated world (tab-audio.js). The same flag
 // would let any page record its own tab, frames from other sites included,
@@ -47,20 +49,39 @@ const guardTarget = async (cdp, sessionId, waiting) => {
  * future. Call it before the first page loads anything. Resolves once Chrome
  * auto-attaches; returns the listener's cleanup.
  */
-export const installCaptureGuard = async (cdp) => {
+export const installCaptureGuard = async (cdp, { openchamberOrigins = [] } = {}) => {
+  const refuses = createOriginRefusal(openchamberOrigins);
   // Targets that exist when the guard is installed are attached running;
   // every later one is attached paused. A running attach after that is
   // someone's own Target.attachToTarget (the runtime's), not ours to guard.
   let installing = true;
   const unsubscribe = cdp.onEvent((event) => {
+    if (event.method === 'Fetch.requestPaused') {
+      const { requestId, request } = event.params;
+      const method = refuses(request.url) ? 'Fetch.failRequest' : 'Fetch.continueRequest';
+      const params = method === 'Fetch.failRequest' ? { requestId, errorReason: 'BlockedByClient' } : { requestId };
+      // A failed decision leaves the request paused, never continued unguarded.
+      void cdp.sendSession(event.sessionId, method, params).catch(() => {});
+      return;
+    }
     if (event.method !== 'Target.attachedToTarget') return;
     const { sessionId, targetInfo, waitingForDebugger } = event.params ?? {};
     if (typeof sessionId !== 'string' || (!waitingForDebugger && !installing)) return;
-    if (!GUARDED_TYPES.has(targetInfo?.type)) {
+    if (!GUARDED_TYPES.has(targetInfo?.type) && openchamberOrigins.length === 0) {
       if (waitingForDebugger) void cdp.sendSession(sessionId, 'Runtime.runIfWaitingForDebugger').catch(() => {});
       return;
     }
-    void guardTarget(cdp, sessionId, waitingForDebugger).then((refused) => {
+    const protect = async () => {
+      if (openchamberOrigins.length > 0) {
+        // Await admission before queuing resume. A refused Fetch.enable must
+        // never release a page, popup, worker or cross-process frame.
+        await cdp.sendSession(sessionId, 'Fetch.enable', { patterns: [{ urlPattern: '*', requestStage: 'Request' }] });
+      }
+      if (GUARDED_TYPES.has(targetInfo?.type)) return guardTarget(cdp, sessionId, waitingForDebugger);
+      if (waitingForDebugger) await cdp.sendSession(sessionId, 'Runtime.runIfWaitingForDebugger');
+      return false;
+    };
+    void protect().catch(() => true).then((refused) => {
       // A page Chrome refused the guard for does not stay open (closing one
       // already gone does nothing). A late answer, a slow first page, is no
       // refusal: Chrome still runs the commands, in order.

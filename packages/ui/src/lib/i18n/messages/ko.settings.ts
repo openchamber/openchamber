@@ -5,6 +5,18 @@ import { firstPartyIntegrationsI18n } from './first-party-integrations.i18n';
 import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
 import { extensionCatalogI18n } from './extension-catalog.i18n';
 export const settingsDict = {
+  'settings.openchamber.spaces.host.installation': 'OpenChamber 호스트 설치에 포함됩니다.',
+  'settings.openchamber.spaces.root.title': 'root 공간',
+  'settings.openchamber.spaces.root.available': 'root 공간을 사용할 수 있습니다. 만들기, 시작, 재시작을 할 때마다 승인된 패스키가 필요합니다.',
+  'settings.openchamber.spaces.root.approve': '패스키 승인',
+  'settings.openchamber.spaces.root.commandInfo': '서버에서 root로 이 명령을 실행하고 출력된 코드를 입력하세요.',
+  'settings.openchamber.spaces.root.code': '승인 코드',
+  'settings.openchamber.spaces.root.label': '패스키 이름, 선택 사항',
+  'settings.openchamber.spaces.root.confirm': '서버 터미널에서 이 패스키 확인',
+  'settings.openchamber.spaces.root.confirmInfo': '이 지문을 터미널에 표시된 지문과 비교하고 터미널에서 확인하세요. 터미널에서 수락해야 승인이 완료됩니다.',
+  'settings.openchamber.spaces.root.empty': 'root 공간용으로 승인된 패스키가 없습니다.',
+  'settings.openchamber.spaces.root.approvedAt': '{date}에 승인됨',
+  'settings.openchamber.spaces.root.revoke': '서버에서 승인 취소',
   'settings.openchamber.sessionRetention.field.archivedDescription': '보존 기간은 보관 시점부터 계산합니다. 기간이 지난 세션은 삭제됩니다.',
   'settings.openchamber.sessionRetention.field.unarchivedArchiveDescription': '보존 기간은 세션의 마지막 활동부터 계산합니다. 기간이 지난 세션은 보관됩니다.',
   'settings.openchamber.sessionRetention.field.unarchivedDeleteDescription': '보존 기간은 세션의 마지막 활동부터 계산합니다. 기간이 지난 세션은 삭제됩니다.',

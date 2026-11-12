@@ -40,6 +40,7 @@ const OPENCHAMBER_SERVICE_AUTH_HEADER = 'authorization';
  *   packageRoot: string,
  *   entry: string,
  *   released: Promise<void>,
+ *   browserOrigins: string | null,
  * }} ServiceRuntime
  */
 
@@ -54,15 +55,15 @@ const stoppingByGuest = new Map();
 
 // Requests retain their lifecycle object across awaits. A later host start
 // cannot reopen admission for work that belonged to the previous host.
-let hostLifecycle = { accepting: true, registryDir: null, orphansReaped: Promise.resolve() };
+let hostLifecycle = { accepting: true, registryDir: null, browserOrigins: async () => [], orphansReaped: Promise.resolve() };
 
 /**
  * Opens service admission for a new host. With `registryDir` every spawn is
  * recorded there (`service-registry.js`), and the services a host that died
  * without stopping them left running are stopped before this host spawns one.
- * @param {{ registryDir?: string | null }} [options]
+ * @param {{ registryDir?: string | null, browserOrigins?: () => Promise<string[]> }} [options]
  */
-export const beginGuestServiceHost = ({ registryDir = null } = {}) => {
+export const beginGuestServiceHost = ({ registryDir = null, browserOrigins = async () => [] } = {}) => {
   if (runtimes.size || startingByGuest.size || stoppingByGuest.size) {
     throw new Error('Guest services must finish stopping before a new host starts.');
   }
@@ -70,6 +71,7 @@ export const beginGuestServiceHost = ({ registryDir = null } = {}) => {
   hostLifecycle = {
     accepting: true,
     registryDir,
+    browserOrigins,
     orphansReaped: registryDir
       ? reapOrphanedGuestServices(registryDir, { log: (message) => console.log(message) })
       : Promise.resolve(),
@@ -78,6 +80,27 @@ export const beginGuestServiceHost = ({ registryDir = null } = {}) => {
 
 export const beginGuestServiceShutdown = () => {
   hostLifecycle.accepting = false;
+};
+
+// A settings mirror can change while Chrome has live pages. Withdraw that
+// service before it can keep using the previous origin policy.
+export const refreshServerBrowserOrigins = async () => {
+  // A pending origin read has no registered runtime yet. Reuse the stop epoch
+  // so its existing pre-spawn check refuses the obsolete policy when it returns.
+  if (startingByGuest.has('openchamber-builtin-server-browser')) {
+    await stopGuestService('openchamber-builtin-server-browser');
+    return;
+  }
+  const runtime = runtimes.get('openchamber-builtin-server-browser');
+  if (!runtime) return;
+  let origins;
+  try {
+    origins = JSON.stringify(await hostLifecycle.browserOrigins());
+  } catch (error) {
+    await stopGuestService('openchamber-builtin-server-browser');
+    throw error;
+  }
+  if (runtime.browserOrigins !== origins) await stopGuestService('openchamber-builtin-server-browser');
 };
 
 const assertGuestHostActive = (lifecycle) => {
@@ -474,6 +497,9 @@ const startGuestService = async ({
     [SERVICE_TOKEN_ENV]: token,
     ELECTRON_RUN_AS_NODE: '1',
   };
+  if (guestId === 'openchamber-builtin-server-browser') {
+    env.OPENCHAMBER_BROWSER_ORIGINS = JSON.stringify(await lifecycle.browserOrigins());
+  }
   if (Object.keys(socketEnv).length > 0) {
     env.OPENCHAMBER_SERVICE_SOCKETS = JSON.stringify(socketEnv);
   }
@@ -504,6 +530,7 @@ const startGuestService = async ({
     packageRoot,
     entry,
     released,
+    browserOrigins: env.OPENCHAMBER_BROWSER_ORIGINS ?? null,
   };
   runtimes.set(guestId, runtime);
 

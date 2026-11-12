@@ -5,6 +5,18 @@ import { firstPartyIntegrationsI18n } from './first-party-integrations.i18n';
 import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
 import { extensionCatalogI18n } from './extension-catalog.i18n';
 export const settingsDict = {
+  'settings.openchamber.spaces.host.installation': 'Dostarczane przez instalację hosta OpenChamber.',
+  'settings.openchamber.spaces.root.title': 'Przestrzenie root',
+  'settings.openchamber.spaces.root.available': 'Przestrzenie root są dostępne. Każde utworzenie, uruchomienie i ponowne uruchomienie wymaga zatwierdzonego klucza dostępu.',
+  'settings.openchamber.spaces.root.approve': 'Zatwierdź klucz dostępu',
+  'settings.openchamber.spaces.root.commandInfo': 'Uruchom to polecenie na serwerze jako root i wpisz wyświetlony kod.',
+  'settings.openchamber.spaces.root.code': 'Kod zatwierdzenia',
+  'settings.openchamber.spaces.root.label': 'Etykieta klucza dostępu, opcjonalna',
+  'settings.openchamber.spaces.root.confirm': 'Potwierdź ten klucz dostępu w terminalu serwera',
+  'settings.openchamber.spaces.root.confirmInfo': 'Porównaj ten odcisk klucza z odciskiem w terminalu i potwierdź go tam. Zatwierdzenie kończy się dopiero po akceptacji w terminalu.',
+  'settings.openchamber.spaces.root.empty': 'Brak kluczy dostępu zatwierdzonych dla przestrzeni root.',
+  'settings.openchamber.spaces.root.approvedAt': 'Zatwierdzono {date}',
+  'settings.openchamber.spaces.root.revoke': 'Cofnij zatwierdzenie na serwerze',
   'settings.openchamber.sessionRetention.field.archivedDescription': 'Okres przechowywania liczy się od archiwizacji. Sesje po upływie tego okresu są usuwane.',
   'settings.openchamber.sessionRetention.field.unarchivedArchiveDescription': 'Okres przechowywania liczy się od ostatniej aktywności sesji. Sesje po upływie tego okresu są archiwizowane.',
   'settings.openchamber.sessionRetention.field.unarchivedDeleteDescription': 'Okres przechowywania liczy się od ostatniej aktywności sesji. Sesje po upływie tego okresu są usuwane.',

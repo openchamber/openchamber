@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { serverBrowserOriginsSchema } from '../guests/server-browser-config.js';
 import { createRequire } from 'node:module';
 
 import { isOverviewFeatureAvailable } from '../overview/feature-flag.js';
@@ -94,6 +95,8 @@ const sanitizeSidebarPinLists = (entries) => {
  * that only lives in the browser, and not one the desktop shell writes itself.
  */
 const isPersistableSettingsKey = (key) => {
+  // Server-to-server policy has no UI setting or client registry entry.
+  if (key === 'serverBrowserOpenChamberOrigins') return true;
   const field = settingsRegistry.fields[key];
   if (!field) return false;
   if (field.computed || field.local) return false;
@@ -902,6 +905,9 @@ export const createSettingsHelpers = (dependencies) => {
     }
     if (typeof candidate.browserProvider === 'string' && candidate.browserProvider.trim()) {
       result.browserProvider = candidate.browserProvider.trim();
+    }
+    if (candidate.serverBrowserOpenChamberOrigins !== undefined) {
+      result.serverBrowserOpenChamberOrigins = serverBrowserOriginsSchema.parse(candidate.serverBrowserOpenChamberOrigins);
     }
     if (typeof candidate.agentControlToolEnabled === 'boolean') {
       result.agentControlToolEnabled = candidate.agentControlToolEnabled;

@@ -331,6 +331,7 @@ function buildIterationNotice(loop, { failures, feedback, trigger }) {
  * Dependencies:
  * - `getOctokit(accountId)` → Octokit or null (account gone);
  * - `readFeedback({ octokit, owner, repo, number })`, `readFailedChecks({ octokit, owner, repo, contexts })` (`../github/pr-feedback.js`);
+ *   the runtime also passes the loop's `directory`, and `mentionText` to a feedback read, which a reader may ignore;
  * - `readAuthorPermission({ octokit, owner, repo, username })` → true only for current repository write access;
  * - `isRateLimited()`, `noteRateLimit(error)` → whether it was a rate limit;
  * - `isSessionWorking(sessionId)` → true / false / null (unknown);
@@ -370,6 +371,7 @@ export function createFixLoopRuntime({
   setTimer = setTimeout,
   clearTimer = clearTimeout,
   automation = null,
+  approvalOnly = false,
   log = console,
 }) {
   const filePath = path.join(dataDir, LOOPS_FILE);
@@ -379,6 +381,7 @@ export function createFixLoopRuntime({
   const running = new Set();
   const stopRequests = new Set();
   let loaded = null;
+  let identitiesReady = false;
   let writing = Promise.resolve();
   let creating = Promise.resolve();
   let stopped = false;
@@ -511,13 +514,16 @@ export function createFixLoopRuntime({
   const ciCounts = (loop) => loop.config.triggers !== 'review';
   const reviewCounts = (loop) => loop.config.triggers !== 'ci';
   const approval = (loop) => loop.config.pushMode === 'approval';
+  const requireRuntimeMode = (config) => {
+    if (approvalOnly && config.pushMode !== 'approval') throw approvalError('Automatic fix loops run only on the agent server.', 409);
+  };
   const trustedFeedback = async (loop, octokit, snapshot, feedback) => {
     if (!readAuthorPermission) throw new Error('GitHub feedback author permission service is unavailable.');
     const permissions = new Map();
     const trusted = async (author) => {
       const username = author.login.toLowerCase();
       if (!permissions.has(username)) permissions.set(username,
-        await readAuthorPermission({ octokit, owner: loop.owner, repo: loop.repo, username }) === true);
+        await readAuthorPermission({ octokit, directory: loop.directory, owner: loop.owner, repo: loop.repo, username }) === true);
       return permissions.get(username);
     };
     const admits = feedbackAdmission(loop.config, snapshot.viewer, agentReplyFor(loop, snapshot.viewer));
@@ -722,7 +728,8 @@ export function createFixLoopRuntime({
 
     let snapshot;
     try {
-      snapshot = await readFeedback({ octokit, owner: loop.owner, repo: loop.repo, number: loop.number });
+      snapshot = await readFeedback({ octokit, directory: loop.directory, owner: loop.owner, repo: loop.repo, number: loop.number,
+        mentionText: loop.config.mentionText });
     } catch (error) {
       await noteReadFailure(loop, error);
       return;
@@ -811,7 +818,7 @@ export function createFixLoopRuntime({
       let failures = null;
       if (ciFailed) {
         try {
-          failures = { headSha: snapshot.headSha, runs: await readFailedChecks({ octokit, owner: loop.owner, repo: loop.repo, contexts: snapshot.ci.contexts }) };
+          failures = { headSha: snapshot.headSha, runs: await readFailedChecks({ octokit, directory: loop.directory, owner: loop.owner, repo: loop.repo, contexts: snapshot.ci.contexts }) };
         } catch (error) {
           await noteReadFailure(loop, error);
           return;
@@ -928,6 +935,7 @@ export function createFixLoopRuntime({
         // Loops saved before these settings existed keep the behavior they started with.
         const entryConfig = normalizeConfig(parsed.data.config, { ...DEFAULT_CONFIG, watch: false, ignoreSelf: true });
         if (parsed.data.worker || parsed.data.pendingApproval || parsed.data.config?.pushMode === 'approval') entryConfig.pushMode = 'approval';
+        requireRuntimeMode(entryConfig);
         const { pendingPushCommits: _legacyPushCount, ...record } = parsed.data;
         const totalIterations = Number.isInteger(record.totalIterations) ? record.totalIterations : record.iterations;
         loops.set(record.id, { ...record, totalIterations, config: entryConfig });
@@ -937,7 +945,7 @@ export function createFixLoopRuntime({
         log.warn?.('[pr-fix-loop] could not read loops:', error?.code ?? 'invalid_state');
         throw error;
       }
-    });
+    }).then(() => { identitiesReady = true; });
     return loaded;
   };
 
@@ -964,6 +972,10 @@ export function createFixLoopRuntime({
 
   return {
     load,
+    ownsIdentity: (id) => approvalOnly && !identitiesReady || loops.has(id) || preparedWorkers.has(id)
+      || [...preparedWorkers.values()].some((worker) => worker.spaceId === id) || [...loops.values()].some((loop) =>
+      loop.worker?.id === id || loop.worker?.spaceId === id || loop.pendingApproval?.id === id),
+    ownsLoop: (id) => loops.has(id),
     ownershipClaims,
     async attachTracking(service) {
       if (typeof service?.subscribeRefresh !== 'function') throw new Error('Tracked-item read outcomes are required for fix-loop observation.');
@@ -1016,6 +1028,7 @@ export function createFixLoopRuntime({
     },
 
     async assertHostDispatch(sessionId, directory, origin) {
+      if (approvalOnly) throw approvalError('Automatic fix loops run only on the agent server.', 409);
       await load();
       await automation.ready();
       const loop = requireLoop(origin.id);
@@ -1061,6 +1074,7 @@ export function createFixLoopRuntime({
         if (approval(existing) && (existing.directory !== directory || existing.accountId !== accountId
           || existing.readContext?.repositoryId !== readContext?.repositoryId)) throw approvalError('The approval loop belongs to its original repository and account.');
         const nextConfig = normalizeConfig(config, existing.config);
+        requireRuntimeMode(nextConfig);
         if (nextConfig.pushMode !== existing.config.pushMode) throw approvalError('Stop the loop before changing its execution mode.');
         if (existing.pendingApproval || existing.internal.reviewJob) throw approvalError('Complete the pending receipt and review writes before changing this loop.');
         await validateWorker(existing, true);
@@ -1070,6 +1084,7 @@ export function createFixLoopRuntime({
         return publicLoop(existing);
       }
       if (existing?.pendingApproval || existing?.internal.reviewJob) throw approvalError('The stopped loop still holds an approval receipt or pending review writes. Resume that loop.');
+      requireRuntimeMode(selectedConfig);
       const loop = {
         id: `fixloop_${crypto.randomUUID()}`,
         sessionId,
@@ -1237,7 +1252,7 @@ export function createFixLoopRuntime({
         if (JSON.stringify(pending.receipt) !== JSON.stringify(loop.pendingApproval)) throw approvalError('The pending approval receipt changed.');
         const octokit = await getOctokit(loop.accountId);
         if (!octokit) throw approvalError('The exact GitHub account is unavailable.');
-        const snapshot = await readFeedback({ octokit, owner: loop.owner, repo: loop.repo, number: loop.number });
+        const snapshot = await readFeedback({ octokit, directory: loop.directory, owner: loop.owner, repo: loop.repo, number: loop.number });
         if (stopped || loop.status === 'stopped' || loop.pendingApproval.id !== receiptId) throw approvalError('Publication was stopped.');
         if (snapshot.state !== 'open') throw approvalError('The pull request must be open to publish or reconcile this approval receipt.');
         const alreadyPublished = sameDestination(pending.receipt.destination, destinationOf(snapshot))
@@ -1347,21 +1362,26 @@ export function createFixLoopRuntime({
   };
 }
 
+const sendFixLoopError = (res, error) => {
+  const response = error?.sourceControlResponse;
+  return res.status(response?.status ?? error?.statusCode ?? error?.status ?? 500)
+    .json(response?.body ?? { error: error?.message ?? 'Fix loop request failed' });
+};
+
+/** How a failed `POST` of a loop answers, here and where the front door creates one itself. */
+export function sendFixLoopCreateError(res, error) {
+  if (error?.response !== undefined || error?.code) return res.status(error.status ?? error.statusCode ?? 400).json({ error: error.message, code: error.code });
+  return sendFixLoopError(res, error);
+}
+
 export function registerFixLoopRoutes(app, { runtime, createWithContext }) {
-  const send = (res, error) => {
-    const response = error?.sourceControlResponse;
-    return res.status(response?.status ?? error?.statusCode ?? error?.status ?? 500)
-      .json(response?.body ?? { error: error?.message ?? 'Fix loop request failed' });
-  };
+  const send = sendFixLoopError;
   const base = '/api/source-control/github/pr/fix-loops';
   app.get(base, async (_req, res) => {
     try { res.json({ loops: await runtime.list() }); } catch (error) { send(res, error); }
   });
   app.post(base, async (req, res) => {
-    try { res.json({ loop: await createWithContext(req) }); } catch (error) {
-      if (error?.response !== undefined || error?.code) return res.status(error.status ?? error.statusCode ?? 400).json({ error: error.message, code: error.code });
-      return send(res, error);
-    }
+    try { res.json({ loop: await createWithContext(req) }); } catch (error) { sendFixLoopCreateError(res, error); }
   });
   app.post(`${base}/workers`, async (req, res) => {
     try { res.status(202).json({ worker: await createWithContext(req, { prepareWorker: true }) }); } catch (error) { send(res, error); }

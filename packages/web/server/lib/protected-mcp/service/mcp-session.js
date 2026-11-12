@@ -105,9 +105,9 @@ export function createLineReader({ onValue, onInvalid = () => {}, onOverflow = (
 export function createSessionManager({ store, startBackend, version, log = () => {} }) {
   const sessions = new Map();
 
-  const open = (definition, socket, initial) => {
+  const open = (definition, socket, { initial, subject }) => {
     const pending = new Map();
-    const session = { id: definition.id, closed: false, end: () => {} };
+    const session = { id: definition.id, subject, closed: false, end: () => {} };
     const group = sessions.get(definition.id) ?? new Set();
     group.add(session);
     sessions.set(definition.id, group);
@@ -157,6 +157,7 @@ export function createSessionManager({ store, startBackend, version, log = () =>
     };
 
     const fromClient = (incoming) => {
+      if (session.closed) return undefined;
       if (Array.isArray(incoming)) return incoming.forEach(fromClient);
       if (!isPlainObject(incoming)) return undefined;
       let message = incoming;
@@ -230,9 +231,16 @@ export function createSessionManager({ store, startBackend, version, log = () =>
     endConnection(id, reason = 'connection_changed') {
       for (const session of [...(sessions.get(id) ?? [])]) session.end(reason);
     },
+    restrictSubject(subject, allowed) {
+      for (const [id, group] of sessions) {
+        if (allowed.includes(id)) continue;
+        for (const session of [...group]) if (session.subject === subject) session.end('subject_changed');
+      }
+    },
     closeAll() {
       for (const group of sessions.values()) for (const session of [...group]) session.end('service_closing');
     },
     count: (id) => sessions.get(id)?.size ?? 0,
+    countAll: () => [...sessions.values()].reduce((count, group) => count + group.size, 0),
   };
 }

@@ -4,6 +4,35 @@ One directory per Settings page. `shared/` holds the page chrome and controls
 every page is built from; see `.agents/skills/settings-ui-patterns/SKILL.md` for
 which primitive to reach for.
 
+## Host and root Spaces settings
+
+The enabled Isolated spaces page lists isolated host users before Docker.
+Host users show the host installation's status and have no Docker setup,
+image or disk-cleanup controls. The Root spaces group owns approved passkeys
+and the approval form. Its search anchor exists while Spaces is enabled,
+including on older servers where it explains that root spaces are unavailable.
+
+Approval starts with the code from `sudo openchamber-host approve-root-passkey`.
+The native ceremony uses only the sign-in credentials returned by the server.
+Its result displays a fingerprint for terminal confirmation and never claims
+that a pending approval grants root access. Refresh reads the approved list and
+matches both fingerprint and exact origin. The approval action restores code
+entry after a rejected or expired confirmation. Missing root spaces stay in
+the root group so their records can be deleted even without a registered project.
+Each approved key displays a copyable root revocation command. No UI revocation
+route exists. The contract and root-operation decisions live in
+`packages/ui/src/lib/spaces/DOCUMENTATION.md` and in the server's Spaces
+documentation.
+
+Web, desktop, hosted mobile and Capacitor share this page. VS Code retains no
+Spaces entry point. The host installer and root component remain server-owned.
+
+### Why approval is an explicit action
+
+A passkey approval grants future root confirmation authority and requires the
+root terminal's separate fingerprint check. It never follows Settings autosave
+and never completes through a page refresh alone.
+
 ## Chat control availability
 
 The sticky user header is a mobile transcript feature. Its Messages-tab

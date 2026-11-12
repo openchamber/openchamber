@@ -2,101 +2,17 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { layout as protectedMcpLayout } from '../protected-mcp/service/install.js';
-import { trustedFixtureDirectory } from '../protected-mcp/test-support/fixtures.js';
 import { APP_UNIT, install, layout, rollback, status, uninstall, update, UPDATER_PATH, UPDATER_TIMER, UPDATER_UNIT } from './host.js';
+import { fakeSystem, hostRoot as fixtureRoot, linked, installOptions as optionsForInstall } from './fake-system.js';
 
 const cleanups = [];
 afterEach(async () => {
   for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
 });
 
-/** The OpenChamber version a link of the install directory points to. */
-const linked = async (root, link) => {
-  const dir = await fs.readlink(path.join(layout(root).installDir, link)).catch(() => null);
-  return dir && JSON.parse(await fs.readFile(path.join(layout(root).installDir, dir, 'node_modules/@openchamber/web/package.json'), 'utf8')).version;
-};
 const protectedCurrent = (root) => fs.readlink(path.join(protectedMcpLayout(root).installDir, 'current')).catch(() => null);
-
-const OWNER = { name: 'alice', uid: 2_000_000_001, gid: 2_000_000_001, gids: [2_000_000_001], home: '/home/alice' };
-
-async function hostRoot() {
-  const scratch = await trustedFixtureDirectory();
-  cleanups.push(scratch.remove);
-  const root = path.join(scratch.directory, 'root');
-  await fs.mkdir(path.join(root, 'usr/bin'), { recursive: true });
-  await fs.symlink('/usr/bin/node', path.join(root, 'usr/bin/node'));
-  const opencode = path.join(root, 'home/alice/.opencode/bin/opencode');
-  await fs.mkdir(path.dirname(opencode), { recursive: true });
-  await fs.writeFile(opencode, '', { mode: 0o755 });
-  const npm = path.join(root, 'usr/lib/node_modules/npm/bin/npm-cli.js');
-  await fs.mkdir(path.dirname(npm), { recursive: true });
-  await fs.writeFile(npm, '', { mode: 0o644 });
-  return root;
-}
-
-/**
- * Privileged operations recorded over a temporary root. npm writes a package of
- * the version named in the tarball's file name, and /health answers with the
- * version `current` points to, unless `broken` names a version that never starts.
- */
-function fakeSystem(root, { latest = '2.7.0', broken = null, protectedFails = false, withoutUpdater = null } = {}) {
-  const calls = [];
-  const record = (name) => async (...args) => {
-    calls.push([name, ...args]);
-  };
-  return {
-    calls,
-    trustedOwners: [0, process.getuid()],
-    isRoot: () => true,
-    hasSystemd: async () => true,
-    account: async (name) => (name === 'root' ? { ...OWNER, name, uid: 0 } : { ...OWNER, name }),
-    chown: async () => {},
-    systemctl: record('systemctl'),
-    isActive: async () => 'active',
-    nodeVersion: async () => 'v24.21.0\n',
-    async npm(_node, _npm, args) {
-      calls.push(['npm']);
-      const prefix = args[args.indexOf('--prefix') + 1];
-      const version = /openchamber-web-(\d+\.\d+\.\d+)/.exec(args.at(-1))[1];
-      const app = path.join(prefix, 'node_modules/@openchamber/web');
-      await fs.mkdir(path.join(app, 'bin'), { recursive: true });
-      await fs.writeFile(path.join(app, 'package.json'), JSON.stringify({ name: '@openchamber/web', version }));
-      await fs.writeFile(path.join(app, 'bin/cli.js'), '', { mode: 0o775 });
-      if (version !== withoutUpdater) {
-        await fs.mkdir(path.join(app, 'server/lib/host-install'), { recursive: true });
-        await fs.writeFile(path.join(app, 'server/lib/host-install/main.js'), '');
-      }
-    },
-    findRelease: async () => ({ version: latest, url: 'https://example.test/pkg.tgz', sha256: 'x' }),
-    downloadRelease: async (_release, file) => {
-      calls.push(['download']);
-      await fs.writeFile(file, 'package');
-    },
-    async health() {
-      const version = await linked(root, 'current');
-      return version === broken ? null : { openchamberVersion: version };
-    },
-    sleep: async () => {},
-    installOpenCode: record('installOpenCode'),
-    protectedMcp: {
-      // Like the real installer, the link moves before the boundary check can refuse.
-      install: async (options) => {
-        calls.push(['protectedMcp.install', options.version, options.engineUser, options.engineUnit]);
-        const { installDir } = protectedMcpLayout(root);
-        await fs.mkdir(path.join(installDir, options.version), { recursive: true });
-        await fs.rm(path.join(installDir, 'current'), { force: true });
-        await fs.symlink(options.version, path.join(installDir, 'current'));
-        if (protectedFails) throw Object.assign(new Error('The engine can reach root: docker_group'), { code: 'unprotected' });
-        return { preflight: { status: 'protected' } };
-      },
-      uninstall: record('protectedMcp.uninstall'),
-    },
-  };
-}
-
-const installOptions = (root, system, extra = {}) => ({
-  root, system, owner: 'alice', repo: 'example/openchamber', tarball: '/cache/openchamber-web-2.6.0.tgz', version: '2.6.0', ...extra,
-});
+const hostRoot = () => fixtureRoot(cleanups);
+const installOptions = (root, system, extra = {}) => optionsForInstall(root, system, { separation: false, ...extra });
 
 describe('host install', () => {
   it('installs root-owned code, a unit that runs it as the owner, the protected MCP service and the updater', async () => {
@@ -111,7 +27,7 @@ describe('host install', () => {
     expect(await linked(root, 'current')).toBe('2.6.0');
     expect((await fs.stat(path.join(paths.installDir, 'current/node_modules/@openchamber/web/bin/cli.js'))).mode & 0o777).toBe(0o755);
     expect(JSON.parse(await fs.readFile(paths.configFile, 'utf8'))).toEqual({
-      version: 1, owner: 'alice', repo: 'example/openchamber', port: 4000, host: '127.0.0.1', autoUpdate: true, protectedMcp: true, acceptUnprotected: false,
+      version: 1, owner: 'alice', repo: 'example/openchamber', port: 4000, host: '127.0.0.1', autoUpdate: true, protectedMcp: true, acceptUnprotected: false, separation: null,
     });
     const unit = (await fs.readFile(paths.unit(APP_UNIT), 'utf8')).split('\n');
     for (const line of ['User=alice', 'NoNewPrivileges=yes', 'Environment=OPENCHAMBER_UPDATE_REPO=example/openchamber',

@@ -65,6 +65,7 @@ export const createBrowserRuntime = ({
   chromePath = null,
   allowedOrigins = [],
   allowedNetworks = [],
+  openchamberOrigins = [],
   configPath = null,
   devServers = null,
   projectDevServers = null,
@@ -83,6 +84,7 @@ export const createBrowserRuntime = ({
     projectDevServers && projectDirectory ? () => projectDevServers.projectGrants(projectDirectory) : null,
   ].filter(Boolean);
   const proxy = createPolicyProxy({
+    openchamberOrigins,
     grants: [...originGrants(allowedOrigins), ...networkGrants(allowedNetworks)],
     configPath,
     devServerGrants: grantSources.length > 0 ? async () => (await Promise.all(grantSources.map((source) => source()))).flat() : null,
@@ -505,7 +507,7 @@ export const createBrowserRuntime = ({
       userAgent = reported.includes('HeadlessChrome/') ? visibleUserAgent(reported) : null;
       nextCdp = await connectCdp(processInfo.endpoint);
       // Before any page loads anything: no page may run without the guard.
-      guardCleanup = await installCaptureGuard(nextCdp);
+      guardCleanup = await installCaptureGuard(nextCdp, { openchamberOrigins });
       if (profile) {
         // The profile's cookies and storage live in the default context, which the command-line proxy covers.
         const { targetInfos = [] } = await nextCdp.send('Target.getTargets');

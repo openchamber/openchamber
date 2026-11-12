@@ -11,6 +11,7 @@ import { createOAuth } from './oauth.js';
 import { createRuntimes } from './runtimes.js';
 import { startStdioUpstream } from './stdio-upstream.js';
 import { openStore } from './store.js';
+import { createSubjectListeners } from './subject-listeners.js';
 
 const ENFORCEMENT_INTERVAL_MS = 10 * 60_000;
 const DEFAULT_WORKER_PATH = '/usr/local/bin:/usr/bin:/bin';
@@ -25,6 +26,7 @@ export async function createProtectedMcpService({
   stateDir,
   engineSocketPath,
   engineSocketGroup = null,
+  subjectsDir = path.join(path.dirname(engineSocketPath), 'subjects'),
   adminSocketPath,
   adminSocketGroup = null,
   integrity: integrityOptions,
@@ -39,6 +41,7 @@ export async function createProtectedMcpService({
   let runtimes = null;
   const store = await openStore({
     stateDir,
+    onSubjectChange: (subject, allowed) => sessions.restrictSubject(subject, allowed),
     onChange: (id, { restart }) => {
       if (restart) sessions?.endConnection(id);
       // A newly approved package is installed right away, not at the first call.
@@ -77,7 +80,8 @@ export async function createProtectedMcpService({
   const views = () => Promise.all(store.adminViews().map(async (view) => (view.transport === 'stdio'
     ? { ...view, runtime: await runtimes.status(view.stdio.command) }
     : view)));
-  const adminServer = createAdminSocketServer({ path: adminSocketPath, group: adminSocketGroup, store, status, views, oauth, log });
+  const subjectListeners = createSubjectListeners({ subjectsDir, store, sessions, log });
+  const adminServer = createAdminSocketServer({ path: adminSocketPath, group: adminSocketGroup, store, status, views, oauth, subjectListeners, log });
   const engineServer = createEngineSocketServer({ path: engineSocketPath, group: engineSocketGroup, store, status, sessions, log });
   let timer = null;
 
@@ -89,9 +93,10 @@ export async function createProtectedMcpService({
       }
       try {
         await engineServer.listen();
+        await subjectListeners.start();
         await adminServer.listen();
       } catch (error) {
-        await Promise.all([engineServer.close(), adminServer.close()]);
+        await Promise.all([engineServer.close(), adminServer.close(), subjectListeners.close()]);
         await store.close();
         throw error;
       }
@@ -108,9 +113,11 @@ export async function createProtectedMcpService({
       // The listener waits for its sockets, so sessions are ended before waiting on it.
       const listenerClosed = engineServer.close();
       const adminClosed = adminServer.close();
+      await adminClosed;
+      const subjectsClosed = subjectListeners.close();
       sessions.closeAll();
       await listenerClosed;
-      await adminClosed;
+      await subjectsClosed;
       await store.close();
     },
     refreshEnforcement,

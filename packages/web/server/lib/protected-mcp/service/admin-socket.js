@@ -3,6 +3,7 @@ import net from 'node:net';
 import { isPlainObject, isString } from '../../shared/guards.js';
 import { isConnectionId, ProtectedMcpError } from './contract.js';
 import { parseOperation } from './store.js';
+import { parseSubject, parseSubjectConnections } from './subject-contract.js';
 
 const MAX_BYTES = 1024 * 1024;
 const CLOSE_GRACE_MS = 2000;
@@ -28,7 +29,7 @@ async function clearStaleSocket(path) {
 }
 
 /** Administrative authority comes only from the kernel's Unix socket permissions. */
-export function createAdminSocketServer({ path, group = null, store, status, views, oauth, log = () => {}, requestTimeoutMs = 5000 }) {
+export function createAdminSocketServer({ path, group = null, store, status, views, oauth, subjectListeners, log = () => {}, requestTimeoutMs = 5000 }) {
   const sockets = new Set();
   const requests = new Set();
   let closing = false;
@@ -36,6 +37,19 @@ export function createAdminSocketServer({ path, group = null, store, status, vie
   const dispatch = async (frame) => {
     if (!isString(frame.type)) invalid();
     switch (frame.type) {
+      case 'subjects':
+        return { type: 'subjects', subjects: store.subjects() };
+      case 'subject-set': {
+        const subject = parseSubject(frame.subject);
+        const connections = parseSubjectConnections(frame.connections);
+        if (connections.some((id) => !store.get(id))) throw new ProtectedMcpError('unknown_connection', { status: 404 });
+        return { type: 'subject', ...await subjectListeners.set(subject, connections) };
+      }
+      case 'subject-remove': {
+        const subject = parseSubject(frame.subject);
+        await subjectListeners.remove(subject);
+        return { type: 'subject-removed', subject };
+      }
       case 'list':
         return { type: 'connections', status: status(), connections: await views() };
       case 'get': {

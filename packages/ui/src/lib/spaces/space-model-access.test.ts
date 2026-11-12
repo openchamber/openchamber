@@ -12,6 +12,7 @@ const anthropic = { kind: 'model' as const, id: 'anthropic', provider: 'anthropi
 
 const running = (change: Partial<SpaceEntry> = {}): SpaceEntry => ({
   id: ID,
+  kind: 'docker',
   name: 'Fix login',
   placeId: 'docker', machine: null,
   projectDirectory: '/home/me/app',

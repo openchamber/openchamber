@@ -67,6 +67,36 @@ describe('createRegistryToolsSource', () => {
   });
 });
 
+describe('the tools of a release built from a fork', () => {
+  const RELEASE = 'https://github.com/rubimpassos/openchamber/releases/download/v2.6.3';
+  const manifestOf = (sdk, version = '2.6.3') => pathToFileURL(tarball(`release-${crypto.randomUUID()}.json`, JSON.stringify({ version, dependencies: { '@opencode/client': '2.2.5', '@openchamber/sdk': sdk } })));
+
+  it('takes the web package from the release that names its sdk, never from npm', () => {
+    const versions = readHostToolVersions(manifestOf(`${RELEASE}/openchamber-sdk-2.6.3.tgz`));
+    expect(versions).toEqual({ webVersion: '2.6.3', openCodeVersion: '2.2.5', webTarballUrl: `${RELEASE}/openchamber-web-2.6.3.tgz` });
+    const source = createRegistryToolsSource(versions);
+    expect(JSON.parse(source.packageJson).dependencies['@openchamber/web']).toBe(`${RELEASE}/openchamber-web-2.6.3.tgz`);
+    expect(source.description).toBe('web 2.6.3 from its release, opencode 2.2.5');
+    expect(toolsContentKey(source, IMAGE)).not.toBe(toolsContentKey(createRegistryToolsSource({ webVersion: '2.6.3', openCodeVersion: '2.2.5' }), IMAGE));
+  });
+
+  it('keeps npm for a workspace or npm build, and for an sdk of another version or another place', () => {
+    for (const sdk of [
+      'workspace:*', '2.6.3', `${RELEASE}/openchamber-sdk-2.6.2.tgz`, `${RELEASE}/openchamber-web-2.6.3.tgz`,
+      'https://github.com/rubimpassos/openchamber/releases/download/v2.6.2/openchamber-sdk-2.6.2.tgz',
+      'https://example.com/rubimpassos/openchamber/releases/download/v2.6.3/openchamber-sdk-2.6.3.tgz',
+    ]) {
+      expect(readHostToolVersions(manifestOf(sdk))).not.toHaveProperty('webTarballUrl');
+    }
+  });
+
+  it('takes no other URL for the web package', () => {
+    for (const webTarballUrl of [`${RELEASE}/openchamber-web-2.6.2.tgz`, `${RELEASE}/openchamber-sdk-2.6.3.tgz`, 'https://example.com/openchamber-web-2.6.3.tgz', `${RELEASE}/openchamber-web-2.6.3.tgz?x=1`]) {
+      expect(() => createRegistryToolsSource({ webVersion: '2.6.3', openCodeVersion: '2.2.5', webTarballUrl })).toThrow(expect.objectContaining({ code: 'invalid_tools_version' }));
+    }
+  });
+});
+
 describe('createPackedToolsSource', () => {
   it('installs both tarballs by path and makes every sdk in the tree the local one', () => {
     const source = createPackedToolsSource({ webTarballPath: tarball('web.tgz', 'web bytes'), sdkTarballPath: tarball('sdk.tgz', 'sdk bytes'), openCodeVersion: '1.18.31' });

@@ -12,6 +12,7 @@ import {
   readServicePid,
   stopAllGuestServices,
   stopGuestService,
+  refreshServerBrowserOrigins,
 } from './service.js';
 import { setCapabilityGrants, writeExtensionStore } from './persist.js';
 import { listInstalledGuests, noteGuestPackageChanged } from './catalog.js';
@@ -42,6 +43,11 @@ http.createServer((req, res) => {
     res.end(JSON.stringify({ pong: true }));
     return;
   }
+  if (req.url === '/origins') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ origins: process.env.OPENCHAMBER_BROWSER_ORIGINS ?? null }));
+    return;
+  }
   if (req.url.startsWith('/slow')) {
     const ms = Number(new URL(req.url, 'http://x').searchParams.get('ms')) || 0;
     setTimeout(() => {
@@ -65,6 +71,73 @@ afterEach(async () => {
 });
 
 describe('guest service proxy', () => {
+  test('cancels a pending browser start when protected origins refresh during its policy read', async () => {
+    // Given a browser start paused after capturing the previous policy.
+    const { dir, persistPath, packageRoot } = await writeFixture();
+    const entered = Promise.withResolvers();
+    const release = Promise.withResolvers();
+    let origins = ['https://previous.example'];
+    let waitForRefresh = true;
+    beginGuestServiceHost({ browserOrigins: async () => {
+      const captured = origins;
+      if (waitForRefresh) {
+        waitForRefresh = false;
+        entered.resolve();
+        await release.promise;
+      }
+      return captured;
+    } });
+    const request = () => proxyGuestServiceRequest({
+      guestId: 'openchamber-builtin-server-browser', packageRoot,
+      service: { entry: 'service/main.js' }, granted: ['service'], persistPath,
+      method: 'GET', path: '/origins',
+    });
+    const pending = request().then(() => 'started', (error) => error.code);
+    try {
+      await entered.promise;
+      // When settings change before that read returns.
+      origins = ['https://current.example'];
+      await refreshServerBrowserOrigins();
+      release.resolve();
+      // Then the stale start is refused and a fresh request gets current policy.
+      expect(await pending).toBe('NO_SERVICE');
+      const current = await request();
+      expect(JSON.parse(current.body).origins).toBe(JSON.stringify(origins));
+    } finally {
+      release.resolve();
+      await pending;
+      await stopAllGuestServices();
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('delivers host policy only to the built-in browser and stops it when the policy changes', async () => {
+    // Given host-owned origins that differ from any inherited environment.
+    const { dir, persistPath, packageRoot } = await writeFixture();
+    let origins = ['https://front.example'];
+    beginGuestServiceHost({ browserOrigins: async () => origins });
+    const request = (guestId) => proxyGuestServiceRequest({
+      guestId, packageRoot, service: { entry: 'service/main.js' },
+      granted: ['service'], persistPath, method: 'GET', path: '/origins',
+    });
+    try {
+      // When services start through the actual process boundary.
+      const browser = await request('openchamber-builtin-server-browser');
+      const ordinary = await request('ordinary');
+      // Then only the browser receives the host policy.
+      expect(JSON.parse(browser.body).origins).toBe(JSON.stringify(origins));
+      expect(JSON.parse(ordinary.body).origins).toBe(null);
+      // When a mirrored setting changes, the old browser is withdrawn.
+      origins = ['https://changed.example'];
+      await refreshServerBrowserOrigins();
+      // Then its next start receives the new policy.
+      expect(getServiceStatus('openchamber-builtin-server-browser')).toBe('stopped');
+      expect(JSON.parse((await request('openchamber-builtin-server-browser')).body).origins).toBe(JSON.stringify(origins));
+    } finally {
+      await stopAllGuestServices();
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
   test('refuses when permissions need a grant', async () => {
     const { dir, persistPath, packageRoot } = await writeFixture();
     try {

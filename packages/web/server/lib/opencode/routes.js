@@ -1,5 +1,6 @@
 import { readOpenCodeInfo, isSupportedOpenCodeVersion } from './compatibility.js';
 import { createSharedHealthProbe, parseHealthWaitMs, waitForOpenCodeHealth } from './health-wait.js';
+import { AGENT_SETTINGS_MIRROR_VERSION, AGENT_SETTINGS_MIRROR_KEYS_V1 } from '../agent-server/settings-mirror.js';
 import express from 'express';
 import { resolveNpmRegistryRequest } from './npm-registry-config.js';
 import fs from 'fs';
@@ -25,6 +26,35 @@ import { vcsInitRefusal, vcsInitRefusalBody } from '../git/repository-root.js';
 
 // Version reads use the same short deadline as the health probe of `/api/info`.
 const OPENCODE_INFO_TIMEOUT_MS = 3_000;
+
+export function registerSettingsRoutes(app, { readSettingsFromDiskMigrated, formatSettingsResponse, persistSettings, agentServer = false }) {
+  app.get('/api/config/settings', async (req, res) => {
+    try {
+      const settings = await readSettingsFromDiskMigrated({ surface: settingsSurfaceOf(req) });
+      res.json(formatSettingsResponse(settings));
+    } catch (error) {
+      console.error('Failed to read settings:', error);
+      res.status(500).json({ error: 'Failed to read settings' });
+    }
+  });
+  app.put('/api/config/settings', async (req, res) => {
+    try {
+      const mirrored = agentServer && req.get('x-openchamber-settings-mirror') === String(AGENT_SETTINGS_MIRROR_VERSION);
+      res.json(await persistSettings(req.body ?? {}, {
+        surface: settingsSurfaceOf(req),
+        replaceKeys: mirrored ? AGENT_SETTINGS_MIRROR_KEYS_V1 : [],
+      }));
+    }
+    catch (error) {
+      if (/^(?:share_project_|project_path_|project_registry_|space_project_refused)/.test(error?.code ?? '')) {
+        return res.status(error.status ?? 403).json({ code: error.code, error: error.message });
+      }
+      console.error('[API:PUT /api/config/settings] Failed to save settings:', error);
+      console.error('[API:PUT /api/config/settings] Error stack:', error.stack);
+      res.status(500).json({ error: 'Failed to save settings' });
+    }
+  });
+}
 
 export const registerOpenCodeRoutes = (app, dependencies) => {
   const {
@@ -94,16 +124,7 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
     return version;
   };
 
-  app.get('/api/config/settings', async (req, res) => {
-    try {
-      // The surface kind resolves the per-surface profile keys; absent means base.
-      const settings = await readSettingsFromDiskMigrated({ surface: settingsSurfaceOf(req) });
-      res.json(formatSettingsResponse(settings));
-    } catch (error) {
-      console.error('Failed to read settings:', error);
-      res.status(500).json({ error: 'Failed to read settings' });
-    }
-  });
+  registerSettingsRoutes(app, { readSettingsFromDiskMigrated, formatSettingsResponse, persistSettings, agentServer: dependencies.agentServer });
 
   app.get('/api/config/opencode-resolution', async (_req, res) => {
     try {
@@ -284,17 +305,6 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
         version: null,
         error: error instanceof Error ? error.message : 'Failed to read OpenCode version',
       });
-    }
-  });
-
-  app.put('/api/config/settings', async (req, res) => {
-    try {
-      const updated = await persistSettings(req.body ?? {}, { surface: settingsSurfaceOf(req) });
-      res.json(updated);
-    } catch (error) {
-      console.error('[API:PUT /api/config/settings] Failed to save settings:', error);
-      console.error('[API:PUT /api/config/settings] Error stack:', error.stack);
-      res.status(500).json({ error: 'Failed to save settings' });
     }
   });
 

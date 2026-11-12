@@ -20,7 +20,7 @@ import { registerOpenCodeProxy } from '../../opencode/proxy.js';
 import { runCommand } from '../run-command.js';
 import { createSpacesHost } from '../host.js';
 import { createHostProviders } from '../host-providers.js';
-import { LEGACY_SPACE_OPENCODE_CONFIG_PATH, SPACE_HOME, spaceOpenCodeConfigPath } from '../layout.js';
+import { SPACE_GLOBAL_OPENCODE_CONFIG_PATH, SPACE_HOME, spaceOpenCodeConfigPath } from '../layout.js';
 import { WINDOW_PLACEHOLDER_KEY, loginGrantOf, spaceLoginCredentialId } from '../space-opencode.js';
 import { LIVE_DOCKER_ENABLED, createLiveDockerPlace } from './docker-live-support.js';
 
@@ -228,7 +228,7 @@ describe.skipIf(!LIVE_DOCKER_ENABLED)('grants on a real space: docker (live)', (
     // the host wrote beside the project is the one OpenCode inside reads, and the home directory
     // holds none.
     expect((await inside(['cat', `${(await listed()).directory}/opencode.json`])).stdout).toContain('http://127.0.0.1:9/v1');
-    expect((await inside(['test', '-e', LEGACY_SPACE_OPENCODE_CONFIG_PATH])).code).not.toBe(0);
+    expect((await inside(['test', '-e', SPACE_GLOBAL_OPENCODE_CONFIG_PATH])).code).not.toBe(0);
     const directory = (await listed()).directory;
     const headers = { 'content-type': 'application/json', 'x-opencode-directory': encodeURIComponent(directory) };
     const model = await prefixed(`/session/${session.id}/model`, { ...json({ model: { id: 'gpt-5.5', providerID: 'lighthouse' } }), headers });

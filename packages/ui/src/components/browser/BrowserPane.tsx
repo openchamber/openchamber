@@ -10,7 +10,7 @@ import { cn } from '@/lib/utils';
 import { openExternalUrl } from '@/lib/url';
 import { normalizeContextPanelDirectoryKey, useUIStore } from '@/stores/useUIStore';
 import { BLANK_URL, browserUrlLabel, isLoopbackUrl, normalizeBrowserUrl } from '@/lib/browser/url';
-import type { BrowserNavStatus } from '@/lib/browser/contract';
+import { browserPartitionOf, type BrowserNavStatus } from '@/lib/browser/contract';
 import {
   acceptsBrowserTabLoadRequest,
   forgetBrowserTabOpenedWithAddress,
@@ -103,14 +103,6 @@ const isChromiumHost = (): boolean => (
 const ZOOM_STEP = 0.5;
 const ZOOM_MIN = -3;
 const ZOOM_MAX = 4;
-const BROWSER_PARTITION = 'persist:openchamber-browser';
-/**
- * A page from an isolated space gets a session of its own, in memory: the
- * desktop shell routes that session through a proxy that reaches only the
- * space's own tunnel ports, so the page sees neither the app's cookies nor
- * anything else on this machine. The name is what the shell checks, so it is
- * built here the way the shell builds it.
- */
 /**
  * The mark before the address of a space's tab while it shows a loopback page:
  * `localhost` there means the space, and the sidebar's container icon says so.
@@ -119,10 +111,6 @@ const addressMarkOf = (directory: string, address: string, label: string): { ico
   spaceIdOfDirectory(directory) !== null && isLoopbackUrl(address) ? { icon: 'instance', label } : undefined
 );
 
-const browserPartitionOf = (directory: string): string => {
-  const spaceId = spaceIdOfDirectory(directory);
-  return spaceId ? `openchamber-space-preview:${spaceId}` : BROWSER_PARTITION;
-};
 /** Sent by the desktop shell when a panel page asks for a new tab (`main.mjs`). */
 const BROWSER_OPEN_TAB_EVENT = 'openchamber:browser-panel-open-tab';
 const browserTabRequestSchema = z.object({
@@ -743,10 +731,11 @@ const WebviewBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory: tab
       tabId: tabID,
       directory: tabDirectory,
       ownerSessionId,
+      partition: browserPartitionOf(directory, ownerSessionId),
       describe: describeTab,
       run: runControlAction,
     }),
-    [describeTab, ownerSessionId, runControlAction, tabDirectory, tabID],
+    [describeTab, directory, ownerSessionId, runControlAction, tabDirectory, tabID],
   );
 
   // Leaving the tab must not strand an overlay or live style overrides on the page.
@@ -899,7 +888,7 @@ const WebviewBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory: tab
 
   const clearBrowsingData = React.useCallback((what: 'cookies' | 'cache') => {
     void invokeDesktopCommand('desktop_browser_clear_data', {
-      partition: browserPartitionOf(directory),
+      partition: browserPartitionOf(directory, ownerSessionId),
       cookies: what === 'cookies',
       cache: what === 'cache',
     })
@@ -911,7 +900,7 @@ const WebviewBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory: tab
         try { webviewRef.current?.reloadIgnoringCache(); } catch { /* not attached */ }
       })
       .catch(() => toast.error(t('contextPanel.browser.clearFailed')));
-  }, [directory, t]);
+  }, [directory, ownerSessionId, t]);
 
   // The stage is measured rather than assumed: the panel is resizable, and a
   // viewport that fitted a moment ago may not fit now.
@@ -1096,7 +1085,7 @@ const WebviewBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory: tab
           <webview
             ref={attachWebview}
             src={initialSrc}
-            partition={browserPartitionOf(directory)}
+                partition={browserPartitionOf(directory, ownerSessionId)}
             // React 19 uses React.JSX, not the legacy global JSX in desktop.d.ts.
             // @ts-expect-error @types/react's WebViewHTMLAttributes requires boolean, which React omits from the DOM.
             allowpopups="true"

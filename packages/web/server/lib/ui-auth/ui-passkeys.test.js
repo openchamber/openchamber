@@ -165,3 +165,19 @@ describe('ui-passkeys rename', () => {
     expect(thrown?.statusCode).toBe(400);
   });
 });
+
+describe('ui-passkeys credentials for a root passkey approval', () => {
+  it('answers the passkeys of this address with their public keys', () => {
+    const storeFile = createStoreFile([passkey({ label: 'Laptop' }), passkey({ id: 'credential-2', rpID: 'other.example', publicKey: 'b3RoZXIta2V5' })]);
+    expect(createController(storeFile).listCredentials(requestFor())).toEqual({
+      rpID: 'example.com',
+      passkeys: [{ id: 'credential-1', label: 'Laptop', publicKey: 'cHVibGljLWtleQ', rpID: 'example.com' }],
+    });
+  });
+
+  it('answers none when UI password protection is off', () => {
+    const storeFile = createStoreFile([passkey()]);
+    const controller = createUiPasskeys({ passwordBinding: '', readSettingsFromDiskMigrated: async () => ({}), storeFile });
+    expect(controller.listCredentials(requestFor())).toEqual({ rpID: 'example.com', passkeys: [] });
+  });
+});

@@ -22,6 +22,7 @@ export function parseServiceConfig(value) {
     serviceVersion: isString(value.serviceVersion) ? value.serviceVersion : 'unknown',
     stateDir: absolute(value.stateDir, 'stateDir'),
     engineSocket: absolute(value.engineSocket, 'engineSocket'),
+    subjectsDir: absolute(value.subjectsDir ?? '/run/openchamber-protected-mcp/subjects', 'subjectsDir'),
     engineSocketGroup: Number.isSafeInteger(value.engineSocketGroup) ? value.engineSocketGroup : null,
     adminSocket: absolute(value.adminSocket ?? '/run/openchamber-protected-mcp-admin/admin.sock', 'adminSocket'),
     adminSocketGroup,

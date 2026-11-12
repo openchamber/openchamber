@@ -10,6 +10,7 @@ import { rotateLogFile } from './cli-log-files.js';
 import { discoverOpenChamberInstanceOnPort, isDesktopRuntimeForPort } from './cli-lifecycle.js';
 import { getPidFilePath, getInstanceFilePath, writePidFile, writeInstanceOptions, removePidFile, removeInstanceFile, isProcessRunning, terminateProcessTree } from './cli-process.js';
 import { isNetworkExposedBindHost } from '../../server/lib/security/bind-host.js';
+import { readAgentServerMode } from '../../server/lib/agent-server/mode.js';
 import { assignInjectedEnv, injectedEnvKeys, withoutInjectedEnv } from '../../server/lib/injected-env.js';
 import {
   intro as clackIntro,
@@ -101,7 +102,8 @@ async function serveCommand(options) {
       }
     }
 
-    const opencodeBinary = await checkOpenCodeCLI(emitNotice);
+    // A front door runs no OpenCode: its sessions run in the agent server.
+    const opencodeBinary = readAgentServerMode(process.env).frontDoor ? null : await checkOpenCodeCLI(emitNotice);
     const preferredRuntime = getPreferredServerRuntime();
     const runtimeBin = preferredRuntime === 'bun' ? bunBin : process.execPath;
 
@@ -295,13 +297,15 @@ async function serveCommand(options) {
     const inheritedEnv = withoutInjectedEnv(process.env);
     delete inheritedEnv.OPENCHAMBER_UI_PASSWORD;
     delete inheritedEnv.OPENCHAMBER_UI_PASSWORD_HASH;
+    // A front door runs no OpenCode, so it has no binary to pass on.
+    if (opencodeBinary) inheritedEnv.OPENCODE_BINARY = opencodeBinary;
     const child = spawn(runtimeBin, serverArgs, {
       detached: true,
       windowsHide: true,
       stdio: ['ignore', logFd, logFd, 'ipc'],
       // Same marking as the foreground path above: the server's own settings
       // are recorded as OpenChamber's, the binary path is not.
-      env: assignInjectedEnv({ ...inheritedEnv, OPENCODE_BINARY: opencodeBinary }, {
+      env: assignInjectedEnv(inheritedEnv, {
         OPENCHAMBER_PORT: String(targetPort),
         OPENCHAMBER_RUNTIME: 'web',
         OPENCHAMBER_HOST: effectiveHost,

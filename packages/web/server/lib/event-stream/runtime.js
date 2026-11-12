@@ -69,6 +69,7 @@ export function createMessageStreamWsRuntime({
   upstreamReconnectDelayMs = DEFAULT_UPSTREAM_RECONNECT_DELAY_MS,
   fetchImpl = fetch,
   globalEventHub = null,
+  frontDoor = false,
 }) {
   const wsServer = new WebSocketServer({
     noServer: true,
@@ -106,9 +107,10 @@ export function createMessageStreamWsRuntime({
     const requestedLastEventId = requestUrl.searchParams.get('lastEventId')?.trim() || '';
     const requestedDirectory = requestUrl.searchParams.get('directory')?.trim() || '';
 
-    if (isGlobalStream) {
+    if (isGlobalStream || frontDoor) {
       globalBridge.accept(socket, {
         requestedLastEventId,
+        requestedDirectory: isGlobalStream ? '' : requestedDirectory,
       });
       return;
     }

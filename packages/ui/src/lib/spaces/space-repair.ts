@@ -20,6 +20,7 @@ import {
 } from './spaces-api';
 import { refreshSpacesJourney, spacesRuntimeGeneration, useSpacesStore, type SpaceAction, type SpaceActionState, type SpaceMark, type SpaceUnsavedChats } from './spaces-store';
 import { runSpaceSetupAgain } from './space-setup';
+import { startRootSpace, type RootPasskeyDependencies } from './root-activation';
 
 /**
  * What is wrong with a space that exists, in the order the status line tells it: an action under
@@ -89,7 +90,7 @@ export const isSpaceActionUnavailable = (entry: SpaceEntry | undefined, action: 
   action === 'setup' && entry?.setup?.state === 'running'
 );
 
-type SpaceActionOptions = { deleteUnsavedChats?: boolean };
+type SpaceActionOptions = { deleteUnsavedChats?: boolean; rootPasskey?: RootPasskeyDependencies };
 
 /** A removal went through: its chats are on the Archive page, and the notice says so. */
 export const noteRemoval = (spaceId: string, chats: { saved: number } | null): void => {
@@ -99,6 +100,10 @@ export const noteRemoval = (spaceId: string, chats: { saved: number } | null): v
 };
 
 const call = (spaceId: string, action: SpaceAction, options: SpaceActionOptions): Promise<SpaceFailure | null> => {
+  const entry = useSpacesStore.getState().journey?.get(spaceId);
+  if (entry?.kind === 'host-root' && (action === 'start' || action === 'restart')) {
+    return startRootSpace(spaceId, action, options.rootPasskey).then(() => null);
+  }
   switch (action) {
     case 'start': return startSpace(spaceId).then(() => null);
     case 'stop': return stopSpace(spaceId).then(() => null);

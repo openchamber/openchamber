@@ -5,6 +5,18 @@ import { firstPartyIntegrationsI18n } from './first-party-integrations.i18n';
 import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
 import { extensionCatalogI18n } from './extension-catalog.i18n';
 export const settingsDict = {
+  'settings.openchamber.spaces.host.installation': 'Beschikbaar via de OpenChamber-installatie op de host.',
+  'settings.openchamber.spaces.root.title': 'Root-ruimtes',
+  'settings.openchamber.spaces.root.available': 'Root-ruimtes zijn beschikbaar. Voor elke aanmaak, start en herstart is een goedgekeurde passkey vereist.',
+  'settings.openchamber.spaces.root.approve': 'Een passkey goedkeuren',
+  'settings.openchamber.spaces.root.commandInfo': 'Voer deze opdracht op de server uit als root en voer de getoonde code in.',
+  'settings.openchamber.spaces.root.code': 'Goedkeuringscode',
+  'settings.openchamber.spaces.root.label': 'Passkeylabel (optioneel)',
+  'settings.openchamber.spaces.root.confirm': 'Bevestig deze passkey in de serverterminal',
+  'settings.openchamber.spaces.root.confirmInfo': 'Vergelijk deze vingerafdruk met die in de terminal en bevestig hem daar. De goedkeuring is pas voltooid nadat de terminal deze accepteert.',
+  'settings.openchamber.spaces.root.empty': 'Geen passkeys goedgekeurd voor root-ruimtes.',
+  'settings.openchamber.spaces.root.approvedAt': 'Goedgekeurd op {date}',
+  'settings.openchamber.spaces.root.revoke': 'Intrekken op de server',
   'settings.openchamber.sessionRetention.field.archivedDescription': 'Telt de bewaartermijn vanaf het archiveren. Verlopen sessies worden verwijderd.',
   'settings.openchamber.sessionRetention.field.unarchivedArchiveDescription': 'Telt de bewaartermijn vanaf de laatste activiteit van de sessie. Verlopen sessies worden gearchiveerd.',
   'settings.openchamber.sessionRetention.field.unarchivedDeleteDescription': 'Telt de bewaartermijn vanaf de laatste activiteit van de sessie. Verlopen sessies worden verwijderd.',

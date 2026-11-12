@@ -4,12 +4,15 @@
 // "no spaces". The contract is `packages/web/server/lib/spaces/DOCUMENTATION.md`, "The journey".
 
 import { z } from 'zod';
+import type { AuthenticationResponseJSON } from '@simplewebauthn/browser';
 
 import { runtimeFetch } from '@/lib/runtime-fetch';
+import { rootActivationChallengeSchema, rootApprovalChallengeSchema, rootApprovalResultSchema, rootPasskeysSchema } from './root-passkey-schemas';
 
 const SPACES_ROUTE = '/api/openchamber/spaces';
 
 const spaceIdSchema = z.string().regex(/^[0-9a-f]{12}$/);
+const placeKindSchema = z.enum(['docker', 'host', 'host-root']).catch('docker');
 export const spaceTaskTitleSchema = z.object({ title: z.string().min(1).max(120), by: z.enum(['user', 'agent']) });
 export type SpaceTaskTitle = z.infer<typeof spaceTaskTitleSchema>;
 
@@ -110,6 +113,7 @@ const grantSchema = z.discriminatedUnion('kind', [
   // A provider of the user's own from Settings: the host reads its address, key and models again at every start.
   z.object({ kind: z.literal('custom'), id: z.string(), provider: z.string(), url: z.string() }),
   z.object({ kind: z.literal('domain'), id: z.string(), upstream: z.string(), url: z.string() }),
+  z.object({ kind: z.literal('mcp'), id: z.string(), connection: z.string(), name: z.string() }),
 ]);
 
 export type SpaceGrant = z.infer<typeof grantSchema>;
@@ -147,6 +151,7 @@ const spaceEntrySchema = z.object({
   taskTitle: spaceTaskTitleSchema.nullish(),
   // The place the space lives on, as the host names it; the browser panel's container mark says it.
   placeId: z.string(),
+  kind: placeKindSchema,
   // The machine of a Docker over SSH place, as the user wrote it; null for this computer, and
   // for a place the host no longer has.
   machine: z.string().nullable().default(null),
@@ -209,9 +214,18 @@ const dockerSetupSchema = z.object({
   memory: z.object({ bytes: z.number().min(0), engine: z.enum(['colima', 'docker_desktop', 'other']).catch('other'), low: z.boolean() }).nullable(),
 }).nullable().default(null);
 
+const rootActivationSchema = z.object({
+  available: z.boolean().catch(false),
+  reason: z.string().nullable().catch(null),
+  origins: z.array(z.string()).catch([]),
+}).nullable().catch(null);
+const placeBaseSchema = z.object({
+  id: z.string(), kind: placeKindSchema, machine: z.string().nullable().default(null),
+  setup: dockerSetupSchema, rootActivation: rootActivationSchema,
+});
 const placeSchema = z.union([
-  z.object({ id: z.string(), machine: z.string().nullable().default(null), available: z.literal(true), hostIsolation: z.boolean(), version: z.string().default(''), setup: dockerSetupSchema }),
-  z.object({ id: z.string(), machine: z.string().nullable().default(null), available: z.literal(false), code: z.string(), message: z.string(), setup: dockerSetupSchema }),
+  placeBaseSchema.extend({ available: z.literal(true), hostIsolation: z.boolean(), version: z.string().default(''), message: z.string().optional() }),
+  placeBaseSchema.extend({ available: z.literal(false), code: z.string(), message: z.string() }),
 ]);
 
 export type SpacePlace = z.infer<typeof placeSchema>;
@@ -222,6 +236,8 @@ export const SSH_PLACE_ID = 'docker-ssh';
 export type SpaceStart = 'clean' | 'uncommitted';
 
 export type CreateSpaceRequest = {
+  readonly spaceId?: string;
+  readonly rootActivation?: AuthenticationResponseJSON;
   projectDirectory: string;
   name: string;
   /** The place to make the space on; the host takes its first place without it. */
@@ -238,7 +254,8 @@ export type GrantRequest =
   | { kind: 'model'; provider: string; upstream: string; secret: { kind: 'typed'; value: string } | { kind: 'env'; name: string } }
   | { kind: 'login'; provider: string }
   | { kind: 'custom'; provider: string }
-  | { kind: 'domain'; upstream: string };
+  | { kind: 'domain'; upstream: string }
+  | { kind: 'mcp'; connection: string; name: string };
 
 // A browser login of the host's a space can be given (7c), never its token: `usable` can be said
 // to a space now, `expired` has run out and the host could not renew it, `unsupported` was made in
@@ -301,6 +318,21 @@ export const setSpacesSwitch = (enabled: boolean): Promise<SpacesSwitchChange> =
 
 export const listSpacePlaces = async (signal?: AbortSignal): Promise<SpacePlace[]> =>
   (await request(`${SPACES_ROUTE}/places`, z.object({ places: z.array(placeSchema) }), { signal })).places;
+
+export const readRootPasskeys = (signal?: AbortSignal) =>
+  request(`${SPACES_ROUTE}/root-passkeys`, rootPasskeysSchema, { signal });
+
+export const requestRootPasskeyApprovalChallenge = (code: string) =>
+  request(`${SPACES_ROUTE}/root-passkeys/approval-challenge`, rootApprovalChallengeSchema, { method: 'POST', body: JSON.stringify({ code }) });
+
+export const completeRootPasskeyApproval = (body: { readonly code: string; readonly response: AuthenticationResponseJSON; readonly label?: string }) =>
+  request(`${SPACES_ROUTE}/root-passkeys/approval`, rootApprovalResultSchema, { method: 'POST', body: JSON.stringify(body) });
+
+export const requestRootActivation = (body: { readonly op: 'create'; readonly request: CreateSpaceRequest }) =>
+  request(`${SPACES_ROUTE}/root-activation`, rootActivationChallengeSchema.extend({ spaceId: spaceIdSchema }), { method: 'POST', body: JSON.stringify(body) });
+
+export const requestRootStartActivation = (spaceId: string) =>
+  request(`${SPACES_ROUTE}/${spaceId}/root-activation`, rootActivationChallengeSchema, { method: 'POST', body: JSON.stringify({ op: 'start' }) });
 
 /**
  * Sets the machine of the Docker over SSH place, the empty string taking the place away, and
@@ -415,8 +447,8 @@ const removalSchema = z.object({
 type SpaceRemoval = z.infer<typeof removalSchema>;
 
 /** Starts a stopped space; its network and the grants the host can say again come back with it. */
-export const startSpace = (spaceId: string): Promise<SpaceEntry> =>
-  request(`${SPACES_ROUTE}/${spaceId}/start`, spaceEntrySchema, { method: 'POST' });
+export const startSpace = (spaceId: string, rootActivation?: AuthenticationResponseJSON): Promise<SpaceEntry> =>
+  request(`${SPACES_ROUTE}/${spaceId}/start`, spaceEntrySchema, { method: 'POST', body: rootActivation ? JSON.stringify({ rootActivation }) : undefined });
 
 /** Stops a running space and its gatekeeper; its files stay. */
 export const setSpaceTaskTitle = async (spaceId: string, title: string): Promise<void> => {
@@ -427,8 +459,8 @@ export const stopSpace = (spaceId: string): Promise<SpaceEntry> =>
   request(`${SPACES_ROUTE}/${spaceId}/stop`, spaceEntrySchema, { method: 'POST' });
 
 /** Restarts the container of a running space, with a fresh token for the server inside. */
-export const restartSpace = (spaceId: string): Promise<SpaceEntry> =>
-  request(`${SPACES_ROUTE}/${spaceId}/restart`, spaceEntrySchema, { method: 'POST' });
+export const restartSpace = (spaceId: string, rootActivation?: AuthenticationResponseJSON): Promise<SpaceEntry> =>
+  request(`${SPACES_ROUTE}/${spaceId}/restart`, spaceEntrySchema, { method: 'POST', body: rootActivation ? JSON.stringify({ rootActivation }) : undefined });
 
 /** Restarts OpenCode inside a running space and answers once it is ready again. */
 export const restartSpaceOpenCode = (spaceId: string): Promise<SpaceEntry> =>

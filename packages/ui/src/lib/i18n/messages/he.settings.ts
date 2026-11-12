@@ -5,6 +5,18 @@ import { firstPartyIntegrationsI18n } from './first-party-integrations.i18n';
 import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
 import { extensionCatalogI18n } from './extension-catalog.i18n';
 export const settingsDict = {
+  'settings.openchamber.spaces.host.installation': 'מסופק על ידי התקנת OpenChamber במחשב המארח.',
+  'settings.openchamber.spaces.root.title': 'מרחבי root',
+  'settings.openchamber.spaces.root.available': 'מרחבי root זמינים. כל יצירה, הפעלה או הפעלה מחדש דורשת מפתח גישה מאושר.',
+  'settings.openchamber.spaces.root.approve': 'אשר מפתח גישה',
+  'settings.openchamber.spaces.root.commandInfo': 'יש להריץ את הפקודה הזאת בשרת כ-root ולהזין את הקוד שהיא מדפיסה.',
+  'settings.openchamber.spaces.root.code': 'קוד אישור',
+  'settings.openchamber.spaces.root.label': 'תווית מפתח הגישה (לא חובה)',
+  'settings.openchamber.spaces.root.confirm': 'אשר את מפתח הגישה הזה במסוף השרת',
+  'settings.openchamber.spaces.root.confirmInfo': 'יש להשוות את טביעת האצבע הזאת לזו שמופיעה במסוף ולאשר אותה שם. האישור יושלם רק אחרי שהמסוף יקבל אותו.',
+  'settings.openchamber.spaces.root.empty': 'אין מפתחות גישה מאושרים למרחבי root.',
+  'settings.openchamber.spaces.root.approvedAt': 'אושר ב-{date}',
+  'settings.openchamber.spaces.root.revoke': 'בטל את האישור בשרת',
   'settings.openchamber.sessionRetention.field.archivedDescription': 'תקופת השמירה נספרת מרגע ההעברה לארכיון. הפעלות שפג תוקפן נמחקות.',
   'settings.openchamber.sessionRetention.field.unarchivedArchiveDescription': 'תקופת השמירה נספרת מהפעילות האחרונה בהפעלה. הפעלות שפג תוקפן מועברות לארכיון.',
   'settings.openchamber.sessionRetention.field.unarchivedDeleteDescription': 'תקופת השמירה נספרת מהפעילות האחרונה בהפעלה. הפעלות שפג תוקפן נמחקות.',

@@ -109,6 +109,7 @@ import { completeWorktreeCheckoutHydration, configureRepositoryTransport, getWor
 import { createPlanDirectoryAuthorizer } from '../guests/plans.js';
 import { createPrivateRepositoryIdentityResolver } from '../source-control/repository-identity.js';
 import { createSourceControlAuditStore } from '../source-control/audit-storage.js';
+import { registerFrontDoorLocalRoutes } from '../agent-server/local-routes.js';
 
 // allow: SIZE_OK — existing feature composition; loopback mechanics stay in guests/loopback-*.js.
 export const createFeatureRoutesRuntime = (dependencies) => {
@@ -238,6 +239,10 @@ export const createFeatureRoutesRuntime = (dependencies) => {
   };
 
   const registerRoutes = async (app, routeDependencies) => {
+    if (routeDependencies.frontDoor) {
+      registerFrontDoorLocalRoutes(app, routeDependencies);
+      return;
+    }
     const {
       messageSearchRuntime,
       sessionWarmingRuntime,
@@ -338,6 +343,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
     registerRoutingPromptRewrite(app, routingRuntime);
 
     registerOpenCodeRoutes(app, {
+      agentServer: routeDependencies.agentServer,
       crypto,
       clientReloadDelayMs,
       getOpenCodeResolutionSnapshot,
@@ -411,7 +417,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       dataDir: openchamberDataDir,
       isLocalScopeSupported: isLocalMcpScopeSupported,
     });
-    registerProtectedMcpRoutes(app, {
+    if (!routeDependencies.agentServer) registerProtectedMcpRoutes(app, {
       dataDir: openchamberDataDir,
       resolveOptionalProjectDirectory,
       // Selections need the managed plugin, exactly like personal entries.

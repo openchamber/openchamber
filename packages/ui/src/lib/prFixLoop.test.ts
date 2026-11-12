@@ -44,7 +44,7 @@ const worker: FixLoopWorker = {
   model: { providerID: 'openai', modelID: 'gpt-test' }, sessionId: null, spacePath: null,
 };
 const space: SpaceEntry = {
-  id: worker.spaceId, purpose: 'pr-fix-loop-approval', name: 'pr-12', placeId: 'docker', machine: null,
+  id: worker.spaceId, kind: 'docker', purpose: 'pr-fix-loop-approval', name: 'pr-12', placeId: 'docker', machine: null,
   approvalModel: worker.model,
   projectDirectory: '/repo', directory: '/spaces/012345abcdef/repo', projectFolder: { path: '/repo', found: true },
   state: 'running', step: null, failure: null, stoppedIdle: false, network: { mode: 'allowlist', domains: [] },
