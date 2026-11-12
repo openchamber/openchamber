@@ -41,6 +41,7 @@ import { resolvePlanRequestOwner } from '@/hooks/useProjectContextOwner';
 import { opencodeClient } from '@/lib/opencode/client';
 import type { RuntimeAPIs } from '@/lib/api/types';
 import type { ProjectRef } from '@/lib/projectContextApi';
+import { applyChatWidth } from '@/lib/chatWidth';
 import { readTabletLayout, useOrientation, useTabletLayout } from '@/lib/device';
 import { useHardwareKeyboard } from '@/lib/hardwareKeyboard';
 import { useI18n } from '@/lib/i18n';
@@ -181,7 +182,7 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
   // When set, the Changes surface opens directly into the per-file diff for this path.
   const [pendingChangesDiff, setPendingChangesDiff] = React.useState<{ path: string; staged: boolean; scope?: 'turn' } | null>(null);
   const setSettingsPage = useUIStore((state) => state.setSettingsPage);
-  const wideChatLayoutEnabled = useUIStore((state) => state.wideChatLayoutEnabled);
+  const chatWidth = useUIStore((state) => state.chatWidth);
   const updateAvailable = useUpdateStore((state) => state.available);
   const updateRuntimeType = useUpdateStore((state) => state.runtimeType);
   const showCapacitorOnlyFeatures = React.useMemo(() => isCapacitorMobileApp(), []);
@@ -394,17 +395,15 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
     return () => useMobileChatInsets.setState({ left: 0, right: 0 });
   }, [sidebarWidth, workspacePanelWidth]);
 
-  // Wide chat layout: the shared chat columns key off this root class, but only
-  // the desktop App set it — so on a tablet, where the chat column is finally
-  // wide enough for the setting to mean something, it did nothing. Applied for
-  // every mobile surface; on a phone the viewport is narrower than even the
-  // normal clamp, so it is a no-op there.
+  // Chat width: the shared columns key off root variables the desktop App also
+  // writes, and only that App set them — so on a tablet, where the chat column
+  // is finally wide enough for the setting to mean something, it did nothing.
+  // Applied for every mobile surface; on a phone the viewport is narrower than
+  // even the compact column, so the choice is a no-op there.
   React.useEffect(() => {
     if (typeof document === 'undefined') return;
-    const root = document.documentElement;
-    root.classList.toggle('wide-chat-layout', wideChatLayoutEnabled);
-    return () => root.classList.remove('wide-chat-layout');
-  }, [wideChatLayoutEnabled]);
+    return applyChatWidth(chatWidth);
+  }, [chatWidth]);
 
   // The draft screen keeps its starter chips while the keyboard is up when
   // there is room for both: a tablet in portrait, or any tablet orientation

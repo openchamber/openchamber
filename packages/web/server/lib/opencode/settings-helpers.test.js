@@ -257,12 +257,19 @@ describe('settings helpers', () => {
     expect(helpers.sanitizeSettingsUpdate({ toolJsonViewMode: 'unknown' })).toEqual({});
   });
 
-  it('accepts only booleans for wide chat layout', () => {
+  it('accepts the four chat width levels and maps the legacy wide-layout switch', () => {
     const helpers = createTestHelpers();
 
-    expect(helpers.sanitizeSettingsUpdate({ wideChatLayoutEnabled: true })).toEqual({ wideChatLayoutEnabled: true });
-    expect(helpers.sanitizeSettingsUpdate({ wideChatLayoutEnabled: false })).toEqual({ wideChatLayoutEnabled: false });
-    expect(helpers.sanitizeSettingsUpdate({ wideChatLayoutEnabled: 'true' })).toEqual({});
+    for (const level of ['compact', 'standard', 'wide', 'full']) {
+      expect(helpers.sanitizeSettingsUpdate({ chatWidth: level })).toEqual({ chatWidth: level });
+    }
+    expect(helpers.sanitizeSettingsUpdate({ chatWidth: 'huge' })).toEqual({});
+    expect(helpers.sanitizeSettingsUpdate({ chatWidth: 2 })).toEqual({});
+    // A settings file from a build before the level existed keeps the choice.
+    expect(helpers.sanitizeSettingsUpdate({ wideChatLayoutEnabled: true })).toEqual({ chatWidth: 'full' });
+    expect(helpers.sanitizeSettingsUpdate({ wideChatLayoutEnabled: false })).toEqual({ chatWidth: 'compact' });
+    // A level in the same document wins over the old switch.
+    expect(helpers.sanitizeSettingsUpdate({ chatWidth: 'standard', wideChatLayoutEnabled: true })).toEqual({ chatWidth: 'standard' });
   });
 
   it('accepts only booleans for collapsible user messages', () => {
@@ -935,7 +942,7 @@ describe('settings registry gate', () => {
     workStatusPanelEnabled: true, workStatusHiddenSections: ['mcp'], workStatusHiddenSectionsExplicit: true, workStatusSectionOrder: ['mcp', 'session'], workStatusSectionOrderExplicit: true,
     showReasoningTraces: true, streamingAutoFollowEnabled: true, collapsibleThinkingBlocks: true, expandReasoningWhileStreaming: true, showTextJustificationActivity: true,
     chatRenderMode: 'live', activityRenderMode: 'summary', mermaidRenderingMode: 'svg', userMessageRenderingMode: 'markdown', collapsibleUserMessages: true,
-    stickyUserHeader: true, promptNavigatorEnabled: true, wideChatLayoutEnabled: true, showSplitAssistantMessageActions: true, showToolFileIcons: true,
+    stickyUserHeader: true, promptNavigatorEnabled: true, chatWidth: 'wide', showSplitAssistantMessageActions: true, showToolFileIcons: true,
     selectionApprovalText: 'Agreed.',
     codeBlockLineWrap: true, tableCellWrap: true, copyMessagesAsPlainText: true, showTurnChangedFiles: true, toolJsonViewMode: 'raw',
     timeFormatPreference: '24h', weekStartPreference: 'monday', messageStreamTransport: 'ws', diffLayoutPreference: 'inline', diffWrapLines: true, diffHideWhitespace: true,

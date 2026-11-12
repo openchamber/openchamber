@@ -394,6 +394,22 @@ describe('settings registry', () => {
   });
 });
 
+describe('chat width setting', () => {
+  test('accepts the four levels and drops an unknown one', () => {
+    for (const level of ['compact', 'standard', 'wide', 'full']) {
+      expect(parseSettingsDocument({ chatWidth: level })).toEqual({ chatWidth: level });
+    }
+    expect(parseSettingsDocument({ chatWidth: 'huge' })).toEqual({});
+  });
+
+  test('reads the legacy wide-layout switch as the matching level', () => {
+    expect(parseSettingsDocument({ wideChatLayoutEnabled: true })).toEqual({ chatWidth: 'full' });
+    expect(parseSettingsDocument({ wideChatLayoutEnabled: false })).toEqual({ chatWidth: 'compact' });
+    // A saved level wins over the switch the same document still carries.
+    expect(parseSettingsDocument({ chatWidth: 'standard', wideChatLayoutEnabled: true })).toEqual({ chatWidth: 'standard' });
+  });
+});
+
 describe('custom stt endpoint path setting', () => {
   test('is an instance setting that trims and caps the path', () => {
     expect(SETTINGS_REGISTRY.sttEndpointPath.scope).toBe('instance');

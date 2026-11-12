@@ -11,6 +11,7 @@
 //
 // Kept free of `vscode` imports so it is unit-tested directly.
 import * as path from 'path';
+import { z } from 'zod';
 import { SETTINGS_REGISTRY_FIELDS } from './settings-registry-gate';
 
 const PREFERENCES_FILE_NAME = 'preferences.json';
@@ -97,6 +98,68 @@ export const parsePreferencesDocument = (raw: string): ParsedPreferencesDocument
 
 export const serializePreferencesDocument = (fields: PreferenceFields): string =>
   JSON.stringify({ version: PREFERENCES_DOCUMENT_VERSION, fields }, null, 2);
+
+/** A settings.json document: arbitrary JSON keys and values, parsed at the file boundary. */
+const settingsDocumentSchema = z.record(z.string(), z.unknown());
+type SettingsDocument = z.infer<typeof settingsDocumentSchema>;
+
+/** The legacy `wideChatLayoutEnabled` switch: only a literal boolean is one. */
+const legacyChatWidthSwitchSchema = z.boolean();
+
+/** `true` → `full`, `false` → `compact`; anything else has no level. */
+const chatWidthLevelOfSwitch = (enabled: boolean): 'full' | 'compact' => (enabled ? 'full' : 'compact');
+
+/**
+ * `chatWidth` replaced the `wideChatLayoutEnabled` switch. Older files keep
+ * each stored value where it was (base or surface), mapped to a level, and
+ * drop the switch; a chatWidth already stored wins over the switch.
+ *
+ * Mirrors `migrateWideChatLayoutPreferenceFields` in the server's
+ * `settings-files.js`.
+ */
+export const migrateWideChatLayoutPreferenceFields = (fields: PreferenceFields) => {
+  const legacy = fields.wideChatLayoutEnabled;
+  if (!legacy) return fields;
+  const next = { ...fields };
+  delete next.wideChatLayoutEnabled;
+  const chatWidth = { ...(next.chatWidth ?? { updatedAt: 0 }) };
+  const baseSwitch = legacyChatWidthSwitchSchema.safeParse(legacy.value);
+  if (baseSwitch.success && chatWidth.value === undefined) chatWidth.value = chatWidthLevelOfSwitch(baseSwitch.data);
+  const surfaces = { ...(chatWidth.surfaces ?? {}) };
+  for (const surface of SETTINGS_SURFACES) {
+    const entry = legacy.surfaces?.[surface];
+    if (!entry || surfaces[surface]) continue;
+    const surfaceSwitch = legacyChatWidthSwitchSchema.safeParse(entry.value);
+    if (surfaceSwitch.success) surfaces[surface] = { ...entry, value: chatWidthLevelOfSwitch(surfaceSwitch.data) };
+  }
+  if (Object.keys(surfaces).length > 0) chatWidth.surfaces = surfaces;
+  chatWidth.updatedAt = Math.max(chatWidth.updatedAt, legacy.updatedAt);
+  next.chatWidth = chatWidth;
+  return next;
+};
+
+/**
+ * The same conversion for a plain document (settings.json's legacy copy), so
+ * the switch does not linger there as an instance key. Mirrors
+ * `migrateWideChatLayoutDocument` in the server's `settings-files.js`.
+ */
+export const migrateWideChatLayoutDocument = (document: SettingsDocument) => {
+  if (!Object.prototype.hasOwnProperty.call(document, 'wideChatLayoutEnabled')) return document;
+  const legacySwitch = legacyChatWidthSwitchSchema.safeParse(document.wideChatLayoutEnabled);
+  const next = { ...document };
+  if (legacySwitch.success && next.chatWidth === undefined) next.chatWidth = chatWidthLevelOfSwitch(legacySwitch.data);
+  delete next.wideChatLayoutEnabled;
+  return next;
+};
+
+/**
+ * The merged persisted settings a bridge read returns: disk wins over the
+ * `globalState` migration source, and the legacy switch is migrated out of the
+ * merged view too, so a write of that view cannot put it back into
+ * `settings.json`.
+ */
+export const mergePersistedSettings = (globalState: SettingsDocument, disk: SettingsDocument) =>
+  migrateWideChatLayoutDocument({ ...globalState, ...disk });
 
 /**
  * The plain key → value view of preference fields as one surface kind sees it:

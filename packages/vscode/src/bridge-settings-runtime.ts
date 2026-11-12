@@ -15,6 +15,9 @@ import {
   flattenPreferences,
   instancePartOf,
   legacySettingsDocumentOf,
+  mergePersistedSettings,
+  migrateWideChatLayoutDocument,
+  migrateWideChatLayoutPreferenceFields,
   profilePartOf,
   parsePreferencesDocument,
   preferencesFilePathFor,
@@ -218,7 +221,7 @@ const readSettingsJsonFromDisk = (): Record<string, unknown> => {
     const parsed = JSON.parse(raw) as unknown;
     if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
       // SAFETY: a non-array object parsed from JSON is a string-keyed dictionary.
-      return parsed as Record<string, unknown>;
+      return migrateWideChatLayoutDocument(parsed as Record<string, unknown>);
     }
     return {};
   } catch {
@@ -241,7 +244,9 @@ const readPreferencesFromDisk = (): PreferencesReadResult => {
   let result: PreferencesReadResult;
   try {
     const parsed = parsePreferencesDocument(fs.readFileSync(OPENCHAMBER_PREFERENCES_PATH, 'utf8'));
-    result = parsed.ok ? { status: 'ok', fields: parsed.fields } : { status: 'unreadable', reason: parsed.reason };
+    result = parsed.ok
+      ? { status: 'ok', fields: migrateWideChatLayoutPreferenceFields(parsed.fields) }
+      : { status: 'unreadable', reason: parsed.reason };
   } catch (error) {
     // SAFETY: fs errors carry a `code` string; anything else is reported by message.
     const code = (error as NodeJS.ErrnoException | null)?.code;
@@ -365,9 +370,12 @@ let eagerMigrationAttempted = false;
 // disk, copy them to disk so other clients see them immediately — without
 // waiting for the user to save again.
 const readPersistedSettings = (ctx?: BridgeContext): Record<string, unknown> => {
-  const fromGlobalState = stripDerived(
+  // The migration source can still carry the pre-chat-width switch. Migrate it
+  // here as well as on disk, or the eager copy below and every later write
+  // would put `wideChatLayoutEnabled` back into `settings.json`.
+  const fromGlobalState = migrateWideChatLayoutDocument(stripDerived(
     ctx?.context?.globalState.get<Record<string, unknown>>(SETTINGS_KEY) || {},
-  );
+  ));
   const fromDisk = stripDerived(readSharedSettingsFromDisk());
 
   if (!eagerMigrationAttempted) {
@@ -386,7 +394,7 @@ const readPersistedSettings = (ctx?: BridgeContext): Record<string, unknown> => 
     }
   }
 
-  return { ...fromGlobalState, ...fromDisk };
+  return mergePersistedSettings(fromGlobalState, fromDisk);
 };
 
 // Everything the webview may see: the persisted document minus the keys the

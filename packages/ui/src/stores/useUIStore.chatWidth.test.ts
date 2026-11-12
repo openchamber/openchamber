@@ -1,0 +1,56 @@
+import { afterEach, describe, expect, test } from 'bun:test';
+import { DEFAULT_CHAT_WIDTH } from '@/lib/chatWidth';
+import { useUIStore } from './useUIStore';
+
+const originalOptions = useUIStore.persist.getOptions();
+const originalState = useUIStore.getState();
+afterEach(() => {
+  useUIStore.persist.setOptions(originalOptions);
+  useUIStore.setState(originalState, true);
+});
+
+type StoredUiState = Partial<ReturnType<typeof useUIStore.getInitialState>> & {
+  wideChatLayoutEnabled?: boolean;
+};
+
+const hydrateFrom = async (version: number, state: StoredUiState): Promise<void> => {
+  useUIStore.persist.setOptions({ storage: {
+    getItem: () => ({ version, state: { ...useUIStore.getInitialState(), ...state } }),
+    setItem: () => undefined,
+    removeItem: () => undefined,
+  } });
+  await useUIStore.persist.rehydrate();
+};
+
+describe('chat width', () => {
+  test('starts at the compact column', () => {
+    expect(DEFAULT_CHAT_WIDTH).toBe('compact');
+    expect(useUIStore.getInitialState().chatWidth).toBe('compact');
+  });
+
+  test('the setter stores the chosen level', () => {
+    useUIStore.getState().setChatWidth('full');
+    expect(useUIStore.getState().chatWidth).toBe('full');
+  });
+
+  test('reads a stored wide-layout switch as full', async () => {
+    await hydrateFrom(28, { wideChatLayoutEnabled: true });
+    expect(useUIStore.getState().chatWidth).toBe('full');
+    expect('wideChatLayoutEnabled' in useUIStore.getState()).toBe(false);
+  });
+
+  test('reads a stored off switch as the compact default', async () => {
+    await hydrateFrom(28, { wideChatLayoutEnabled: false });
+    expect(useUIStore.getState().chatWidth).toBe('compact');
+  });
+
+  test('keeps a level stored after the migration', async () => {
+    await hydrateFrom(29, { chatWidth: 'standard' });
+    expect(useUIStore.getState().chatWidth).toBe('standard');
+  });
+
+  test('keeps the wide level stored after the migration', async () => {
+    await hydrateFrom(29, { chatWidth: 'wide' });
+    expect(useUIStore.getState().chatWidth).toBe('wide');
+  });
+});

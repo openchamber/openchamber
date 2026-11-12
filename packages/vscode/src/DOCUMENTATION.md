@@ -143,6 +143,7 @@ The webview build emits each worker as one self-contained file. VS Code webviews
   - An existing but unparseable `preferences.json` is a failure, not an empty profile: it is never seeded over or rewritten, one warning is logged per process, reads return `settings.json` only, and writes drop the profile part until a later read succeeds.
   - Both files are written atomically (tmp file + rename). Write failures throw, so `persistSettings` rejects and the webview sees the save fail instead of a silent success.
   - The extension host is always the `vscode` surface kind: per-surface profile keys it changes land under `surfaces.vscode` in `preferences.json` and reads resolve `vscode` first, base otherwise (mirrors the server's header-driven behaviour).
+  - Reads migrate a stored `wideChatLayoutEnabled` switch to `chatWidth` (`true` is `full`, `false` is `compact`) in both files and drop the switch, matching the server: a level already stored wins, and `settings.json` no longer keeps the switch as an unknown instance key.
 
 - `bridge-system-runtime.ts`
   - System/editor/provider/quota/notification/update-check message handlers.

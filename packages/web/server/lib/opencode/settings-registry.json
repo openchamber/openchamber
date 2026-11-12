@@ -443,7 +443,7 @@
       "scope": "profile",
       "perSurface": true
     },
-    "wideChatLayoutEnabled": {
+    "chatWidth": {
       "scope": "profile",
       "perSurface": true
     },

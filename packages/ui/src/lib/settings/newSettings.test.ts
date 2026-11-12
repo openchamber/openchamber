@@ -105,6 +105,17 @@ describe('new settings badge', () => {
     expect(storedBaseline()).toHaveLength(SETTINGS_ANCHOR_PAGES.size);
   });
 
+  test('a renamed anchor does not badge the control it became', () => {
+    // A baseline from before `chat.wide-layout` was renamed to `chat.width`.
+    startFromBaseline([
+      ...baselineWithout('chat.width'),
+      'chat.wide-layout',
+    ]);
+
+    expect(isNewSetting('chat.width')).toBe(false);
+    expect(getNewSettingPages()).toEqual([]);
+  });
+
   test('every anchor a later build added is new, on its own page', () => {
     startFromBaseline(baselineWithout('voice.playback'));
 

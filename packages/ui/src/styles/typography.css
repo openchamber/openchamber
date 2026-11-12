@@ -85,37 +85,25 @@
     text-decoration: underline;
   }
 
+  /* The Chat settings width level (`lib/chatWidth.ts`) writes these two
+     variables onto the document root. Without a level the default is today's
+     48rem column. */
   .chat-column {
-    width: min(100%, 48rem);
+    width: min(100%, var(--chat-column-width, 48rem));
     margin-inline: auto;
     padding-inline: calc(clamp(0.75rem, 2.5vw, 1rem) * var(--padding-scale, 1));
-  }
-
-  .wide-chat-layout .chat-column {
-    width: min(100%, 64rem);
   }
 
   .chat-input-column {
-    width: min(100%, 48rem);
+    width: min(100%, var(--chat-column-width, 48rem));
     margin-inline: auto;
     padding-inline: calc(clamp(0.75rem, 2.5vw, 1rem) * var(--padding-scale, 1));
-  }
-
-  .wide-chat-layout .chat-input-column {
-    width: min(100%, 64rem);
   }
 
   .chat-message-column {
-    width: min(100%, 48rem);
+    width: min(100%, var(--chat-message-column-width, 48rem));
     margin-inline: auto;
     padding-inline: calc(clamp(0.75rem, 2.5vw, 1rem) * var(--padding-scale, 1));
-  }
-
-  /* Wide layout: the transcript uses the whole chat width; the composer and
-     the rows docked above it (.chat-input-column, .chat-column cards) keep a
-     readable column. */
-  .wide-chat-layout .chat-message-column {
-    width: 100%;
   }
 
   /* On a wide window the side padding follows the chat's own width (a
@@ -235,11 +223,7 @@
    layer order). That dropped the clamp for a frame and flashed message text to
    full width. An unlayered duplicate of just the width keeps it robust. */
 .chat-message-column {
-  width: min(100%, 48rem);
-}
-
-.wide-chat-layout .chat-message-column {
-  width: 100%;
+  width: min(100%, var(--chat-message-column-width, 48rem));
 }
 
 /* A message reached through a message link shows a selection tint behind its

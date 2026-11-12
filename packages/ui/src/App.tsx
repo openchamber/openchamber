@@ -73,6 +73,7 @@ import { lazyWithChunkRecovery } from '@/lib/chunkLoadRecovery';
 import { useOnDemandComponent } from '@/hooks/useOnDemandComponent';
 import { preloadFileTypeSprite } from '@/lib/fileTypeIcons';
 import { useI18n } from '@/lib/i18n';
+import { applyChatWidth } from '@/lib/chatWidth';
 import { applyMobileKeyboardMode } from '@/lib/mobileKeyboardMode';
 import { SyncAppEffects } from '@/apps/AppEffects';
 import { isSameRuntimeEndpoint, resetAppForRuntimeEndpointChange } from '@/apps/runtimeEndpointReset';
@@ -241,7 +242,7 @@ function App({ apis }: AppProps) {
   const [initRetryEpoch, setInitRetryEpoch] = React.useState(0);
   const [runtimeEndpointEpoch, setRuntimeEndpointEpoch] = React.useState(0);
   const [manualInitRetrying, setManualInitRetrying] = React.useState(false);
-  const wideChatLayoutEnabled = useUIStore((state) => state.wideChatLayoutEnabled);
+  const chatWidth = useUIStore((state) => state.chatWidth);
   const mobileKeyboardMode = useUIStore((state) => state.mobileKeyboardMode);
   const isDesktopRuntime = React.useMemo(() => isDesktopShell(), []);
   const [bootInjectionStatus, setBootInjectionStatus] = React.useState<BootInjectionStatus>(() => {
@@ -312,12 +313,7 @@ function App({ apis }: AppProps) {
     });
   }, []);
 
-  React.useEffect(() => {
-    document.documentElement.classList.toggle('wide-chat-layout', wideChatLayoutEnabled);
-    return () => {
-      document.documentElement.classList.remove('wide-chat-layout');
-    };
-  }, [wideChatLayoutEnabled]);
+  React.useEffect(() => applyChatWidth(chatWidth), [chatWidth]);
 
   React.useEffect(() => {
     registerRuntimeAPIs(apis);

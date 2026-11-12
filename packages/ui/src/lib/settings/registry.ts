@@ -24,6 +24,7 @@ import type { DraftStarterRef } from '@/lib/draftStarters';
 import { sanitizeStarterRefs } from '@/lib/draftStarters';
 import { getFilesViewShowGitignored, setFilesViewShowGitignored } from '@/lib/filesViewShowGitignored';
 import { UI_FONT_WEIGHT_OPTIONS, isMonoFontOption, isUiFontOption, type MonoFontOption, type UiFontOption } from '@/lib/fontOptions';
+import { chatWidthLevelSchema, type ChatWidthLevel } from '@/lib/chatWidth';
 import { LOCALES } from '@/lib/i18n/runtime';
 import { useI18nStore } from '@/lib/i18n/store';
 import { isInputHistoryLimit, isInputHistoryScope, type InputHistoryScope } from '@/lib/inputHistoryScope';
@@ -195,6 +196,19 @@ const parseDraftStarters: SettingsParser<DraftStarterRef[]> = mapParser(fromSche
 // Unknown ids are dropped rather than kept: they would hide nothing and
 // accumulate forever as sections get renamed.
 const parseWorkStatusHiddenSections: SettingsParser<string[]> = mapParser(fromSchema(z.array(z.unknown())), (value) => sanitizeWorkStatusHiddenSections(value));
+/**
+ * The chat width level. Builds before it existed saved a
+ * `wideChatLayoutEnabled` switch: `true` reads as `full` so the
+ * transcript still fills the chat area, `false` as today's compact default. The switch is never
+ * returned.
+ */
+const parseChatWidth: SettingsParser<ChatWidthLevel> = (value, raw) => {
+  const level = chatWidthLevelSchema.safeParse(value);
+  if (level.success) return level.data;
+  if (raw.wideChatLayoutEnabled === true) return 'full';
+  if (raw.wideChatLayoutEnabled === false) return 'compact';
+  return undefined;
+};
 const parseLargeTextPasteBehavior: SettingsParser<LargeTextPasteBehavior> = parseOneOf(['ask', 'attach', 'inline', 'inline-double-paste']);
 const parseFileEditorKeymap: SettingsParser<FileEditorKeymap> = parseOneOf(['default', 'vim']);
 
@@ -476,7 +490,7 @@ export const SETTINGS_REGISTRY = {
   collapsibleUserMessages: field({ scope: 'profile', parse: parseBoolean, ui: uiStore('collapsibleUserMessages', (v) => useUIStore.getState().setCollapsibleUserMessages(v)) }),
   stickyUserHeader: field({ scope: 'profile', perSurface: true, parse: parseBoolean, ui: uiStore('stickyUserHeader', (v) => useUIStore.getState().setStickyUserHeader(v)) }),
   promptNavigatorEnabled: field({ scope: 'profile', perSurface: true, parse: parseBoolean, ui: uiStore('promptNavigatorEnabled', (v) => useUIStore.getState().setPromptNavigatorEnabled(v)) }),
-  wideChatLayoutEnabled: field({ scope: 'profile', perSurface: true, parse: parseBoolean, ui: uiStore('wideChatLayoutEnabled', (v) => useUIStore.getState().setWideChatLayoutEnabled(v)) }),
+  chatWidth: field({ scope: 'profile', perSurface: true, parse: parseChatWidth, ui: uiStore('chatWidth', (v) => useUIStore.getState().setChatWidth(v)) }),
   showSplitAssistantMessageActions: field({ scope: 'profile', parse: parseBoolean, ui: uiStore('showSplitAssistantMessageActions', (v) => useUIStore.getState().setShowSplitAssistantMessageActions(v)) }),
   showToolFileIcons: field({ scope: 'profile', parse: parseBoolean, ui: uiStore('showToolFileIcons', (v) => useUIStore.getState().setShowToolFileIcons(v)) }),
   codeBlockLineWrap: field({ scope: 'profile', parse: parseBoolean, ui: uiStore('codeBlockLineWrap', (v) => useUIStore.getState().setCodeBlockLineWrap(v)) }),

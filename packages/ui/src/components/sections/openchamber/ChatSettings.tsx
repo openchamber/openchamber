@@ -2,6 +2,7 @@ import React from 'react';
 
 import { Input } from '@/components/ui/input';
 import { NumberInput } from '@/components/ui/number-input';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { SortableTabsStrip, type SortableTabsStripItem } from '@/components/ui/sortable-tabs-strip';
 import {
   SettingsSection,
@@ -17,8 +18,10 @@ import {
   SETTINGS_NUMBER_STEPPER_ROW_CLASS,
   SETTINGS_NUMBER_UNIT_CLASS,
   SETTINGS_OPTION_STACK_CLASS,
+  SETTINGS_SELECT_ROW_TRIGGER_CLASS,
 } from '@/components/sections/shared/SettingsSection';
 import { JevAccessNote } from '@/components/sections/classification/JevAccessNote';
+import { CHAT_WIDTH_LEVELS, isChatWidthLevel, type ChatWidthLevel } from '@/lib/chatWidth';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { useDeviceInfo } from '@/lib/device';
 import { useI18n, type I18nKey } from '@/lib/i18n';
@@ -78,6 +81,13 @@ const LARGE_TEXT_PASTE_BEHAVIOR_OPTIONS: ChipOption<LargeTextPasteBehavior>[] = 
   { id: 'inline-double-paste', labelKey: 'settings.openchamber.visual.option.largeTextPaste.inlineDoublePaste.label' },
 ];
 
+const CHAT_WIDTH_OPTION_LABEL_KEYS = {
+  compact: 'settings.openchamber.visual.option.chatWidth.compact.label',
+  standard: 'settings.openchamber.visual.option.chatWidth.standard.label',
+  wide: 'settings.openchamber.visual.option.chatWidth.wide.label',
+  full: 'settings.openchamber.visual.option.chatWidth.full.label',
+} satisfies Record<ChatWidthLevel, I18nKey>;
+
 /** A sub-option that only matters while the option above it is on. */
 const NESTED_OPTION_CLASS = 'ps-6';
 
@@ -128,8 +138,8 @@ const MessagesTab: React.FC = () => {
   const setShowTurnChangedFiles = useUIStore((state) => state.setShowTurnChangedFiles);
   const streamingAutoFollowEnabled = useUIStore((state) => state.streamingAutoFollowEnabled);
   const setStreamingAutoFollowEnabled = useUIStore((state) => state.setStreamingAutoFollowEnabled);
-  const wideChatLayoutEnabled = useUIStore((state) => state.wideChatLayoutEnabled);
-  const setWideChatLayoutEnabled = useUIStore((state) => state.setWideChatLayoutEnabled);
+  const chatWidth = useUIStore((state) => state.chatWidth);
+  const setChatWidth = useUIStore((state) => state.setChatWidth);
   const promptNavigatorEnabled = useUIStore((state) => state.promptNavigatorEnabled);
   const setPromptNavigatorEnabled = useUIStore((state) => state.setPromptNavigatorEnabled);
   const collapsibleUserMessages = useUIStore((state) => state.collapsibleUserMessages);
@@ -229,16 +239,35 @@ const MessagesTab: React.FC = () => {
         settingsItem="chat.message-appearance"
         contentClassName={SETTINGS_OPTION_STACK_CLASS}
       >
-        <SettingsCheckboxRow
-          checked={wideChatLayoutEnabled}
-          onChange={(enabled) => {
-            setWideChatLayoutEnabled(enabled);
-            void updateDesktopSettings({ wideChatLayoutEnabled: enabled });
-          }}
-          label={t('settings.openchamber.visual.field.wideChatLayout')}
-          ariaLabel={t('settings.openchamber.visual.field.wideChatLayoutAria')}
-          settingsItem="chat.wide-layout"
-        />
+        <SettingsFieldRow
+          label={t('settings.openchamber.visual.field.chatWidth')}
+          info={t('settings.openchamber.visual.field.chatWidthInfo')}
+          settingsItem="chat.width"
+        >
+          <Select<ChatWidthLevel>
+            value={chatWidth}
+            onValueChange={(value) => {
+              setChatWidth(value);
+              void updateDesktopSettings({ chatWidth: value });
+            }}
+          >
+            <SelectTrigger
+              className={SETTINGS_SELECT_ROW_TRIGGER_CLASS}
+              aria-label={t('settings.openchamber.visual.field.chatWidthAria')}
+            >
+              <SelectValue>
+                {(value) => (value !== undefined && isChatWidthLevel(value) ? t(CHAT_WIDTH_OPTION_LABEL_KEYS[value]) : null)}
+              </SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              {CHAT_WIDTH_LEVELS.map((level) => (
+                <SelectItem key={level} value={level}>
+                  {t(CHAT_WIDTH_OPTION_LABEL_KEYS[level])}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </SettingsFieldRow>
         <SettingsCheckboxRow
           checked={streamingAutoFollowEnabled}
           onChange={setStreamingAutoFollowEnabled}
