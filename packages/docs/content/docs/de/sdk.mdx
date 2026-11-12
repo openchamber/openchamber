@@ -341,11 +341,49 @@ Wenn dein OpenCode-Plugin oder MCP-Server ein Tool hinzufügt, zeigt der Chat de
 ]
 ```
 
-`match` ist der Tool-Name, wie OpenCode ihn meldet; ein `*` am Ende passt auf ein Präfix. `icon` ist ein Remixicon-Name oder eine `.svg`-Datei in deinem Paket, wie bei `panel.icon`. `title` und `subtitle` sind Vorlagen über `input`, `output` und `metadata` des Aufrufs. `output` bestimmt, wie der Inhalt dargestellt wird: `text`, `json` (als Baum), `markdown`, `code` mit einer `language`, `table` mit `columns` (die Zeilen kommen aus dem Ausgabe-Array oder aus `output.items`) oder `auto` für die Standarddarstellung. Ein exaktes `match` schlägt einen Platzhalter, und bei Gleichstand gewinnt die zuerst installierte Erweiterung. Eine Berechtigung ist nicht nötig: das ändert nur, wie Daten gezeichnet werden, die ohnehin schon im Chat sind.
+`match` ist der Tool-Name, wie OpenCode ihn meldet; ein `*` am Ende passt auf ein Präfix. `icon` ist ein Remixicon-Name oder eine `.svg`-Datei in deinem Paket, wie bei `panel.icon`. `title` und `subtitle` sind Vorlagen über `input`, `output` und `metadata` des Aufrufs. `output` bestimmt, wie der Inhalt dargestellt wird: `text`, `json` (als Baum), `markdown`, `code` mit einer `language`, `table` mit `columns` (die Zeilen kommen aus dem Ausgabe-Array oder aus `output.items`), `card` mit `card` (ein Eintrag als Karte, siehe unten) oder `auto` für die Standarddarstellung. Ein exaktes `match` schlägt einen Platzhalter, und bei Gleichstand gewinnt die zuerst installierte Erweiterung. Eine Berechtigung ist nicht nötig: das ändert nur, wie Daten gezeichnet werden, die ohnehin schon im Chat sind.
 
 Ist der Code Mode von OpenCode aktiv, ruft der Agent Tools aus einem kurzen Skript auf statt einzeln. Ein Skript mit einem einzigen Aufruf erscheint als Zeile dieses Tools, und `output` ist das, was das Skript zurückgegeben hat. Schreibe in `match` ein `_`, wo im Skript ein Punkt steht: `tools.github.list_issues` im Skript ist `github_list_issues`. Ein Skript mit mehreren Aufrufen behält seine eigene Zeile.
 
 Eine Erweiterung, die nur Tools gestaltet, braucht gar keine Seite: lass `panel.entry` weg, dann hat sie kein Icon in der Leiste, nur eine Karte unter Einstellungen → Erweiterungen. Ohne Seite darf sie `tools` und `providerLogos` und sonst nichts deklarieren. Die andere Ausnahme ist ein Work-Status-Abschnitt, ein Datei-Editor oder eine Vollbildseite mit eigenem `entry`, siehe oben.
+
+### Eine Karte für einen einzelnen Eintrag
+
+Wenn ein Tool mit einem einzelnen Objekt antwortet, etwa einem Issue, zeichnet `output: "card"` es als Karte statt als rohes JSON. `card` legt fest, welcher Teil der Ausgabe wohin kommt:
+
+```json
+"tools": [
+  {
+    "match": "jira_get_issue",
+    "name": "Jira issue",
+    "title": "{input.key}",
+    "output": "card",
+    "card": {
+      "label": "{output.key} · {output.fields.issuetype.name}",
+      "title": "{output.fields.summary}",
+      "status": {
+        "value": "{output.fields.status.name}",
+        "tones": { "In Progress": "info", "Blocked": "error", "Done": "success" }
+      },
+      "fields": [
+        { "label": "Assignee", "value": "{output.fields.assignee.displayName}" },
+        { "label": "Priority", "value": "{output.fields.priority.name}" }
+      ],
+      "link": { "label": "Open in Jira", "url": "{output.url}" }
+    }
+  }
+]
+```
+
+`label` ist die kleine Zeile oben, `title` die Überschrift, `status` ein Badge, `fields` bis zu acht beschriftete Werte und `link` ein Link unten. Deklariere mindestens eines der ersten vier. Jeder Wert ist eine Vorlage, die das `output` des Tools liest. `tones` färbt das Badge nach seinem exakten Text, als `info`, `success`, `warning`, `error` oder `neutral`. Ein Status, den du nicht aufgeführt hast, ist neutral.
+
+Ist die Ausgabe ein Array oder enthält sie ein `items`-Array, zeichnet dieselbe `card` eine kompakte Liste: eine Zeile pro Eintrag mit Label, Titel, erstem Feld und Status, wobei `{output.…}` diesen Eintrag liest. Angezeigt werden die ersten 200 Einträge, und Zeilen haben keinen Link.
+
+Ein Teil, dessen Wert in der Ausgabe fehlt, wird weggelassen. Ist nichts von dem da, was du angegeben hast, oder ist die Ausgabe kein JSON, zeigt der Chat die Ausgabe so, wie er es ohne die Regel täte.
+
+Der Link öffnet nur eine `https`-Adresse. `"{output.url}"` übernimmt die Adresse unverändert aus der Ausgabe. Du kannst die Adresse auch selbst um Werte herum schreiben, etwa `"https://tracker.example.com/browse/{output.key}"`. Jeder Wert wird dann prozentkodiert und kann den Host oder den Pfad, den du geschrieben hast, nicht ändern. Eine Erweiterung mit `settings` einer Integration (siehe Konten und Netzwerk oben) kann auch eine Einstellung lesen, die nicht geheim ist: `"https://{settings.site}/browse/{output.key}"`, wobei der Nutzer einen Hostnamen wie `acme.atlassian.net` als `site` gespeichert hat. Eine Einstellung, die eine vollständige Adresse, einen Port oder einen Pfad enthält, ergibt keinen Link, ebenso wenig ein fehlender Wert.
+
+`card` braucht eine OpenChamber-Version, die neuer ist als 2.7.0. Eine ältere lehnt die Erweiterung als ungültig ab, und `engines.openchamber` ändert daran nichts.
 
 ## Das Logo deines Anbieters
 

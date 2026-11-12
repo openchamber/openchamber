@@ -554,7 +554,7 @@ Used by the OpenChamber host and by tools that validate packages. Guests rarely 
 | `capabilities`        | Optional list of `prompt`, `sessions`, `files`, `model`, `shells`. `files` is read **and** write inside the open project; `model` is `generate`; `shells` is the running-shell methods. Approved once at install                     |
 | `actions` | Optional, 1–8 entries, unique kebab-case `id`, `label` 1–40 chars, optional `icon` with the `panel.icon` rules, `where: "message" \| "session" \| "selection" \| "file" \| "diff"`, optional `display: "label" \| "icon" \| "both"` on a selection, optional `mode: "open" \| "background"`. Message actions may narrow `roles` to `["user"]` / `["assistant"]`, default both. Session actions may request `payload: ["messages"]`, adding the `conversation` capability. Invalid shape is `invalid-actions`. Default `open` mode opens the guest with `ready.item`, using the attach dialog for `attach: "dialog"` and the rail otherwise. `background` calls `onAction` in a temporary hidden frame; see Background actions above |
 | `commands`            | Optional, 1–8 entries, unique `name` matching `/^[a-z][a-z0-9-]{0,23}$/`, optional `description` 1–80 chars (`invalid-commands`). `/name args` in the chat box calls `onResolve` instead of the model and attaches what it returns. A name the composer already has (built-in, OpenCode command, skill) is ignored with a console warning |
-| `tools`               | Optional, 1–16 entries that say how the extension's tool calls look in the chat. `match` is the full tool name OpenCode reports (`jira_search`), 1–128 chars of `[A-Za-z0-9_.:-]`, with `*` allowed once at the end as a suffix wildcard (`jira_*`). Optional `name` (1–40, the header title when `title` is absent or renders empty), `icon` (Remixicon name or package `.svg` path, same rules as `panel.icon`; the SVG is drawn in the text colour at the glyph size), `title` / `subtitle` templates (1–200, `{input.path}` / `{output.path}` / `{metadata.path}` placeholders, a missing path renders empty, values are cut at 200), `output` `"auto"` (default) \| `"text"` \| `"json"` \| `"markdown"` \| `"code"` \| `"table"`, `language` (code only), `columns` (table only, 1–16 dotted paths; rows are the output array or `output.items`). Bad shape is `invalid-tools`. An exact `match` beats a wildcard from any extension; among equals the first extension wins. Only an enabled, fully approved extension's rules apply. With Code Mode, a finished script that made one call is matched under the tool's direct name (`example.findings` in the script is `example_findings`) and shows as that tool's row, with `output` being what the script returned; a running script, a script with several calls, and a failed call or a failed script keep the script row |
+| `tools`               | Optional, 1–16 entries that say how the extension's tool calls look in the chat. `match` is the full tool name OpenCode reports (`jira_search`), 1–128 chars of `[A-Za-z0-9_.:-]`, with `*` allowed once at the end as a suffix wildcard (`jira_*`). Optional `name` (1–40, the header title when `title` is absent or renders empty), `icon` (Remixicon name or package `.svg` path, same rules as `panel.icon`; the SVG is drawn in the text colour at the glyph size), `title` / `subtitle` templates (1–200, `{input.path}` / `{output.path}` / `{metadata.path}` placeholders, a missing path renders empty, values are cut at 200), `output` `"auto"` (default) \| `"text"` \| `"json"` \| `"markdown"` \| `"code"` \| `"table"` \| `"card"`, `language` (code only), `columns` (table only, 1–16 dotted paths; rows are the output array or `output.items`), `card` (card only, see Tool cards below). Bad shape is `invalid-tools`. An exact `match` beats a wildcard from any extension; among equals the first extension wins. Only an enabled, fully approved extension's rules apply. With Code Mode, a finished script that made one call is matched under the tool's direct name (`example.findings` in the script is `example_findings`) and shows as that tool's row, with `output` being what the script returned; a running script, a script with several calls, and a failed call or a failed script keep the script row |
 | `providerLogos`       | Optional map of 1–256 OpenCode provider IDs (`/^[a-z0-9][a-z0-9._-]{0,63}$/`, the ID OpenCode reports; IDs the app draws with the same bundled logo follow it, like `claude` for `anthropic`) to a package `.svg` or `.png`, up to 1 MiB each. An alias is another key with the same file. Bad shape is `invalid-provider-logos`; a missing, empty or larger file fails install as `invalid-manifest`. Order for one provider: uploaded logo, chosen icon, extension logo, bundled logo, models.dev logo, generic mark. The first enabled, fully approved extension wins a provider. The image keeps its colours; `currentColor` in an SVG follows the theme. No capability and no page needed. Web and desktop only: VS Code and mobile load no extensions |
 | `fileEditors`         | Optional, 1–8 editors: unique kebab-case `id`, `title` 1–60 chars, `match` 1–16 file-name patterns (no `/`, not only wildcards), `entry` package `.html` with built scripts, optional `content` `"text"` (default) or `"binary"` (`invalid-file-editors`). See File editors above |
 | `filesystem`          | Optional, 1–16 globs, each 1–256 chars, starting with `/` or `~/`; `**` spans folders, `*` / `?` stay in one segment; no `..`, empty segment, or backslash (`invalid-filesystem`). Declaring it adds the `filesystem` capability and the dialog lists the globs |
@@ -571,6 +571,43 @@ Used by the OpenChamber host and by tools that validate packages. Guests rarely 
 
 Extra keys are dropped, not forwarded.
 
+#### Tool cards
+
+`output: "card"` draws a tool's JSON output as a card, from the output alone: no extension code runs.
+
+```json
+{
+  "match": "jira_get_issue",
+  "name": "Jira issue",
+  "title": "{input.key}",
+  "output": "card",
+  "card": {
+    "label": "{output.key} · {output.fields.issuetype.name}",
+    "title": "{output.fields.summary}",
+    "status": { "value": "{output.fields.status.name}", "tones": { "In Progress": "info", "Blocked": "error", "Done": "success" } },
+    "fields": [
+      { "label": "Assignee", "value": "{output.fields.assignee.displayName}" },
+      { "label": "Priority", "value": "{output.fields.priority.name}" }
+    ],
+    "link": { "label": "Open in Jira", "url": "{output.url}" }
+  }
+}
+```
+
+| Part | Rules |
+| ---- | ----- |
+| `label`, `title` | Optional templates, 1–200 chars, at least one `{output.path}` placeholder; `{input.…}` and `{metadata.…}` are refused |
+| `status` | Optional `{ value, tones? }`. `value` is a template like the above. `tones` maps up to 16 status texts (1–64 chars, matched exactly) to `"neutral"` \| `"info"` \| `"success"` \| `"warning"` \| `"error"`; a status without an entry is neutral |
+| `fields` | Optional, 1–8 of `{ label, value }`: `label` plain text 1–40, `value` a template |
+| `link` | Optional `{ label, url }`: `label` plain text 1–40. `url` is `{output.path}` alone (the output holds the address), or an `https://` address written around `{output.path}` placeholders, which may also read `{settings.<id>}`: a `contributes.integration.settings` field declared without `secret` |
+
+At least one of `label`, `title`, `status`, `fields`. Unknown keys are refused. `card` without `output: "card"`, or the reverse, is `invalid-tools`, and the message names the place (`contributes.tools[0].card.link.url: …`).
+
+- An object output is one card. An array, or an object with an `items` array, is a list: one row per item with its label, title, first field and status, the first 200 items, no link. In a row `{output.path}` reads the item.
+- A path that is absent, or holds `null`, a blank string, an object or an array, is missing. A part with nothing resolved is hidden. When no label, title, status or field resolves, or the output is not JSON, the chat shows the output as it would without the rule.
+- The link shows only for an `https` address without a user name or password, at most 2,048 characters. In a written address every placeholder has to resolve and each value is percent-encoded, so a value cannot change the host or path the manifest wrote; a value that would be a `.` or `..` path step gives no link. `https://{settings.site}/browse/{output.key}` works when `site` is a bare host name; a full address, a port or a path in the setting gives no link.
+- `card` ships in the first OpenChamber release after 2.7.0. An older one refuses the package with `invalid-tools`, whatever `engines.openchamber` says.
+
 ### 3.2 Parse / version helpers
 
 
@@ -578,6 +615,7 @@ Extra keys are dropped, not forwarded.
 | -------------------------------------------------- | --------------------------------------------------------- |
 | `parseManifest(document)` (`@openchamber/sdk/schemas`) | Typed document → success/failure (does not throw on junk) |
 | `parseManifestJson(json)` (`@openchamber/sdk/schemas`) | String → same result                                      |
+| `guestToolCardSchema` (`@openchamber/sdk/schemas`) | The zod schema of a tool rule's `card`, for a host that re-reads a catalog row |
 | `resolveAttachMode(attach)`                        | Normalize to `'panel'                                     |
 | `resolveAttachEntry(contributes)`                  | Dialog page from the object form, or `null` when the dialog reuses `panel.entry` |
 | `hasGuestPage(contributes)` | `true` when `panel.entry` is set; background-only and tools-only packages return `false` |

@@ -341,11 +341,49 @@ OpenCode 플러그인이나 MCP 서버가 도구를 추가하면 채팅은 그 �
 ]
 ```
 
-`match`는 OpenCode가 보고하는 도구 이름이며, 끝의 `*`는 접두사와 일치합니다. `icon`은 Remixicon 이름이거나 패키지 안의 `.svg` 파일이며, `panel.icon`과 같습니다. `title`과 `subtitle`은 호출의 `input`, `output`, `metadata`를 쓰는 템플릿입니다. `output`은 본문을 그리는 방식을 고릅니다. `text`, `json`(트리), `markdown`, `language`가 있는 `code`, `columns`가 있는 `table`(행은 출력 배열이나 `output.items`에서 가져옵니다), 또는 기본값인 `auto`입니다. 정확한 `match`가 와일드카드보다 우선하고, 동점이면 먼저 설치된 확장이 이깁니다. 권한은 필요 없습니다. 이미 채팅에 있는 데이터를 그리는 방식만 바꾸기 때문입니다.
+`match`는 OpenCode가 보고하는 도구 이름이며, 끝의 `*`는 접두사와 일치합니다. `icon`은 Remixicon 이름이거나 패키지 안의 `.svg` 파일이며, `panel.icon`과 같습니다. `title`과 `subtitle`은 호출의 `input`, `output`, `metadata`를 쓰는 템플릿입니다. `output`은 본문을 그리는 방식을 고릅니다. `text`, `json`(트리), `markdown`, `language`가 있는 `code`, `columns`가 있는 `table`(행은 출력 배열이나 `output.items`에서 가져옵니다), `card`가 있는 `card`(항목 하나를 카드로 그립니다. 아래 참고), 또는 기본값인 `auto`입니다. 정확한 `match`가 와일드카드보다 우선하고, 동점이면 먼저 설치된 확장이 이깁니다. 권한은 필요 없습니다. 이미 채팅에 있는 데이터를 그리는 방식만 바꾸기 때문입니다.
 
 OpenCode의 Code Mode가 켜져 있으면 에이전트는 도구를 하나씩 부르지 않고 짧은 스크립트에서 호출합니다. 호출이 하나뿐인 스크립트는 그 도구의 행으로 표시되고, `output`은 스크립트가 반환한 값입니다. `match`에는 스크립트의 점 자리에 `_`를 씁니다. 스크립트의 `tools.github.list_issues`는 `github_list_issues`입니다. 여러 번 호출하는 스크립트는 스크립트 자체의 행으로 남습니다.
 
 도구 모양만 꾸미는 확장에는 페이지가 전혀 필요 없습니다. `panel.entry`를 생략하면 레일에 아이콘이 없고, 설정 → 확장 에 카드만 표시됩니다. 페이지가 없으면 `tools`와 `providerLogos`만 선언할 수 있습니다. 또 다른 예외는 자체 `entry`가 있는 Work Status 섹션, 파일 편집기, 전체 화면 페이지입니다(위 참고).
+
+### 항목 하나를 위한 카드
+
+도구가 issue 같은 객체 하나로 응답하면 `output: "card"`가 원본 JSON 대신 그 객체를 카드로 그립니다. `card`는 출력의 어느 부분이 어디에 들어갈지 정합니다.
+
+```json
+"tools": [
+  {
+    "match": "jira_get_issue",
+    "name": "Jira issue",
+    "title": "{input.key}",
+    "output": "card",
+    "card": {
+      "label": "{output.key} · {output.fields.issuetype.name}",
+      "title": "{output.fields.summary}",
+      "status": {
+        "value": "{output.fields.status.name}",
+        "tones": { "In Progress": "info", "Blocked": "error", "Done": "success" }
+      },
+      "fields": [
+        { "label": "Assignee", "value": "{output.fields.assignee.displayName}" },
+        { "label": "Priority", "value": "{output.fields.priority.name}" }
+      ],
+      "link": { "label": "Open in Jira", "url": "{output.url}" }
+    }
+  }
+]
+```
+
+`label`은 맨 위의 작은 줄, `title`은 제목, `status`는 배지, `fields`는 레이블이 붙은 값 최대 8개, `link`는 맨 아래의 링크입니다. 앞의 네 가지 중 하나 이상을 선언하세요. 모든 값은 도구의 `output`을 읽는 템플릿입니다. `tones`는 배지의 텍스트와 정확히 일치하는 항목에 따라 배지 색을 `info`, `success`, `warning`, `error`, `neutral` 중 하나로 정합니다. 나열하지 않은 상태는 neutral입니다.
+
+출력이 배열이거나 `items` 배열을 가지고 있으면 같은 `card`가 간결한 목록을 그립니다. 항목마다 한 행이며 레이블, 제목, 첫 번째 필드, 상태가 표시되고, 이때 `{output.…}` 템플릿은 그 항목을 읽습니다. 처음 200개 항목이 표시되며 행에는 링크가 없습니다.
+
+값이 출력에 없는 부분은 빠집니다. 지정한 것이 출력에 하나도 없거나 출력이 JSON이 아니면, 채팅은 이 규칙이 없을 때와 같은 방식으로 출력을 보여줍니다.
+
+링크는 `https` 주소만 엽니다. `"{output.url}"`은 출력에 있는 주소를 그대로 씁니다. 값을 끼워 넣어 주소를 직접 쓸 수도 있습니다. 예를 들면 `"https://tracker.example.com/browse/{output.key}"`입니다. 그러면 각 값은 퍼센트 인코딩되므로, 직접 쓴 호스트나 경로를 바꿀 수 없습니다. 통합 `settings`가 있는 확장(위의 '계정과 네트워크' 참고)은 비밀이 아닌 설정도 읽을 수 있습니다. `"https://{settings.site}/browse/{output.key}"`에서 `site`는 사용자가 저장한 `acme.atlassian.net` 같은 호스트 이름입니다. 전체 주소, 포트 또는 경로가 들어 있는 설정은 링크를 만들지 않으며, 값이 없을 때도 마찬가지입니다.
+
+`card`에는 2.7.0보다 새로운 OpenChamber 릴리스가 필요합니다. 더 오래된 릴리스는 확장을 유효하지 않은 것으로 보고 거부하며, `engines.openchamber`를 지정해도 이는 바뀌지 않습니다.
 
 ## 프로바이더 로고
 

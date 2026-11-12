@@ -47,9 +47,11 @@ import { DiffViewToggle, type DiffViewMode } from '../DiffViewToggle';
 import { useDefaultDiffViewMode } from '../useDefaultDiffViewMode';
 import { MinDurationShineText } from './MinDurationShineText';
 import { getToolIcon } from './toolPresentation';
+import { GuestToolCard } from './GuestToolCard';
 import { GuestToolTable } from './GuestToolTable';
 import {
     guestToolTableRows,
+    resolveGuestToolCard,
     guestToolHeaderReadsOutput,
     renderGuestToolHeader,
     useGuestToolPresentation,
@@ -875,6 +877,12 @@ const ToolScrollableTextOutput: React.FC<{
     const outputLanguage = getToolOutputLanguage(output, part, metadata, input);
     const jsonResult = React.useMemo(() => tryParseJsonOutput(renderedOutput), [renderedOutput]);
     const forcedMode = presentation?.output && presentation.output !== 'auto' ? presentation.output : null;
+    // A declared card with nothing to draw (not JSON, no part resolves) is
+    // `null` and falls through to the host's own detection, like a table.
+    const card = React.useMemo(
+        () => (forcedMode === 'card' && presentation && jsonResult.isJson ? resolveGuestToolCard(presentation, jsonResult.data) : null),
+        [forcedMode, presentation, jsonResult],
+    );
 
     if (isShellTool(part.tool) && isStreaming) {
         return (
@@ -900,6 +908,8 @@ const ToolScrollableTextOutput: React.FC<{
             return <GuestToolTable rows={rows} columns={presentation.columns} />;
         }
     }
+
+    if (card) return <GuestToolCard result={card} />;
 
     if (forcedMode === 'text' || forcedMode === 'code') {
         return (

@@ -341,11 +341,49 @@ host.onResolve(async ({ command, args }) => {
 ]
 ```
 
-`match` 是 OpenCode 报告的工具名；末尾的 `*` 匹配前缀。`icon` 是 Remixicon 图标名或你包内的 `.svg` 文件，和 `panel.icon` 一样。`title` 和 `subtitle` 是基于这次调用的 `input`、`output` 和 `metadata` 的模板。`output` 决定正文怎么渲染：`text`、`json`（树形）、`markdown`、带 `language` 的 `code`、带 `columns` 的 `table`（行来自输出数组或 `output.items`），或者 `auto` 使用默认方式。精确的 `match` 优先于通配符，平局时先安装的扩展胜出。不需要任何权限：这只改变聊天里已有数据的绘制方式。
+`match` 是 OpenCode 报告的工具名；末尾的 `*` 匹配前缀。`icon` 是 Remixicon 图标名或你包内的 `.svg` 文件，和 `panel.icon` 一样。`title` 和 `subtitle` 是基于这次调用的 `input`、`output` 和 `metadata` 的模板。`output` 决定正文怎么渲染：`text`、`json`（树形）、`markdown`、带 `language` 的 `code`、带 `columns` 的 `table`（行来自输出数组或 `output.items`）、带 `card` 的 `card`（把单个条目显示为卡片，见下文），或者 `auto` 使用默认方式。精确的 `match` 优先于通配符，平局时先安装的扩展胜出。不需要任何权限：这只改变聊天里已有数据的绘制方式。
 
 开启 OpenCode 的 Code Mode 后，智能体通过一段简短的脚本调用工具，而不是逐个调用。只调用一次工具的脚本会显示为该工具的行，`output` 是脚本返回的内容。在 `match` 里，把脚本中的点写成 `_`：脚本里的 `tools.github.list_issues` 对应 `github_list_issues`。调用多次的脚本仍显示为脚本自己的行。
 
 只给工具定制样式的扩展根本不需要页面：不写 `panel.entry`，它就没有侧栏图标，只在 设置 → 扩展 里有一张卡片。没有页面时，它只能声明 `tools` 和 `providerLogos`，别的什么都不写。另一个例外是带自己 `entry` 的 Work Status 分区、文件编辑器或全屏页面，见上文。
+
+### 单个条目的卡片
+
+当工具返回单个对象（比如一个 issue）时，`output: "card"` 会把它绘制成卡片，而不是原始 JSON。`card` 指定输出的哪一部分放在哪里：
+
+```json
+"tools": [
+  {
+    "match": "jira_get_issue",
+    "name": "Jira issue",
+    "title": "{input.key}",
+    "output": "card",
+    "card": {
+      "label": "{output.key} · {output.fields.issuetype.name}",
+      "title": "{output.fields.summary}",
+      "status": {
+        "value": "{output.fields.status.name}",
+        "tones": { "In Progress": "info", "Blocked": "error", "Done": "success" }
+      },
+      "fields": [
+        { "label": "Assignee", "value": "{output.fields.assignee.displayName}" },
+        { "label": "Priority", "value": "{output.fields.priority.name}" }
+      ],
+      "link": { "label": "Open in Jira", "url": "{output.url}" }
+    }
+  }
+]
+```
+
+`label` 是顶部的一行小字，`title` 是标题，`status` 是徽章，`fields` 是最多 8 个带标签的值，`link` 是底部的链接。前四项中至少声明一项。每个值都是读取工具 `output` 的模板。`tones` 按徽章的精确文本为它上色，可取 `info`、`success`、`warning`、`error` 或 `neutral`。没有列出的状态为 neutral。
+
+当输出是数组，或带有 `items` 数组时，同一个 `card` 会绘制一个紧凑列表：每个条目一行，显示它的标签、标题、第一个字段和状态，此时 `{output.…}` 读取的是该条目。只显示前 200 个条目，行上没有链接。
+
+值不在输出中的部分会被省略。如果你指定的内容在输出中一项都没有，或者输出不是 JSON，聊天会按没有这条规则时的方式显示输出。
+
+链接只打开 `https` 地址。`"{output.url}"` 原样取用输出中的地址。你也可以自己写地址，把值嵌在其中，例如 `"https://tracker.example.com/browse/{output.key}"`。这时每个值都会经过百分号编码，因此无法改变你写的主机或路径。带有集成 `settings` 的扩展（见上文"账户与网络"）还可以读取非机密的设置项：`"https://{settings.site}/browse/{output.key}"`，其中用户把 `acme.atlassian.net` 这样的主机名保存为 `site`。如果设置项里是完整地址、端口或路径，就不会生成链接；值缺失时也一样。
+
+`card` 需要比 2.7.0 更新的 OpenChamber 版本。更旧的版本会把扩展当作无效而拒绝，`engines.openchamber` 也改变不了这一点。
 
 ## 你的提供商的徽标
 

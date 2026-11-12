@@ -341,11 +341,49 @@ OpenCode eklentiniz veya MCP sunucunuz bir araç eklediğinde sohbet, çağrıla
 ]
 ```
 
-`match`, OpenCode'un bildirdiği haliyle aracın adıdır; sondaki `*` bir öneki eşleştirir. `icon`, `panel.icon` gibi bir Remixicon adı ya da paketinizdeki bir `.svg` dosyasıdır. `title` ve `subtitle`, çağrının `input`, `output` ve `metadata` değerleri üzerinde çalışan şablonlardır. `output`, gövdenin nasıl çizileceğini seçer: `text`, `json` (ağaç), `markdown`, `language` ile `code`, `columns` ile `table` (satırlar çıktı dizisinden veya `output.items` içinden gelir) ya da varsayılan için `auto`. Tam bir `match` joker karakteri yener; eşitlikte ilk yüklenen eklenti kazanır. İzin gerekmez: bu yalnızca sohbette zaten bulunan verilerin nasıl çizildiğini değiştirir.
+`match`, OpenCode'un bildirdiği haliyle aracın adıdır; sondaki `*` bir öneki eşleştirir. `icon`, `panel.icon` gibi bir Remixicon adı ya da paketinizdeki bir `.svg` dosyasıdır. `title` ve `subtitle`, çağrının `input`, `output` ve `metadata` değerleri üzerinde çalışan şablonlardır. `output`, gövdenin nasıl çizileceğini seçer: `text`, `json` (ağaç), `markdown`, `language` ile `code`, `columns` ile `table` (satırlar çıktı dizisinden veya `output.items` içinden gelir), `card` ile `card` (kart olarak tek bir öğe, aşağıya bakın) ya da varsayılan için `auto`. Tam bir `match` joker karakteri yener; eşitlikte ilk yüklenen eklenti kazanır. İzin gerekmez: bu yalnızca sohbette zaten bulunan verilerin nasıl çizildiğini değiştirir.
 
 OpenCode'un Code Mode özelliği açıkken ajan, araçları tek tek değil kısa bir betikten çağırır. Tek bir çağrı yapan betik o aracın satırı olarak gösterilir ve `output`, betiğin döndürdüğü değerdir. `match` içinde, betikte nokta olan yere `_` yazın: betikteki `tools.github.list_issues`, `github_list_issues` olur. Birden fazla çağrı yapan betik kendi satırını korur.
 
 Yalnızca araçları biçimlendiren bir eklentinin sayfaya hiç ihtiyacı yoktur: `panel.entry` öğesini atlayın, şeritte simgesi olmaz, sadece Ayarlar → Uzantılar içinde bir kart görünür. Sayfası olmadan yalnızca `tools` ve `providerLogos` tanımlayabilir, başka bir şey tanımlamaz. Diğer istisna, kendi `entry` sayfası olan bir Work Status bölümü, dosya düzenleyicisi veya tam ekran sayfadır, yukarıya bakın.
+
+### Tek bir öğe için kart
+
+Bir araç tek bir nesneyle, örneğin bir issue ile yanıt verdiğinde `output: "card"` onu ham JSON yerine bir kart olarak çizer. `card`, çıktının hangi kısmının nereye gideceğini söyler:
+
+```json
+"tools": [
+  {
+    "match": "jira_get_issue",
+    "name": "Jira issue",
+    "title": "{input.key}",
+    "output": "card",
+    "card": {
+      "label": "{output.key} · {output.fields.issuetype.name}",
+      "title": "{output.fields.summary}",
+      "status": {
+        "value": "{output.fields.status.name}",
+        "tones": { "In Progress": "info", "Blocked": "error", "Done": "success" }
+      },
+      "fields": [
+        { "label": "Assignee", "value": "{output.fields.assignee.displayName}" },
+        { "label": "Priority", "value": "{output.fields.priority.name}" }
+      ],
+      "link": { "label": "Open in Jira", "url": "{output.url}" }
+    }
+  }
+]
+```
+
+`label` en üstteki küçük satır, `title` başlık, `status` bir rozet, `fields` en fazla sekiz etiketli değer, `link` ise en alttaki bağlantıdır. İlk dördünden en az birini tanımlayın. Her değer, aracın `output` değerini okuyan bir şablondur. `tones`, rozeti tam metnine göre `info`, `success`, `warning`, `error` veya `neutral` olarak renklendirir. Listelemediğiniz bir durum nötr olur.
+
+Çıktı bir diziyse ya da bir `items` dizisi içeriyorsa aynı `card` kompakt bir liste çizer: her öğe için etiketi, başlığı, ilk alanı ve durumuyla bir satır. Burada `{output.…}` o öğeyi okur. İlk 200 öğe gösterilir ve satırlarda bağlantı olmaz.
+
+Değeri çıktıda bulunmayan bir kısım atlanır. Adını verdiğiniz hiçbir şey çıktıda yoksa ya da çıktı JSON değilse sohbet, çıktıyı kural olmasaydı göstereceği gibi gösterir.
+
+Bağlantı yalnızca bir `https` adresini açar. `"{output.url}"`, adresi çıktıdan olduğu gibi alır. Adresi değerlerin çevresine kendiniz de yazabilirsiniz, örneğin `"https://tracker.example.com/browse/{output.key}"`. O zaman her değer yüzde kodlamasından geçer, bu yüzden yazdığınız ana makineyi veya yolu değiştiremez. Entegrasyon `settings` alanları olan bir eklenti (yukarıdaki Hesaplar ve ağ bölümüne bakın) gizli olmayan bir ayarı da okuyabilir: `"https://{settings.site}/browse/{output.key}"`. Burada kullanıcı `acme.atlassian.net` gibi bir ana makine adını `site` olarak kaydetmiştir. Tam bir adres, bir port veya bir yol içeren bir ayar bağlantı vermez; eksik bir değer de vermez.
+
+`card`, 2.7.0'dan yeni bir OpenChamber sürümü gerektirir. Daha eski bir sürüm eklentiyi geçersiz sayıp reddeder ve `engines.openchamber` bunu değiştirmez.
 
 ## Sağlayıcınızın logosu
 

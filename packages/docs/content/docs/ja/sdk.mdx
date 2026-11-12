@@ -341,11 +341,49 @@ host.onResolve(async ({ command, args }) => {
 ]
 ```
 
-`match` は OpenCode が報告するツール名で、末尾の `*` は前方一致です。`icon` は Remixicon の名前か、パッケージ内の `.svg` ファイルで、`panel.icon` と同じです。`title` と `subtitle` は呼び出しの `input`、`output`、`metadata` を使うテンプレートです。`output` は本文の描画方法を選びます。`text`、`json`(ツリー)、`markdown`、`language` 付きの `code`、`columns` 付きの `table`(行は出力の配列か `output.items` から取られます)、または既定の `auto` です。完全一致の `match` はワイルドカードより優先され、同点なら先にインストールされた拡張機能が勝ちます。権限は要りません。これはすでにチャットにあるデータの描き方を変えるだけです。
+`match` は OpenCode が報告するツール名で、末尾の `*` は前方一致です。`icon` は Remixicon の名前か、パッケージ内の `.svg` ファイルで、`panel.icon` と同じです。`title` と `subtitle` は呼び出しの `input`、`output`、`metadata` を使うテンプレートです。`output` は本文の描画方法を選びます。`text`、`json`(ツリー)、`markdown`、`language` 付きの `code`、`columns` 付きの `table`(行は出力の配列か `output.items` から取られます)、`card` 付きの `card`(1 つの項目をカードとして描きます。後述)、または既定の `auto` です。完全一致の `match` はワイルドカードより優先され、同点なら先にインストールされた拡張機能が勝ちます。権限は要りません。これはすでにチャットにあるデータの描き方を変えるだけです。
 
 OpenCode の Code Mode が有効なとき、エージェントはツールを 1 つずつではなく短いスクリプトから呼び出します。呼び出しが 1 つだけのスクリプトはそのツールの行として表示され、`output` はスクリプトが返した値になります。`match` には、スクリプトでドットになっている箇所を `_` にして書きます。スクリプト内の `tools.github.list_issues` は `github_list_issues` です。複数回呼び出すスクリプトは、スクリプト自身の行のままです。
 
 ツールの見た目を整えるだけの拡張機能にはページはまったく不要です。`panel.entry` を省略すると、レールにアイコンは出ず、設定 → 拡張機能 にカードが表示されるだけになります。ページがない場合に宣言できるのは `tools` と `providerLogos` だけです。もう一つの例外は、独自の `entry` を持つ Work Status セクション、ファイルエディター、または全画面ページです(上記参照)。
+
+### 1 つの項目のカード
+
+ツールが issue のようなオブジェクトを 1 つ返すとき、`output: "card"` は生の JSON の代わりに、それをカードとして描きます。`card` は、出力のどの部分をどこに置くかを指定します。
+
+```json
+"tools": [
+  {
+    "match": "jira_get_issue",
+    "name": "Jira issue",
+    "title": "{input.key}",
+    "output": "card",
+    "card": {
+      "label": "{output.key} · {output.fields.issuetype.name}",
+      "title": "{output.fields.summary}",
+      "status": {
+        "value": "{output.fields.status.name}",
+        "tones": { "In Progress": "info", "Blocked": "error", "Done": "success" }
+      },
+      "fields": [
+        { "label": "Assignee", "value": "{output.fields.assignee.displayName}" },
+        { "label": "Priority", "value": "{output.fields.priority.name}" }
+      ],
+      "link": { "label": "Open in Jira", "url": "{output.url}" }
+    }
+  }
+]
+```
+
+`label` は上部の小さな行、`title` は見出し、`status` はバッジ、`fields` は最大 8 個のラベル付きの値、`link` は下部のリンクです。最初の 4 つのうち少なくとも 1 つを宣言してください。どの値も、ツールの `output` を読むテンプレートです。`tones` はバッジのテキストとの完全一致で色を決め、`info`、`success`、`warning`、`error`、`neutral` のいずれかを指定します。列挙しなかったステータスは neutral になります。
+
+出力が配列のとき、または `items` 配列を持つとき、同じ `card` はコンパクトな一覧を描きます。項目ごとに 1 行で、ラベル、タイトル、最初のフィールド、ステータスが並び、`{output.…}` はその項目を読みます。表示されるのは最初の 200 件で、行にリンクは付きません。
+
+値が出力にない部分は省かれます。指定したものが出力に 1 つもない場合や、出力が JSON でない場合、チャットはこのルールがないときと同じように出力を表示します。
+
+リンクが開くのは `https` のアドレスだけです。`"{output.url}"` は出力にあるアドレスをそのまま使います。値を埋め込む形で、アドレスを自分で書くこともできます。たとえば `"https://tracker.example.com/browse/{output.key}"` です。この場合、各値はパーセントエンコードされるので、あなたが書いたホストやパスを変えることはできません。連携の `settings`(上記の「アカウントとネットワーク」を参照)を持つ拡張機能は、シークレットではない設定も読めます。`"https://{settings.site}/browse/{output.key}"` では、ユーザーが `acme.atlassian.net` のようなホスト名を `site` として保存しています。完全なアドレス、ポート、またはパスが入った設定ではリンクは出ません。値がない場合も同じです。
+
+`card` には 2.7.0 より新しい OpenChamber のリリースが必要です。古いリリースは拡張機能を無効なものとして拒否し、`engines.openchamber` を指定してもそれは変わりません。
 
 ## プロバイダーのロゴ
 

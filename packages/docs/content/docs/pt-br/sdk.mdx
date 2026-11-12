@@ -341,11 +341,49 @@ Quando o seu plugin do OpenCode ou servidor MCP adiciona uma ferramenta, o chat 
 ]
 ```
 
-`match` é o nome da ferramenta como o OpenCode o reporta; um `*` no final casa com um prefixo. `icon` é um nome do Remixicon ou um arquivo `.svg` no seu pacote, como `panel.icon`. `title` e `subtitle` são templates sobre `input`, `output` e `metadata` da chamada. `output` escolhe como o corpo é renderizado: `text`, `json` (uma árvore), `markdown`, `code` com um `language`, `table` com `columns` (as linhas vêm do array de saída ou de `output.items`) ou `auto` para o padrão. Um `match` exato vence um curinga, e em caso de empate vence a primeira extensão instalada. Nenhuma permissão é necessária: isso só muda como dados que já estão no chat são desenhados.
+`match` é o nome da ferramenta como o OpenCode o reporta; um `*` no final casa com um prefixo. `icon` é um nome do Remixicon ou um arquivo `.svg` no seu pacote, como `panel.icon`. `title` e `subtitle` são templates sobre `input`, `output` e `metadata` da chamada. `output` escolhe como o corpo é renderizado: `text`, `json` (uma árvore), `markdown`, `code` com um `language`, `table` com `columns` (as linhas vêm do array de saída ou de `output.items`), `card` com `card` (um item como um card, veja abaixo) ou `auto` para o padrão. Um `match` exato vence um curinga, e em caso de empate vence a primeira extensão instalada. Nenhuma permissão é necessária: isso só muda como dados que já estão no chat são desenhados.
 
 Com o Code Mode do OpenCode ativado, o agente chama as ferramentas a partir de um script curto em vez de uma por uma. Um script que faz uma única chamada aparece como a linha dessa ferramenta, e `output` é o que o script retornou. Escreva `match` com `_` onde o script tem um ponto: `tools.github.list_issues` em um script é `github_list_issues`. Um script que faz várias chamadas mantém a própria linha.
 
 Uma extensão que só estiliza ferramentas não precisa de página nenhuma: deixe `panel.entry` de fora e ela não terá ícone na barra lateral, só um card em Configurações → Extensões. Sem página ela pode declarar `tools` e `providerLogos`, e nada mais. A outra exceção é uma seção do Work Status, um editor de arquivos ou uma página em tela cheia com `entry` próprio, veja acima.
+
+### Um card para um item
+
+Quando uma ferramenta responde com um único objeto, como uma issue, `output: "card"` o desenha como um card em vez de JSON bruto. `card` diz qual parte da saída vai em cada lugar:
+
+```json
+"tools": [
+  {
+    "match": "jira_get_issue",
+    "name": "Jira issue",
+    "title": "{input.key}",
+    "output": "card",
+    "card": {
+      "label": "{output.key} · {output.fields.issuetype.name}",
+      "title": "{output.fields.summary}",
+      "status": {
+        "value": "{output.fields.status.name}",
+        "tones": { "In Progress": "info", "Blocked": "error", "Done": "success" }
+      },
+      "fields": [
+        { "label": "Assignee", "value": "{output.fields.assignee.displayName}" },
+        { "label": "Priority", "value": "{output.fields.priority.name}" }
+      ],
+      "link": { "label": "Open in Jira", "url": "{output.url}" }
+    }
+  }
+]
+```
+
+`label` é a linha pequena no topo, `title` é o título, `status` é um selo, `fields` são até oito valores com rótulo e `link` é um link na parte de baixo. Declare pelo menos um dos quatro primeiros. Todo valor é um template que lê o `output` da ferramenta. `tones` colore o selo pelo texto exato dele, como `info`, `success`, `warning`, `error` ou `neutral`. Um status que você não listou fica neutro.
+
+Quando a saída é um array, ou tem um array `items`, o mesmo `card` desenha uma lista compacta: uma linha por item, com rótulo, título, primeiro campo e status, em que `{output.…}` lê esse item. Aparecem os primeiros 200 itens, e as linhas não têm link.
+
+Uma parte cujo valor não está na saída fica de fora. Se nada do que você indicou estiver lá, ou se a saída não for JSON, o chat mostra a saída como mostraria sem a regra.
+
+O link só abre um endereço `https`. `"{output.url}"` usa o endereço da saída como ele está. Você também pode escrever o endereço por conta própria em volta dos valores, como `"https://tracker.example.com/browse/{output.key}"`. Nesse caso cada valor passa por percent-encoding, então não consegue mudar o host nem o caminho que você escreveu. Uma extensão com `settings` de integração (veja Contas e rede acima) também pode ler uma configuração que não é secreta: `"https://{settings.site}/browse/{output.key}"`, em que o usuário salvou um nome de host como `acme.atlassian.net` em `site`. Uma configuração que contém um endereço completo, uma porta ou um caminho não gera link, e um valor ausente também não.
+
+`card` precisa de uma versão do OpenChamber mais nova que a 2.7.0. Uma versão mais antiga recusa a extensão como inválida, e `engines.openchamber` não muda isso.
 
 ## O logo do seu provedor
 

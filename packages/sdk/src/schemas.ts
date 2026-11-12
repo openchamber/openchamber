@@ -2,6 +2,7 @@
 // validate an untrusted guest's manifest and messages with zod. Guests import
 // `@openchamber/sdk`, which carries no schema library.
 export {
+  guestToolCardSchema,
   openChamberManifestSchema,
   PACKAGE_VERSION_PATTERN,
   packageManifestSchema,

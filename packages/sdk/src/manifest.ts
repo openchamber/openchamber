@@ -159,18 +159,87 @@ export const GUEST_TOOL_COLUMNS_MAX = 16;
 /** Characters in one column path. */
 export const GUEST_TOOL_COLUMN_MAX = 64;
 
-export const GUEST_TOOL_OUTPUTS = ['auto', 'text', 'json', 'markdown', 'code', 'table'] as const;
+/** How many `fields` a `card` may list. */
+export const GUEST_TOOL_CARD_FIELDS_MAX = 8;
+/** How many status texts a card's `status.tones` may map. */
+export const GUEST_TOOL_CARD_TONES_MAX = 16;
+/** Characters in one `status.tones` key, the status text it colours. */
+export const GUEST_TOOL_CARD_TONE_KEY_MAX = 64;
+/** Characters in the address a card's `link.url` renders to; a longer one shows no link. */
+export const GUEST_TOOL_CARD_URL_MAX = 2048;
+
+export const GUEST_TOOL_OUTPUTS = ['auto', 'text', 'json', 'markdown', 'code', 'table', 'card'] as const;
 
 /** How the expanded body of a matched tool call renders. `auto` keeps the host's own detection. */
 export type GuestToolOutput = (typeof GUEST_TOOL_OUTPUTS)[number];
+
+/** The colours an extension may ask for by meaning; the host's theme picks the actual ones. */
+export const GUEST_TONES = ['neutral', 'info', 'success', 'warning', 'error'] as const;
+
+export type GuestTone = (typeof GUEST_TONES)[number];
+
+/** What a `title` or `subtitle` template reads from. */
+export const GUEST_TOOL_TEMPLATE_ROOTS = ['input', 'output', 'metadata'] as const;
+
+/**
+ * The placeholders of a tool template over the given roots: `{output}` or
+ * `{output.fields.status.name}`, the root in group 1 and the dotted path
+ * (with its leading dot) in group 2. A new global pattern on every call, so
+ * no caller inherits another's `lastIndex`.
+ */
+export const guestToolPlaceholderPattern = (roots: readonly string[]): RegExp => (
+  new RegExp(`\\{(${roots.join('|')})((?:\\.[A-Za-z0-9_-]+)*)\\}`, 'g')
+);
+
+/**
+ * A card link also reads `{settings.<id>}`, so a card template is checked over
+ * these. Written out, not spread from the roots above: a bundler keeps a
+ * spread in every guest bundle, used or not.
+ */
+export const GUEST_TOOL_CARD_TEMPLATE_ROOTS = ['input', 'output', 'metadata', 'settings'] as const;
+
+/** The `contributes.integration.settings` ids the card links of these tools read, each once. */
+export const guestToolLinkSettingIds = (tools: readonly GuestToolContribution[] | undefined): string[] => {
+  const ids = new Set<string>();
+  for (const tool of tools ?? []) {
+    for (const match of (tool.card?.link?.url ?? '').matchAll(guestToolPlaceholderPattern(['settings']))) {
+      if (match[2]) ids.add(match[2].slice(1));
+    }
+  }
+  return [...ids];
+};
+
+/**
+ * The body of `output: "card"`, drawn by the host from the tool's JSON output.
+ * `label`, `title`, `status.value`, each `fields[].value` and `link.url` are
+ * templates that read `{output.path}` only; `fields[].label` and `link.label`
+ * are plain text. A part whose placeholders all miss is hidden. When the
+ * output is an array, or has an `items` array, each item is a row drawn from
+ * the same templates with `output` bound to that item.
+ *
+ * `status.tones` maps a rendered status text, matched exactly, to a tone;
+ * anything else is neutral. `link.url` is either one placeholder holding a
+ * whole address (`{output.url}`) or an `https://` address built around
+ * placeholders, whose values are percent-encoded; there it may also read
+ * `{settings.<id>}`, a non-secret `contributes.integration.settings` field.
+ * The link shows only for an `https` address without credentials.
+ */
+export type GuestToolCard = {
+  label?: string;
+  title?: string;
+  status?: { value: string; tones?: Record<string, GuestTone> };
+  fields?: { label: string; value: string }[];
+  link?: { label: string; url: string };
+};
 
 /**
  * How a tool call looks in the chat, declared without code. `match` is the
  * full tool name OpenCode reports, or a prefix ending in `*`. `title` and
  * `subtitle` are templates with `{input.path}`, `{output.path}`, and
  * `{metadata.path}` placeholders; a missing path renders as an empty string.
- * `language` only means something for `output: "code"` and `columns` only
- * for `output: "table"` (rows are the output array or `output.items`).
+ * `language` only means something for `output: "code"`, `columns` only
+ * for `output: "table"` (rows are the output array or `output.items`), and
+ * `card` only for `output: "card"`.
  */
 export type GuestToolContribution = {
   match: string;
@@ -183,6 +252,7 @@ export type GuestToolContribution = {
   output?: GuestToolOutput;
   language?: string;
   columns?: string[];
+  card?: GuestToolCard;
 };
 
 export type IntegrationSettingField = {

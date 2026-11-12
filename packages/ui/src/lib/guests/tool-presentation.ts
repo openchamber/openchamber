@@ -1,5 +1,15 @@
 import React from 'react';
-import { GUEST_TOOL_TEMPLATE_VALUE_MAX, type GuestToolContribution, type JsonValue } from '@openchamber/sdk';
+import {
+  GUEST_TOOL_CARD_TEMPLATE_ROOTS,
+  GUEST_TOOL_CARD_URL_MAX,
+  GUEST_TOOL_TEMPLATE_ROOTS,
+  GUEST_TOOL_TEMPLATE_VALUE_MAX,
+  guestToolPlaceholderPattern,
+  type GuestTone,
+  type GuestToolCard,
+  type GuestToolContribution,
+  type JsonValue,
+} from '@openchamber/sdk';
 import type { ToolInput } from '@/lib/opencode/model';
 
 import { isGuestActive } from './capabilities.ts';
@@ -12,7 +22,11 @@ export type GuestToolRule = GuestToolContribution & {
   /** `match` without its trailing `*`; the whole name for an exact rule. */
   prefix: string;
   wildcard: boolean;
+  /** The guest's setting values a card link reads as `{settings.<id>}`. */
+  linkSettings: Readonly<Record<string, string>>;
 };
+
+const NO_LINK_SETTINGS: Readonly<Record<string, string>> = Object.freeze({});
 
 const EMPTY_RULES: GuestToolRule[] = [];
 
@@ -33,6 +47,7 @@ export const compileGuestToolRules = (guests: readonly InstalledGuest[]): GuestT
         guestId: guest.id,
         prefix: wildcard ? tool.match.slice(0, -1) : tool.match,
         wildcard,
+        linkSettings: guest.toolLinkSettings ?? NO_LINK_SETTINGS,
       });
     }
   }
@@ -139,7 +154,7 @@ type TemplateContext = {
   metadata: TemplateValue;
 };
 
-const PLACEHOLDER = /\{(input|output|metadata)((?:\.[A-Za-z0-9_-]+)*)\}/g;
+const PLACEHOLDER = guestToolPlaceholderPattern(GUEST_TOOL_TEMPLATE_ROOTS);
 
 /**
  * Substitutes `{input.path}` / `{output.path}` / `{metadata.path}` in a
@@ -221,4 +236,169 @@ export const guestToolTableRows = (output: TemplateValue): JsonValue[] | null =>
     if (isJsonArray(items)) return items;
   }
   return null;
+};
+
+/** Rows drawn for a list; the rest is a count line, as in a table. */
+export const GUEST_TOOL_CARD_ROWS_MAX = 200;
+
+const CARD_PLACEHOLDER = guestToolPlaceholderPattern(GUEST_TOOL_CARD_TEMPLATE_ROOTS);
+
+/**
+ * A value a card or a link can show: text that is not blank, a number or a
+ * boolean. Nothing, a blank string, an object and an array are all "missing":
+ * the JSON text of an object has no place in a card.
+ */
+const cardScalar = (value: TemplateValue): string | null => {
+  if (String(value) === value) return value.trim() === '' ? null : value;
+  return Number(value) === value || Boolean(value) === value ? String(value) : null;
+};
+
+/**
+ * One card template over one output. `null` when none of its placeholders
+ * resolves, which hides the part; a placeholder that misses beside one that
+ * resolves renders as nothing, the way it does in a title.
+ */
+const renderCardText = (template: string, output: TemplateValue): string | null => {
+  let resolved = false;
+  const text = template.replace(PLACEHOLDER, (written, root: string, rest: string) => {
+    if (root !== 'output') return written;
+    const value = cardScalar(readPath(output, rest.slice(1)));
+    if (value === null) return '';
+    resolved = true;
+    return stringifyTemplateValue(value);
+  }).trim();
+  return resolved && text !== '' ? text : null;
+};
+
+/**
+ * An address the host may put in an `href`: it parses, it is `https`, it
+ * carries no user name or password, and it is not longer than a link may be.
+ * Returns the address as the parser wrote it, so what was checked is what
+ * opens. `null` otherwise.
+ */
+export const safeHttpsAddress = (address: string): string | null => {
+  if (address.length > GUEST_TOOL_CARD_URL_MAX) return null;
+  let url: URL;
+  try {
+    url = new URL(address);
+  } catch {
+    return null;
+  }
+  if (url.protocol !== 'https:' || url.username !== '' || url.password !== '') return null;
+  return url.href.length > GUEST_TOOL_CARD_URL_MAX ? null : url.href;
+};
+
+// What the manifest wrote between the host and the query, as its steps. The
+// substituted values are percent-encoded, so every separator is the template's.
+const writtenPathSteps = (address: string): string[] => (
+  (/^https:\/\/[^/\\?#]*([^?#]*)/i.exec(address)?.[1] ?? '').split(/[/\\]/)
+);
+
+const isDotStep = (step: string): boolean => /^(?:\.|%2e){1,2}$/i.test(step);
+
+/**
+ * The address of a card's link, or `null` for no link. A template that is one
+ * placeholder takes the output's own address as it is. Anything longer is an
+ * address the manifest wrote around values: each value is percent-encoded, so
+ * it stays inside the step, the query value or the host label it was written
+ * into, and a value that would walk the path (`..`) gives no link. Every
+ * placeholder has to resolve, and the finished address passes
+ * `safeHttpsAddress`.
+ */
+export const renderGuestToolLinkUrl = (
+  template: string,
+  data: { output: TemplateValue; settings: Readonly<Record<string, string>> },
+): string | null => {
+  const whole = [...template.matchAll(CARD_PLACEHOLDER)];
+  if (whole.length === 1 && whole[0]?.[0] === template) {
+    const value = whole[0][1] === 'output' ? readPath(data.output, (whole[0][2] ?? '').slice(1)) : undefined;
+    return String(value) === value ? safeHttpsAddress(value.trim()) : null;
+  }
+  let missing = whole.length === 0;
+  const address = template.replace(CARD_PLACEHOLDER, (_written, root: string, rest: string) => {
+    const path = rest.slice(1);
+    let value: string | null = null;
+    if (root === 'output') value = cardScalar(readPath(data.output, path));
+    else if (root === 'settings' && Object.hasOwn(data.settings, path)) value = cardScalar(data.settings[path]);
+    if (value === null) {
+      missing = true;
+      return '';
+    }
+    try {
+      return encodeURIComponent(value.trim());
+    } catch {
+      // A lone surrogate has no percent-encoding.
+      missing = true;
+      return '';
+    }
+  });
+  if (missing || writtenPathSteps(address).some(isDotStep)) return null;
+  return safeHttpsAddress(address);
+};
+
+/** One card, or one row of a list, with the parts that resolved. */
+export type GuestToolCardView = {
+  label: string | null;
+  title: string | null;
+  status: { text: string; tone: GuestTone } | null;
+  fields: { label: string; value: string }[];
+  link: { label: string; url: string } | null;
+};
+
+export type GuestToolCardResult =
+  | { kind: 'card'; card: GuestToolCardView }
+  /** `hidden` counts the output items past the row cap. */
+  | { kind: 'list'; rows: GuestToolCardView[]; hidden: number };
+
+const cardView = (
+  card: GuestToolCard,
+  output: TemplateValue,
+  settings: Readonly<Record<string, string>>,
+  withLink: boolean,
+): GuestToolCardView | null => {
+  const label = card.label ? renderCardText(card.label, output) : null;
+  const title = card.title ? renderCardText(card.title, output) : null;
+  const statusText = card.status ? renderCardText(card.status.value, output) : null;
+  const tones = card.status?.tones;
+  const fields: GuestToolCardView['fields'] = [];
+  for (const field of card.fields ?? []) {
+    const value = renderCardText(field.value, output);
+    if (value !== null) fields.push({ label: field.label, value });
+  }
+  if (label === null && title === null && statusText === null && fields.length === 0) return null;
+  const url = withLink && card.link ? renderGuestToolLinkUrl(card.link.url, { output, settings }) : null;
+  return {
+    label,
+    title,
+    status: statusText === null ? null : {
+      text: statusText,
+      tone: tones && Object.hasOwn(tones, statusText) ? tones[statusText] ?? 'neutral' : 'neutral',
+    },
+    fields,
+    link: url !== null && card.link ? { label: card.link.label, url } : null,
+  };
+};
+
+/**
+ * What `output: "card"` draws for a parsed output: one card for an object, a
+ * list for an array or an `items` array, one row per item from the same
+ * templates with `output` bound to the item. `null` when there is nothing to
+ * draw (not JSON data, no part of the card resolves, no row does), and the
+ * caller then shows the output the way it would without the rule. A list row
+ * carries no link.
+ */
+export const resolveGuestToolCard = (rule: GuestToolRule, output: TemplateValue): GuestToolCardResult | null => {
+  if (!rule.card) return null;
+  const items = guestToolTableRows(output);
+  if (!items) {
+    if (!isJsonObject(output)) return null;
+    const card = cardView(rule.card, output, rule.linkSettings, true);
+    return card ? { kind: 'card', card } : null;
+  }
+  const rows: GuestToolCardView[] = [];
+  for (const item of items.slice(0, GUEST_TOOL_CARD_ROWS_MAX)) {
+    const row = cardView(rule.card, item, rule.linkSettings, false);
+    if (row) rows.push(row);
+  }
+  return rows.length > 0 ? { kind: 'list', rows, hidden: Math.max(0, items.length - GUEST_TOOL_CARD_ROWS_MAX) } : null;
 };

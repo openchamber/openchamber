@@ -341,11 +341,49 @@ Gdy Twoja wtyczka OpenCode lub serwer MCP dodaje narzędzie, czat pokazuje jego 
 ]
 ```
 
-`match` to nazwa narzędzia w takiej postaci, w jakiej zgłasza ją OpenCode; `*` na końcu dopasowuje prefiks. `icon` to nazwa ikony Remixicon albo plik `.svg` w Twoim pakiecie, tak jak `panel.icon`. `title` i `subtitle` to szablony nad `input`, `output` i `metadata` wywołania. `output` wybiera sposób renderowania treści: `text`, `json` (drzewo), `markdown`, `code` z `language`, `table` z `columns` (wiersze pochodzą z tablicy wyniku lub z `output.items`) albo `auto` dla domyślnego. Dokładny `match` wygrywa z symbolem wieloznacznym, a przy remisie wygrywa pierwsze zainstalowane rozszerzenie. Żadna zgoda nie jest potrzebna: to zmienia tylko sposób rysowania danych, które już są w czacie.
+`match` to nazwa narzędzia w takiej postaci, w jakiej zgłasza ją OpenCode; `*` na końcu dopasowuje prefiks. `icon` to nazwa ikony Remixicon albo plik `.svg` w Twoim pakiecie, tak jak `panel.icon`. `title` i `subtitle` to szablony nad `input`, `output` i `metadata` wywołania. `output` wybiera sposób renderowania treści: `text`, `json` (drzewo), `markdown`, `code` z `language`, `table` z `columns` (wiersze pochodzą z tablicy wyniku lub z `output.items`), `card` z `card` (jeden element jako karta, patrz niżej) albo `auto` dla domyślnego. Dokładny `match` wygrywa z symbolem wieloznacznym, a przy remisie wygrywa pierwsze zainstalowane rozszerzenie. Żadna zgoda nie jest potrzebna: to zmienia tylko sposób rysowania danych, które już są w czacie.
 
 Gdy Code Mode w OpenCode jest włączony, agent wywołuje narzędzia z krótkiego skryptu zamiast pojedynczo. Skrypt z jednym wywołaniem jest pokazywany jako wiersz tego narzędzia, a `output` to wynik zwrócony przez skrypt. W `match` wpisz `_` tam, gdzie w skrypcie jest kropka: `tools.github.list_issues` w skrypcie to `github_list_issues`. Skrypt z kilkoma wywołaniami zachowuje własny wiersz.
 
 Rozszerzenie, które tylko stylizuje narzędzia, nie potrzebuje żadnej strony: pomiń `panel.entry`, a nie będzie miało ikony na pasku bocznym, tylko kartę w Ustawienia → Rozszerzenia. Bez strony może deklarować `tools` i `providerLogos`, i nic więcej. Drugi wyjątek to sekcja Work Status, edytor plików lub strona na pełnym ekranie z własnym `entry`, patrz wyżej.
+
+### Karta dla jednego elementu
+
+Gdy narzędzie odpowiada jednym obiektem, na przykład issue, `output: "card"` rysuje go jako kartę zamiast surowego JSON-a. `card` mówi, która część wyniku trafia w które miejsce:
+
+```json
+"tools": [
+  {
+    "match": "jira_get_issue",
+    "name": "Jira issue",
+    "title": "{input.key}",
+    "output": "card",
+    "card": {
+      "label": "{output.key} · {output.fields.issuetype.name}",
+      "title": "{output.fields.summary}",
+      "status": {
+        "value": "{output.fields.status.name}",
+        "tones": { "In Progress": "info", "Blocked": "error", "Done": "success" }
+      },
+      "fields": [
+        { "label": "Assignee", "value": "{output.fields.assignee.displayName}" },
+        { "label": "Priority", "value": "{output.fields.priority.name}" }
+      ],
+      "link": { "label": "Open in Jira", "url": "{output.url}" }
+    }
+  }
+]
+```
+
+`label` to mały wiersz na górze, `title` to nagłówek, `status` to odznaka, `fields` to do ośmiu wartości z etykietami, a `link` to link na dole. Zadeklaruj co najmniej jedno z pierwszych czterech. Każda wartość jest szablonem, który czyta `output` narzędzia. `tones` koloruje odznakę według jej dokładnego tekstu, jako `info`, `success`, `warning`, `error` lub `neutral`. Status, którego nie wymienisz, jest neutralny.
+
+Gdy wynik jest tablicą albo ma tablicę `items`, to samo `card` rysuje zwartą listę: jeden wiersz na element, z jego etykietą, tytułem, pierwszym polem i statusem, a `{output.…}` czyta wtedy ten element. Pokazuje się pierwsze 200 elementów, a wiersze nie mają linku.
+
+Część, której wartości nie ma w wyniku, jest pomijana. Jeśli w wyniku nie ma niczego, co wymieniasz, albo wynik nie jest JSON-em, czat pokazuje wynik tak, jak pokazałby go bez tej reguły.
+
+Link otwiera tylko adres `https`. `"{output.url}"` bierze adres z wyniku bez zmian. Możesz też napisać adres samodzielnie, wokół wartości, na przykład `"https://tracker.example.com/browse/{output.key}"`. Każda wartość jest wtedy kodowana procentowo, więc nie może zmienić hosta ani ścieżki, które wpisujesz. Rozszerzenie z `settings` integracji (zobacz Konta i sieć wyżej) może też odczytać ustawienie, które nie jest tajne: `"https://{settings.site}/browse/{output.key}"`, gdzie użytkownik zapisał jako `site` nazwę hosta, na przykład `acme.atlassian.net`. Ustawienie, które zawiera pełny adres, port albo ścieżkę, nie daje linku, tak samo jak wartość, której brakuje.
+
+`card` wymaga wersji OpenChamber nowszej niż 2.7.0. Starsza odrzuca rozszerzenie jako nieprawidłowe, a `engines.openchamber` tego nie zmienia.
 
 ## Logo Twojego dostawcy
 

@@ -444,8 +444,13 @@ export const setGuestConfigurationNote = (guestId, message) => {
   return true;
 };
 
-/** Catalog JSON. Drops packageRoot. Keeps attach only when true. `entry` is absent for a page-less guest. */
-export const toPublicGuest = (guest) => {
+/**
+ * Catalog JSON. Drops packageRoot. Keeps attach only when true. `entry` is absent for a page-less guest.
+ * `toolLinkSettings` are the setting values the guest's card links read
+ * (`toolLinkSettingsOf`); only the catalog route passes them, since the chat
+ * draws from the catalog alone.
+ */
+export const toPublicGuest = (guest, toolLinkSettings = null) => {
   const row = {
     id: guest.id,
     name: guest.name,
@@ -526,6 +531,9 @@ export const toPublicGuest = (guest) => {
   }
   if (Array.isArray(guest.tools) && guest.tools.length > 0) {
     row.tools = guest.tools.map((tool) => ({ ...tool }));
+  }
+  if (toolLinkSettings && Object.keys(toolLinkSettings).length > 0) {
+    row.toolLinkSettings = { ...toolLinkSettings };
   }
   if (guest.providerLogos) {
     row.providerLogos = { ...guest.providerLogos };

@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import { OPENCHAMBER_SDK_API_VERSION } from './api-version.ts';
-import { GUEST_PROVIDER_LOGOS_MAX, clampStatusSectionHeight, hasGuestPage, requestedGuestCapabilities, toPublicNotifications, toPublicQuota, toPublicSessionEvents, toPublicSourceControl, resolveAttachEntry, resolvePageEntry, resolveStatusSectionEntry, resolveStatusSectionSource, resolveAttachMode, resolveIntegrationApi, toPublicIntegration, type OpenChamberContributes, isOpenCodeProviderId, isTrackerUrlTemplate, toPublicTracker } from './manifest.ts';
+import { GUEST_PROVIDER_LOGOS_MAX, GUEST_TONES, GUEST_TOOL_CARD_FIELDS_MAX, GUEST_TOOL_CARD_TONES_MAX, GUEST_TOOL_CARD_TONE_KEY_MAX, GUEST_TOOL_TEMPLATE_MAX, guestToolLinkSettingIds, clampStatusSectionHeight, hasGuestPage, requestedGuestCapabilities, toPublicNotifications, toPublicQuota, toPublicSessionEvents, toPublicSourceControl, resolveAttachEntry, resolvePageEntry, resolveStatusSectionEntry, resolveStatusSectionSource, resolveAttachMode, resolveIntegrationApi, toPublicIntegration, type OpenChamberContributes, isOpenCodeProviderId, isTrackerUrlTemplate, toPublicTracker } from './manifest.ts';
 import type { JsonValue } from './contract.ts';
 import type { LinksContribution } from './manifest.ts';
 import { parseManifest, parseManifestJson } from './parse.ts';
@@ -940,6 +940,180 @@ describe('contributes.tools', () => {
     for (const tools of cases) {
       expect(withTools(tools)).toMatchObject({ ok: false, code: 'invalid-tools' });
     }
+  });
+});
+
+describe('contributes.tools card', () => {
+  const integration = {
+    name: 'Tracker',
+    description: 'Issues from a tracker',
+    token: { scheme: 'bearer' as const, apiOrigin: 'https://api.tracker.example' },
+    settings: [{ id: 'site', label: 'Site' }, { id: 'api-key', label: 'API key', secret: true as const }],
+  };
+  const withCard = (card: JsonValue, extra: { [key: string]: JsonValue } = {}) => parseManifest({
+    apiVersion: 1,
+    contributes: { panel: validBlock.contributes.panel, tools: [{ match: 'tracker_issue', output: 'card', card }], ...extra },
+  });
+  const message = (result: ReturnType<typeof parseManifest>): string => (result.ok ? 'ok' : `${result.code}: ${result.message}`);
+
+  test('reads a card with every part, at each bound', () => {
+    const card = {
+      label: '{output.key} · {output.fields.issuetype.name}',
+      title: `{output.fields.summary}${'t'.repeat(GUEST_TOOL_TEMPLATE_MAX - '{output.fields.summary}'.length)}`,
+      status: {
+        value: '{output.fields.status.name}',
+        tones: Object.fromEntries(new Array(GUEST_TOOL_CARD_TONES_MAX).fill(null).map((_, index) => [
+          index === 0 ? 's'.repeat(GUEST_TOOL_CARD_TONE_KEY_MAX) : `Status ${index}`, GUEST_TONES[index % GUEST_TONES.length],
+        ])),
+      },
+      fields: new Array(GUEST_TOOL_CARD_FIELDS_MAX).fill(null).map((_, index) => ({ label: `Field ${index}`, value: `{output.fields.${index}}` })),
+      link: { label: 'Open in tracker', url: '{output.url}' },
+    };
+    const result = withCard(card);
+    expect(message(result)).toBe('ok');
+    if (result.ok) expect(result.manifest.contributes.tools?.[0]?.card).toEqual(card);
+  });
+
+  test('one part is a card, and a link alone is not', () => {
+    for (const card of [{ label: '{output.key}' }, { title: '{output}' }, { status: { value: '{output.state}' } }, { fields: [{ label: 'Owner', value: '{output.owner}' }] }]) {
+      expect(message(withCard(card))).toBe('ok');
+    }
+    expect(withCard({ link: { label: 'Open', url: '{output.url}' } })).toMatchObject({
+      ok: false, code: 'invalid-tools', message: 'contributes.tools[0].card: needs label, title, status or fields; a link alone is not a card.',
+    });
+    expect(withCard({})).toMatchObject({ ok: false, code: 'invalid-tools' });
+  });
+
+  test('card and output "card" come together', () => {
+    const withTool = (tool: { [key: string]: JsonValue }) => parseManifest({ apiVersion: 1, contributes: { panel: validBlock.contributes.panel, tools: [{ match: 'x', ...tool }] } });
+    for (const tool of [{ output: 'card' }, { card: { title: '{output.title}' } }, { output: 'table', columns: ['id'], card: { title: '{output.title}' } }]) {
+      expect(withTool(tool)).toMatchObject({
+        ok: false, code: 'invalid-tools', message: 'contributes.tools[0].card: card and output "card" come together: declare both or neither.',
+      });
+    }
+  });
+
+  test('rejects a card outside its shape', () => {
+    const cases: unknown[] = [
+      null,
+      'card',
+      { title: '{output.title}', footer: '{output.footer}' },
+      { title: '' },
+      { title: `{output.t}${'t'.repeat(GUEST_TOOL_TEMPLATE_MAX)}` },
+      { title: 7 },
+      { status: '{output.state}' },
+      { status: { tones: { Done: 'success' } } },
+      { status: { value: '{output.state}', tone: 'info' } },
+      { status: { value: '{output.state}', tones: { Done: 'green' } } },
+      { status: { value: '{output.state}', tones: { Done: 'accent' } } },
+      { status: { value: '{output.state}', tones: { ['s'.repeat(GUEST_TOOL_CARD_TONE_KEY_MAX + 1)]: 'info' } } },
+      { status: { value: '{output.state}', tones: { '': 'info' } } },
+      { status: { value: '{output.state}', tones: Object.fromEntries(new Array(GUEST_TOOL_CARD_TONES_MAX + 1).fill(null).map((_, index) => [`s${index}`, 'info'])) } },
+      { status: { value: '{output.state}', tones: ['info'] } },
+      { fields: [] },
+      { fields: new Array(GUEST_TOOL_CARD_FIELDS_MAX + 1).fill({ label: 'Owner', value: '{output.owner}' }) },
+      { fields: [{ value: '{output.owner}' }] },
+      { fields: [{ label: 'Owner' }] },
+      { fields: [{ label: 'l'.repeat(41), value: '{output.owner}' }] },
+      { fields: [{ label: 'Owner', value: '{output.owner}', tone: 'info' }] },
+      { title: '{output.title}', link: '{output.url}' },
+      { title: '{output.title}', link: { url: '{output.url}' } },
+      { title: '{output.title}', link: { label: 'Open', url: '{output.url}', target: '_self' } },
+      { title: '{output.title}', link: { label: 'l'.repeat(41), url: '{output.url}' } },
+    ];
+    for (const card of cases) {
+      expect(withCard(card)).toMatchObject({ ok: false, code: 'invalid-tools' });
+    }
+  });
+
+  test('a card template reads the output and nothing else', () => {
+    expect(withCard({ title: 'Issue' })).toMatchObject({
+      ok: false, message: 'contributes.tools[0].card.title: needs at least one {output.path} placeholder.',
+    });
+    expect(withCard({ title: '{output.key} for {input.project}' })).toMatchObject({
+      ok: false, message: "contributes.tools[0].card.title: a card reads the tool's output only: write {output.path} where it says {input.project}.",
+    });
+    for (const card of [
+      { label: '{metadata.key}' },
+      { status: { value: '{output.state} {settings.site}' } },
+      { fields: [{ label: 'Owner', value: '{input.owner}' }] },
+      // Not placeholders, so nothing reads the output.
+      { title: '{output.}' },
+      { title: '{ output.title }' },
+      { title: '{output.a b}' },
+      { title: '{outputs.title}' },
+    ]) {
+      expect(withCard(card)).toMatchObject({ ok: false, code: 'invalid-tools' });
+    }
+  });
+
+  test('a link is one placeholder or an https address written around placeholders', () => {
+    const link = (url: JsonValue, extra?: { [key: string]: JsonValue }) => withCard({ title: '{output.title}', link: { label: 'Open', url } }, extra);
+    for (const url of [
+      '{output.url}',
+      '{output.links.0.href}',
+      'https://tracker.example/browse/{output.key}',
+      'https://tracker.example/{output.project}/issues/{output.number}?from=chat#activity',
+      'https://{output.site}/browse/{output.key}',
+    ]) {
+      expect(message(link(url))).toBe('ok');
+    }
+    for (const url of [
+      'https://tracker.example/browse',
+      'https://tracker.example/browse/{input.key}',
+      'https://tracker.example/browse/{metadata.key}',
+      'http://tracker.example/browse/{output.key}',
+      '{output.origin}/browse/{output.key}',
+      '{output.url}?from=chat',
+      ' {output.scheme}://tracker.example/{output.key}',
+      '//tracker.example/browse/{output.key}',
+      '/browse/{output.key}',
+      'javascript:open({output.key})',
+      'https://user:{output.token}@tracker.example/{output.key}',
+      'https://{output.user}@tracker.example/{output.key}',
+      'https://tracker.example:{output.port}/browse/{output.key}',
+      `https://tracker.example/{output.key}/${'p'.repeat(GUEST_TOOL_TEMPLATE_MAX)}`,
+      7,
+    ]) {
+      expect(link(url)).toMatchObject({ ok: false, code: 'invalid-tools' });
+    }
+    expect(link('ftp://tracker.example/{output.key}')).toMatchObject({
+      message: 'contributes.tools[0].card.link.url: an address written around placeholders starts with https://, has no user name or password, and takes no placeholder as its port.',
+    });
+  });
+
+  test('a link reads a declared setting that is not a secret', () => {
+    const link = (url: string, extra: { [key: string]: JsonValue } = { integration }) => withCard({ title: '{output.title}', link: { label: 'Open', url } }, extra);
+
+    expect(message(link('https://{settings.site}/browse/{output.key}'))).toBe('ok');
+    expect(link('https://{settings.host}/browse/{output.key}')).toMatchObject({
+      ok: false, code: 'invalid-tools', message: 'contributes.tools[0].card.link.url: {settings.host} names no contributes.integration.settings field.',
+    });
+    expect(link('https://{settings.api-key}/browse/{output.key}')).toMatchObject({
+      ok: false, code: 'invalid-tools', message: 'contributes.tools[0].card.link.url: {settings.api-key} names a secret field, and a link reads only a field without "secret".',
+    });
+    // Without an integration there is no field to name.
+    expect(link('https://{settings.site}/browse/{output.key}', {})).toMatchObject({
+      ok: false, code: 'invalid-tools', message: 'contributes.tools[0].card.link.url: {settings.site} names no contributes.integration.settings field.',
+    });
+    for (const url of ['https://{settings.site}/browse', 'https://{settings}/{output.key}', 'https://{settings.site.host}/{output.key}', 'https://{settings.Site}/{output.key}', '{settings.site}']) {
+      expect(link(url)).toMatchObject({ ok: false, code: 'invalid-tools' });
+    }
+    // A title is not a link: there the text stays as written and names nothing.
+    expect(message(parseManifest({
+      apiVersion: 1,
+      contributes: { panel: validBlock.contributes.panel, tools: [{ match: 'x', title: '{settings.site} {input.key}' }] },
+    }))).toBe('ok');
+  });
+
+  test('names the settings the card links read, each once', () => {
+    expect(guestToolLinkSettingIds([
+      { match: 'a', output: 'card', card: { title: '{output.t}', link: { label: 'Open', url: 'https://{settings.site}/{settings.space}/{output.key}' } } },
+      { match: 'b', output: 'card', card: { title: '{output.t}', link: { label: 'Open', url: 'https://{settings.site}/{output.key}' } } },
+      { match: 'c', title: '{settings.other}', output: 'card', card: { title: '{output.t}', link: { label: 'Open', url: '{output.url}' } } },
+      { match: 'd' },
+    ])).toEqual(['site', 'space']);
+    expect(guestToolLinkSettingIds(undefined)).toEqual([]);
   });
 });
 
