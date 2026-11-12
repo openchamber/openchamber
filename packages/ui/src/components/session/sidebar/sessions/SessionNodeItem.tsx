@@ -46,6 +46,15 @@ import { formatProjectLabel, formatSessionCompactDateLabel, formatSessionDateLab
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useOpenTrackerItem } from '@/components/sourceBoard/openTrackerItem';
 import { RowMarkTooltip } from './RowMarkTooltip';
+import { GuestRowMarkLines, GuestRowMarks } from './GuestRowMarks';
+import { useRowGuestMarks } from './useRowGuestMarks';
+import { openGuestSurface } from '@/lib/guests/open-surface';
+import { openGuestUrl } from '@/lib/guests/open-url';
+import { resolveEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
+import type { RowGuestMark } from '@/lib/guests/marks';
+import { isSpaceDirectory } from '@/lib/spaces/space-route';
+import { pluginModeFromId } from '@/lib/surfaces/modes';
+import { useGitBranchLabel } from '@/stores/useGitStore';
 import { SIDEBAR_REF_TOOLTIP_CLOSE_DELAY_MS, SidebarRefLinks } from './SidebarRefLinks';
 import { useScrollDismissedTooltip } from './useScrollDismissedTooltip';
 import { refTintStyle } from '@/lib/source-control/prVisualState';
@@ -435,6 +444,34 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
     sessionProjectId ? state.projects.find((entry) => entry.id === sessionProjectId)?.path ?? null : null,
   );
   const trackerDirectory = projectRootDirectory ?? sessionDirectory;
+  // Extensions' marks (`contributes.marks`): the session's own, its branch's
+  // and its folder's. An isolated space's rows show none, since no service
+  // hears of a space's sessions, and VS Code loads no extensions.
+  const guestMarksOff = isVSCode || isSpaceDirectory(sessionDirectory);
+  const markRootDirectory = normalizePath(projectRootDirectory);
+  // The folder that holds the session's own: its worktree, else the project
+  // root. In the tree a row without a worktree lies in the root, whatever
+  // subfolder the session started in; elsewhere only the root itself counts.
+  const markContainerDirectory = guestMarksOff
+    ? null
+    : normalizePath(node.worktree?.path ?? null) ?? (markRootDirectory && sessionDirectory && (
+      sessionDirectory === markRootDirectory
+      || (renderContext === 'project' && !archivedBucket && sessionDirectory.startsWith(`${markRootDirectory}/`))
+    ) ? markRootDirectory : null);
+  // The row's branch is the one the sidebar already has, live Git state
+  // first; a row that knows none shows no branch mark.
+  const liveBranch = useGitBranchLabel(guestMarksOff ? null : sessionDirectory);
+  const liveContainerBranch = useGitBranchLabel(markContainerDirectory);
+  const markBranch = guestMarksOff
+    ? null
+    : liveBranch || liveContainerBranch || node.worktree?.branch?.trim() || (branchInSpace ? null : secondaryMeta?.branchLabel?.trim()) || null;
+  const guestMarks = useRowGuestMarks({
+    sessionId: guestMarksOff ? null : session.id,
+    projectId: guestMarksOff ? null : sessionProjectId ?? null,
+    branch: markBranch,
+    folder: guestMarksOff ? null : sessionDirectory,
+    containerFolder: markContainerDirectory,
+  });
   // Multi-select scope: sessions are flat per project, so selection groups by
   // project (falling back to the directory when no project is known) — a
   // selection must survive mixing sessions from different worktrees.
@@ -1114,6 +1151,18 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
     </Tooltip>
   ) : null;
 
+  // A mark opens its extension's panel on this row's session, selecting it
+  // first; an extension without a panel opens the mark's link where the user
+  // is, as the PR badge opens its page, and selects nothing.
+  const openGuestMark = (mark: RowGuestMark) => {
+    if (!mark.panel) {
+      if (mark.url) void openGuestUrl(mark.url, resolveEffectiveDirectory() ?? null, true);
+      return;
+    }
+    handleSessionSelect(session.id, sessionDirectory);
+    openGuestSurface({ mode: pluginModeFromId(mark.guestId), directory: sessionDirectory, supported: true });
+  };
+
   // Every row shares the timeline row body: grouped and Chats rows use its
   // one-line form, with the session's live state and time on the right.
   const rowBody = (
@@ -1147,6 +1196,7 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
       prBadge={timelinePrBadge}
       zombieIndicator={isTimelineRow ? streamingIndicator : null}
       goal={sessionGoalGlyph}
+      marks={guestMarks.length > 0 ? <GuestRowMarks marks={guestMarks} onOpen={openGuestMark} /> : null}
       badges={rowBadges}
       doneHint={doneHintBadge()}
       // Grouped rows reserve room for permanent actions on their button.
@@ -1296,6 +1346,9 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
                       </div>
                     ) : null}
                     {refLines.length > 0 ? <SidebarRefLinks items={refLines} directory={trackerDirectory} /> : null}
+                    {/* Every mark, not only those past the two drawn: on a one-line
+                        row the hover actions cover the cluster. */}
+                    {guestMarks.length > 0 ? <GuestRowMarkLines marks={guestMarks} /> : null}
                     {currentRecap ? (
                       <p className="min-w-0 line-clamp-4 text-muted-foreground">{currentRecap}</p>
                     ) : null}

@@ -387,6 +387,9 @@ export const inspectGuestPackage = async (packageRoot, { openchamberVersion, ski
   if (parsed.manifest.contributes.instructions) {
     guest.instructions = true;
   }
+  if (parsed.manifest.contributes.marks) {
+    guest.marks = true;
+  }
   if (parsed.manifest.contributes.mentions) {
     guest.mentions = parsed.manifest.contributes.mentions;
   }
@@ -584,6 +587,9 @@ export const toPublicGuest = (guest, toolLinkSettings = null) => {
   }
   if (guest.instructions) {
     row.instructions = true;
+  }
+  if (guest.marks) {
+    row.marks = true;
   }
   if (guest.skills) {
     row.skills = true;

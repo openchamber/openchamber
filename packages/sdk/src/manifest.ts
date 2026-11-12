@@ -915,9 +915,10 @@ export const serviceProvides = (
  * follows from `contributes.links`: identifiers and links in chat messages
  * become the extension's, and a click hands the one clicked to it. `wake`
  * follows from `contributes.waits`: the service's text reaches an agent's
- * session when a wait it started fires.
+ * session when a wait it started fires. `marks` follows from
+ * `contributes.marks`: the service puts icons on sidebar rows.
  */
-export const GUEST_CAPABILITIES = ['prompt', 'sessions', 'files', 'model', 'shells', 'conversation', 'service', 'network', 'filesystem', 'origins', 'transcript', 'sessionControl', 'sessionAnswers', 'instructions', 'skills', 'opencodePlugin', 'opencode', 'links', 'wake'] as const;
+export const GUEST_CAPABILITIES = ['prompt', 'sessions', 'files', 'model', 'shells', 'conversation', 'service', 'network', 'filesystem', 'origins', 'transcript', 'sessionControl', 'sessionAnswers', 'instructions', 'skills', 'opencodePlugin', 'opencode', 'links', 'wake', 'marks'] as const;
 
 export type GuestCapability = (typeof GUEST_CAPABILITIES)[number];
 
@@ -1092,6 +1093,8 @@ export type OpenChamberContributes = {
   sessionControl?: SessionControlContribution;
   /** The service adds to what agents read. Needs `service`. Grants `instructions`. */
   instructions?: true;
+  /** The service puts marks on sidebar rows (`marks.set`). Needs `service`. Grants `marks`. */
+  marks?: true;
   /** A folder of `<name>/SKILL.md` skills inside the package. Grants `skills`. */
   skills?: string;
   /**
@@ -1119,7 +1122,7 @@ export type PublicGuestCapabilities = {
 };
 
 export const requestedGuestCapabilities = (
-  contributes: Pick<OpenChamberContributes, 'capabilities' | 'integration' | 'service' | 'filesystem' | 'actions' | 'origins' | 'sessionEvents' | 'sessionControl' | 'instructions' | 'skills' | 'opencodePlugin' | 'links' | 'waits'>,
+  contributes: Pick<OpenChamberContributes, 'capabilities' | 'integration' | 'service' | 'filesystem' | 'actions' | 'origins' | 'sessionEvents' | 'sessionControl' | 'instructions' | 'skills' | 'opencodePlugin' | 'links' | 'waits' | 'marks'>,
 ): GuestCapability[] => {
   const declared = new Set<GuestCapability>(contributes.capabilities ?? []);
   if (guestActionsNeedConversation(contributes.actions)) declared.add('conversation');
@@ -1136,6 +1139,7 @@ export const requestedGuestCapabilities = (
   if (contributes.opencodePlugin) declared.add('opencodePlugin');
   if (contributes.links) declared.add('links');
   if (contributes.waits && contributes.waits.length > 0) declared.add('wake');
+  if (contributes.marks) declared.add('marks');
   return GUEST_CAPABILITIES.filter((capability) => declared.has(capability));
 };
 
@@ -1258,6 +1262,7 @@ export type ParseManifestErrorCode =
   | 'invalid-session-events'
   | 'invalid-session-control'
   | 'invalid-instructions'
+  | 'invalid-marks'
   | 'invalid-skills'
   | 'invalid-opencode-plugin'
   | 'invalid-mentions'

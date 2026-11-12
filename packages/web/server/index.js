@@ -140,7 +140,8 @@ import { createJevClient } from './lib/routing/jev.js';
 import { createSessionWorkRuntime } from './lib/session-work/runtime.js';
 import { createSessionLineage } from './lib/session-lineage.js';
 import { createGracefulShutdownRuntime } from './lib/opencode/shutdown-runtime.js';
-import { beginGuestServiceHost, beginGuestServiceShutdown, getServiceStatus, holdGuestService, proxyGuestServiceRequest, stopAllGuestServices } from './lib/guests/service.js';
+import { beginGuestServiceHost, beginGuestServiceShutdown, getServiceStatus, holdGuestService, onGuestServiceEnded, proxyGuestServiceRequest, stopAllGuestServices } from './lib/guests/service.js';
+import { guestMarks } from './lib/guests/marks.js';
 import { guestServiceRegistryDir } from './lib/guests/service-registry.js';
 import { findInstalledGuest, listInstalledGuests, setGuestConfigurationNote } from './lib/guests/catalog.js';
 import { createExtensionSessionEvents } from './lib/guests/session-events.js';
@@ -2267,6 +2268,12 @@ const insideSpaceTaskNaming = process.env.OPENCHAMBER_SPACE_TASK_TITLE_FILE && p
     announce: broadcastOpenChamberUiEvent,
   }) : null;
 
+const announceGuestMarksChanged = () => broadcastOpenChamberUiEvent({ type: 'openchamber:guest-marks-changed', properties: {} });
+// A mark lives as long as the process that set it.
+onGuestServiceEnded((guestId) => {
+  if (guestMarks.dropEnded(guestId)) announceGuestMarksChanged();
+});
+
 const serviceHostApi = createServiceHostApi({
   listGuests: () => listInstalledGuests({ persistPath: extensionsPersistPath(OPENCHAMBER_DATA_DIR) }),
   control: {
@@ -2285,6 +2292,13 @@ const serviceHostApi = createServiceHostApi({
   }),
   setConfigurationNote: (guestId, message) => {
     if (setGuestConfigurationNote(guestId, message)) broadcastOpenChamberUiEvent({ type: 'openchamber:guests-changed', properties: {} });
+  },
+  marks: {
+    set: (...args) => {
+      const outcome = guestMarks.set(...args);
+      if (outcome === 'changed') announceGuestMarksChanged();
+      return outcome;
+    },
   },
 });
 serviceHostApi.register();
@@ -3145,6 +3159,7 @@ async function main(options = {}) {
     onGuestDeactivated: async (event) => {
       guestSurfaceRuntime?.endForGuest(event.guestId);
       setGuestConfigurationNote(event.guestId, null);
+      if (guestMarks.clearGuest(event.guestId)) announceGuestMarksChanged();
       if (event.removed) await guestInstructions.remove(event.guestId);
       return browserControlRouter.handleGuestDeactivated(event);
     },

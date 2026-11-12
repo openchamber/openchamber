@@ -256,6 +256,28 @@ Um serviço inicia na primeira requisição, e o serviço de um papel para quand
 
 Uma execução é um `POST /schedule`. Leia-a com `readServiceScheduleRequest` e responda 200. Uma execução perdida enquanto o OpenChamber estava fora do ar não volta. Um serviço que precisa de eventos externos mantém a própria conexão ou faz polling.
 
+## Marcas nas linhas da barra lateral
+
+`contributes.marks: true` permite que o seu serviço coloque ícones pequenos nas linhas da barra lateral, por exemplo um X vermelho em cada sessão de uma branch cujas verificações falham. O usuário aprova isso como uma linha separada.
+
+```ts
+await host.setMark({ directory, branch: 'feature/login' }, { icon: 'close-circle', tone: 'error', text: 'Checks failed' });
+await host.setMark({ sessionId }, { icon: 'robot-2', tone: 'info', text: 'Started from the desk' });
+await host.setMark({ sessionId }, null);
+```
+
+| Destino | Linhas |
+| --- | --- |
+| `{ sessionId }` | aquela sessão |
+| `{ directory, branch }` | cada sessão naquela branch e a linha do worktree da branch; `directory` é qualquer pasta do repositório |
+| `{ directory }` | as sessões naquela pasta e o worktree que fica nela |
+
+`icon` é um nome do Remixicon, `tone` é `neutral`, `info`, `success`, `warning` ou `error`, e `text` (até 200 caracteres) é a dica, mostrada depois do nome da extensão. Um clique abre o seu painel na sessão daquela linha. Uma extensão sem painel pode adicionar um endereço `https` em `url`, e o clique abre esse endereço.
+
+Definir um destino de novo substitui a marca dele, e `null` a remove. Uma linha desenha no máximo duas marcas, uma por extensão, e lista todas na dica dela. Em uma linha de uma só linha de texto, os botões da linha cobrem as marcas enquanto o ponteiro está sobre ela, então um clique alcança uma marca nas linhas de duas linhas de texto e em telas sensíveis ao toque.
+
+Uma marca vive enquanto o processo do seu serviço viver, então declare `service.keepRunning` e defina as marcas de novo quando o serviço iniciar. Um serviço mantém até 200 marcas e as altera até 60 vezes por minuto. As marcas precisam de uma versão do OpenChamber mais nova que a 2.7.0: uma mais antiga ignora a chave e recusa a chamada.
+
 ## Linhas no menu @
 
 `contributes.mentions: { label }` adiciona uma seção ao menu `@` da caixa de chat. Seu serviço responde a `POST /mentions/search` com `{ items: [{ id, title, subtitle?, url? }] }` em até 2 segundos, e a `POST /mentions/resolve` com `{ text }` para a linha que o usuário escolhe. O texto vai para o agente com a mensagem, e o usuário vê um chip. Um serviço lento não adiciona linhas e nunca segura os arquivos; uma linha que não pode ser lida não deixa chip e avisa isso.

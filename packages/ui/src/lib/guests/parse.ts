@@ -249,6 +249,7 @@ const installedGuestSchema = z.object({
   quota: publicQuotaSchema.optional().catch(undefined),
   sessionControl: z.object({ content: z.boolean() }).optional().catch(undefined),
   instructions: z.literal(true).optional().catch(undefined),
+  marks: z.literal(true).optional().catch(undefined),
   skills: z.literal(true).optional().catch(undefined),
   opencodePlugin: z.literal(true).optional().catch(undefined),
   mentions: z.object({ label: z.string().trim().min(1) }).optional().catch(undefined),

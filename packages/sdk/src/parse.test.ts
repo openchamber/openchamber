@@ -1932,6 +1932,24 @@ describe('services that act on their own', () => {
   test('mentions need no frame', () => {
     expect(parse({ panel: pageless, service, mentions: { label: 'Notes' } }).ok).toBe(true);
   });
+
+  test('marks are true, need a service and no frame, and ask for their own capability', () => {
+    const running = { ...service, keepRunning: true };
+    const accepted = parse({ panel: pageless, service: running, marks: true });
+    expect(accepted.ok).toBe(true);
+    if (accepted.ok) {
+      expect(accepted.manifest.contributes.marks).toBe(true);
+      expect(requestedGuestCapabilities(accepted.manifest.contributes)).toEqual(['service', 'marks']);
+    }
+    expect(parse({ panel: { ...pageless, entry: 'panel/index.html' }, marks: true })).toMatchObject({
+      ok: false, code: 'invalid-marks', message: "contributes.marks is served by the extension's service; declare contributes.service.",
+    });
+    const refused: JsonValue[] = [false, 'true', 1, {}, { icon: 'alert' }, [], null];
+    for (const hostile of refused) {
+      expect(parse({ panel: pageless, service: running, marks: hostile }), JSON.stringify(hostile)).toMatchObject({ ok: false, code: 'invalid-marks', message: 'contributes.marks is true.' });
+    }
+    expect(requestedGuestCapabilities({ service: { entry: 'service/main.js', runtime: 'host' } })).toEqual(['service']);
+  });
 });
 
 describe('contributes.blocks', () => {

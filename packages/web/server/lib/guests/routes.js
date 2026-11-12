@@ -32,6 +32,7 @@ import {
   resolveGuestServedFile,
   toPublicGuest,
 } from './catalog.js';
+import { guestMarks, mayGuestShowMarks } from './marks.js';
 import { createGuestPackageWatch } from './package-watch.js';
 import { runGuestFileOperation } from './files.js';
 import { createGuestFrameGrants } from './frame-grants.js';
@@ -263,6 +264,8 @@ export const registerGuestRoutes = (app, {
     readGlobalEntries: () => ({ path: '', targets: [] }),
     addGlobalEntry: () => { throw new Error('No global OpenCode config here.'); },
   },
+  // What running services put on sidebar rows (`marks.js`).
+  marks = guestMarks,
 }) => {
   const persistPath = extensionsPersistPath(openchamberDataDir);
   const authPath = guestAuthPersistPath(openchamberDataDir);
@@ -358,6 +361,20 @@ export const registerGuestRoutes = (app, {
     } catch (error) {
       console.error('Failed to search extension mentions:', error);
       res.status(500).json({ error: 'Failed to search extension mentions' });
+    }
+  });
+
+  // Before the `:id` routes as well. Marks travel apart from the catalog: a
+  // service changes them far more often than anything a catalog reload is for.
+  app.get('/api/guests/marks', async (_req, res) => {
+    try {
+      const guests = await listInstalledGuests({ persistPath });
+      res.json({
+        marks: guests.filter(mayGuestShowMarks).flatMap((guest) => marks.list(guest.id).map(({ target, mark }) => ({ guestId: guest.id, target, mark }))),
+      });
+    } catch (error) {
+      console.error('Failed to list extension marks:', error);
+      res.status(500).json({ error: 'Failed to list extension marks' });
     }
   });
 

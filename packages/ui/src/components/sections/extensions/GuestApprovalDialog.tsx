@@ -36,6 +36,7 @@ const CAPABILITY_ROWS = {
   opencodePlugin: { icon: 'puzzle', titleKey: 'settings.extensions.capability.opencodePlugin', detailKey: 'settings.extensions.capability.opencodePlugin.detail' },
   links: { icon: 'link', titleKey: 'settings.extensions.capability.links', detailKey: 'settings.extensions.capability.links.detail' },
   wake: { icon: 'timer', titleKey: 'settings.extensions.capability.wake', detailKey: 'settings.extensions.capability.wake.detail' },
+  marks: { icon: 'flag', titleKey: 'settings.extensions.capability.marks', detailKey: 'settings.extensions.capability.marks.detail' },
 } satisfies Record<GuestCapability, { icon: IconName; titleKey: I18nKey; detailKey: I18nKey }>;
 
 type GuestApprovalDialogProps = {
@@ -210,6 +211,12 @@ export const GuestApprovalDialog: React.FC<GuestApprovalDialogProps> = ({ guest,
                         {t(guest.links.action === 'open' ? 'settings.extensions.capability.links.open' : 'settings.extensions.capability.links.attach')}
                       </p>
                     </div>
+                  ) : null}
+                  {capability === 'marks' ? (
+                    // What a click on a mark does: the panel when the package has one, else the mark's own link.
+                    <p className="typography-meta mt-0.5 text-foreground">
+                      {t(guest?.entry ? 'settings.extensions.capability.marks.panel' : 'settings.extensions.capability.marks.link')}
+                    </p>
                   ) : null}
                   {capability === 'service' && sessionEvents.length > 0 ? (
                     <div className="typography-meta mt-0.5 text-foreground">

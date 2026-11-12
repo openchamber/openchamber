@@ -868,13 +868,70 @@ chevron, while its saved collapse stays and its delete dialog counts the members
   containing worktree by longest prefix. Branch labels are live-first.
 - A detailed zone row has two lines of fixed height (20px and 16px). An empty
   second line is omitted; a project icon, branch, goal, linked reference,
-  waiting request or expansion chevron keeps it visible. The first holds the title and the action indicator, pin, done hint,
+  waiting request or expansion chevron keeps it visible, and an extension's
+  mark never does. The first holds the title and the action indicator, pin, done hint,
   status icon and time; hover actions cover that cluster. The second opens
   with the project's icon and holds the branch (or the space's name) and the
-  state cluster: goal glyph, PR (or the zombie warning), permission/question
-  badges. It shows no provider logo: the model's provider says nothing about
+  state cluster: goal glyph, PR (or the zombie warning), extension marks,
+  permission/question badges. It shows no provider logo: the model's provider says nothing about
   the work, and the maintainer dropped it on 2026-10-25. The linked PRs and
   issues come from `useSessionRefLines`, which the phone's rows read too.
+- Extension marks (`contributes.marks`, contract in
+  `packages/sdk/DOCUMENTATION.md`, *Sidebar marks*) are icons a running
+  extension service puts on rows: `sessions/GuestRowMarks.tsx` draws them,
+  `sessions/useRowGuestMarks.ts` reads them for one row, and
+  `lib/guests/marks-store.ts` holds them, read from the server by
+  `hooks/useGuestMarksSync.ts`. The rules:
+  - Place. Right after the PR badge (or the zombie warning) and before the
+    permission/question badges, through the `marks` slot of
+    `SessionTimelineRowBody`: in the first line's cluster on a one-line row,
+    in the second line's state cluster on a two-line row. A worktree work row
+    draws them after its reference mark, in the same two places.
+  - Height. A mark never opens a second line, so a mark that comes or goes
+    leaves the row's height as it was. On a two-line row whose second line has
+    nothing else, the marks ride in the first line's cluster.
+  - Count. One per extension, in catalog order, the first two drawn. There is
+    no "+N": the whole-row tooltip lists every mark of the row as icon,
+    extension name and text (`GuestRowMarkLines`), the drawn ones included,
+    because on a one-line row the hover actions cover the cluster.
+  - Which marks. Those set on the row's session, on its branch in its project,
+    and on its folder or the folder that holds it (its worktree, else the
+    project root). For one extension the session's mark wins over the
+    branch's and the branch's over the folder's (`mergeRowGuestMarks`).
+  - The row's branch is the one the sidebar already has, live first: Git state
+    at the session's folder, then at the folder that holds it, then the
+    worktree's recorded branch, then the row's `secondaryMeta.branchLabel`. A
+    row that knows no branch shows no branch mark, so a project root switched
+    to another branch does not keep the old branch's mark. After a switch the
+    mark follows once the Git store has refreshed.
+  - A zone row without a worktree knows the project root only when its own
+    folder is the root, so a session started in a subfolder of the root
+    matches a folder mark by its own folder alone there. In the project tree
+    such a row lies in the root.
+  - Tooltip. `{extension name}: {text}` above the mark (`RowMarkTooltip`),
+    plain text, never a link. While the pointer is on a mark, its tooltip
+    replaces the whole-row one.
+  - Click. A mark of an extension with a panel is a button: it selects the
+    row's session and opens that extension's panel there
+    (`openGuestSurface`); on a worktree work row it opens the work as a click
+    on the row does, then the panel for that folder. Without a panel, a mark
+    that carries a link opens it (`openGuestUrl`) and selects nothing. With
+    neither it is an image with an accessible name. The button keeps the
+    row's press handlers off, as the PR badge does.
+  - Reach. The click works where the cluster stays visible: the second line
+    of a two-line row and touch layouts (`alwaysShowActions`). On a one-line
+    row the hover actions cover the cluster on hover and on keyboard focus;
+    a mark there takes Tab and Enter but is covered while focused, as the PR
+    badge is.
+  - Cost. A row subscribes by its own keys and gets arrays that keep their
+    identity while their content does, so a mark set on one row renders that
+    row only (`SessionNodeItem.marks.test.tsx`). Nothing polls: the sync hook
+    reads `GET /api/guests/marks` on `guest-marks-changed`, on
+    `event-stream-ready`, and when the set of extensions that may show marks
+    changes, and asks nothing while that set is empty.
+  - Not shown: rows of an isolated space (no service hears of a space's
+    sessions), VS Code and mobile (no extensions are loaded there). An icon
+    name the sprite lacks draws the fallback glyph.
 - Detailed rows reach past the zones (`detailedZoneRows` keeps its name):
   under a project, every work takes the two lines too. That is the project
   root's sessions and drafts, in its folders as well (a session row's

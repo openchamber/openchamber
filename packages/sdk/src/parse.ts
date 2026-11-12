@@ -106,7 +106,8 @@ const isPanelIcon = (value: string): boolean => (
   PANEL_ID.test(value) || isGuestPackageSvgIcon(value)
 );
 
-const isHttpsUrl = (value: string): boolean => {
+/** An `https` address without credentials. */
+export const isHttpsUrl = (value: string): boolean => {
   try {
     const parsed = new URL(value);
     return parsed.protocol === 'https:' && parsed.username === '' && parsed.password === '';
@@ -824,6 +825,7 @@ const contributesSchema = z.object({
   quota: quotaSchema.optional(),
   sessionControl: z.object({ content: z.literal(true).optional(), answers: z.literal(true).optional() }).strict().optional(),
   instructions: z.literal(true).optional(),
+  marks: z.literal(true).optional(),
   skills: z.string().trim().refine(isSafeAssetPath).optional(),
   // The value becomes a filesystem path OpenCode executes code from, so only a folder inside the package.
   opencodePlugin: z.string().trim().refine(isSafeAssetPath).optional(),
@@ -1007,7 +1009,7 @@ export const openChamberManifestSchema = z.object({
       });
       return;
     }
-    for (const key of ['sessionControl', 'instructions', 'mentions', 'waits'] as const) {
+    for (const key of ['sessionControl', 'instructions', 'marks', 'mentions', 'waits'] as const) {
       if (contributes[key] !== undefined && !contributes.service) {
         ctx.addIssue({
           code: 'custom', path: [key],
@@ -1232,6 +1234,9 @@ const failureFromIssue = (issue: { path: ReadonlyArray<PropertyKey>; code: strin
   }
   if (path === 'contributes.instructions') {
     return fail('invalid-instructions', issue.code === 'custom' ? issue.message : 'contributes.instructions is true.');
+  }
+  if (path === 'contributes.marks') {
+    return fail('invalid-marks', issue.code === 'custom' ? issue.message : 'contributes.marks is true.');
   }
   if (path === 'contributes.skills') {
     return fail('invalid-skills', 'contributes.skills is a folder inside the package.');

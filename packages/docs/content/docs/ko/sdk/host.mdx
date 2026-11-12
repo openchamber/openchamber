@@ -256,6 +256,28 @@ await host.emit('deploy-finished', { id: 42 });
 
 실행 한 번은 `POST /schedule` 하나입니다. `readServiceScheduleRequest`로 읽고 200으로 답하세요. OpenChamber가 꺼져 있는 동안 놓친 실행은 사라집니다. 외부 이벤트가 필요한 서비스는 자체 연결을 유지하거나 폴링합니다.
 
+## 사이드바 행의 마크
+
+`contributes.marks: true`를 선언하면 서비스가 사이드바 행에 작은 아이콘을 놓을 수 있습니다. 예를 들어 체크가 실패한 브랜치의 모든 세션에 빨간 X 표시를 붙일 수 있습니다. 사용자는 이를 별도 줄로 승인합니다.
+
+```ts
+await host.setMark({ directory, branch: 'feature/login' }, { icon: 'close-circle', tone: 'error', text: 'Checks failed' });
+await host.setMark({ sessionId }, { icon: 'robot-2', tone: 'info', text: 'Started from the desk' });
+await host.setMark({ sessionId }, null);
+```
+
+| 대상 | 행 |
+| --- | --- |
+| `{ sessionId }` | 해당 세션 |
+| `{ directory, branch }` | 그 브랜치의 모든 세션과 그 브랜치의 worktree 행. `directory`는 저장소 안의 어느 폴더든 됩니다 |
+| `{ directory }` | 그 폴더의 세션과 그 폴더에 있는 worktree |
+
+`icon`은 Remixicon 이름이고, `tone`은 `neutral`, `info`, `success`, `warning`, `error` 중 하나입니다. `text`(최대 200자)는 툴팁이며 확장 이름 뒤에 표시됩니다. 클릭하면 그 행의 세션에서 패널이 열립니다. 패널이 없는 확장은 `url`에 `https` 주소를 넣을 수 있고, 클릭하면 그 주소가 열립니다.
+
+같은 대상에 다시 설정하면 마크가 교체되고, `null`은 마크를 지웁니다. 한 행에는 마크가 최대 두 개, 확장마다 하나씩 그려지며, 행의 툴팁에는 모든 마크가 나열됩니다. 한 줄짜리 행에서는 포인터가 올라가 있는 동안 행의 버튼이 마크를 가리므로, 마크를 클릭할 수 있는 곳은 두 줄짜리 행과 터치 화면입니다.
+
+마크는 서비스 프로세스가 살아 있는 동안만 유지됩니다. 그러니 `service.keepRunning`을 선언하고 서비스가 시작될 때 마크를 다시 설정하세요. 서비스는 마크를 최대 200개까지 보유하고 1분에 60번까지 변경할 수 있습니다. 마크에는 2.7.0보다 새로운 OpenChamber가 필요합니다. 그보다 오래된 버전은 이 키를 무시하고 호출을 거부합니다.
+
 ## @ 메뉴의 행
 
 `contributes.mentions: { label }`은 채팅창의 `@` 메뉴에 섹션을 추가합니다. 서비스는 `POST /mentions/search`에 2초 안에 `{ items: [{ id, title, subtitle?, url? }] }`로 답하고, 사용자가 고른 행에 대해 `POST /mentions/resolve`에 `{ text }`로 답합니다. 텍스트는 메시지와 함께 에이전트에게 전달되고, 사용자에게는 칩이 보입니다. 느린 서비스는 행을 추가하지 않으며 파일 표시를 막지 않습니다. 읽을 수 없는 행은 칩을 남기지 않고 그 사실을 알립니다.

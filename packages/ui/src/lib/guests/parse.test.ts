@@ -456,6 +456,20 @@ describe('session events on a catalog row', () => {
   });
 });
 
+describe('marks on a catalog row', () => {
+  test('keeps that an extension asks to show marks, and reads a row that says it another way as one that does not', () => {
+    const row = (id: string, marks: JsonValue) => ({
+      id, name: id, icon: 'flag',
+      capabilities: { requested: ['service', 'marks'], granted: ['service', 'marks'] },
+      service: { runtime: 'host', granted: true },
+      marks,
+    });
+    const guests = readGuests(JSON.stringify({ guests: [row('ci', true), row('off', false), row('newer', { rows: ['session'] })] })) ?? [];
+    expect(guests.map((guest) => [guest.id, guest.marks])).toEqual([['ci', true], ['off', undefined], ['newer', undefined]]);
+    expect(guests[0]?.capabilities.granted).toEqual(['service', 'marks']);
+  });
+});
+
 describe('notification channels on a catalog row', () => {
   test('keeps the channel a service declares, and drops a malformed slice without the row', () => {
     const slice = { label: 'Slack', instances: { kind: 'fixed', origin: 'https://slack.com' }, token: { scheme: 'bearer', username: false, scopes: ['chat:write'] } };

@@ -69,6 +69,35 @@ test('an empty detailed line disappears and returns when metadata arrives', asyn
   expect(document.querySelector('div.h-4')).not.toBeNull();
 });
 
+// An extension's mark comes and goes while the app runs, so it must not
+// change the row's height: it never opens the second line by itself.
+test('an extension mark opens no second line and rides in the first line until something else opens it', async () => {
+  const marks = <span data-mark>Mark</span>;
+  const order = (line: Element | null | undefined) => Array.from(line?.querySelectorAll('[data-slot]') ?? []).map((node) => node.getAttribute('data-slot'));
+  const slots = {
+    goal: <span data-slot="goal" />,
+    prBadge: <span data-slot="pr" />,
+    marks: <span data-slot="marks" data-mark />,
+    badges: <span data-slot="badges" />,
+  };
+
+  await act(async () => renderRow(false, false, { marks }));
+  expect(document.querySelector('.h-4')).toBeNull();
+  expect(document.querySelector('.h-5 [data-mark]')).not.toBeNull();
+
+  await act(async () => renderRow(false, false, { marks, branchLabel: 'main' }));
+  expect(document.querySelector('.h-4 [data-mark]')).not.toBeNull();
+  expect(document.querySelector('.h-5 [data-mark]')).toBeNull();
+  expect(document.querySelectorAll('[data-mark]')).toHaveLength(1);
+
+  // Right after the PR badge and before the host's own attention marks, on both row forms.
+  await act(async () => renderRow(false, false, slots));
+  expect(order(document.querySelector('.h-4'))).toEqual(['goal', 'pr', 'marks', 'badges']);
+  expect(order(document.querySelector('.h-5'))).toEqual([]);
+  await act(async () => renderRow(true, false, slots));
+  expect(order(document.body)).toEqual(['goal', 'pr', 'marks', 'badges']);
+});
+
 test('a branch name opens its line without an icon, and the chevron sits over it on hover', async () => {
   const toggle = <button data-toggle>Expand</button>;
   for (const withProject of [false, true]) {

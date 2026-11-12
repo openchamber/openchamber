@@ -296,6 +296,28 @@ A service starts on the first request, and a role's service stops when idle. `se
 
 A run is one `POST /schedule`. Read it with `readServiceScheduleRequest` and answer 200. A run missed while OpenChamber was down is gone. A service that needs outside events holds its own connection or polls.
 
+## Marks on sidebar rows
+
+`contributes.marks: true` lets your service put small icons on sidebar rows, such as a red cross on every session of a branch whose checks fail. The user approves it as its own line.
+
+```ts
+await host.setMark({ directory, branch: 'feature/login' }, { icon: 'close-circle', tone: 'error', text: 'Checks failed' });
+await host.setMark({ sessionId }, { icon: 'robot-2', tone: 'info', text: 'Started from the desk' });
+await host.setMark({ sessionId }, null);
+```
+
+| Target | Rows |
+| --- | --- |
+| `{ sessionId }` | that session |
+| `{ directory, branch }` | every session on that branch and the branch's worktree row; `directory` is any folder of the repository |
+| `{ directory }` | the sessions in that folder and the worktree at it |
+
+`icon` is a Remixicon name, `tone` is `neutral`, `info`, `success`, `warning` or `error`, and `text` (up to 200 characters) is the tooltip, shown after the extension's name. A click opens your panel in that row's session. An extension without a panel can add an `https` address as `url`, and the click opens that address.
+
+Setting a target again replaces its mark, and `null` removes it. A row draws two marks at most, one per extension, and lists them all in its tooltip. On a one-line row the row's buttons cover the marks while the pointer is over it, so a click reaches a mark on two-line rows and on touch screens.
+
+A mark lives as long as your service process, so declare `service.keepRunning` and set the marks again when the service starts. A service holds up to 200 marks and changes them up to 60 times a minute. Marks need an OpenChamber release newer than 2.7.0: an older one ignores the key and refuses the call.
+
 ## Rows in the @ menu
 
 `contributes.mentions: { label }` adds a section to the composer's `@` menu. Your service answers `POST /mentions/search` with `{ items: [{ id, title, subtitle?, url? }] }`, within 2 seconds, and `POST /mentions/resolve` with `{ text }` for the row the user picks. The text goes to the agent with the message, and the user sees a chip. A slow service adds no rows and never holds the files back; a row that cannot be read leaves no chip and says so.

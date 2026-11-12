@@ -128,6 +128,12 @@ describe('session content in enterprise mode', () => {
     expect(enterpriseBlockedCapabilities(guest, { source: 'zip' }, enterprise())).toEqual(['service', 'opencode']);
   });
 
+  test('marks are not gated by themselves: the service that sets them is', () => {
+    const guest = { service: { entry: 'service/main.js', runtime: 'host', keepRunning: true }, marks: true };
+    expect(enterpriseBlockedCapabilities(guest, { source: 'zip' }, enterprise())).toEqual(['service']);
+    expect(enterpriseBlockedCapabilities(guest, { source: 'git', gitUrl: 'https://github.com/acme/ext' }, enterprise(['https://github.com/acme/ext']))).toEqual([]);
+  });
+
   test('transcript is gated with the service that would receive it', () => {
     const guest = { service: { entry: 'service/main.js', runtime: 'host' }, sessionEvents: { events: ['turn-finished'], content: true } };
     expect(enterpriseBlockedCapabilities(guest, { source: 'zip' }, enterprise())).toEqual(['service', 'transcript']);

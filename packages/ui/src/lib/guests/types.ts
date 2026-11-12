@@ -77,6 +77,8 @@ export type InstalledGuest = {
   sessionControl?: { content: boolean };
   /** The service adds to what agents read. */
   instructions?: true;
+  /** The service puts marks on sidebar rows (`contributes.marks`). */
+  marks?: true;
   /** The package ships skills for every agent. */
   skills?: true;
   /** The package ships an OpenCode plugin, listed in the managed OpenCode config while the extension is on. */

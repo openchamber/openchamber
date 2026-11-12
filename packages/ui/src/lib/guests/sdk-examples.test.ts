@@ -5,6 +5,8 @@ import { Window } from 'happy-dom';
 import { guestMessageSchema } from '@openchamber/sdk/schemas';
 import type { GuestMessage, HostMessage, HostReadyContext, HostResultPayload, GuestWorkspaceSnapshot } from '@openchamber/sdk';
 
+import { resolveGuestIconName } from './icon.ts';
+
 const examples = new URL('../../../../sdk/examples/', import.meta.url);
 const windows: Window[] = [];
 const tick = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
@@ -323,5 +325,13 @@ describe('checked-in SDK examples', () => {
       messages: [{ id: 'm', role: 'assistant', text: '![private](https://example.com/image)', createdAt: 0 }] } });
     expect(app.window.document.body.textContent).toContain('![private](https://example.com/image)');
     expect(app.window.document.querySelector('img')).toBeNull();
+  });
+
+  // An icon name the host sprite lacks draws the fallback glyph, so an example must name one it has.
+  test('the mark the agent desk sets names an icon the host draws', async () => {
+    const source = await readFile(new URL('agent-desk/service/main.ts', examples), 'utf8');
+    const icons = [...source.matchAll(/setMark\([^;]*?icon: '([^']+)'/g)].map((match) => match[1]);
+    expect(icons).toEqual(['robot-2']);
+    for (const icon of icons) expect(resolveGuestIconName(icon)).toBe(icon);
   });
 });

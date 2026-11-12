@@ -141,6 +141,8 @@ export function useWorktreeWork({ group, projectId, collapsed, onNavigate }: Arg
     prepare();
     useSessionUIStore.getState().openNewSessionDraft({ selectedProjectId: projectId, directoryOverride: group.directory });
   };
+  // The folder `open` lands in: its session's own, else the work's, where a new chat starts.
+  const openDirectory = sessionToOpen?.directory ?? directory;
   const open = (): void => {
     const session = sessionToOpen;
     if (!session) {
@@ -148,7 +150,7 @@ export function useWorktreeWork({ group, projectId, collapsed, onNavigate }: Arg
       return;
     }
     prepare();
-    useSessionUIStore.getState().setCurrentSession(session.id, session.directory ?? directory);
+    useSessionUIStore.getState().setCurrentSession(session.id, openDirectory);
   };
   // The pin list it is filed in (Pin to), Pinned when none.
   const pinList = pinned ? worktree?.pinList ?? DEFAULT_PIN_LIST : null;
@@ -260,6 +262,7 @@ export function useWorktreeWork({ group, projectId, collapsed, onNavigate }: Arg
     canRename,
     canNewChat,
     directory,
+    openDirectory,
     worktreeRemoving,
     sessions,
     project,

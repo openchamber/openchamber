@@ -256,6 +256,28 @@ Ein Dienst startet bei der ersten Anfrage, und der Dienst einer Rolle stoppt im 
 
 Ein Lauf ist ein `POST /schedule`. Lies ihn mit `readServiceScheduleRequest` und antworte mit 200. Ein Lauf, der verpasst wird, während OpenChamber nicht läuft, entfällt. Ein Dienst, der externe Ereignisse braucht, hält seine eigene Verbindung oder pollt.
 
+## Markierungen an Zeilen der Seitenleiste
+
+`contributes.marks: true` lässt deinen Dienst kleine Symbole an Zeilen der Seitenleiste setzen, etwa ein rotes Kreuz an jeder Sitzung eines Branches, dessen Checks fehlschlagen. Der Nutzer gibt das als eigene Zeile frei.
+
+```ts
+await host.setMark({ directory, branch: 'feature/login' }, { icon: 'close-circle', tone: 'error', text: 'Checks failed' });
+await host.setMark({ sessionId }, { icon: 'robot-2', tone: 'info', text: 'Started from the desk' });
+await host.setMark({ sessionId }, null);
+```
+
+| Ziel | Zeilen |
+| --- | --- |
+| `{ sessionId }` | diese Sitzung |
+| `{ directory, branch }` | jede Sitzung auf diesem Branch und die Worktree-Zeile des Branches; `directory` ist ein beliebiger Ordner des Repositorys |
+| `{ directory }` | die Sitzungen in diesem Ordner und der Worktree, der dort liegt |
+
+`icon` ist ein Remixicon-Name, `tone` ist `neutral`, `info`, `success`, `warning` oder `error`, und `text` (bis zu 200 Zeichen) ist der Tooltip, angezeigt nach dem Namen der Erweiterung. Ein Klick öffnet dein Panel in der Sitzung dieser Zeile. Eine Erweiterung ohne Panel kann eine `https`-Adresse als `url` mitgeben, und der Klick öffnet diese Adresse.
+
+Setzt du ein Ziel erneut, ersetzt das seine Markierung, und `null` entfernt sie. Eine Zeile zeichnet höchstens zwei Markierungen, eine pro Erweiterung, und listet alle in ihrem Tooltip auf. In einer einzeiligen Zeile verdecken die Schaltflächen der Zeile die Markierungen, solange der Zeiger darüber steht. Ein Klick erreicht eine Markierung daher in zweizeiligen Zeilen und auf Touchscreens.
+
+Eine Markierung lebt so lange wie dein Dienstprozess. Deklariere deshalb `service.keepRunning` und setze die Markierungen beim Start des Dienstes erneut. Ein Dienst hält bis zu 200 Markierungen und ändert sie bis zu 60 Mal pro Minute. Markierungen brauchen eine OpenChamber-Version, die neuer als 2.7.0 ist: Eine ältere ignoriert den Schlüssel und lehnt den Aufruf ab.
+
 ## Zeilen im @-Menü
 
 `contributes.mentions: { label }` fügt dem `@`-Menü des Chatfelds einen Abschnitt hinzu. Dein Dienst beantwortet `POST /mentions/search` innerhalb von 2 Sekunden mit `{ items: [{ id, title, subtitle?, url? }] }` und `POST /mentions/resolve` mit `{ text }` für die Zeile, die der Nutzer auswählt. Der Text geht mit der Nachricht an den Agenten, und der Nutzer sieht einen Chip. Ein langsamer Dienst fügt keine Zeilen hinzu und hält die Dateien nie auf; eine Zeile, die sich nicht lesen lässt, hinterlässt keinen Chip und meldet das.
