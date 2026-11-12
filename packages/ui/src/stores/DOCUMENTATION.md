@@ -68,18 +68,30 @@ request for that key. Their older responses cannot restore a pre-change list or
 stamp a fresh TTL over the replacement request. A runtime switch clears the
 directory maps and rejects loads captured from the previous runtime.
 
+### Why command refreshes retire an in-flight read
+
+A cold OpenCode location can answer with no commands before announcing its
+completed catalog. Command events refresh the ambient project and every named
+location, so an open draft's list updates even when it belongs to a worktree.
+A command invalidation marks that directory's pending read
+obsolete; it publishes nothing and all its callers await one replacement read.
+Joining the old read would keep the empty list even after `command.updated`.
+Empty answers remain visible but receive no freshness TTL, so reopening the
+menu can recover immediately if the event was missed. Nonempty lists retain
+their TTL, and no timer polls for commands.
+
 A same-runtime load retired by a catalog change waits for the replacement list before it returns. A create or delete waiting for that read therefore keeps its successful result; the retired response itself publishes nothing. A runtime switch still returns failure instead of joining work for another runtime.
 
 ### Why catalog bursts share resource refreshes
 
 A config save announces several catalog kinds. `refreshStoresForCatalogKinds`
-unions their tasks before invalidation, so config plus agent refreshes each
-agent directory once, and config plus provider plus model refreshes providers
+unions their tasks before invalidation, so config plus agent or command refreshes each
+corresponding directory once, and config plus provider plus model refreshes providers
 once. Concurrent batches count invalidation revisions per resource, scoped to
 the SDK instance and the directory owners. A revision received during a request
 earns one trailing read; all invalidations during that read coalesce again.
 Callers wait for the latest revision's read. Entries leave the map when settled;
-a later edit still refreshes. Agents retain the ambient project and event
+a later edit still refreshes. Agents and commands retain the ambient project and event
 locations without reading unrelated directories. Separate refreshes per kind
 were rejected because their invalidations retired each other's fresh reads.
 

@@ -258,14 +258,14 @@ describe('useCommandsStore', () => {
     expect(selectCommandsForDirectory(useCommandsStore.getState(), '/workspace/project').map(c => c.name)).toEqual(['first']);
   });
 
-  test('successful empty discovery clears only that project and is cached', async () => {
+  test('successful empty discovery clears only that project and allows a fresh read', async () => {
     const commands = [{ name: 'old' }];
     useCommandsStore.setState({ commands, commandsByDirectory: { [activeProjectPath]: commands } });
     expect(await useCommandsStore.getState().loadCommands()).toBe(true);
     expect(selectCommandsForDirectory(useCommandsStore.getState(), activeProjectPath)).toEqual([]);
     expect(useCommandsStore.getState().commands).toEqual([]);
     await useCommandsStore.getState().loadCommands();
-    expect(listCommandsCalls).toBe(1);
+    expect(listCommandsCalls).toBe(2);
   });
 
 
