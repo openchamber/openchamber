@@ -214,8 +214,13 @@ queue rows with reorder and remove, but no edit or send action.
 
 The action button (`ComposerActionButtons`, and the same rule in the
 collapsed mobile pill) is one disc in one slot: 28px on desktop, the footer's
-button size in VS Code, and a 28px disc inside the 32px touch target on
-phones. It is drawn by `.oc-action-disc` in `design-system.css`: the
+button size in VS Code, and a 28px disc at the end of the 32px touch target on
+phones, where the footer and the collapsed pill take `pe-3.5` so the disc's
+right edge lines up with the agent label in the row below. The pill's action
+row is built like the expanded footer (`h-12`, the attach button in
+`composer-mobile-actions` at a 10px inset, mic and Send in a `gap-x-1`
+group), so no icon moves across the swap with 32px buttons or on the 36px
+touch floor. It is drawn by `.oc-action-disc` in `design-system.css`: the
 composer's text colour with the glyph cut out in the composer's own fill
 (`--oc-composer-foreground` over `--oc-composer-background`), flat, no ring
 or shadow. Disabled, it is a quiet tone step of the text colour with the
