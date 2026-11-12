@@ -3248,6 +3248,8 @@ export const dict = {
   'vscodeLayout.actions.cancel': 'İptal',
   'vscodeLayout.actions.newSessionAria': 'Yeni session',
   'vscodeLayout.actions.resizeSessionsSidebarAria': 'Session\'lar kenar çubuğunu yeniden boyutlandır',
+  'vscodeLayout.actions.showSessionsAria': 'Oturumları göster',
+  'vscodeLayout.actions.hideSessionsAria': 'Oturumları gizle',
   'vscodeLayout.actions.settingsAria': 'Ayarlar',
   'updateDialog.header.updateAvailable': 'Güncelleme Var',
   'updateDialog.header.updating': 'OpenChamber güncelleniyor...',

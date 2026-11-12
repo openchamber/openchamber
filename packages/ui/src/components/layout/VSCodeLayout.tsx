@@ -94,6 +94,10 @@ export const VSCodeLayout: React.FC = () => {
   const [containerWidth, setContainerWidth] = React.useState<number>(0);
   const [expandedSidebarWidth, setExpandedSidebarWidth] = React.useState<number>(SESSIONS_SIDEBAR_WIDTH);
   const [isResizingExpandedSidebar, setIsResizingExpandedSidebar] = React.useState(false);
+  // The desktop sidebar's switch: local to this device, and VS Code mounts
+  // none of the desktop surfaces that read it.
+  const sessionsSidebarOpen = useUIStore((state) => state.isSidebarOpen);
+  const toggleSessionsSidebar = useUIStore((state) => state.toggleSidebar);
   const containerRef = React.useRef<HTMLDivElement>(null);
   const expandedSidebarResizeStartXRef = React.useRef(0);
   const expandedSidebarResizeStartWidthRef = React.useRef(SESSIONS_SIDEBAR_WIDTH);
@@ -537,33 +541,37 @@ export const VSCodeLayout: React.FC = () => {
         // Expanded layout: sessions sidebar + chat side by side
         <div className="flex h-full">
           {/* Sessions sidebar */}
-          <div
-            className={cn('relative h-full border-e border-border overflow-hidden flex-shrink-0', isResizingExpandedSidebar && 'select-none')}
-            style={{ width: expandedSidebarWidth, minWidth: expandedSidebarWidth, maxWidth: expandedSidebarWidth }}
-          >
-            <SessionSidebar
-              mobileVariant
-              allowReselect
-              hideDirectoryControls
-            />
+          {sessionsSidebarOpen ? (
             <div
-              className={cn(
-                'absolute inset-e-0 top-0 z-20 h-full w-[3px] cursor-col-resize transition-colors hover:bg-[var(--interactive-border)]/80',
-                isResizingExpandedSidebar && 'bg-[var(--interactive-border)]'
-              )}
-              onPointerDown={handleExpandedSidebarResizeStart}
-              onPointerMove={handleExpandedSidebarResizeMove}
-              onPointerUp={handleExpandedSidebarResizeEnd}
-              onPointerCancel={handleExpandedSidebarResizeEnd}
-              role="separator"
-              aria-orientation="vertical"
-              aria-label={t('vscodeLayout.actions.resizeSessionsSidebarAria')}
-            />
-          </div>
+              className={cn('relative h-full border-e border-border overflow-hidden flex-shrink-0', isResizingExpandedSidebar && 'select-none')}
+              style={{ width: expandedSidebarWidth, minWidth: expandedSidebarWidth, maxWidth: expandedSidebarWidth }}
+            >
+              <SessionSidebar
+                mobileVariant
+                allowReselect
+                hideDirectoryControls
+              />
+              <div
+                className={cn(
+                  'absolute inset-e-0 top-0 z-20 h-full w-[3px] cursor-col-resize transition-colors hover:bg-[var(--interactive-border)]/80',
+                  isResizingExpandedSidebar && 'bg-[var(--interactive-border)]'
+                )}
+                onPointerDown={handleExpandedSidebarResizeStart}
+                onPointerMove={handleExpandedSidebarResizeMove}
+                onPointerUp={handleExpandedSidebarResizeEnd}
+                onPointerCancel={handleExpandedSidebarResizeEnd}
+                role="separator"
+                aria-orientation="vertical"
+                aria-label={t('vscodeLayout.actions.resizeSessionsSidebarAria')}
+              />
+            </div>
+          ) : null}
           {/* Chat content */}
           <div className="flex-1 flex flex-col min-w-0">
             <VSCodeHeader
               title={chatTitle}
+              sessionsSidebarOpen={sessionsSidebarOpen}
+              onToggleSessionsSidebar={toggleSessionsSidebar}
               showArchiveToggle
               showWorkStatus
               showContextUsage
@@ -669,6 +677,9 @@ interface VSCodeHeaderProps {
   onNewSession?: () => void;
   onSettings?: () => void;
   showWorkStatus?: boolean;
+  /** The expanded layout's sessions list beside the chat, which this header folds. */
+  sessionsSidebarOpen?: boolean;
+  onToggleSessionsSidebar?: () => void;
   showContextUsage?: boolean;
   enableSessionSwitcher?: boolean;
   /** The sessions list has nothing to separate from the search field below it. */
@@ -676,7 +687,7 @@ interface VSCodeHeaderProps {
 }
 
 
-const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, onArchiveAll, showArchiveToggle = Boolean(onArchiveAll), onNewSession, onSettings, showWorkStatus, showContextUsage, enableSessionSwitcher, borderless }) => {
+const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, onArchiveAll, showArchiveToggle = Boolean(onArchiveAll), onNewSession, onSettings, showWorkStatus, sessionsSidebarOpen = false, onToggleSessionsSidebar, showContextUsage, enableSessionSwitcher, borderless }) => {
   const { t } = useI18n();
   const showArchivedSessions = useSessionDisplayStore((state) => state.showArchivedSessions);
   const toggleArchivedSessions = useSessionDisplayStore((state) => state.toggleArchivedSessions);
@@ -737,6 +748,22 @@ const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, on
           aria-label={t('vscodeLayout.actions.backToSessionsAria')}
         >
           <Icon name="arrow-left" className="h-5 w-5" />
+        </button>
+      )}
+      {onToggleSessionsSidebar && (
+        <button
+          type="button"
+          onClick={onToggleSessionsSidebar}
+          className={cn(
+            '-ms-1 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md transition-colors hover:bg-interactive-hover/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+            sessionsSidebarOpen ? 'text-foreground' : 'text-muted-foreground hover:text-foreground',
+          )}
+          aria-label={t(sessionsSidebarOpen ? 'vscodeLayout.actions.hideSessionsAria' : 'vscodeLayout.actions.showSessionsAria')}
+          aria-pressed={sessionsSidebarOpen}
+          title={t(sessionsSidebarOpen ? 'vscodeLayout.actions.hideSessionsAria' : 'vscodeLayout.actions.showSessionsAria')}
+        >
+          {/* The desktop sidebar toggle's glyph, the Session card toggle's pair. */}
+          <Icon name="panel-left" className="h-4 w-4" />
         </button>
       )}
       {enableSessionSwitcher ? (

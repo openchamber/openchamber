@@ -3345,6 +3345,8 @@ export const dict = {
   'vscodeLayout.actions.cancel': 'ביטול',
   'vscodeLayout.actions.newSessionAria': 'הפעלה חדשה',
   'vscodeLayout.actions.resizeSessionsSidebarAria': 'שינוי גודל סרגל הצד של ההפעלות',
+  'vscodeLayout.actions.showSessionsAria': 'הצג סשנים',
+  'vscodeLayout.actions.hideSessionsAria': 'הסתר סשנים',
   'vscodeLayout.actions.settingsAria': 'הגדרות',
   'updateDialog.header.updateAvailable': 'יש עדכון זמין',
   'updateDialog.header.updating': 'מעדכן את OpenChamber…',

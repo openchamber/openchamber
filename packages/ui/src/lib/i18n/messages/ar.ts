@@ -3345,6 +3345,8 @@ export const dict = {
   'vscodeLayout.actions.cancel': 'إلغاء',
   'vscodeLayout.actions.newSessionAria': 'جلسة جديدة',
   'vscodeLayout.actions.resizeSessionsSidebarAria': 'تغيير حجم الشريط الجانبي للجلسات',
+  'vscodeLayout.actions.showSessionsAria': 'إظهار الجلسات',
+  'vscodeLayout.actions.hideSessionsAria': 'إخفاء الجلسات',
   'vscodeLayout.actions.settingsAria': 'الإعدادات',
   'updateDialog.header.updateAvailable': 'يتوفر تحديث',
   'updateDialog.header.updating': 'جارٍ تحديث OpenChamber…',

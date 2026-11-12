@@ -3390,6 +3390,8 @@ export const dict: Record<I18nKey, string> = {
   "vscodeLayout.actions.archiveAllError": "Error al archivar {count} sesión(es)",
   "vscodeLayout.actions.cancel": "Cancelar",
   "vscodeLayout.actions.resizeSessionsSidebarAria": "Ajustar tamaño del panel de sesiones",
+  "vscodeLayout.actions.showSessionsAria": "Mostrar sesiones",
+  "vscodeLayout.actions.hideSessionsAria": "Ocultar sesiones",
   "vscodeLayout.actions.settingsAria": "Configuración",
   "updateDialog.header.updateAvailable": "Actualización disponible",
   "updateDialog.header.updating": "Actualizando OpenChamber...",

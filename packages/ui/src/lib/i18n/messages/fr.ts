@@ -3099,6 +3099,8 @@ export const dict = {
   'vscodeLayout.actions.backToSessionsAria': 'Retour aux sessions',
   'vscodeLayout.actions.newSessionAria': 'Nouvelle session',
   'vscodeLayout.actions.resizeSessionsSidebarAria': 'Redimensionner la barre latérale des sessions',
+  'vscodeLayout.actions.showSessionsAria': 'Afficher les sessions',
+  'vscodeLayout.actions.hideSessionsAria': 'Masquer les sessions',
   'vscodeLayout.actions.settingsAria': 'Paramètres',
   'updateDialog.header.updateAvailable': 'Mise à jour disponible',
   'updateDialog.header.updating': 'Mise à jour de OpenChamber...',

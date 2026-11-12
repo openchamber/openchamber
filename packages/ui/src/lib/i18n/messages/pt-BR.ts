@@ -3390,6 +3390,8 @@ export const dict: Record<I18nKey, string> = {
   "vscodeLayout.actions.cancel": "Cancelar",
   "vscodeLayout.actions.newSessionAria": "Nova sessão",
   "vscodeLayout.actions.resizeSessionsSidebarAria": "Ajustar tamanho do painel de sessões",
+  "vscodeLayout.actions.showSessionsAria": "Mostrar sessões",
+  "vscodeLayout.actions.hideSessionsAria": "Ocultar sessões",
   "vscodeLayout.actions.settingsAria": "Configurações",
   "updateDialog.header.updateAvailable": "Atualização disponível",
   "updateDialog.header.updating": "Atualizando OpenChamber...",

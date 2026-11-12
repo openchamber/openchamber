@@ -3434,6 +3434,8 @@ export const dict: Record<I18nKey, string> = {
   'vscodeLayout.actions.cancel': '취소',
   'vscodeLayout.actions.newSessionAria': '새 세션',
   'vscodeLayout.actions.resizeSessionsSidebarAria': '세션 사이드바 크기 조정',
+  'vscodeLayout.actions.showSessionsAria': '세션 표시',
+  'vscodeLayout.actions.hideSessionsAria': '세션 숨기기',
   'vscodeLayout.actions.settingsAria': '설정',
   'updateDialog.header.updateAvailable': '업데이트 가능',
   'updateDialog.header.updating': 'OpenChamber 업데이트 중…',

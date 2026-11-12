@@ -3141,6 +3141,8 @@ export const dict = {
   'vscodeLayout.actions.cancel': 'Abbrechen',
   'vscodeLayout.actions.newSessionAria': 'Neue Sitzung',
   'vscodeLayout.actions.resizeSessionsSidebarAria': 'Größe der Sitzungs-Seitenleiste anpassen',
+  'vscodeLayout.actions.showSessionsAria': 'Sitzungen anzeigen',
+  'vscodeLayout.actions.hideSessionsAria': 'Sitzungen ausblenden',
   'vscodeLayout.actions.settingsAria': 'Einstellungen',
   'updateDialog.header.updateAvailable': 'Update verfügbar',
   'updateDialog.header.updating': 'OpenChamber wird aktualisiert...',

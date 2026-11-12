@@ -3397,6 +3397,8 @@ export const dict: Record<I18nKey, string> = {
   'vscodeLayout.actions.cancel': '取消',
   'vscodeLayout.actions.newSessionAria': '新增會話',
   'vscodeLayout.actions.resizeSessionsSidebarAria': '調整會話側邊欄大小',
+  'vscodeLayout.actions.showSessionsAria': '顯示工作階段',
+  'vscodeLayout.actions.hideSessionsAria': '隱藏工作階段',
   'vscodeLayout.actions.settingsAria': '設定',
   'updateDialog.header.updateAvailable': '有可用更新',
   'updateDialog.header.updating': '正在更新 OpenChamber...',

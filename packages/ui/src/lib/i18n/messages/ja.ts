@@ -3431,6 +3431,8 @@ export const dict: Record<I18nKey, string> = {
   'vscodeLayout.actions.cancel': 'キャンセル',
   'vscodeLayout.actions.newSessionAria': '新しいセッション',
   'vscodeLayout.actions.resizeSessionsSidebarAria': 'セッションサイドバーのサイズを調整',
+  'vscodeLayout.actions.showSessionsAria': 'セッションを表示',
+  'vscodeLayout.actions.hideSessionsAria': 'セッションを非表示',
   'vscodeLayout.actions.settingsAria': '設定',
   'updateDialog.header.updateAvailable': '更新があります',
   'updateDialog.header.updating': 'OpenChamberを更新中...',

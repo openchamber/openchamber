@@ -3508,6 +3508,8 @@ export const dict: Record<I18nKey, string> = {
   'vscodeLayout.actions.cancel': 'Anuluj',
   'vscodeLayout.actions.newSessionAria': 'Nowa sesja',
   'vscodeLayout.actions.resizeSessionsSidebarAria': 'Zmień rozmiar panelu sesji',
+  'vscodeLayout.actions.showSessionsAria': 'Pokaż sesje',
+  'vscodeLayout.actions.hideSessionsAria': 'Ukryj sesje',
   'vscodeLayout.actions.settingsAria': 'Ustawienia',
   'vscodeLayout.title.chat': 'Czat',
   'vscodeLayout.title.newSession': 'Nowa sesja',

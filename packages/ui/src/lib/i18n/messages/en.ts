@@ -3434,6 +3434,8 @@ export const dict = {
   'vscodeLayout.actions.cancel': 'Cancel',
   'vscodeLayout.actions.newSessionAria': 'New session',
   'vscodeLayout.actions.resizeSessionsSidebarAria': 'Resize sessions sidebar',
+  'vscodeLayout.actions.showSessionsAria': 'Show sessions',
+  'vscodeLayout.actions.hideSessionsAria': 'Hide sessions',
   'vscodeLayout.actions.settingsAria': 'Settings',
   'updateDialog.header.updateAvailable': 'Update Available',
   'updateDialog.header.updating': 'Updating OpenChamber...',
