@@ -517,7 +517,7 @@ class Page {
         const timing = animation.effect?.getComputedTiming?.()
         return timing && Number.isFinite(timing.endTime)
       }).length
-      const loading = [...document.querySelectorAll('[aria-busy="true"], .animate-spin, .animate-pulse, [data-slot="skeleton"], [class*="skeleton" i], [role="progressbar"]')]
+      const loading = [...document.querySelectorAll('[aria-busy="true"], [data-spinner], .animate-spin, .animate-pulse, [data-slot="skeleton"], [class*="skeleton" i], [role="progressbar"]')]
         .filter(visible)
         .map((element) => (element.getAttribute("aria-label") || element.className?.baseVal || element.className || element.tagName).toString().slice(0, 80))
       // Loading placeholders that say so in words, such as "Loading sessions...".
@@ -641,7 +641,8 @@ const SHOTS = [
       await openApp(page, ctx)
       await page.hover("[data-sidebar-row-key]", { text: "relay-desk" })
       await page.click("button[aria-label=\"New draft session\"]")
-      await setContextPanel(page, "context")
+      // The draft as a user usually sees it: the Session card beside it, no panel open.
+      await setContextPanel(page, null)
     },
   },
   {
