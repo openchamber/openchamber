@@ -21,6 +21,8 @@ import { SpaceActionsMenu } from './SpaceActions';
 import { openSpaceApply, pickSpaceAction, useSpaceActions } from './spaceActionsState';
 import { SPACE_ACTION_TEXT } from './spaceActionText';
 import { SpaceStatusLines } from './SpaceStatus';
+import { spacePlaceName } from '@/lib/spaces/space-places';
+import { RootSpaceBadge } from './RootSpaceNotice';
 
 const SPACE_STATE_TEXT = {
   preparing: 'spaces.row.state.preparing',
@@ -78,7 +80,7 @@ export const SpaceRow: React.FC<{
   // What a space is mostly opened here for stays in sight: its work back to the project, and
   // Start or Stop. The rest, rarer, is in the menu beside them.
   const toggle = available.find((action) => action === 'start' || action === 'stop') ?? null;
-  const meta = [t(SPACE_STATE_TEXT[entry.state]), ...(bytes !== null ? [formatDiskSize(bytes)] : [])].join(' · ');
+  const meta = [spacePlaceName(t, entry), t(SPACE_STATE_TEXT[entry.state]), ...(bytes !== null ? [formatDiskSize(bytes)] : [])].join(' · ');
   return (
     <div className="flex w-full items-start gap-2 py-1.5" data-space-row={entry.id}>
       <Icon name="instance" className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
@@ -88,7 +90,7 @@ export const SpaceRow: React.FC<{
           {/* A name from the label: text to show. */}
           <p className="typography-ui-label min-w-0 max-w-full truncate text-foreground">{entry.name}</p>
           <span className="typography-meta text-muted-foreground">{meta}</span>
-          <NetworkBadge network={entry.network} />
+          {entry.kind === 'host-root' ? <RootSpaceBadge kind={entry.kind} /> : <NetworkBadge network={entry.network} />}
         </div>
         {showFolder ? <FolderLine folder={entry.projectFolder} /> : null}
         <SpaceStatusLines spaceId={entry.id} className="pt-1" hideStopped />

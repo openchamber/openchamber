@@ -327,6 +327,7 @@ export function registerSourceControlRoutes(app, dependencies = {}) {
     readGitHubPullStack: shell.readPullStack,
     readCurrentGitHubAccountId: shell.readCurrentGitHubAccountId,
     applyFixLoopReviewOperation: shell.applyFixLoopReviewOperation,
+    readFixLoopPull: shell.readFixLoopPull,
     resolveChangeRequestSource: shell.resolveChangeRequestSource,
     // The Change-Id amend (`POST /api/git/change-id`) rewrites a branch tip.
     invalidateBranchStatus: shell.invalidateBranchStatus,

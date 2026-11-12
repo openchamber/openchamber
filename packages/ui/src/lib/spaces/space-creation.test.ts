@@ -15,6 +15,7 @@ const originalFetch = globalThis.fetch;
 
 const entry: SpaceEntry = {
   id: ID,
+  kind: 'docker',
   name: 'Fix login',
   placeId: 'docker', machine: null,
   projectDirectory: PROJECT,

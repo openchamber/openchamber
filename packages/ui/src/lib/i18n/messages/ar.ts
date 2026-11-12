@@ -1,4 +1,5 @@
 import { settingsDict } from './ar.settings';
+import type { I18nKey } from './en';
 import { prStacksI18n } from './pr-stacks.i18n';
 import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
 import { referencePickerI18n } from './reference-picker.i18n';
@@ -58,7 +59,45 @@ import { workflowsI18n } from './workflows.i18n';
 import { sessionReferencesI18n } from './session-references.i18n';
 import { guestStatusViewI18n } from './guest-status-view.i18n';
 
+// Without `as const`: the Arabic text as literal types makes the inferred type too long for the
+// compiler to serialize (TS7056). `satisfies` still checks every key against the source dictionary.
 export const dict = {
+  'spaces.root.confirm': 'التأكيد بمفتاح مرور',
+  'spaces.place.host': 'هذا الحاسوب، مستخدم معزول',
+  'spaces.place.hostDescription': 'تعمل كل مساحة بحساب مستخدم Linux مستقل دون صلاحيات root، ولها شبكتها وحدود مواردها الخاصة.',
+  'spaces.place.docker': 'هذا الحاسوب، Docker',
+  'spaces.place.root': 'هذا الحاسوب بصلاحيات root، دون عزل',
+  'spaces.place.checking': 'جارٍ التحقق من بيئات التشغيل...',
+  'spaces.create.hostDescription': 'يبدأ الوكيل بنسخة من هذا المشروع.',
+  'spaces.root.createTitle': 'مساحة root جديدة',
+  'spaces.root.create': 'إنشاء مساحة root',
+  'spaces.root.warning': 'يعمل الوكيل بصلاحيات مدير النظام root على هذا الحاسوب. يمكنه قراءة جميع الملفات وجميع بيانات الاعتماد، بما فيها بيانات اعتماد MCP المحمية وبيانات المساحات الأخرى، وتغيير النظام. قيود الشبكة وأذونات "الاستخدام دون الاطلاع" لا تحمي أي شيء هنا.',
+  'spaces.root.network': 'لا تُفرض قيود على الشبكة في مساحة root.',
+  'spaces.root.grants': 'أذونات الوصول إلى النماذج غير محمية من root.',
+  'spaces.root.badge': 'root، دون عزل',
+  'spaces.failure.agentSeparationMissing': 'فصل الوكلاء غير مثبّت. ثبّته على الجهاز المضيف قبل استخدام مساحات root.',
+  'spaces.failure.noRootPasskey': 'لا يوجد مفتاح مرور معتمد لمساحات root. اعتمد مفتاحًا في الإعدادات > المساحات المعزولة > مساحات root.',
+  'spaces.failure.hostdUnavailable': 'مكوّن root غير متاح. تحقق من تثبيت OpenChamber على الخادم.',
+  'spaces.failure.rootUnavailable': 'مساحات root غير متاحة. تحقق من تثبيت البرنامج على الجهاز المضيف ومفاتيح المرور المعتمدة في الإعدادات.',
+  'spaces.failure.rootActivationRequired': 'أكّد باستخدام مفتاح مرور معتمد قبل إنشاء مساحة root هذه أو تشغيلها.',
+  'spaces.failure.rootPasskeyNotApproved': 'مفتاح المرور هذا غير معتمد لمساحات root. اعتمده في الإعدادات > المساحات المعزولة > مساحات root.',
+  'spaces.failure.rootActivationRefused': 'رُفض التأكيد بمفتاح المرور. حاول مجددًا باستخدام مفتاح مرور معتمد.',
+  'spaces.failure.rootChallengeUnknown': 'انتهت صلاحية هذا التأكيد أو أنه يخص خادمًا آخر. ابدأ الإجراء من جديد.',
+  'spaces.failure.uiPasskeyMissing': 'لا يوجد مفتاح مرور لتسجيل الدخول إلى هذا العنوان. أضف مفتاحًا في الإعدادات > عام > مفاتيح المرور، ثم حاول مجددًا.',
+  'spaces.failure.approvalCodeWrong': 'رمز الاعتماد غير صحيح. أدخل الرمز الذي طبعه الأمر المُشغّل بصلاحيات root.',
+  'spaces.failure.approvalExpired': 'انتهت صلاحية الاعتماد. شغّل أمر الاعتماد بصلاحيات root مجددًا للحصول على رمز جديد.',
+  'spaces.failure.approvalAwaitingConfirmation': 'أكّد البصمة في طرفية الخادم قبل بدء اعتماد آخر.',
+  'spaces.failure.mcpUnsupportedPlace': 'تتوفر أذونات MCP فقط للمساحات التي تعمل مباشرة على هذا الحاسوب.',
+  'spaces.failure.rootPlaceNotAllowed': 'لا يمكن تشغيل عملية الموافقة على طلبات الدمج بصلاحيات root. اختر بيئة معزولة.',
+  'spaces.failure.rootOrigin': 'افتح {origins} لاستخدام مفتاح مرور معتمد. هذا العنوان، {origin}، غير معتمد لمساحات root.',
+  'spaces.failure.rootCancelled': 'أُلغي التأكيد بمفتاح المرور. لم تُنشأ أي مساحة root ولم تُشغّل.',
+  'spaces.access.mcp.title': 'خوادم MCP',
+  'spaces.access.mcp.dockerOnly': 'تتوفر خوادم MCP فقط للمساحات التي تعمل بحسابات مستخدمين معزولة على هذا الحاسوب.',
+  'spaces.access.mcp.irreversible': 'يمكن للوكيل استخدام خوادم MCP التي مُنح الوصول إليها دون طلب الإذن. لا يمكن سحب الأذونات. احذف المساحة لإزالتها.',
+  'spaces.access.mcp.empty': 'لا توجد اتصالات MCP محمية مُعدّة.',
+  'spaces.access.mcp.unavailable': 'تعذرت قراءة اتصالات MCP المحمية. تحقق من خوادم MCP في الإعدادات وحاول مجددًا.',
+  'spaces.access.mcp.give': 'منح الوصول لهذه المساحة',
+  'spaces.access.mcp.given': 'تم المنح',
   'quota.family.zen': 'نماذج Zen',
   'quota.value.requests': 'الطلبات: {count}',
   'quota.value.spent': 'تم إنفاق {spent}',
@@ -4054,4 +4093,4 @@ export const dict = {
   'chat.promptHistorySearch.hint': "↑ ↓ للتصفح · Enter للتحميل · Esc للإغلاق",
   'helpDialog.item.searchPromptHistory': "البحث في سجل المطالبات (إدخال الدردشة)",
 
-} as const;
+} satisfies Readonly<Record<I18nKey, string>>;

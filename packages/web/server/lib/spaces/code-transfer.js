@@ -116,7 +116,7 @@ export function createTransferSession({ git, temporaryDirectory, removeDirectory
     try {
       const hooks = path.join(directory, 'no-hooks');
       await fs.mkdir(hooks);
-      const isolated = ['-c', `core.hooksPath=${hooks.replaceAll('\\', '/')}`, '-c', 'core.fsmonitor='];
+      const isolated = ['-c', `core.hooksPath=${hooks.replaceAll('\\', '/')}`, '-c', `core.fsmonitor=${git.fsmonitor ?? ''}`];
       const g = {
         run: (where, args, options) => git.run(where, [...isolated, ...args], options),
         output: (where, args, options) => git.output(where, [...isolated, ...args], options),

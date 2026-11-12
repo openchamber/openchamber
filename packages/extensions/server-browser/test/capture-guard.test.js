@@ -113,3 +113,36 @@ test('stops guarding once cleaned up, and does not stay subscribed when Chrome r
   await assert.rejects(installCaptureGuard(refusing.cdp), /refused/);
   assert.equal(refusing.listeners.size, 0);
 });
+
+test('intercepts redirects and subframes before resuming targets', async () => {
+  // Given a Chrome with host-owned origins.
+  const chrome = fakeChrome();
+  await installCaptureGuard(chrome.cdp, { openchamberOrigins: ['http://localhost:3000'] });
+  // When new pages and cross-process frames attach and their requests pause.
+  chrome.attach('page', 'page', true);
+  chrome.attach('frame', 'iframe', true);
+  await settle();
+  for (const [sessionId, url] of [['page', 'http://127.1:3000/redirect'], ['frame', 'http://LOCALHOST.:3000/frame'], ['page', 'https://example.com']]) {
+    for (const listener of chrome.listeners) listener({ method: 'Fetch.requestPaused', sessionId, params: { requestId: url, request: { url } } });
+  }
+  await settle();
+  // Then interception precedes resume and every request has the right decision.
+  for (const session of ['page', 'frame']) {
+    const methods = methodsFor(chrome.sent, session);
+    assert.equal(methods[0], 'Fetch.enable');
+    assert.ok(methods.indexOf('Fetch.enable') < methods.indexOf('Runtime.runIfWaitingForDebugger'));
+  }
+  assert.deepEqual(chrome.sent.filter(([, method]) => method === 'Fetch.failRequest').map(([, , params]) => params.requestId), ['http://127.1:3000/redirect', 'http://LOCALHOST.:3000/frame']);
+  assert.deepEqual(chrome.sent.filter(([, method]) => method === 'Fetch.continueRequest').map(([, , params]) => params.requestId), ['https://example.com']);
+});
+
+test('does not resume a target when Chrome refuses origin interception', async () => {
+  // Given a Chrome that refuses interception.
+  const chrome = fakeChrome({ refuse: ['Fetch.enable'] });
+  await installCaptureGuard(chrome.cdp, { openchamberOrigins: ['http://localhost:3000'] });
+  // When a page is attached paused.
+  chrome.attach('page', 'page', true);
+  await settle();
+  // Then it never runs unprotected.
+  assert.equal(methodsFor(chrome.sent, 'page').includes('Runtime.runIfWaitingForDebugger'), false);
+});

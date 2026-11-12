@@ -49,7 +49,8 @@ This module provides notification message preparation utilities for the web serv
 `notifyPullRequest({ item, event })` delivers user merge-follow events through the same native, UI, web-push, APNs and extension-channel fanout. `notifyOnPullRequests` is a profile setting, default on, independent of completion/error notifications. It is checked on the server before every delivery. Fixed event titles follow the interface locale (`pull-request-locales.js`); the body names the repository and PR number. Enterprise-mode push and extension deliveries strip that reference through the existing fanout boundary. Notifications have kind `pull-request`, no session id, and never wake an agent. Existing click routing accepts sessions only, so these notifications currently bring the app forward without selecting a PR.
 - `createNotificationTriggerRuntime(dependencies)`: creates runtime-owned debounced trigger handling for OpenCode events.
 - Returned API:
-  - `maybeSendPushForTrigger(payload)`
+   - `maybeSendPushForTrigger(payload)`
+   - `deliverAgentNotification(payload)`: owner-device push delivery for a reconstructed `openchamber:notification` with `origin: 'agent'` and `spaceId: null`. It revalidates bounded `goal`, `review`, `browser-help` and `pull-request` payloads, then uses this runtime's registered-device senders and enterprise-stripping fanout. UI, desktop, notification-center and extension-channel delivery remain with their existing owners. Ready, error, question and permission events stay with the raw-event watcher; plugin notifications stay live-only.
   - `sendGoalSettlePush({ sessionId, directory, status, title, body })`
   - `sendBrowserHelpPush({ sessionId, guestId, title, body })` — the browser-help
     fanout (see "browser.requestHelp notification" below); `data.url` adds
@@ -164,6 +165,8 @@ The relay has no route for it, and sends only ever start from this server's list
 
 ### Template runtime API (template-runtime.js)
 - `createNotificationTemplateRuntime(dependencies)`: creates shared notification/template runtime. Model-backed summarization was retired after the Zen provider became unavailable.
+- `fetchImpl`, defaulting to `fetch`, owns all default-source session and message reads. The trigger runtime accepts the same injection for session ancestry, activity and settle notification enrichment. A front door passes its authenticated, bounded agent transport to both runtimes.
+- `readDisplayMetadata(directory)` optionally supplies `{ projectName, branch }` from the server that owns the project. With this dependency, every project label and branch lookup bypasses local git and primary-worktree discovery, including the active-project fallback. A failed delegated read leaves a folder or registered label and an empty branch; it never starts local discovery.
 - Returned API:
   - `resolveNotificationTemplate(template, variables)`
   - `shouldApplyResolvedTemplateMessage(template, resolved, variables)`
@@ -201,6 +204,16 @@ The `settings` parameter for `prepareNotificationLastMessage` supports `maxLastM
 - Always applies `maxLastMessageLength` truncation to final result.
 
 ## Notes for contributors
+
+### Why front-door display metadata is delegated
+
+The front door has no project filesystem access. The agent server resolves project labels and branches under its own account through `agent-server/display-metadata.js`; its bounded reply contains display strings only. Keeping the local template resolver as that route's implementation preserves worktree project labels and the `Chats` label without duplicating the naming rules.
+
+### Why agent announcements have a separate push entry
+
+The agent server owns goal settlement, reviews, browser help and PR watches, while the front door owns registered push devices. `deliverAgentNotification` checks the owner's native-notification switch and the kind's completion or PR toggle before delivery. Review and PR announcements retain hidden-only focus suppression; browser help retains its session-and-panel deep link and its independence from question and notify-tool toggles. The shared fanout keeps native-device visibility suppression and enterprise stripping.
+
+Goal and review session names are read through the injected `fetchImpl`. A goal event may carry `properties.goalStatus` as `complete`, `budgetLimited` or `blocked`, which preserves a fix loop's settlement when it uses the goal notification kind. Without that field the agent session's goal metadata supplies the status. Unavailable or unrelated metadata gives a generic push title, without guessing from notification text or reading a local project. Browser-help events use the explicit `browser-help` kind; a plugin event never opts into push through its tag or guest id.
 
 ### Why interruption suppression is limited to steps
 

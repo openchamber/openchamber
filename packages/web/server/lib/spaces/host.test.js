@@ -140,6 +140,24 @@ describe('createSpacesHost', () => {
     host.middleware({ path: '/api/host', url: '/api/host', headers: {}, query: {}, method: 'GET' }, {}, () => { passed = true; });
     expect(passed).toBe(true);
   });
+
+  it('applies a place upstream refusal before delivering or remembering a grant', async () => {
+    const place = createMemoryPlace();
+    const refusal = new SpaceError('host_loopback_unavailable', 'Choose a reachable network address');
+    place.requireWindowUpstream = vi.fn(() => { throw refusal; });
+    place.exec = vi.fn();
+    const dataDir = temporary();
+    const host = createSpacesHost({ dataDir, place, logger: { warn: () => {} } });
+    hosts.push(host);
+    const { id } = await host.manager.createSpace({ placeId: 'memory', projectDirectory: '/home/me/project', name: 'Grant preflight' });
+    const records = createSpaceRecords({ dataDir });
+    records.write(id, { placeId: 'memory', name: 'Grant preflight', network: { mode: 'open' }, repository: '/home/me/project', spacePath: `/spaces/${id}/project` });
+    await expect(host.journey.grantAccess(id, { kind: 'domain', upstream: 'http://host.docker.internal:9000/' })).rejects.toMatchObject({ code: 'host_loopback_unavailable' });
+    expect(place.requireWindowUpstream).toHaveBeenCalledWith('http://host.docker.internal:9000/');
+    expect(place.exec).not.toHaveBeenCalled();
+    expect(records.read(id).record.grants ?? []).toEqual([]);
+    await place.remove(id);
+  });
 });
 
 // A stand-in place whose spaces are Express apps with the host's real UI auth: the merged

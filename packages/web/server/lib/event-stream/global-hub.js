@@ -4,6 +4,8 @@ import { createUpstreamSseReader } from './upstream-reader.js';
 import { serializeMessageStreamWsEvent } from './protocol.js';
 import { translateWireEvent } from './translate-v2.js';
 import { createDeltaCoalescer, DELTA_COALESCE_WINDOW_MS } from './delta-coalescer.js';
+import { isAgentPayloadAllowed } from '../agent-server/session-boundary.js';
+import { isString } from '../shared/guards.js';
 
 // Raised from 512 → 2048 to improve recovery after brief disconnects during
 // long-running agent sessions where many events accumulate quickly.
@@ -19,6 +21,9 @@ export function createGlobalMessageStreamHub({
   replayLimit = MESSAGE_STREAM_GLOBAL_REPLAY_LIMIT,
   replayByteLimit = MESSAGE_STREAM_GLOBAL_REPLAY_BYTES,
   deltaCoalesceWindowMs = DELTA_COALESCE_WINDOW_MS,
+  upstreamOrigin = null,
+  upstreamPath = '/api/event',
+  isSpaceSession = () => false,
 }) {
   if (!Number.isSafeInteger(replayLimit) || replayLimit < 0 || !Number.isSafeInteger(replayByteLimit) || replayByteLimit < 0) {
     throw new RangeError('Replay limits must be nonnegative safe integers');
@@ -65,7 +70,7 @@ export function createGlobalMessageStreamHub({
     }
   };
 
-  const normalizeEvent = ({ envelope, payload }) => {
+  const normalizeEvent = ({ envelope, payload, spaceId = null, origin = upstreamOrigin }) => {
     const directory =
       typeof envelope?.directory === 'string' && envelope.directory.length > 0 ? envelope.directory : 'global';
     const eventId = typeof envelope?.eventId === 'string' && envelope.eventId.length > 0
@@ -74,7 +79,6 @@ export function createGlobalMessageStreamHub({
     // An event of an isolated space carries the space's id; subscribers see it only when they
     // asked for space events, because a consumer that acts on the host's OpenCode by
     // directory must never act on a space's directory.
-    const spaceId = typeof envelope?.spaceId === 'string' && envelope.spaceId.length > 0 ? envelope.spaceId : null;
     let serializedFrame;
     let translated;
     return {
@@ -83,8 +87,9 @@ export function createGlobalMessageStreamHub({
       directory,
       eventId,
       spaceId,
+      origin,
       serialize() {
-        serializedFrame ??= serializeMessageStreamWsEvent(payload, { directory, eventId });
+        serializedFrame ??= serializeMessageStreamWsEvent(payload, { directory, eventId, origin, spaceId });
         return serializedFrame;
       },
       // Browser clients receive the raw wire payload and translate it
@@ -111,7 +116,7 @@ export function createGlobalMessageStreamHub({
       replay.length = 0;
       replayBytes = 0;
     } else {
-      replay.push({ eventId: normalized.eventId, serializedFrame, bytes });
+      replay.push({ eventId: normalized.eventId, directory: normalized.directory, serializedFrame, bytes });
       replayBytes += bytes;
       while (replay.length > replayLimit || replayBytes > replayByteLimit) {
         replayBytes -= replay.shift().bytes;
@@ -140,7 +145,7 @@ export function createGlobalMessageStreamHub({
       buildUrl: () => {
         buildUrlFailed = false;
         try {
-          return new URL(buildOpenCodeUrl('/api/event', ''));
+          return new URL(buildOpenCodeUrl(upstreamPath, ''));
         } catch {
           buildUrlFailed = true;
           throw new Error('OpenCode service unavailable');
@@ -158,7 +163,12 @@ export function createGlobalMessageStreamHub({
         notifyStatus({ type: 'disconnect', reason });
       },
       onEvent(event) {
-        coalescer.push(event);
+        // Provenance comes from the connection the owner opened, never an upstream frame.
+        if (upstreamOrigin === 'agent' && (!isString(event.payload?.type) || event.payload.type.startsWith('openchamber:'))) return;
+        if (upstreamOrigin === 'agent' && !isAgentPayloadAllowed({ directory: event.envelope?.directory, payload: event.payload }, isSpaceSession)) return;
+        const { spaceId: _space, origin: _origin, provenance: _provenance, ...payload } = event.payload ?? {};
+        const envelope = { directory: event.envelope?.directory, eventId: event.envelope?.eventId };
+        coalescer.push({ envelope, payload, spaceId: null, origin: upstreamOrigin });
       },
       onError(error) {
         if (controller?.signal.aborted) {
@@ -217,7 +227,7 @@ export function createGlobalMessageStreamHub({
      * a client keeps one cursor for everything. `directory` is the space's, `spaceId` marks it.
      */
     injectEvent({ payload, directory, spaceId }) {
-      coalescer.push({ envelope: { directory, spaceId }, payload });
+      coalescer.push({ envelope: { directory }, payload, spaceId, origin: 'space' });
     },
     subscribeStatus(subscriber) {
       statusSubscribers.add(subscriber);

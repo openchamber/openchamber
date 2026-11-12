@@ -28,6 +28,7 @@ import { useSpacesStore, type SpaceAction } from '@/lib/spaces/spaces-store';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { SPACE_ACTION_TEXT } from './spaceActionText';
 import { spaceFailureText } from './spaceFailureText';
+import { RootSpaceBadge } from './RootSpaceNotice';
 
 const STEP_TEXT = {
   checking_place: 'spaces.group.step.checkingPlace',
@@ -239,17 +240,19 @@ export const SpaceStatusLines: React.FC<{
  */
 export const SpaceStatusMark: React.FC<{ spaceId: string; className?: string }> = ({ spaceId, className }) => {
   const { t } = useI18n();
+  const kind = useSpacesStore((state) => state.journey?.get(spaceId)?.kind);
+  const badge = <RootSpaceBadge kind={kind} />;
   const lines = useSpaceStatusLines(spaceId);
-  if (lines.length === 0) return null;
+  if (lines.length === 0) return badge;
   const tone = lines.reduce<StatusTone>((top, line) => (TONE_RANK[line.tone] > TONE_RANK[top] ? line.tone : top), 'note');
   // A stopped space is a resting state, not a fault: a word where a row's time goes. A square
   // there read as a Stop button (maintainer, 2026-10-26).
   if (tone === 'stopped') {
-    return <span className={cn('flex-shrink-0 typography-micro text-muted-foreground', className)}>{t('spaces.row.state.stopped')}</span>;
+    return <>{badge}<span className={cn('flex-shrink-0 typography-micro text-muted-foreground', className)}>{t('spaces.row.state.stopped')}</span></>;
   }
   return (
-    <span role="img" aria-label={lines[0]?.text} className={cn('inline-flex flex-shrink-0 items-center', TONE_CLASS[tone], className)}>
+    <>{badge}<span role="img" aria-label={lines[0]?.text} className={cn('inline-flex flex-shrink-0 items-center', TONE_CLASS[tone], className)}>
       <LineIcon tone={tone} className="size-3" />
-    </span>
+    </span></>
   );
 };

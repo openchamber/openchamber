@@ -3,6 +3,49 @@
 ## Purpose
 This module provides OpenCode server integration utilities for the web server runtime, including configuration management and provider authentication.
 
+## Front-door ownership and settings invariants
+
+`../agent-server/DOCUMENTATION.md` owns the split-account contract. Bootstrap
+installs its dispatcher after owner API authentication but before feature
+handlers. Forwarded bodies stay unread by common JSON parsers. The front-door
+feature branch registers owner settings, themes, status and protected admin
+only; it does not construct project/git/session feature handlers. The startup
+pipeline omits local terminal construction and injects the authenticated agent
+fetch into message transport. PWA session shortcuts use that same transport and
+the registry's textual last directory, not a local project resolver.
+
+In front-door mode `auth.js` receives the agent credential source. Its SDK client
+uses the agent upstream's authenticated fetch and its byte/deadline bounds;
+agent rows are schema-reconstructed before the existing credential and login
+helpers consume them. Key, OAuth and external credential variants remain valid.
+The ordinary single-account and VS Code source keeps its default transport.
+
+Front-door settings remain authoritative. Project paths are validated
+lexically, and project filesystem probes, legacy project creation, storage
+migrations and orphan recovery are disabled. New paths require authoritative
+ownership or successful sharing before persistence. Successful settings writes
+enqueue a version-1 safe projection to the agent; mirror failures preserve the
+owner save and agent responses cannot update owner state. The runtime's safe
+formatter must be used by front-door settings routes: the ordinary formatter
+can resolve project paths.
+
+On the agent only, version-1 mirror PUTs replace absent allowlisted preference
+keys before the ordinary merge. Normal settings PUT remains a partial update.
+Per-session permission policy is excluded from replacement, so an unrelated
+owner preference save cannot restore a revoked auto-accept mode. Notification
+center reconciliation stays active on the read-only watcher even when executor
+subscriptions are gated off. The owner archive guard precedes forwarding.
+
+### Why serialized persistence and refresh outside its lock
+
+All registry/settings writers share one lock so authorization precedes the
+actual save and concurrent writers cannot resurrect an older registry. Managed
+plugin refresh runs after releasing that lock: it re-reads migrated settings
+and would otherwise wait on its own write. The HTTP caller still waits for the
+refresh, and failure keeps the successful settings save.
+
+`serverBrowserOpenChamberOrigins` is an instance-owned HTTP(S) origin array accepted by the settings sanitizer for server-to-server mirroring. It has no UI control or UI registry entry. Malformed arrays are refused as a whole, and formatting retains the field. The guest runtime adds listening origins and supplies it only to the built-in Server Browser. The front door owns its authoritative value and mirror allowlist. Successful writes refresh the running browser's policy through the host callback.
+
 Diagnostic logging for the timeline export (`proxy.js` error lines, the lifecycle journal, the local diagnostics route in `core-routes.js`) is described in `../diagnostics/DOCUMENTATION.md`.
 
 ## Entrypoints and structure

@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { networkGrants, originGrants, parseConfig } from '../src/config.js';
+import { loadConfig, networkGrants, originGrants, parseConfig } from '../src/config.js';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 
 test('defaults to no private origin grants', () => {
   const config = parseConfig({});
@@ -16,6 +19,24 @@ test('defaults to no private origin grants', () => {
     profileKeyFile: null,
   });
   assert.deepEqual(originGrants(config.allowedOrigins), []);
+});
+
+test('takes protected origins only from the host and fails on malformed host policy', () => {
+  // Given a local file trying to override host-owned origins.
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'browser-config-'));
+  const configPath = path.join(directory, 'config.json');
+  fs.writeFileSync(configPath, JSON.stringify({ openchamberOrigins: [], allowedOrigins: ['https://front.example'] }));
+  try {
+    // When loading configuration with a dedicated host field.
+    const config = loadConfig({ configPath, env: { OPENCHAMBER_BROWSER_ORIGINS: '["https://front.example"]' } });
+    // Then local grants cannot erase the refusal.
+    assert.deepEqual(config.openchamberOrigins, ['https://front.example']);
+    for (const value of ['not json', 'null', '["https://front.example/path"]']) {
+      assert.throws(() => loadConfig({ configPath, env: { OPENCHAMBER_BROWSER_ORIGINS: value } }));
+    }
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
 });
 
 test('normalizes explicit origins into exact host and port grants', () => {

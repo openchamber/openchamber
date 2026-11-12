@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { createProtectedSelectionStore } from './selections.js';
 import { readServiceState, resolveClientConfigPath, requestAdmin } from './service-client.js';
 import { requestOrigin, renderOauthCallbackPage } from '../shared/oauth-callback.js';
+import { createAgentSubjectSync } from './agent-subject.js';
 
 const selectionBodySchema = z.object({
   scope: z.enum(['global', 'project']),
@@ -53,10 +54,12 @@ export function registerProtectedMcpRoutes(app, {
   resolveOptionalProjectDirectory,
   isSupported,
   listOrdinaryMcpNames,
+  resolveProjectIdentity,
+  selectionMirror,
   platform = process.platform,
   env = process.env,
 }) {
-  const selections = createProtectedSelectionStore({ dataDir });
+  const selections = createProtectedSelectionStore({ dataDir, resolveProjectIdentity, enforceMirrorCapacity: Boolean(selectionMirror) });
   let callbacksInFlight = 0;
   const host = () => {
     if (platform !== 'linux') return { supported: false, reason: 'unsupported_platform' };
@@ -65,6 +68,9 @@ export function registerProtectedMcpRoutes(app, {
   };
   const service = () => readServiceState({ clientConfigPath: resolveClientConfigPath(env), platform });
   const admin = (frame, timeoutMs) => requestAdmin({ clientConfigPath: resolveClientConfigPath(env), frame, timeoutMs });
+  const agentSubject = createAgentSubjectSync({ dataDir, clientConfigPath: () => resolveClientConfigPath(env) });
+  if (host().supported) void agentSubject.start();
+  if (host().supported) void selectionMirror?.push();
   const supported = (_req, res, next) => host().supported ? next() : fail(res, 501, host().reason, 'Protected MCP connections are not available on this host');
   const ask = async (res, frame, timeoutMs) => {
     const result = await admin(frame, timeoutMs);
@@ -72,9 +78,9 @@ export function registerProtectedMcpRoutes(app, {
     return result.answer;
   };
   /** Names of ordinary MCP entries here, or null when a broken config file makes them unknown. */
-  const ordinaryNames = (directory) => {
+  const ordinaryNames = async (directory) => {
     try {
-      return new Set(listOrdinaryMcpNames(directory));
+      return new Set(await listOrdinaryMcpNames(directory));
     } catch {
       return null;
     }
@@ -86,11 +92,11 @@ export function registerProtectedMcpRoutes(app, {
     let current = null;
     let selectionsError = null;
     try {
-      current = selections.read(directory);
+      current = await selections.read(directory);
     } catch {
       selectionsError = 'selections_unreadable';
     }
-    const ordinary = ordinaryNames(directory);
+    const ordinary = await ordinaryNames(directory);
     return res.json({
       host: host(),
       service: await service(),
@@ -114,14 +120,17 @@ export function registerProtectedMcpRoutes(app, {
       if (!state.status.connections.some((connection) => connection.id === body.data.connection)) {
         return fail(res, 404, 'connection_not_found', 'The protected MCP service has no such connection');
       }
-      if (directory && ordinaryNames(directory)?.has(name)) return fail(res, 409, 'name_in_use', `An MCP server named "${name}" already exists here`);
+      if (directory && (await ordinaryNames(directory))?.has(name)) return fail(res, 409, 'name_in_use', `An MCP server named "${name}" already exists here`);
     }
     try {
       await selections.set({ scope: body.data.scope, directory, name, connection: body.data.connection, disabled: body.data.disabled === true });
     } catch (cause) {
-      return fail(res, cause?.code === 'PROTECTED_SELECTION_INVALID' ? 400 : 500, 'selection_not_saved', 'The selection could not be saved');
+      return fail(res, cause?.code === 'PROTECTED_SELECTION_CAPACITY' ? 413 : cause?.code === 'PROTECTED_SELECTION_INVALID' ? 400 : 500, 'selection_not_saved', 'The selection could not be saved');
     }
-    return res.json({ selections: selections.read(directory) });
+    // A change the agents' subject did not take yet is said so: until it does, the agents keep the old connections.
+    const subject = await agentSubject.push();
+    void selectionMirror?.push();
+    return res.json({ selections: await selections.read(directory), agentAccessUpdated: subject.ok });
   });
 
   app.delete('/api/protected-mcp/selections/:name', jsonBody, supported, async (req, res) => {
@@ -135,7 +144,10 @@ export function registerProtectedMcpRoutes(app, {
     } catch (cause) {
       return fail(res, cause?.code === 'PROTECTED_SELECTION_INVALID' ? 400 : 500, 'selection_not_saved', 'The selection could not be removed');
     }
-    return res.json({ selections: selections.read(directory) });
+    // A change the agents' subject did not take yet is said so: until it does, the agents keep the old connections.
+    const subject = await agentSubject.push();
+    void selectionMirror?.push();
+    return res.json({ selections: await selections.read(directory), agentAccessUpdated: subject.ok });
   });
 
   app.get('/api/protected-mcp/connections/:id', supported, async (req, res) => {
@@ -149,11 +161,11 @@ export function registerProtectedMcpRoutes(app, {
     if (error) return fail(res, 400, 'invalid_directory', error);
     const { definition, secrets, use } = body.data;
     if (use.scope === 'project' && !directory) return fail(res, 400, 'project_required', 'A project selection needs a project directory');
-    const ordinary = directory ? ordinaryNames(directory) : new Set();
+    const ordinary = directory ? await ordinaryNames(directory) : new Set();
     if (!ordinary) return fail(res, 500, 'ordinary_mcp_unreadable', 'The MCP configuration could not be read');
     if (ordinary.has(definition.name)) return fail(res, 409, 'name_in_use', 'An MCP server already uses this name here');
     try {
-      if (Object.hasOwn(selections.read(directory)[use.scope] ?? {}, definition.name)) return fail(res, 409, 'selection_name_in_use', 'A selection already uses this name');
+      if (Object.hasOwn((await selections.read(directory))[use.scope] ?? {}, definition.name)) return fail(res, 409, 'selection_name_in_use', 'A selection already uses this name');
     } catch { return fail(res, 500, 'selections_unreadable', 'The protected MCP selections could not be read'); }
     const answer = await ask(res, { type: 'apply', operation: { kind: 'create', definition, secrets } });
     if (!answer) return;
@@ -164,7 +176,9 @@ export function registerProtectedMcpRoutes(app, {
       const rollback = await admin({ type: 'apply', operation: { kind: 'remove', id: connection.id, expectedRevision: connection.revision } });
       return res.status(500).json({ code: 'selection_not_saved', error: 'The selection could not be saved', connectionRemoved: rollback.ok });
     }
-    return res.status(201).json({ connection, selections: selections.read(directory) });
+    const subject = await agentSubject.push();
+    void selectionMirror?.push();
+    return res.status(201).json({ connection, selections: await selections.read(directory), agentAccessUpdated: subject.ok });
   });
   for (const { method, suffix, schema, kind } of [
     { method: 'put', suffix: '', schema: updateSchema, kind: 'update' },
@@ -183,6 +197,9 @@ export function registerProtectedMcpRoutes(app, {
       return res.json({ removed: true, selectionsRemoved: cleanup.removed, selectionsNotUpdated: cleanup.notUpdated });
     } catch {
       return res.json({ removed: true, selectionsRemoved: [], selectionsNotUpdated: ['mcp-protected'] });
+    } finally {
+      void agentSubject.push();
+      void selectionMirror?.push();
     }
   });
   app.post('/api/protected-mcp/connections/:id/oauth', supported, jsonBody, async (req, res) => {

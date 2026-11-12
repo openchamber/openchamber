@@ -4,7 +4,7 @@ import { parseGitHubRemoteUrl } from '../github/repo/index.js';
 import { approvalError, commitSchema, destinationOf, sameDestination } from './approval-contract.js';
 
 /** Host-owned publication. The receipt, object and destination never come from a worker response. */
-export function createApprovalPublication({ dataDir, git, gitServices }) {
+export function createApprovalPublication({ dataDir, git, gitServices, captureRef = null }) {
   const { withHostGit } = createTransferSession({ git, temporaryDirectory: dataDir, name: 'approval publication' });
   const capture = async (loop, snapshot) => {
     const destination = destinationOf(snapshot);
@@ -35,7 +35,8 @@ export function createApprovalPublication({ dataDir, git, gitServices }) {
       if (exported.unmerged.count || exported.nestedRepositories.count) throw approvalError('Resolve conflicts and nested repositories before exporting an approval result.');
       const id = crypto.randomUUID();
       const localRef = `refs/heads/openchamber-approval/${id}`;
-      await withHostGit('approval_capture_failed', async (g) => {
+      if (captureRef) await captureRef({ directory: loop.directory, commit, expectedHead: destination.expectedHead, localRef });
+      else await withHostGit('approval_capture_failed', async (g) => {
         if ((await g.run(loop.directory, ['merge-base', '--is-ancestor', destination.expectedHead, commit])).code !== 0) {
           throw approvalError('The exported commit does not descend from the PR head.');
         }

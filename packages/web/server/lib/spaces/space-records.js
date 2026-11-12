@@ -46,6 +46,9 @@ const isHttpUrl = (value) => {
   }
 };
 const upstreamSchema = z.string().url().refine(isHttpUrl, 'http or https');
+/** A protected MCP connection id, and the name OpenCode inside knows it by: the rule MCP Settings use, short enough for the grant id `mcp-<name>`. */
+export const mcpConnectionSchema = z.string().regex(/^pmcp_[0-9a-f]{16}$/);
+export const mcpNameSchema = z.string().max(60).regex(/^[a-z0-9](?:[a-z0-9_-]*[a-z0-9])?$/);
 /** Where the host finds a secret again, never the secret: an environment variable of the host's by name, or the user typed it once. */
 export const secretSourceSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('env'), name: z.string().regex(/^[A-Za-z_][A-Za-z0-9_]{0,255}$/) }).strict(),
@@ -84,6 +87,15 @@ export const grantSchema = z.discriminatedUnion('kind', [
     kind: z.literal('custom'),
     id: z.string().regex(GRANT_ID_PATTERN),
     provider: z.string().regex(GRANT_ID_PATTERN),
+  }).strict(),
+  // A protected MCP connection, on this computer's places only: the protected service lets the
+  // space's own subject call it, and OpenCode inside reaches it under `name`. No credential is
+  // anywhere near the space.
+  z.object({
+    kind: z.literal('mcp'),
+    id: z.string().regex(GRANT_ID_PATTERN),
+    connection: mcpConnectionSchema,
+    name: mcpNameSchema,
   }).strict(),
 ]);
 const MAX_GRANTS = 100;

@@ -2,7 +2,7 @@
 // facts, and everything written on top of `exec` relies on them.
 
 import { SpaceError } from './errors.js';
-import { requireSpaceId } from './labels.js';
+import { requireSpaceId } from './resource-ids.js';
 
 export const SPACE_USER = '1000:1000';
 export const SPACE_HOME = '/home/space';
@@ -110,10 +110,13 @@ export const GATEKEEPER_BIND_PATH = `${GATEKEEPER_PROGRAM_DIRECTORY}/bind`;
 // cooperates.
 export const spaceOpenCodeConfigDirectory = (spaceId) => `${spaceWorkPath(spaceId)}/.opencode`;
 export const spaceOpenCodeConfigPath = (spaceId) => `${spaceOpenCodeConfigDirectory(spaceId)}/opencode.json`;
-// Where the host wrote it before, OpenCode's global file in the home volume. A space made then
-// still holds it, and OpenCode merges a provider's settings across layers field by field, so a
-// stale entry there would leak fields into the one beside the project; the write removes it.
-export const LEGACY_SPACE_OPENCODE_CONFIG_PATH = `${SPACE_HOME}/.config/opencode/opencode.json`;
+// OpenCode's global file in the home volume. The host wrote providers here before; OpenCode
+// merges a provider's settings across layers field by field, so a stale entry would leak fields
+// into the one beside the project, and every provider write removes the file. It now holds only
+// the relays of protected MCP grants: a command beside the project would make the server inside
+// pause OpenCode until someone trusted what the host itself wrote, and the folder trust check
+// leaves global configuration to the user, as OpenCode does.
+export const SPACE_GLOBAL_OPENCODE_CONFIG_PATH = `${SPACE_HOME}/.config/opencode/opencode.json`;
 
 const IMAGE_PATH = '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin';
 

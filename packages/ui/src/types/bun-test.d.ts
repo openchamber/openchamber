@@ -4,6 +4,10 @@
 declare module "bun:test" {
   export function describe(name: string, fn: () => void): void;
   export function test(name: string, fn: () => void | Promise<void>, timeoutMs?: number): void;
+  export function it(name: string, fn: () => void | Promise<void>, timeoutMs?: number): void;
+  export namespace it {
+    function each<T extends readonly unknown[]>(values: T): (name: string, fn: (value: T[number]) => void | Promise<void>) => void;
+  }
   export interface ExpectResult {
     toEqual(expected: unknown): void;
     toBe(expected: unknown): void;
@@ -18,6 +22,7 @@ declare module "bun:test" {
     rejects: {
       toThrow(expected?: string | RegExp | (new (...args: never[]) => unknown)): Promise<void>;
       toBeInstanceOf(expected: new (...args: never[]) => object): Promise<void>;
+      toMatchObject<T>(expected: T): Promise<void>;
     };
     toBeGreaterThan(expected: number): void;
     toBeGreaterThanOrEqual(expected: number): void;
@@ -27,6 +32,7 @@ declare module "bun:test" {
     toHaveLength(expected: number): void;
     toHaveBeenCalled(): void;
     toHaveBeenCalledTimes(expected: number): void;
+    toHaveBeenCalledWith(...args: readonly unknown[]): void;
     toBeInstanceOf(expected: unknown): void;
     toHaveProperty(path: string): void;
     not: {

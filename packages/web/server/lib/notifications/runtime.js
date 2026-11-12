@@ -19,6 +19,25 @@ const textOrNull = (value) => nonEmptyText.safeParse(value).data ?? null;
 /** The session id OpenCode gives an MCP elicitation form, which no session owns. */
 const LOCATION_SCOPED_FORM_SESSION_ID = 'global';
 
+const agentPushText = z.string().max(1000);
+const agentPushSessionId = z.string().regex(/^[A-Za-z0-9_-]{1,128}$/);
+const agentPushDirectory = z.string().max(4096).refine((value) => !value.includes('\0')).nullish();
+const agentPushFields = { title: agentPushText, body: agentPushText, tag: z.string().min(1).max(256) };
+const agentNotificationSchema = z.object({
+  type: z.literal('openchamber:notification'), origin: z.literal('agent'), spaceId: z.null(),
+  properties: z.discriminatedUnion('kind', [
+    z.object({ ...agentPushFields, kind: z.literal('goal'), sessionId: agentPushSessionId, directory: agentPushDirectory, goalStatus: z.enum(['complete', 'budgetLimited', 'blocked']).optional() }),
+    z.object({ ...agentPushFields, kind: z.literal('review'), sessionId: agentPushSessionId, directory: agentPushDirectory }),
+    z.object({ ...agentPushFields, kind: z.literal('browser-help'), sessionId: agentPushSessionId, guestId: z.string().min(1).max(256) }),
+    z.object({ ...agentPushFields, kind: z.literal('pull-request'), sessionId: z.null().optional() }),
+  ]),
+});
+const pushSessionSchema = z.object({ title: z.string().transform((value) => value.trim().slice(0, 256)).catch('') });
+const goalPushStatusSchema = z.object({ metadata: z.object({ openchamber: z.object({ goal: z.object({
+  status: z.enum(['complete', 'budgetLimited', 'blocked']),
+}) }) }) });
+const goalPushType = (status) => ({ complete: 'goal_complete', budgetLimited: 'goal_budget', blocked: 'goal_blocked' })[status] ?? 'goal';
+
 export const createNotificationTriggerRuntime = (deps) => {
   const {
     readSettingsFromDisk,
@@ -35,6 +54,7 @@ export const createNotificationTriggerRuntime = (deps) => {
     isAnyInteractiveClientVisible,
     buildOpenCodeUrl,
     getOpenCodeAuthHeaders,
+    fetchImpl = fetch,
     // OpenChamber's own session metadata (the goal lives there, not on the
     // OpenCode record). Optional: without it no goal can suppress a push.
     readSessionMetadata = null,
@@ -56,7 +76,7 @@ export const createNotificationTriggerRuntime = (deps) => {
   // Where a session is read: the host's OpenCode for its own sessions, the OpenCode inside the
   // space for a session of a space. The host's OpenCode does not know a space's session, so it
   // is never asked about one; a space that cannot be asked answers nothing.
-  const hostSource = { buildOpenCodeUrl, getOpenCodeAuthHeaders, fetchImpl: (...args) => fetch(...args) };
+  const hostSource = { buildOpenCodeUrl, getOpenCodeAuthHeaders, fetchImpl };
   const unreachableSpaceFetch = async () => { throw new Error('isolated spaces are off'); };
   const sourceFor = (spaceId) => (spaceId
     ? {
@@ -1088,23 +1108,30 @@ export const createNotificationTriggerRuntime = (deps) => {
   // Goal and review settle push: same fanout as the trigger paths (web-push
   // with the full text; APNs with the generic per-type title and the session
   // name as body, so the relay never sees content).
-  const sendSettlePush = async ({ sessionId, directory, type, tag, title, body }) => {
-    let sessionName = '';
+  const readPushSession = async (sessionId, directory) => {
     try {
       const base = buildOpenCodeUrl(`/api/session/${encodeURIComponent(sessionId)}`, '');
       const url = directory ? `${base}?directory=${encodeURIComponent(directory)}` : base;
-      const response = await fetch(url, {
+      const response = await fetchImpl(url, {
         method: 'GET',
         headers: { Accept: 'application/json', ...getOpenCodeAuthHeaders() },
         signal: AbortSignal.timeout(2000),
       });
       if (response.ok) {
         const session = unwrapOpenCodeResponse(await response.json().catch(() => null));
-        if (typeof session?.title === 'string') sessionName = session.title.trim();
+        return {
+          sessionName: pushSessionSchema.safeParse(session).data?.title ?? '',
+          goalStatus: goalPushStatusSchema.safeParse(session).data?.metadata.openchamber.goal.status ?? null,
+        };
       }
     } catch {
       // Session name is presentation sugar for the mobile push — never block on it.
     }
+    return { sessionName: '', goalStatus: null };
+  };
+
+  const sendSettlePush = async ({ sessionId, directory, type, tag, title, body }) => {
+    const { sessionName } = await readPushSession(sessionId, directory);
     await fanoutPush(
       {
         title,
@@ -1203,8 +1230,37 @@ export const createNotificationTriggerRuntime = (deps) => {
     sendToChannels({ kind: 'pull-request', title, body, tag }, settings);
   };
 
+  // The owner watcher already pushes raw OpenCode triggers. Only server-owned
+  // announcements need this second path; plugin notifications remain live-only.
+  const deliverAgentNotification = async (payload) => {
+    const parsed = agentNotificationSchema.safeParse(payload);
+    if (!parsed.success) return;
+    const notification = parsed.data.properties;
+    const settings = await readSettingsFromDisk();
+    if (settings.nativeNotificationsEnabled !== true) return;
+    const { kind, title, body, tag } = notification;
+    if ((kind === 'goal' || kind === 'review') && settings.notifyOnCompletion === false) return;
+    if (kind === 'pull-request' && settings.notifyOnPullRequests === false) return;
+    if ((kind === 'review' || kind === 'pull-request') && settings.notificationMode !== 'always' && getIsWindowFocused?.()) return;
+    if (kind === 'browser-help') {
+      await sendBrowserHelpPush(notification);
+      return;
+    }
+    if (kind === 'pull-request') {
+      await fanoutPush({ title, body, phoneBody: `${title}: ${body}`, tag, data: { url: '/', type: kind } }, { requireNoSse: true });
+      return;
+    }
+    const { sessionId, directory } = notification;
+    const { sessionName, goalStatus } = await readPushSession(sessionId, directory);
+    await fanoutPush({
+      title, body, phoneBody: phoneBodyOf(title, body) || title, tag,
+      data: { url: buildSessionDeepLinkUrl(sessionId), sessionId, sessionName, type: kind === 'goal' ? goalPushType(notification.goalStatus ?? goalStatus) : kind },
+    }, { requireNoSse: true });
+  };
+
   return {
     maybeSendPushForTrigger,
+    deliverAgentNotification,
     setAutoAcceptSession,
     setGetIsWindowFocused,
     setGetIsSessionAutoAccepting,

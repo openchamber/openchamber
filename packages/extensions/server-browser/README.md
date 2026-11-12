@@ -146,6 +146,40 @@ directories (`${XDG_DATA_HOME:-~/.local/share}/openchamber-server-browser/`,
 `${XDG_CONFIG_HOME:-~/.config}/openchamber-server-browser/profile.key`),
 independent of `OPENCHAMBER_DATA_DIR`.
 
+### OpenChamber origin refusal
+
+The host supplies `OPENCHAMBER_BROWSER_ORIGINS` as a JSON array of HTTP(S)
+origins. It combines its listening URLs with the server-owned settings field
+`serverBrowserOpenChamberOrigins`. In a split installation the front door
+mirrors that field to the agent server, including its configured, LAN and tunnel
+origins. An absent settings field adds no origins beyond the agent server's
+own listeners. A malformed field prevents the service from starting.
+
+Local configuration files cannot set or clear this policy. `allowedOrigins`,
+private-network approval and development-server discovery cannot override it.
+Chrome's Fetch interception refuses matching requests before sending them,
+including redirects, subframes and popups. It is enabled on paused targets
+before they resume. A target that refuses interception stays paused or closes.
+The existing egress proxy enforces the same refusal in `classifyProxyTarget`,
+before DNS, listener probes or grants. HTTP forwarding, WebSocket upgrades and
+CONNECT tunnels all use that decision. Fetch does not intercept WebSocket
+handshakes, so the proxy is required even when CDP interception is enabled.
+Hostnames compare case-insensitively without trailing dots; localhost names,
+127/8, IPv6 loopback, IPv4-mapped loopback and unspecified bind addresses match
+as loopback on the protected port. The refusal matches host and port across
+schemes because CONNECT exposes only an authority and could carry plain
+HTTP or WebSocket traffic. Default ports still follow the URL's scheme.
+Other endpoints and development-server ports retain their existing policy.
+File requests are refused by the CDP guard too.
+
+After a successful settings write, the host stops a running browser whose
+origin list changed. Its next request starts a fresh service with the current
+policy. Tabs from the stopped service close. Editing settings directly on disk
+requires a service restart; unknown proxy aliases must be listed explicitly.
+
+This refusal protects the built-in browser's network use. The service runs as
+the agent account and is not a sandbox for arbitrary code that account runs.
+
 ## Build and test
 
 From the repository root:

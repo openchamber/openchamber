@@ -9,11 +9,11 @@ and the OpenChamber server carries those changes to the service over a private
 Unix socket, `admin.sock`, that only root, the service account and members of
 `openchamber-mcp-admins` can open.
 
-This module delivers stage 1 of the design. The service has its own account,
-while OpenChamber and OpenCode still share one, so the account that administers
-is also the account the agent runs as. An agent acting on purpose can therefore
-change these servers or capture a secret while it is typed; Known limits has the
-details. Stage 2 runs OpenCode under a separate account and is not built.
+The service supports stage 1 group access and stage 2 per-subject call authority.
+Account separation and binding subject directories into agent or space units
+belong to the host installer and host daemon. A stage 1 installation still runs
+OpenChamber and OpenCode under one account with administrative authority. Known
+limits describes the consequences.
 
 ## Ownership
 
@@ -31,11 +31,12 @@ details. Stage 2 runs OpenCode under a separate account and is not built.
 - `service/relay.js` is the engine-side relay OpenCode starts for a protected
   connection. It holds no credential and is not a security component, because
   the engine can already open the engine socket directly.
-- `routes.js`, `service-client.js`, `selections.js` and `selections-reader.js`
-  run in the OpenChamber server, with the engine's authority. `routes.js` serves
+- `routes.js`, `service-client.js`, `agent-subject.js`, `selections.js` and `selections-reader.js`
+  run in the OpenChamber front door, with its administrative authority. `routes.js` serves
   `/api/protected-mcp/*`. `service-client.js` reads redacted status from the
   engine socket and sends administration frames to the admin socket.
   `selections.js` stores which protected connections each project uses.
+  `agent-subject.js` synchronizes their enabled union to the `agent` subject.
   `selections-reader.js` parses the selection files and builds the relay
   entries for them. Because `../opencode/mcp-local-plugin.js` serializes it into
   the managed OpenCode plugin, the reader takes every dependency as an argument.
@@ -48,8 +49,9 @@ details. Stage 2 runs OpenCode under a separate account and is not built.
   entries that start the relay. It owns live reconciliation for both ordinary
   personal entries and protected selections.
 
-The OpenChamber server, the OpenCode engine and everything they start share one
-authority, the engine, and one Linux account, the engine account. The service,
+In stage 1 the OpenChamber server, the OpenCode engine and everything they start
+share the engine account. Subject listeners also support engines in separate
+units without membership in either service group. The service,
 its workers, its state and its installed code form the protected side, and the
 service and its workers run as the service account, `openchamber-mcp`. The
 admin socket is the only way into protected administration, and OpenChamber's
@@ -69,9 +71,12 @@ session check, `requireApiAuth`, guards the routes that reach it.
   save.
 - A **selection** names a connection for OpenCode, for all projects or for one
   project. Selections hold an MCP name and a connection id, never a credential.
+- A **subject** is `agent` or `space-<12 lowercase hex digits>`, with an allowed
+  set of connection ids persisted by the service. A subject's listener grants
+  exactly that set. Its directory is the capability bound into its unit.
 - **Call authority** is the right to open MCP sessions on approved connections.
-  Every engine process has it through the engine socket's group,
-  `openchamber-mcp-clients`.
+  A subject gets its allowed set through its listener. Members of the original
+  engine socket's group, `openchamber-mcp-clients`, retain every connection.
 - **Administrative authority** is the right to add or change connections,
   credentials, destinations and policies. It is membership of
   `openchamber-mcp-admins`, the group of the admin socket, and root and the
@@ -88,9 +93,9 @@ session check, `requireApiAuth`, guards the routes that reach it.
    status answer, an error, a log line, an admin socket answer or a file the
    engine can read. Credential values reach only the worker or upstream request
    of their own connection.
-2. The engine socket accepts exactly two first frames, `hello` for an MCP session
-   and `status` for redacted status. Any other request is refused before
-   anything else happens, so no administrative operation exists there.
+2. The original engine socket accepts `hello` for an MCP session and `status`
+   for redacted status. Subject sockets accept only `hello`. No administrative
+   operation exists on any engine listener.
 3. A `hello` names a connection id and nothing else. The relay cannot choose a
    command, arguments, environment, URL, header or policy.
 4. Only root, the service account and members of `openchamber-mcp-admins` can
@@ -154,9 +159,11 @@ session check, `requireApiAuth`, guards the routes that reach it.
     `acl_unreadable` when `getfacl` fails on a path, and `groups_unreadable`
     when the service cannot read `/etc/group`. Who can administer is a separate
     observation, `administration`, and never changes this status.
-11. Selections decide which connections OpenCode starts and grant no access.
-    Every engine process can call every approved connection through the engine
-    socket, so projects are not isolated from each other.
+11. Selections decide which connections OpenCode starts. Their enabled union
+    across global and project files supplies the shared `agent` subject's allowed
+    set. A subject listener restricts calls to its service-owned set, independently
+    of a caller's selections. The original `engine.sock` still grants every
+    approved connection to its clients group for stage 1 installs.
 12. An OAuth token write applies only to the grant it started from. The stored
     token object is the grant's identity. Every change replaces it and nothing
     modifies it, and a policy-only update or a new sign-in start keeps it. A
@@ -185,6 +192,21 @@ session check, `requireApiAuth`, guards the routes that reach it.
     message, and the service's validation messages name fields such as
     `stdio.env.<NAME>`. OpenChamber forwards the authorization code in a pasted
     address to the socket and neither keeps nor logs it.
+14. Subject identity comes only from the listener that accepted the socket.
+    Frames cannot choose it. Only admin socket frames create, replace or remove
+    grants. A disallowed hello returns `connection_not_allowed` before looking
+    up the connection or starting a backend. Subject listeners refuse status.
+15. Subject and connection mutations share the store queue and `state.json`
+    snapshot. Removing a connection removes it from every subject in the same
+    write. A successful shrink or subject removal ends only that subject's
+    revoked sessions before answering. Failed snapshot replacement leaves the
+    previous authority and its sessions intact. Directory paths and inodes stay
+    stable across updates, removal, recreation and service restarts; only the
+    socket inside is replaced.
+    The successful rename is the commit point for live grants and revocations.
+    A subsequent directory-flush failure returns `state_durability_unverified`;
+    the change has applied and its listener stays usable, but durability through
+    a machine crash is unconfirmed. Retrying a subject update is safe.
 
 ## Topology on the host
 
@@ -193,8 +215,11 @@ session check, `requireApiAuth`, guards the routes that reach it.
 | `/usr/lib/openchamber-protected-mcp/<version>/` | `root:root`, `0755` dirs, `0644` files | Installed service code; `current` is a symlink to the active version |
 | `/etc/openchamber/protected-mcp/service.json` | `root:root 0644` | Service configuration: identities, paths, both socket paths and their groups |
 | `/etc/openchamber/protected-mcp/client.json` | `root:root 0644` | What OpenChamber needs to reach the service: the engine socket path, the admin socket path, the relay command |
+| `/etc/openchamber/protected-mcp/agent-client.json` | `root:root 0644` | Only with separate accounts: the same for the agents' OpenChamber, with the subject socket `/run/openchamber-mcp/engine.sock` that its unit binds |
 | `/var/lib/openchamber-protected-mcp/` | `openchamber-mcp`, `0700` | Definitions, credentials, worker state, installed MCP packages, migration journals |
 | `/run/openchamber-protected-mcp/` | `openchamber-mcp:openchamber-mcp-clients`, `0750` | Runtime directory; holds the engine socket `engine.sock`, `0660` |
+| `/run/openchamber-protected-mcp/subjects/` | `openchamber-mcp`, `0700` | Subject directories; configurable as `subjectsDir` in `service.json` |
+| `/run/openchamber-protected-mcp/subjects/<subject>/` | `openchamber-mcp`, `0711` | Stable directory with that subject's `engine.sock`, `0666` |
 | `/run/openchamber-protected-mcp-admin/` | `openchamber-mcp:openchamber-mcp-admins`, `0750` | Admin runtime directory; holds the admin socket `admin.sock`, `0660` |
 
 The engine account is a member of `openchamber-mcp-clients`. In stage 1 the
@@ -202,7 +227,12 @@ installer also puts it in `openchamber-mcp-admins`. It is a member of nothing
 else the service owns. The service runs as `openchamber-mcp` under the hardened
 systemd unit the installer writes, with both groups as supplementary groups so
 it can hand each socket to its group. The unit's `RuntimeDirectory` lists both
-directories at mode `0750`.
+directories at mode `0750`. `RuntimeDirectoryPreserve=yes` keeps the runtime
+tree through stops and restarts so an existing bind mount keeps its directory
+inode. A reboot clears `/run`; consuming units must establish their binds again.
+The service creates `subjectsDir` and its children as its own account. A custom
+`subjectsDir` must be writable within the service unit's filesystem restrictions
+and preserved by whichever unit owns its parent.
 
 A host install (`scripts/install.sh --host`, `../host-install/`) installs the
 service together with OpenChamber and updates both on every OpenChamber update,
@@ -220,23 +250,29 @@ installed tree at every start. The script unpacks the downloaded package in a
 directory under `/var/cache` and removes that directory when it exits, however
 it exits.
 
-The installer asks for no password. It creates both groups, adds the engine
-account to both, prints the boundary status, and says that in stage 1
-OpenChamber administers through `openchamber-mcp-admins` as the engine account.
-A reinstall with a different `--engine-user` removes the previous account from
-both groups and reports the change. Existing processes keep their supplementary
-groups until they exit, so stop the previous account's engine processes when
-changing accounts.
+The installer asks for no password. It creates both groups and prints the
+boundary status. Without `--admin-user` it adds the engine account to both and
+says that in stage 1 OpenChamber administers through `openchamber-mcp-admins`
+as the engine account. With `--admin-user <account>`, the account OpenChamber
+runs as when agents have an account of their own, that account joins both
+groups, the engine account joins neither, `service.json` records `adminUser`,
+and `agent-client.json` gives the agents' OpenChamber the subject socket path.
+The preflight then reports `administration: separate`, since the engine
+account cannot open the admin socket. Every account the installation stops
+using, a previous `--engine-user` or `--admin-user` and an engine account that
+now has an administrator of its own, leaves both groups, and the installer says
+so. Existing processes keep their supplementary groups until they exit, so
+restart the previous account's processes when changing accounts.
 
 `install.sh --protected-mcp-uninstall` runs the installed copy of
 `service/install.js uninstall` with its other flags. It stops and disables the
-unit and removes the unit file, the installed code, `client.json` and
-`service.json`. The state, the `openchamber-mcp` account, both groups and the
-engine account's memberships stay for a reinstall. With `--purge-state` it also
-deletes the state directory, the `openchamber-mcp` account and both groups.
-Given `--engine-user <account>` as well, it first takes that account out of
-both groups. It ignores a failure to remove an account, a group or a
-membership.
+unit and removes the unit file, the installed code, `client.json`,
+`agent-client.json` and `service.json`. The state, the `openchamber-mcp`
+account, both groups and the accounts' memberships stay for a reinstall. With
+`--purge-state` it also deletes the state directory, the `openchamber-mcp`
+account and both groups. Given `--engine-user <account>` or `--admin-user
+<account>` as well, it first takes those accounts out of both groups. It
+ignores a failure to remove an account, a group or a membership.
 
 ## Tool policy
 
@@ -288,7 +324,17 @@ Frames are UTF-8 JSON, one per line, at most 16 MiB each.
 - Anything else, including a malformed first line, answers
   `{"type":"error","code":"..."}` and closes. Codes: `unsupported_request`,
   `malformed_frame`, `protocol_mismatch`, `unknown_connection`,
-  `connection_disabled`, `too_many_sessions`, `hello_timeout`.
+   `connection_disabled`, `too_many_sessions`, `hello_timeout`.
+
+Each subject listener uses the same hello and MCP framing. It refuses `status`
+with `unsupported_request` and any hello outside its allowed set with
+`connection_not_allowed`. Extra hello fields, including `subject`, remain
+malformed. The 64-session limit covers all listeners together.
+
+The host daemon binds a subject directory read-only at `/run/openchamber-mcp`
+inside its unit. The subject's OpenCode starts the existing relay with
+`--socket /run/openchamber-mcp/engine.sock` and the connection id. Connecting to
+a Unix socket works through the read-only bind. The relay needs no change.
 
 When the service stops, it closes the listener, drops every socket that has not
 finished its first frame, ends every session and destroys whatever is still open
@@ -344,6 +390,19 @@ The protocol is one request per connection:
 | `{"type":"oauth-start","id","expectedRevision","redirectUri"}` | `oauth-started`: `attempt` and `authorizationUrl` | Starts a sign-in |
 | `{"type":"oauth-complete","state","code"?,"error"?}` | `oauth-completed`: `outcome` and the connection `name` | Finishes a sign-in |
 | `{"type":"oauth-attempt","attempt"}` | `oauth-attempt`: `status` `pending`, `done` or `unknown`, and the `outcome` once done | Reports a sign-in |
+| `{"type":"subjects"}` | `subjects`: array of `{ subject, connections }` | Lists grants |
+| `{"type":"subject-set","subject","connections":["pmcp_..."]}` | `subject`: `{ subject, connections }` | Creates or replaces a grant; ids are deduplicated and sorted |
+| `{"type":"subject-remove","subject"}` | `subject-removed`: `subject` | Removes a grant and closes its listener; repeated removal succeeds |
+
+Subject names outside `agent` and `space-[0-9a-f]{12}` return `invalid_subject`.
+A malformed connection-id array returns `invalid_request`; a well-formed id
+that is not stored returns `unknown_connection` with status 404, preserving the
+previous grant. Subject grants live as an optional `subjects` array in
+`state.json`, alongside the connections. Stage 1 snapshots without that array
+start with no subjects. Malformed stored grants fail startup closed. Directory
+creation or listen failure grants nothing; a failed new grant write closes its
+new listener unless replacement already committed. Removal keeps the directory
+for existing binds and later reuse.
 
 A view is the definition with every secret slot as `{ "set": true|false }`, the
 `id` and `revision`, and `editable`. `editable` is the definition without `id`
@@ -389,6 +448,8 @@ discovery can try 2 resource metadata addresses and 2 issuer metadata addresses,
 then register a client, each with a 15 second network timeout. The remaining
 5 seconds cover the socket exchange. Both pasted and browser completion get
 20 seconds for one token exchange with a 15 second network timeout.
+`listSubjects`, `setSubject` and `removeSubject` use the same bounded admin
+exchange, configuration lookup and refusal mapping as connection operations.
 
 ## Administration through OpenChamber
 
@@ -553,6 +614,63 @@ Deleting a connection through the routes calls `removeConnection`, which walks
 every selection file under a lock and drops each entry that names the
 connection. A file it cannot read or write is reported and left as it was.
 
+At route registration on a supported Linux host, the front door checks service
+reachability and pushes the union to subject `agent`. Every successful selection
+PUT, DELETE, create-and-select and connection deletion requests another push,
+including deletions with partial selection cleanup. Pushes are serialized and
+read the current files inside the queue. They exclude disabled entries and
+deduplicate ids across all global and project documents, including unopened
+projects. A disabled project entry cannot revoke a global selection used in
+other locations.
+
+In front-door mode these documents stay authoritative in the front door's data
+directory. Project targets use an injected asynchronous identity resolver that
+asks the agent for a registered directory's `git:<absolute path>` or
+`directory:<absolute path>` identity. Identities have at most 4096 characters
+and exclude control characters. Single-account stores retain synchronous local
+resolution and synchronous reads. Ordinary-name reads use the agent's merged
+file-backed and personal MCP configuration; unavailable reads report unknown
+conflicts.
+
+Startup, successful selection mutations and the existing agent event-stream
+reconnect hook enqueue a separate selection mirror. It reads the front door's
+current documents inside a serialized queue and PUTs a complete snapshot to the
+agent. Replies never update owner documents or the service subject. Each mirror
+failure logs a fixed code, preserves the owner save and retries on the next
+change, start or reconnect. Service subject synchronization continues to read
+only the front door's own documents.
+
+The snapshot is at most 1 MiB, with at most 1024 documents and 256 entries per
+document. The agent validates names, connection ids and identities before
+writing, derives project filenames from identity hashes and rejects duplicates.
+Front-door selection writes validate the projected complete snapshot before
+committing under a shared capacity lock across projects. An over-capacity PUT
+returns 413 and preserves the previous document. Empty project documents are
+omitted from snapshots, so removals do not consume document slots. Single-account
+stores retain their existing limits.
+It atomically replaces each file through the existing MCP file writer, then
+removes managed documents absent from the snapshot. The watched directory stays
+in place. Invalid input changes no file. A filesystem failure can leave a
+partially applied set of complete files; stale deletion starts only after every
+replacement succeeds. Another complete push safely repairs that state. The
+service subject independently enforces call authority throughout.
+
+A selection route waits for its push and answers `agentAccessUpdated: false`
+when the service did not take it; the selection write is never rolled back. A
+failed push is tried again every 10 seconds until the service takes one, and any
+later change replaces the pending retry, so a removal reaches the service once it
+is reachable again. A malformed or unreadable
+document prevents replacement of the service's previous set. An orphaned id
+left by partial cleanup makes the service refuse the replacement; the
+connection deletion has already removed that id from every subject. There is no
+filesystem watcher.
+
+In a separated install the agent unit binds `subjects/agent` when it starts, and
+systemd skips that bind when the folder is missing. `systemd-tmpfiles` makes the
+runtime folders down to `subjects/agent` at every boot, from
+`/etc/tmpfiles.d/openchamber-protected-mcp.conf`, and the installer runs it before
+the agent restarts, so the socket the service creates shows inside the agent.
+
 ## Runtime surfaces
 
 | Runtime | Behavior |
@@ -600,6 +718,20 @@ connection. A file it cannot read or write is reported and left as it was.
 
 ## Decisions
 
+### Why selections are mirrored across accounts
+
+The managed plugin reads selections as the agent account, which cannot read the
+front door's data directory. Selection names and ids contain no credentials and
+grant no authority; the protected service enforces its own `agent` subject. A
+validated one-way copy gives the plugin its entries while authority remains
+computed from the front door's documents.
+
+### Why mirror replacement keeps the watched directory
+
+The plugin watches document names in `mcp-protected/`. Atomic file renames and
+stale file removals preserve that watcher. Swapping the whole directory would
+leave existing plugin watchers attached to the old inode.
+
 ### Why a separate system identity and not encryption inside the engine
 
 Encryption inside the engine needs a key the engine account can read, and then
@@ -629,6 +761,24 @@ enforced before any service code runs, and no listening address exists for
 enterprise policy to gate. A second socket, in its own directory with its own
 group, lets stage 2 grant it to a different account without touching the engine
 socket.
+
+### Why one listener per subject and not peer credentials
+
+Node has no `SO_PEERCRED` API. A listener binds identity to a fixed subject,
+and the kernel's path permissions decide who can reach it. The private parent
+hides all subjects; a read-only bind exposes one directory to one unit. Keeping
+that directory's inode while recreating its socket lets existing binds survive
+a service restart. Peer-credential inference would need a native dependency and
+a separate identity mapping.
+
+### Why subject grants share the connection snapshot
+
+One snapshot and mutation queue make deletion of a connection and all its grants
+one durable transition. Separate grant files could retain stale authority after
+an interrupted deletion. Filesystem writes and operation parsing have dedicated
+service modules; the store keeps mutation ordering. Installer filesystem work,
+system calls and unit layout have separate modules so its orchestration stays
+within the source-size limit.
 
 ### Why the OAuth callback needs no session
 
@@ -707,6 +857,13 @@ layout as the repository.
 
 ## Known limits
 
+- Common sessions share subject `agent`, so projects are not isolated from each
+  other. Every common session can call the enabled union, even a connection
+  selected only in another project. A failed push preserves the last successful
+  set until a retry, a selection change or a server start succeeds.
+- Subject authority protects only units that cannot also reach the original
+  group socket or the admin socket. This module supplies the listeners; host
+  account separation and bind setup belong to the other installation tracks.
 - Stage 1 shares one account. An agent acting on purpose reaches administration
   through it. It can open the admin socket, and it can read what OpenChamber
   holds, including `jwt-secret`, with which it can mint a session. It can then

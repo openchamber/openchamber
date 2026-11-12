@@ -13,10 +13,49 @@ The server watches one PR for one host session. Auto mode sends feedback through
 - `../spaces/` owns the permanent restriction profile and quarantine/code-out checks. This module never interprets an in-space HTTP response as host authentication, a command, a grant or publication authority.
 
 `server/index.js` builds the adapters without starting Spaces, and starts persisted loops after Spaces and Git services initialize. Host event subscribers continue to exclude space events. Worker progress uses authoritative space-specific polling.
-The feedback adapter loads GitHub clients directly from `../github/octokit.js`.
+Single-account loops and agent-owned auto loops load GitHub clients directly
+from `../github/octokit.js`.
 A captured account resolves only through `getOctokitForAccountId(accountId)` and
 never falls back to the active credential. Legacy auto loops without an account
 use `getOctokitOrNull('github.com')`, explicitly scoped to the supported instance.
+
+## Front-door approval runtime
+
+In front-door mode, a second `createFixLoopRuntime` instance runs approval loops
+in the front door. Its own `<data dir>/pr-fix-loops.json` is authoritative for
+local loop ids, worker preparations, receipts and lifecycle state. Auto mode
+remains entirely agent-owned; the front-door instance refuses auto mode. The
+single-account runtime and its local adapters are unchanged.
+
+Front-door GitHub adapters use opaque `{ accountId }` handles. Tokens stay in
+the agent account. Through `agent-upstream`, the front door requests bounded,
+schema-checked feedback, author permissions, failed checks and project-side
+operations. Binding reads, publication and review operations use the existing
+agent-side Git services. Notifications remain local to the front door. The
+[agent-server contract](../agent-server/DOCUMENTATION.md#pr-fix-loop-services)
+owns the private service boundary.
+
+`space-worker.js` uses the front door's Spaces host and existing dispatcher for
+worker queues, turns and usage. The trusted Spaces journey owns stop and resume.
+It reads the original host session
+through the schema-checked agent upstream. The agent fetches the exact
+provider-reported PR head into the registered project; the D2a bundle transfer
+seeds that head into the worker. Existing code out checks the result before the
+agent promotes its bundle into the project. The front door never opens the
+project directory.
+
+The front door generates each receipt identity and retains publication
+authority. Delegation preserves the existing fresh-provider, binding and
+exact-head checks in `runtime.js` and `publication.js`, together with the managed
+executor's exact-object and lease checks. Agent answers cannot select a loop,
+Space, host session or publication authority.
+
+### Why approval and auto loops run in separate runtimes
+
+Approval loops require the front door's Space and receipt authority. An agent
+callback into the front door would give the agent a path to that authority.
+Running the approval runtime there keeps calls one-way to bounded agent
+services while auto loops retain their existing agent-owned queue.
 
 ## Approval setup
 
@@ -53,7 +92,7 @@ The host persists it before offering approval. Counts describe the code-out comp
 
 `POST .../:id/approve { receiptId }` accepts only the pending receipt identity. The host reads fresh authenticated GitHub state and refuses a closed PR, changed head, changed ref, renamed/transferred head repository or replacement repository with the same name. It verifies local repository and transport authority through the binding/network executor. The executor checks that the receipt branch still names the approved commit, revalidates before transfer, disables repository hooks, and pushes exactly `<approved sha>:<approved ref>` with `--force-with-lease=<ref>:<expected head>` to the saved managed endpoint. Contributor provenance uses the existing exact-destination selection mechanism. No mutable branch tip, ambient remote or worker-provided command selects publication.
 
-An interrupted publication retains its receipt and `publishing` marker. Restart never retries that write or enqueues another turn. Approving the same receipt reconciles an exact matching remote result without another push; an unchanged old head can retry the same leased object. Both paths require an open PR, including when the remote already names the approved commit. Closed or merged PRs retain the receipt and work without publishing, clearing the receipt or starting review writes. A preflight refusal preserves the previous publication marker. Changed remote state remains a refusal. Failed or uncertain publication keeps the local object and receipt.
+An interrupted publication retains its exact receipt and `publishing` marker. Restart never retries that write or enqueues another turn. Approving the same receipt reconciles an exact matching remote result without another push; an unchanged old head can retry the same leased object. Both paths require an open PR, including when the remote already names the approved commit. Closed or merged PRs retain the receipt and work without publishing, clearing the receipt or starting review writes. A preflight refusal preserves the previous publication marker. Changed remote state remains a refusal. Failed or uncertain publication keeps the local object and receipt.
 
 Successful publication durably changes review work from `awaitingPublication` to `pending`, with the exact published receipt. A host timer posts each thread reply before resolving that thread, and posts replies to assigned reviews and conversation comments in the same PR conversation. The host supplies repository, PR number, published head SHA, branch, binding context and deterministic operation keys. Worker text supplies only the bounded reply and fixed-thread choice. No URL, HTTP method, credential, repository or generic API request comes from the worker.
 
@@ -65,9 +104,13 @@ The loop persists dispatch intent before each operation and advances its cursor 
 
 `<data dir>/pr-fix-loops.json` is version 2, serialized and atomically renamed with mode `0600`. Version 1 auto loops remain readable. An approval record with no valid trusted worker fails closed on startup, create/update and resume. A record that carries a worker or pending receipt cannot normalize into auto mode. Unknown execution modes are rejected. Malformed or unreadable state fails loading and is left intact. Persistence covers process restart; power-loss durability is not promised.
 
+Failed agent reads preserve loop and receipt state. Worker export failure retains
+`working` state for recovery. No private agent service response authorizes a
+front-door fallback to project access.
+
 The ordinary host queue also validates each `pr-fix-loop` origin at dispatch, before model switching, synthetic context or prompt delivery. It lazily loads the owning loop even when the queue starts first. Approval, missing, stopped, malformed, wrong-session and wrong-directory authorities stay queued with an error; absence of the admission service also refuses delivery. Only a matching active auto loop may dispatch on the host. This closes already queued version-1 approval work across restart. Work already delivered to a host OpenCode before this guard existed cannot be retroactively isolated or undone.
 
-Execution mode is fixed for an existing loop. Stop and prepare a new loop to change it. A pending receipt or review job prevents replacement or configuration changes through both activation `POST` and configuration `PATCH`. Explicit stop persists the loop as stopped, stops both worker containers through the trusted journey, and retains files, commits and receipts. Stop errors remain visible. A stopped/error loop resumes only after its protected worker starts and passes verification again. Deleting the original host session also stops its worker. Forgetting a finished loop never deletes its space or retained approval branch.
+Execution mode is fixed for an existing loop. Stop and prepare a new loop to change it. A pending receipt or review job prevents replacement or configuration changes through both activation `POST` and configuration `PATCH`. Explicit stop persists the loop as stopped, stops both worker containers through the trusted journey, and retains worker files, commits, approval refs and receipts. Stop errors remain visible. A stopped/error loop resumes only after its protected worker starts and passes verification again. Deleting the original host session also stops its worker. Forgetting a finished loop never deletes its space or retained approval branch.
 
 The token budget prohibits subsequent model iterations once a completed turn consumes its budget. In approval mode the host still captures that turn's exact code and replies. The loop stays `working` while an interrupted export needs recovery and `waitingForPush` while the retained receipt needs approval. Publication and bounded host review writes can finish without another model turn. After those operations complete, the loop settles as `budgetReached` and sends its settlement notification once. Pending or blocked review writes retain their own visible state until they finish. Charged usage and pending work survive restart through the existing persisted fields; no new budget flag or state version is required. Auto mode keeps its existing terminal transition at the completed turn boundary.
 
@@ -100,6 +143,14 @@ in-flight steps and publication. A stop during worker resume cancels activation
 and stops the worker again after the outstanding resume returns.
 Every durable save releases a terminal loop's reservation once its final receipt
 and review job are cleared, including publication that completed after Stop.
+
+In front-door mode each server has its own admission. A front-door approval loop
+reserves its session and PR against other fix loops only: the front door
+refuses a creation while the other runtime's loop holds either, and runs
+creations one at a time. On the agent, pr-watch wakes, queued sends and
+auto-review do not see a front-door approval loop. When one of them pushes to
+the PR while a receipt waits, approving that receipt fails its head check, and
+the loop keeps the receipt and its work, waiting with that error.
 
 `config.watch` (default `true`; records saved before it load as `false`) turns "ready" into a wait. When CI is green, no thread is unresolved and no change request is pending, a watching loop stays `status: 'watching'` with `statusReason: 'pr-ready'` and reacts to new CI failure or feedback under the same admission rules. It ends when the PR closes, the user stops it, the session is deleted, or a limit or error settles it. Without `watch`, `ready` stays terminal. A saved `ready` loop stays finished.
 
@@ -134,6 +185,15 @@ The source-control provider shell registers them with the supplied host runtime.
 Activation and preparation use GitHub's bound resource reader; host review jobs
 use the shell's canonical mutation service. A missing replay record remains an
 unknown outcome and cannot post a replacement reply.
+
+In front-door mode, preparation and approval activation are local. Auto-mode
+creation forwards to the agent server. Per-loop routes use the front door's
+persisted local ids to select the owning runtime. The list merges both runtimes
+through reconstructed schemas and rejects agent entries claiming approval mode,
+a worker or approval state. Agent loop events retain their typed stream;
+front-door approval events are local. Creation answers `409
+fix_loop_automation_conflict` while the other runtime's loop holds the same host
+session or pull request, the check one server's automation admission makes.
 
 | Route | Request and response |
 |---|---|

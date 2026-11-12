@@ -17,6 +17,7 @@ import { isRightToLeft, useI18n } from '@/lib/i18n';
 import { resolveProjectContextId } from '@/lib/projectContextApi';
 import { cn } from '@/lib/utils';
 import { registerBrowserCloser, registerBrowserOpener, registerSleepingBrowserTab, setShownBrowserTab } from '@/lib/browser/controlClient';
+import { browserPartitionOf } from '@/lib/browser/contract';
 import { pickLiveBrowserTabs, touchRecentBrowserTab } from '@/lib/browser/liveTabs';
 import { subscribeOpenchamberEvents } from '@/lib/openchamberEvents';
 import { useGuestsStore } from '@/lib/guests/store';
@@ -372,6 +373,7 @@ export const ContextSurfacePanes: React.FC = () => {
   // project, which is not always the project on screen, and belongs to that
   // session.
   React.useEffect(() => registerBrowserOpener((url, context) => {
+    if (!context.sessionId) return null;
     const directory = context.directory ? normalizeContextPanelDirectoryKey(context.directory) : directoryKey;
     if (!directory) return null;
     const tabId = openAgentBrowserTab(directory, url, context.sessionId);
@@ -409,8 +411,8 @@ export const ContextSurfacePanes: React.FC = () => {
   }), [effectiveDirectory]);
 
   // Tells agent browser control which project is on screen and which browser
-  // tab the user last had in front of them there; a session without a tab of
-  // its own may use that tab only when it is the user's and in its project.
+  // tab the user last had in front of them there. It is a default only for
+  // the session that owns it, in the agent browser partition.
   // From the store, not the drawn tab: a closed zone still remembers it.
   const storedBrowserTab = storedZones[browserZone.zone].activeTab;
   const shownBrowserTabId = storedBrowserTab?.mode === 'browser' ? storedBrowserTab.id : null;
@@ -581,6 +583,7 @@ export const ContextSurfacePanes: React.FC = () => {
       tabId: tab.id,
       directory: tab.directory,
       ownerSessionId: tab.ownerSessionId,
+      partition: browserPartitionOf(tab.directory, tab.ownerSessionId),
       describe: () => ({ title: '', url: tab.targetPath ?? '' }),
       wake: () => wakeBrowserTab(tab.directory, tab.id),
     }));

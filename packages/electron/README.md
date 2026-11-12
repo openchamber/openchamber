@@ -544,6 +544,25 @@ The server (`packages/web/server/lib/fs/ripgrep.js`) looks for ripgrep in this o
   Popups close with the window that opened them and do not count as app windows
   when closing the last one hides the app on macOS.
 
+Agent-controlled tabs use the separate persistent partition
+`persist:openchamber-agent-browser`. Main applies the panel permission restrictions
+and an all-resource `webRequest.onBeforeRequest` filter there. Known OpenChamber
+server endpoints, their loopback aliases and local interface addresses on server
+ports are blocked, including redirects and WebSocket handshakes. File, DevTools,
+Chrome and packaged UI schemes are refused. The filter reads current desktop
+hosts, connection settings, active window endpoints, local interfaces and the
+embedded server's current tunnel URL for each request. A settings read failure
+cancels the request. Human browsing and space-preview proxies keep their existing
+behavior. Agent links stay in the same view; favicon requests use that view's
+session. Capture accepts hardened agent views; clear-data accepts the exact agent
+partition name. Both
+persistent panel sessions flush storage before exit.
+
+See [desktop browser security](./DOCUMENTATION.md) for the ownership and request
+policy invariants. The focused Node tests exercise policy and main-process wiring;
+Chromium redirects, subresources and WebSockets still require a native Electron
+run to validate interception.
+
 ## IPC Pattern
 
 `desktop_get_current_window_state` includes the native `visible` boolean, true

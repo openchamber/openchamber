@@ -87,6 +87,19 @@ A missing folder is omitted from the list. Other guests stay. The renderer reads
 
 A sandboxed frame has an opaque origin, so its own requests (scripts, styles, `fetch`) are cross-site and carry no `SameSite=Lax` cookie. Behind a sign-in proxy (Authentik, oauth2-proxy) that made the proxy redirect every script to its login page; the CSP refused the redirect and the panel stayed empty (#5326). Two fixes were rejected. Adding the proxy's origin to `script-src` cannot work, since the redirect target is a login page and not a script, and it would let code from elsewhere into an approved extension. Telling operators to exempt `/api/guests/` from the proxy opens installs, tokens and file operations to anyone when OpenChamber has no password of its own. `/api/guest-files/<grant>/` holds nothing but one extension's package files and takes only its grant, so a proxy can skip exactly that prefix (`packages/docs/content/docs/reverse-proxy.mdx`). The grant sits in the path, as the HTML preview's does, so relative URLs keep it and nothing in the page's URL is a session credential. The query-token route stays for clients and servers that predate grants, and for relay frames, which read files with the runtime's own credential.
 
+## Server Browser policy delivery
+
+- `server-browser-config.js` owns delivery of OpenChamber's own origins to the built-in Server Browser. `beginGuestServiceHost` receives a server-owned `browserOrigins` reader. Only `openchamber-builtin-server-browser` receives its result as `OPENCHAMBER_BROWSER_ORIGINS`; ordinary service environments do not inherit or receive that variable. The reader adds the actual listening port, loopback aliases, the bind host, and interface addresses for wildcard binds to `settings.serverBrowserOpenChamberOrigins`. Settings read/parse failure prevents startup. A successful settings write calls `refreshServerBrowserOrigins`; changed or unreadable policy stops the old service, and the next request starts with current policy. The front door owns mirroring its configured, LAN and tunnel origins through that field; guest manifests, local browser config and request bodies do not set it.
+
+### Why origin refusal is separate from browser egress grants
+
+The built-in browser's local files and private-network approvals are agent-owned. Giving those grants authority over OpenChamber's protected origins would let a broad development-server grant remove the refusal. The host delivers an independent policy and Chrome intercepts requests before pages, redirects or frames send them.
+
+A policy refresh also cancels pending browser starts through the existing stop
+epoch. A start awaiting its policy has no registered process to stop yet; the
+epoch check before spawn refuses its stale result. A later request starts with
+the current policy. Other guests retain their lifecycle.
+
 ## Invariants
 
 - Built-in packages come from the app-owned registry bound by `registerBuiltInGuests` at server startup. Source/build/packaging rules are in `packages/extensions/DOCUMENTATION.md`. They receive only their declared grants automatically; ordinary runtime and enabled checks still apply. `openchamber-builtin-` IDs are reserved from user installs, including replacement. DELETE, Git update and grant-edit routes refuse built-ins. Disable preserves account/storage data and stops their services.

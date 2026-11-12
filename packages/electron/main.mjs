@@ -134,6 +134,7 @@ import {
   shouldAllowBrowserPanelPermission,
 } from './browser-panel-security.mjs';
 import { isSpaceId, spaceIdOfPreviewPartition, spacePreviewPartition, spacePreviewProxyConfig } from './space-preview.mjs';
+import { AGENT_BROWSER_PARTITION, BROWSER_PANEL_PARTITION, buildAgentBrowserPolicy, isStandaloneBrowserPanelPartition, shouldCancelAgentBrowserRequest } from './agent-browser-policy.mjs';
 import { shouldBlockGuestFrameNavigation } from './guest-frame-navigation.mjs';
 import { createRelayDevTunnelBridge } from './relay-dev-tunnel.mjs';
 import { parsePairingDeepLink } from './pairing-deep-link.mjs';
@@ -477,19 +478,19 @@ const flushRendererStorage = async () => {
   // The browser panel's logins: session cookies get an expiry so they outlive
   // the quit (browser-panel-cookies.mjs), and Chromium writes cookies to disk
   // on a timer, so a sign-in shortly before quitting would be lost with the rest.
-  const panelSession = session.fromPartition(BROWSER_PANEL_PARTITION);
-  const panelCookies = keepSessionCookies(panelSession.cookies, {
+  const persistentPanelSessions = [BROWSER_PANEL_PARTITION, AGENT_BROWSER_PARTITION].map((partition) => session.fromPartition(partition));
+  const panelCookies = persistentPanelSessions.map((panelSession) => keepSessionCookies(panelSession.cookies, {
     onError: (error) => log.warn('[electron] could not keep a browser panel session cookie:', error?.message || error),
   })
     .then(() => panelSession.cookies.flushStore())
     .catch((error) => {
       log.warn('[electron] browser panel cookie flush before quit failed:', error);
-    });
+    }));
   await Promise.race([
-    Promise.all([...pages, panelCookies]),
+    Promise.all([...pages, ...panelCookies]),
     new Promise((resolve) => setTimeout(resolve, RENDERER_STORAGE_FLUSH_TIMEOUT_MS)),
   ]);
-  for (const storageSession of [session.defaultSession, panelSession]) {
+  for (const storageSession of [session.defaultSession, ...persistentPanelSessions]) {
     try {
       storageSession.flushStorageData();
     } catch (error) {
@@ -1048,15 +1049,6 @@ const initialStartup = Promise.withResolvers();
 const injectRuntimeConfigIntoHtml = (html) => injectRuntimeConfig(html, { pending: runtimeConfigGate.isHeld() });
 
 /**
- * The browser panel's own session, kept separate from OpenChamber's.
- *
- * Every page the user opens in the panel shares this partition, which is what
- * lets a dev-server login persist between sessions without touching the app's
- * own storage.
- */
-const BROWSER_PANEL_PARTITION = 'persist:openchamber-browser';
-
-/**
  * Denies device and location access to pages shown in the browser panel.
  *
  * Electron grants permission requests by default when no handler is set. The
@@ -1102,12 +1094,43 @@ const resolveBrowserPanelContents = (rawId) => {
 const focusEmulatedPanelContents = new WeakSet();
 
 /**
- * The sessions of the browser panel: the user's persistent one, and one per
- * isolated space whose pages are shown. Membership is what the panel commands
+ * The sessions of the browser panel: human, agent, and one per isolated space.
+ * Membership is what the panel commands
  * check, so a space's view answers to annotation and capture like any other.
  */
 const panelSessions = new Set();
 const isPanelSession = (candidate) => panelSessions.has(candidate);
+
+// Read authoritative connection state at the request boundary. Settings have
+// writers outside this process, and a watcher notification can arrive after a
+// request for a newly saved host. A failed read cancels the agent's request.
+const currentAgentBrowserPolicy = () => {
+  const settings = JSON.parse(fs.readFileSync(settingsFilePath(), 'utf8'));
+  const windows = BrowserWindow.getAllWindows().filter((window) => !window.isDestroyed() && !browserPanelPopups.has(window));
+  const localAddresses = Object.values(os.networkInterfaces()).flatMap((entries) => (entries || []).map((entry) => entry.address));
+  return buildAgentBrowserPolicy({
+    serverUrls: [
+      state.sidecarUrl, state.localOrigin, state.localUiUrl, state.apiBaseUrl,
+      process.env.OPENCHAMBER_SERVER_URL,
+      state.serverHandle?.getTunnelUrl?.(),
+      ...windows.flatMap((window) => [window.webContents.getURL(), window.__ocRuntimeConfig?.apiBaseUrl, window.__ocHostWindowBaseUrl, window.__ocRuntimeKey]),
+    ],
+    tunnelHostnames: [
+      settings.managedRemoteTunnelHostname,
+      ...(Array.isArray(settings.managedRemoteTunnelPresets) ? settings.managedRemoteTunnelPresets.map((preset) => preset?.hostname) : []),
+    ],
+    connectionSettings: {
+      hosts: settings.desktopHosts,
+      connections: settings.connectionSettings,
+      desktopConnections: settings.desktopConnectionSettings,
+    },
+    localAddresses,
+    localPorts: [
+      settings.desktopLocalPort,
+      ...(Array.isArray(settings.desktopSshInstances) ? settings.desktopSshInstances.map((instance) => instance?.localForward?.preferredLocalPort) : []),
+    ],
+  });
+};
 
 const hardenPanelSession = (panelSession) => {
   if (panelSessions.has(panelSession)) return;
@@ -1148,7 +1171,22 @@ const hardenPanelSession = (panelSession) => {
 const hardenBrowserPanelSession = () => {
   const panelSession = session.fromPartition(BROWSER_PANEL_PARTITION);
   hardenPanelSession(panelSession);
-  // Only the user's session: a space's pages open everything in place anyway.
+  const agentSession = session.fromPartition(AGENT_BROWSER_PARTITION);
+  hardenPanelSession(agentSession);
+  // No resource-type filter: Chromium checks redirects and WebSocket handshakes
+  // here too. Never install this policy on the human or space-preview sessions.
+  agentSession.webRequest.onBeforeRequest((details, callback) => {
+    try {
+      callback({ cancel: shouldCancelAgentBrowserRequest({
+        partition: AGENT_BROWSER_PARTITION,
+        url: details.url,
+        policy: currentAgentBrowserPolicy(),
+      }) });
+    } catch {
+      callback({ cancel: true });
+    }
+  });
+  // Only the user's session: agent and space pages open everything in place.
   panelSession.registerPreloadScript({ type: 'frame', filePath: resolveBrowserPanelPreloadPath() });
 
   app.on('certificate-error', (event, contents, url, error, _certificate, callback) => {
@@ -1253,7 +1291,18 @@ const guardAttachedWebviews = (contents) => {
     webPreferences.nodeIntegration = false;
     webPreferences.contextIsolation = true;
     const partition = String(webPreferences.partition || params?.partition || '');
-    if (partition === BROWSER_PANEL_PARTITION) return;
+    if (partition === AGENT_BROWSER_PARTITION) {
+      try {
+        if (shouldCancelAgentBrowserRequest({ partition, url: params?.src || 'about:blank', policy: currentAgentBrowserPolicy() })) {
+          event.preventDefault();
+          return;
+        }
+      } catch {
+        event.preventDefault();
+        return;
+      }
+    }
+    if (isStandaloneBrowserPanelPartition(partition)) return;
     const spaceId = spaceIdOfPreviewPartition(partition);
     if (spaceId) {
       applySpacePreviewProxy(spaceId).catch((error) => {
@@ -4548,11 +4597,12 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
      * data URL so nothing else has to fetch anything.
      */
     case 'desktop_browser_fetch_favicon': {
-      // Only the user's own panel session may have an icon fetched for it. A space's view has a
+      // Human and agent icons stay in their owning session. A space's view has a
       // session of its own, so its page, whose icon URL the agent chose, gets none: the fetch is
       // the shell's own request and must reach nothing of the user's on the space's behalf.
       const view = resolveBrowserPanelContents(args.webContentsId);
-      if (view.session !== session.fromPartition(BROWSER_PANEL_PARTITION)) {
+      if (view.session !== session.fromPartition(BROWSER_PANEL_PARTITION)
+        && view.session !== session.fromPartition(AGENT_BROWSER_PARTITION)) {
         throw new Error('A space page has no favicon to fetch');
       }
       const target = typeof args.url === 'string' ? args.url.trim() : '';
@@ -4566,9 +4616,7 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
         throw new Error('Unsupported favicon URL');
       }
 
-      const response = await electronNet.fetch(parsed.toString(), {
-        session: session.fromPartition(BROWSER_PANEL_PARTITION),
-      });
+      const response = await view.session.fetch(parsed.toString());
       if (!response.ok) throw new Error(`Favicon request failed (${response.status})`);
 
       const mime = (response.headers.get('content-type') || '').split(';')[0].trim().toLowerCase();
@@ -4589,8 +4637,8 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       // Exact names only: the panel's own partition, or a space's, whose shape
       // is checked whole. A prefix would also accept a partition that merely
       // starts with one of these names.
-      const partition = typeof args.partition === 'string' ? args.partition.trim() : '';
-      if (partition !== BROWSER_PANEL_PARTITION && spaceIdOfPreviewPartition(partition) === null) {
+      const partition = typeof args.partition === 'string' ? args.partition : '';
+      if (!isStandaloneBrowserPanelPartition(partition) && spaceIdOfPreviewPartition(partition) === null) {
         throw new Error('Unsupported browser partition');
       }
       const storages = [];
@@ -5838,6 +5886,22 @@ app.on('web-contents-created', (_event, contents) => {
     return;
   }
   if (contents.getType() !== 'webview') return;
+
+  // Internal Chromium pages may navigate without a network request. Refuse
+  // renderer-initiated navigation too; initial src is checked at attachment.
+  if (contents.session === session.fromPartition(AGENT_BROWSER_PARTITION)) {
+    const guardAgentNavigation = (event, url = event.url) => {
+      try {
+        if (!shouldCancelAgentBrowserRequest({ partition: AGENT_BROWSER_PARTITION, url, policy: currentAgentBrowserPolicy() })) return;
+      } catch {
+        // Unavailable connection state keeps navigation blocked.
+      }
+      event.preventDefault();
+    };
+    contents.on('will-navigate', guardAgentNavigation);
+    contents.on('will-frame-navigate', guardAgentNavigation);
+    contents.on('will-redirect', guardAgentNavigation);
+  }
 
   // Pages of a space keep everything in their own view: a window or tab of
   // theirs would leave the space's session for the user's.

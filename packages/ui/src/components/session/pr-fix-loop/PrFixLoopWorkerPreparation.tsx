@@ -9,6 +9,7 @@ import { listModelVariantIds } from '@/lib/modelVariants';
 import { APPROVAL_WORKER_PROVIDERS, fixLoopWorkerModelSchema, type FixLoopWorker, type FixLoopWorkerModel } from '@/lib/prFixLoop';
 import { prFixLoopApi, type PrFixLoopTarget } from '@/lib/prFixLoopApi';
 import { listSpacePlaces, type SpacePlace } from '@/lib/spaces/spaces-api';
+import { isRootPlace, orderedSpacePlaces, spacePlaceName } from '@/lib/spaces/space-places';
 import { selectProvidersForDirectory, useConfigStore } from '@/stores/useConfigStore';
 
 type Places = { readonly state: 'loading' } | { readonly state: 'ready'; readonly places: readonly SpacePlace[] } | { readonly state: 'failed' };
@@ -32,7 +33,7 @@ export function PrFixLoopWorkerPreparation({ target, onPrepared }: {
     const controller = new AbortController();
     setPlaces({ state: 'loading' });
     listSpacePlaces(controller.signal).then(
-      (answer) => { if (!controller.signal.aborted) setPlaces({ state: 'ready', places: answer }); },
+      (answer) => { if (!controller.signal.aborted) setPlaces({ state: 'ready', places: orderedSpacePlaces(answer).filter((place) => !isRootPlace(place)) }); },
       () => { if (!controller.signal.aborted) setPlaces({ state: 'failed' }); },
     );
     return () => controller.abort();
@@ -62,13 +63,13 @@ export function PrFixLoopWorkerPreparation({ target, onPrepared }: {
     <SettingsStackedField label={t('spaces.create.place.label')}>
       <Select value={placeId} disabled={busy || places.state !== 'ready'} onValueChange={(value) => { if (value) setPlaceId(value); }}>
         <SelectTrigger aria-label={t('spaces.create.place.label')}><SelectValue placeholder={t('prFixLoop.worker.choosePlace')}>
-          {place ? place.machine ?? t('spaces.create.place.localDocker') : null}
+          {place ? spacePlaceName(t, place) : null}
         </SelectValue></SelectTrigger>
         <SelectContent>{places.state === 'ready' ? places.places.map((entry) => <SelectItem key={entry.id} value={entry.id} disabled={!entry.available || !entry.hostIsolation}>
-          {entry.machine ?? t('spaces.create.place.localDocker')}
+          {spacePlaceName(t, entry)}
         </SelectItem>) : null}</SelectContent>
       </Select>
-      {places.state === 'loading' ? <p role="status" className="typography-meta text-muted-foreground">{t('spaces.create.place.checking')}</p> : null}
+      {places.state === 'loading' ? <p role="status" className="typography-meta text-muted-foreground">{t('spaces.place.checking')}</p> : null}
       {places.state === 'failed' || (places.state === 'ready' && !places.places.some((entry) => entry.available && entry.hostIsolation)) ?
         <p role="alert" className="typography-meta text-status-warning">{t('prFixLoop.worker.placeUnavailable')}</p> : null}
       {place?.machine ? <p className="typography-meta text-status-warning">{t('spaces.create.place.keysOnMachine', { machine: place.machine })}</p> : null}

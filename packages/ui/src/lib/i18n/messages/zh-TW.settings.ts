@@ -5,6 +5,18 @@ import { firstPartyIntegrationsI18n } from './first-party-integrations.i18n';
 import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
 import { extensionCatalogI18n } from './extension-catalog.i18n';
 export const settingsDict = {
+  'settings.openchamber.spaces.host.installation': '由安裝在主機上的 OpenChamber 提供。',
+  'settings.openchamber.spaces.root.title': 'root 空間',
+  'settings.openchamber.spaces.root.available': 'root 空間可用。每次建立、啟動和重新啟動都需要已核准的通行金鑰。',
+  'settings.openchamber.spaces.root.approve': '核准通行金鑰',
+  'settings.openchamber.spaces.root.commandInfo': '請在伺服器上以 root 執行此命令，並輸入命令輸出的代碼。',
+  'settings.openchamber.spaces.root.code': '核准碼',
+  'settings.openchamber.spaces.root.label': '通行金鑰標籤，選填',
+  'settings.openchamber.spaces.root.confirm': '在伺服器終端機中確認此通行金鑰',
+  'settings.openchamber.spaces.root.confirmInfo': '請將此指紋與終端機中的指紋比較，並在終端機中確認。只有終端機接受後，核准才算完成。',
+  'settings.openchamber.spaces.root.empty': '沒有獲准用於 root 空間的通行金鑰。',
+  'settings.openchamber.spaces.root.approvedAt': '於 {date} 核准',
+  'settings.openchamber.spaces.root.revoke': '在伺服器上撤銷',
   'settings.openchamber.sessionRetention.field.archivedDescription': '保留期限從封存時開始計算。過期的工作階段會被刪除。',
   'settings.openchamber.sessionRetention.field.unarchivedArchiveDescription': '保留期限從工作階段的最後活動時間開始計算。過期的工作階段會被封存。',
   'settings.openchamber.sessionRetention.field.unarchivedDeleteDescription': '保留期限從工作階段的最後活動時間開始計算。過期的工作階段會被刪除。',

@@ -12,6 +12,7 @@ const originalLoadSessions = useGlobalSessionsStore.getState().loadSessions;
 
 const entry = (change: Partial<SpaceEntry> = {}): SpaceEntry => ({
   id: ID,
+  kind: 'docker',
   name: 'Fix login',
   placeId: 'docker', machine: null,
   projectDirectory: '/home/me/app',

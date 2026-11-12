@@ -5,6 +5,18 @@ import { firstPartyIntegrationsI18n } from './first-party-integrations.i18n';
 import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
 import { extensionCatalogI18n } from './extension-catalog.i18n';
 export const settingsDict = {
+  'settings.openchamber.spaces.host.installation': 'Provided by the OpenChamber host installation.',
+  'settings.openchamber.spaces.root.title': 'Root spaces',
+  'settings.openchamber.spaces.root.available': 'Root spaces are available. Every create, start and restart requires an approved passkey.',
+  'settings.openchamber.spaces.root.approve': 'Approve a passkey',
+  'settings.openchamber.spaces.root.commandInfo': 'Run this command on the server as root and enter the code it prints.',
+  'settings.openchamber.spaces.root.code': 'Approval code',
+  'settings.openchamber.spaces.root.label': 'Passkey label (optional)',
+  'settings.openchamber.spaces.root.confirm': 'Confirm this passkey on the server terminal',
+  'settings.openchamber.spaces.root.confirmInfo': 'Compare this fingerprint with the terminal and confirm it there. Approval is complete only after the terminal accepts it.',
+  'settings.openchamber.spaces.root.empty': 'No passkeys approved for root spaces.',
+  'settings.openchamber.spaces.root.approvedAt': 'Approved {date}',
+  'settings.openchamber.spaces.root.revoke': 'Revoke on the server',
   'settings.openchamber.sessionRetention.field.archivedDescription': 'Counts the retention period from archiving. Expired sessions are deleted.',
   'settings.openchamber.sessionRetention.field.unarchivedArchiveDescription': 'Counts the retention period from the session\'s last activity. Expired sessions are archived.',
   'settings.openchamber.sessionRetention.field.unarchivedDeleteDescription': 'Counts the retention period from the session\'s last activity. Expired sessions are deleted.',

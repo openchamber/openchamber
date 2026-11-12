@@ -9,7 +9,7 @@ import { useUIStore } from '@/stores/useUIStore';
 import { BrowserPane } from './BrowserPane';
 
 for (const ownerSessionId of [null, 'session-fixture']) {
-  test(`renders popup permission for ${ownerSessionId === null ? 'user' : 'agent'} browser tabs`, async () => {
+  test(`uses an isolated partition for ${ownerSessionId === null ? 'user' : 'agent'} browser tabs`, async () => {
     const dom = new Window({ url: 'http://localhost/' });
     const globals = {
       window: Object.assign(dom, { __OPENCHAMBER_ELECTRON__: { runtime: 'desktop' } }),
@@ -22,9 +22,17 @@ for (const ownerSessionId of [null, 'session-fixture']) {
       IS_REACT_ACT_ENVIRONMENT: true,
     };
     const descriptors = Object.getOwnPropertyDescriptors(globalThis);
-    Object.assign(globalThis, globals);
+    for (const [key, value] of Object.entries(globals)) {
+      Object.defineProperty(globalThis, key, { value, writable: true, configurable: true });
+    }
     const browserProvider = useUIStore.getState().browserProvider;
-    useUIStore.setState({ browserProvider: BUILTIN_BROWSER_PROVIDER });
+    const contextPanelByDirectory = useUIStore.getState().contextPanelByDirectory;
+    const contextRailOrder = useUIStore.getState().contextRailOrder;
+    useUIStore.setState({ browserProvider: BUILTIN_BROWSER_PROVIDER, contextPanelByDirectory: {} });
+    const tabID = ownerSessionId
+      ? useUIStore.getState().openAgentBrowserTab('/fixture', 'about:blank', ownerSessionId)
+      : 'popup-test';
+    const openedTab = useUIStore.getState().contextPanelByDirectory['/fixture']?.tabs.find((tab) => tab.id === tabID);
     const host = document.createElement('div');
     document.body.appendChild(host);
     const root = createRoot(host);
@@ -36,8 +44,8 @@ for (const ownerSessionId of [null, 'session-fixture']) {
               initialUrl="about:blank"
               directory="/fixture"
               siteDirectory="/fixture"
-              tabID="popup-test"
-              ownerSessionId={ownerSessionId}
+              tabID={tabID ?? 'missing-tab'}
+              ownerSessionId={openedTab?.ownerSessionId ?? null}
               visible
             />
           </ThemeSystemProvider>
@@ -46,12 +54,15 @@ for (const ownerSessionId of [null, 'session-fixture']) {
       const webview = dom.document.querySelector('webview');
       expect(webview).not.toBeNull();
       expect(webview?.hasAttribute('allowpopups')).toBe(true);
+      expect(webview?.getAttribute('partition')).toBe(ownerSessionId === null
+        ? 'persist:openchamber-browser'
+        : 'persist:openchamber-agent-browser');
       expect(webview?.getAttribute('webpreferences')).toBe(
         ownerSessionId === null ? null : 'backgroundThrottling=no',
       );
     } finally {
       await act(async () => root.unmount());
-      useUIStore.setState({ browserProvider });
+      useUIStore.setState({ browserProvider, contextPanelByDirectory, contextRailOrder });
       await dom.happyDOM.close();
       for (const key of Object.keys(globals)) {
         const descriptor = descriptors[key];

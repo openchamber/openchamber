@@ -240,7 +240,7 @@ const sleep = (milliseconds) => new Promise((resolve) => { setTimeout(resolve, m
 
 const sha256 = (value) => `sha256:${crypto.createHash('sha256').update(value).digest('hex')}`;
 
-export function runEscapeSuite(title, { enabled = true, setup }) {
+export function runEscapeSuite(title, { enabled = true, setup, spaceUid = () => 1000, hostBackend = false }) {
   describe.skipIf(!enabled)(`escape tests: ${title}`, () => {
     const spec = {
       id: createSpaceId(),
@@ -256,6 +256,7 @@ export function runEscapeSuite(title, { enabled = true, setup }) {
 
     const inside = (argv) => place.exec(spec.id, argv, { timeoutMs: 60_000 });
     const shell = (script) => inside(['sh', '-c', script]);
+    const uidFor = (target = 'space') => spaceUid(spec.id, target);
 
     // Without this, "cannot reach the internet" also passes on a machine that is offline.
     const publicAddress = () => {
@@ -288,7 +289,7 @@ export function runEscapeSuite(title, { enabled = true, setup }) {
     });
 
     it('is not root and cannot become root', async () => {
-      expect((await inside(['id', '-u'])).stdout).toBe('1000\n');
+      expect((await inside(['id', '-u'])).stdout).toBe(`${await uidFor()}\n`);
 
       const sudo = await shell('sudo -n id -u');
       expect(sudo.code).not.toBe(0);
@@ -322,6 +323,16 @@ export function runEscapeSuite(title, { enabled = true, setup }) {
     });
 
     it('cannot change kernel settings', async () => {
+      if (hostBackend) {
+        // ProcSubset=pid hides /proc/sys on a host place. Exercise the actual hostname
+        // syscall instead, with the readable hostname as the positive control.
+        const before = await inside(['hostname']);
+        expect(before.code).toBe(0);
+        expect(before.stdout.trim()).not.toBe('');
+        expect((await inside(['hostname', 'escaped'])).code).not.toBe(0);
+        expect((await inside(['hostname'])).stdout).toBe(before.stdout);
+        return;
+      }
       // Positive control: the file is there and readable.
       expect((await inside(['cat', '/proc/sys/kernel/hostname'])).code).toBe(0);
       const result = await shell('echo escaped > /proc/sys/kernel/hostname');
@@ -408,15 +419,20 @@ export function runEscapeSuite(title, { enabled = true, setup }) {
       expect(result.stdout).toContain(`/spaces/${spec.id}`);
 
       const hostUser = os.userInfo().username;
+      // In the rootless Docker harness the host filesystem is overlayfs, whose mount
+      // options disclose backing paths that do not exist in the unit's filesystem.
+      // For host units inspect actual mount destinations; owner-home access is tested live too.
+      const observed = hostBackend ? result.stdout.split('\n').map((line) => / on (.*?) type /.exec(line)?.[1] ?? '').join('\n') : result.stdout;
       for (const hostPath of ['/Users', `/home/${hostUser}`, '/host', '/mnt/host', 'docker.sock']) {
         const asPathSegment = new RegExp(`${hostPath.replace(/[.]/g, '\\.')}(/|\\s|$)`, 'm');
-        expect(result.stdout).not.toMatch(asPathSegment);
+        expect(observed).not.toMatch(asPathSegment);
       }
     });
 
     describe('tools volume', () => {
       const launcher = `${TOOLS_BIN_PATH}/openchamber`;
-      const fingerprint = async () => (await shell(`sha256sum ${TOOLS_MARKER_PATH} "$(readlink -f ${launcher})" && ls -la ${TOOLS_MOUNT_PATH} ${TOOLS_BIN_PATH}`)).stdout;
+      // Without `..`: on a host place that is the per-exec /opt tmpfs, whose time is when the exec started.
+      const fingerprint = async () => (await shell(`sha256sum ${TOOLS_MARKER_PATH} "$(readlink -f ${launcher})" && ls -la ${TOOLS_MOUNT_PATH} ${TOOLS_BIN_PATH} | grep -v ' \\.\\.$'`)).stdout;
 
       it('positive control: the tools are there, and the programs the space runs come from them', async () => {
         const version = await inside(['openchamber', '--version']);
@@ -431,7 +447,8 @@ export function runEscapeSuite(title, { enabled = true, setup }) {
       });
 
       it('is mounted read-only', async () => {
-        const mounts = (await inside(['cat', '/proc/mounts'])).stdout.split('\n').filter((line) => line.split(' ')[1] === TOOLS_MOUNT_PATH);
+        // ProcSubset=pid hides the top-level /proc/mounts alias; the process's own view remains.
+        const mounts = (await inside(['cat', hostBackend ? '/proc/self/mounts' : '/proc/mounts'])).stdout.split('\n').filter((line) => line.split(' ')[1] === TOOLS_MOUNT_PATH);
         expect(mounts).toHaveLength(1);
         expect(mounts[0].split(' ')[3].split(',')).toContain('ro');
       });
@@ -452,7 +469,10 @@ export function runEscapeSuite(title, { enabled = true, setup }) {
         // Positive control: the fingerprint is real, so "unchanged" below means something.
         expect(before).toMatch(/^[0-9a-f]{64}  /);
 
-        const result = await shell(script);
+        // Ubuntu's ln may answer EEXIST before trying an unlink on a read-only mount.
+        // Explicit unlink+link exercises the same replacement against the kernel on host units.
+        const attempt = hostBackend && title === 'replace the launcher with a link' ? `rm -f ${launcher} && ln -s /bin/true ${launcher}` : script;
+        const result = await shell(attempt);
         expect(result.code).not.toBe(0);
         // Root owns these files, so "Permission denied" would also stop this user on a WRITABLE mount
         // and would prove nothing about the mount. Only the kernel's answer for a read-only mount counts.
@@ -513,7 +533,8 @@ export function runEscapeSuite(title, { enabled = true, setup }) {
     });
 
     it('has no listener that faces the space network', async () => {
-      const listeners = (await shell(LISTENERS)).stdout.split('\n').filter(Boolean);
+      // The /proc/net alias is also hidden by ProcSubset=pid. /proc/self/net is the same netns.
+      const listeners = (await shell(hostBackend ? LISTENERS.replaceAll('/proc/net/', '/proc/self/net/') : LISTENERS)).stdout.split('\n').filter(Boolean);
       // Positive control: the server inside is among them, so the listing is real.
       expect(listeners).toContain(`0100007F:${SPACE_SERVER_PORT.toString(16).toUpperCase().padStart(4, '0')}`);
       expect(listeners.filter((listener) => !LOOPBACK_LISTENER.test(listener))).toEqual([]);
@@ -521,7 +542,12 @@ export function runEscapeSuite(title, { enabled = true, setup }) {
 
     it('cannot fill the disk of the host through its own output', async () => {
       // 50 MB to the stdout of PID 1, which is what the place keeps as the container log.
-      const flood = await shell('head -c 52428800 /dev/zero | tr "\\0" x | fold -w 1000 > /proc/1/fd/1');
+      // A host unit has no PID namespace. Flood its own main process's journal fd;
+      // Docker keeps using the container init's fd. The write and retained-byte controls stay.
+      // journald stdout is a Unix socket and cannot be reopened through /proc/PID/fd/1.
+      // The host fixture runs the attacker emitter as this unit's main command under the
+      // unchanged unit properties, then restores the server. Docker keeps its original probe.
+      const flood = hostBackend ? await host.floodLogs(spec.id) : await shell('head -c 52428800 /dev/zero | tr "\\0" x | fold -w 1000 > /proc/1/fd/1');
       // Positive control: the write went through, and the host kept some of it.
       expect(flood.code).toBe(0);
       const kept = await host.logBytes(spec.id);
@@ -776,7 +802,9 @@ export function runEscapeSuite(title, { enabled = true, setup }) {
         const { inner } = await host.gatekeeperAddresses(spec.id);
         const answer = await probe(tcpProbe(inner, GATEKEEPER_CORRIDOR_PORT));
         expect(answer).toMatch(/^connected:/);
-        expect(inner.endsWith('.1'), `the gatekeeper is at ${inner}`).toBe(true);
+        // Host places allocate /30 pairs. The gatekeeper is the first host in that /30,
+        // which is .1, .5, .9, ... rather than always the first address of a Docker /24.
+        expect(hostBackend ? Number(inner.split('.').at(-1)) % 4 === 1 : inner.endsWith('.1'), `the gatekeeper is at ${inner}`).toBe(true);
       });
 
       describe('the model key', () => {
@@ -984,10 +1012,13 @@ export function runEscapeSuite(title, { enabled = true, setup }) {
           `mkdir -p "$(dirname ${decoyRecord})"`,
           `printf '{}' > ${decoyRecord}`,
           `printf -- '-----BEGIN OPENSSH PRIVATE KEY-----' > "$HOME/decoy-key"`,
-          `DECOY_TOKEN=${decoy} sleep 30 & echo "decoy-pid:$!"`,
+          hostBackend ? 'true' : `DECOY_TOKEN=${decoy} sleep 30 & echo "decoy-pid:$!"`,
         ].join('; '));
         const decoyPid = /decoy-pid:(\d+)/.exec(planted.stdout)?.[1];
         let removal;
+        // A host exec unit kills descendants at command completion. Hold a separate attached
+        // process so its environment is genuinely present for the positive control.
+        const decoyProcess = hostBackend ? await host.startCredentialProcess(spec.id, decoy) : null;
         try {
           const row = await inside(['node', '--no-warnings', '-e', plantCredential(database)]);
           expect(row.code, row.stderr).toBe(0);
@@ -1004,6 +1035,7 @@ export function runEscapeSuite(title, { enabled = true, setup }) {
         } finally {
           removal = await inside(['node', '--no-warnings', '-e', removeCredential(database)]);
           await shell(`rm -f ${decoyRecord} "$HOME/decoy-key"; ${decoyPid ? `kill ${decoyPid} 2>/dev/null` : 'true'}; true`);
+          await decoyProcess?.stop();
         }
         // Checked after the finally, so a failed control above is the error that gets reported.
         expect(removal.code, removal.stderr).toBe(0);
@@ -1091,7 +1123,7 @@ require('node:dns').promises.lookup('${GATEKEEPER_ALIAS}').then((answer) => done
       });
 
       it('is itself hardened, seen from inside it', async () => {
-        expect((await inGatekeeper(['id', '-u'])).stdout).toBe('1000\n');
+        expect((await inGatekeeper(['id', '-u'])).stdout).toBe(`${await uidFor('gatekeeper')}\n`);
         const status = (await inGatekeeper(['cat', '/proc/self/status'])).stdout;
         expect(status).toMatch(/^NoNewPrivs:\s+1$/m);
         expect(status).toMatch(/^CapEff:\s+0000000000000000$/m);

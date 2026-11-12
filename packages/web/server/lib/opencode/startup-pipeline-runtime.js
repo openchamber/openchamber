@@ -63,7 +63,7 @@ export const createStartupPipelineRuntime = (dependencies) => {
       dictationModelsDir,
     } = options;
 
-    const terminalRuntime = createTerminalRuntime({
+    const terminalRuntime = options.frontDoor ? null : createTerminalRuntime({
       app,
       server,
       express,
@@ -100,6 +100,8 @@ export const createStartupPipelineRuntime = (dependencies) => {
       buildOpenCodeUrl,
       getOpenCodeAuthHeaders,
       globalEventHub,
+      fetchImpl: options.fetchImpl,
+      frontDoor: options.frontDoor,
       processForwardedEventPayload,
       wsClients: messageStreamWsClients,
       triggerHealthCheck,

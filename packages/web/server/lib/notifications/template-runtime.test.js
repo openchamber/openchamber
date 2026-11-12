@@ -68,7 +68,6 @@ describe('notification template message extraction', () => {
   });
 
   it('excludes reasoning parts when fetching assistant messages', async () => {
-    const runtime = createRuntime();
     // v2 pages messages as `{ data, cursor }` and an assistant message is a
     // flat record carrying `content[]`.
     globalThis.fetch = vi.fn(async () => new Response(JSON.stringify({
@@ -85,6 +84,7 @@ describe('notification template message extraction', () => {
       ],
       cursor: {},
     })));
+    const runtime = createRuntime();
 
     await expect(runtime.fetchLastAssistantMessageText('session-1', 'msg-1')).resolves.toBe('final answer');
   });

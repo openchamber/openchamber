@@ -35,8 +35,7 @@ async function clearStaleSocket(path) {
  * a status request gets the redacted status, a hello for an enabled connection
  * becomes an MCP session, and anything else gets an error code and the door.
  */
-export function createEngineSocketServer({ path, group = null, store, status, sessions, log = () => {} }) {
-  let active = 0;
+export function createEngineSocketServer({ path, group = null, subject = null, store, status, sessions, log = () => {} }) {
   const sockets = new Set();
   const inSession = new Set();
   const server = net.createServer({ allowHalfOpen: true }, (socket) => {
@@ -69,19 +68,18 @@ export function createEngineSocketServer({ path, group = null, store, status, se
       const parsed = parseEngineFrame(buffer.subarray(0, end).toString('utf8'));
       const rest = buffer.subarray(end + 1);
       if (!parsed.ok) return answerError(parsed.code);
-      if (parsed.frame.type === 'status') return answer(status());
+      if (parsed.frame.type === 'status') return subject === null ? answer(status()) : answerError('unsupported_request');
+      if (subject !== null && !store.subjectAllows(subject, parsed.frame.connection)) return answerError('connection_not_allowed');
       const definition = store.get(parsed.frame.connection);
       if (!definition) return answerError('unknown_connection');
       if (!definition.enabled) return answerError('connection_disabled');
-      if (active >= MAX_SESSIONS) return answerError('too_many_sessions');
+      if (sessions.countAll() >= MAX_SESSIONS) return answerError('too_many_sessions');
       clearTimeout(timer);
       decided = true;
       socket.off('data', onData);
-      active += 1;
       inSession.add(socket);
-      socket.once('close', () => { active -= 1; });
       socket.write(`${JSON.stringify({ type: 'ready', connection: definition.id, name: definition.name })}\n`);
-      sessions.open(definition, socket, rest);
+      sessions.open(definition, socket, { initial: rest, subject });
       return undefined;
     };
     socket.on('data', onData);
@@ -103,7 +101,7 @@ export function createEngineSocketServer({ path, group = null, store, status, se
         });
       });
       if (group !== null) await fs.chown(path, -1, group);
-      await fs.chmod(path, 0o660);
+      await fs.chmod(path, subject === null ? 0o660 : 0o666);
     },
     /**
      * Stops accepting and drops every socket that is not in a session; the

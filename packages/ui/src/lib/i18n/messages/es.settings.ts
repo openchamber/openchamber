@@ -5,6 +5,18 @@ import { firstPartyIntegrationsI18n } from './first-party-integrations.i18n';
 import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
 import { extensionCatalogI18n } from './extension-catalog.i18n';
 export const settingsDict = {
+  'settings.openchamber.spaces.host.installation': 'Proporcionado por la instalación de OpenChamber en el equipo anfitrión.',
+  'settings.openchamber.spaces.root.title': 'Espacios root',
+  'settings.openchamber.spaces.root.available': 'Los espacios root están disponibles. Cada creación, inicio y reinicio requiere una clave de paso aprobada.',
+  'settings.openchamber.spaces.root.approve': 'Aprobar una clave de paso',
+  'settings.openchamber.spaces.root.commandInfo': 'Ejecuta este comando en el servidor como root e introduce el código que muestra.',
+  'settings.openchamber.spaces.root.code': 'Código de aprobación',
+  'settings.openchamber.spaces.root.label': 'Etiqueta de la clave de paso (opcional)',
+  'settings.openchamber.spaces.root.confirm': 'Confirma esta clave de paso en el terminal del servidor',
+  'settings.openchamber.spaces.root.confirmInfo': 'Compara esta huella con la del terminal y confírmala allí. La aprobación solo se completa cuando el terminal la acepta.',
+  'settings.openchamber.spaces.root.empty': 'No hay claves de paso aprobadas para espacios root.',
+  'settings.openchamber.spaces.root.approvedAt': 'Aprobada el {date}',
+  'settings.openchamber.spaces.root.revoke': 'Revocar en el servidor',
   'settings.openchamber.sessionRetention.field.archivedDescription': 'Cuenta el periodo de retención desde el archivado. Las sesiones caducadas se eliminan.',
   'settings.openchamber.sessionRetention.field.unarchivedArchiveDescription': 'Cuenta el periodo de retención desde la última actividad de la sesión. Las sesiones caducadas se archivan.',
   'settings.openchamber.sessionRetention.field.unarchivedDeleteDescription': 'Cuenta el periodo de retención desde la última actividad de la sesión. Las sesiones caducadas se eliminan.',

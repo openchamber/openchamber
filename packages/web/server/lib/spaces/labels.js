@@ -2,6 +2,8 @@ import crypto from 'node:crypto';
 
 import { SpaceError } from './errors.js';
 import { requireSpacePurpose } from './approval-profile.js';
+import { isSpaceId, isToolsKey, requireSpaceId, requireToolsKey } from './resource-ids.js';
+export { isSpaceId, requireSpaceId } from './resource-ids.js';
 
 export const LABEL_MARKER = 'openchamber.space';
 const LABEL_ID = 'openchamber.space.id';
@@ -32,9 +34,7 @@ export const ROLE_TOOLS = 'tools';
 export const ROLE_TOOLS_FILL = 'tools-fill';
 export const ROLE_TOOLS_CHECK = 'tools-check';
 const TOOLS_ROLES = new Set([ROLE_TOOLS, ROLE_TOOLS_FILL, ROLE_TOOLS_CHECK]);
-const TOOLS_KEY_PATTERN = /^[0-9a-f]{16}$/;
 
-const SPACE_ID_PATTERN = /^[0-9a-f]{12}$/;
 // The owner travels inside `--filter label=key=value`, so it stays a plain token.
 const OWNER_PATTERN = /^[A-Za-z0-9._-]{1,64}$/;
 const PROJECT_PATTERN = /^[0-9a-f]{16}$/;
@@ -45,14 +45,6 @@ const MAX_NAME_LENGTH = 100;
 
 export const createSpaceId = () => crypto.randomBytes(6).toString('hex');
 
-export const isSpaceId = (value) => SPACE_ID_PATTERN.test(value);
-
-export function requireSpaceId(value) {
-  if (!isSpaceId(value)) {
-    throw new SpaceError('invalid_space_id', 'A space id is 12 lowercase hex characters');
-  }
-  return value;
-}
 
 const isOwner = (value) => OWNER_PATTERN.test(value ?? '');
 
@@ -156,14 +148,6 @@ export function parseSpaceLabels(labels) {
   return parsed;
 }
 
-const isToolsKey = (value) => TOOLS_KEY_PATTERN.test(value ?? '');
-
-export function requireToolsKey(value) {
-  if (!isToolsKey(value)) {
-    throw new SpaceError('invalid_tools_key', 'A tools key is 16 lowercase hex characters');
-  }
-  return value;
-}
 
 /** One volume per owner and per tools content. A one-shot container adds its role as a suffix. */
 export function toolsResourceName(owner, key, role = ROLE_TOOLS) {

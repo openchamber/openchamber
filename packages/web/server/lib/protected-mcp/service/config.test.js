@@ -12,7 +12,7 @@ describe('service configuration', () => {
     // Given / When
     const config = parseServiceConfig(base);
     // Then
-    expect(config).toMatchObject({ adminSocket: '/run/openchamber-protected-mcp-admin/admin.sock', adminSocketGroup: null, engineSocketGroup: null, npm: null });
+    expect(config).toMatchObject({ adminSocket: '/run/openchamber-protected-mcp-admin/admin.sock', subjectsDir: '/run/openchamber-protected-mcp/subjects', adminSocketGroup: null, engineSocketGroup: null, npm: null });
     expect(config).not.toHaveProperty('admin');
   });
 
@@ -25,8 +25,17 @@ describe('service configuration', () => {
     expect(config).not.toHaveProperty('admin');
   });
 
+  it('uses a configured absolute subjects directory', () => {
+    // Given an administrator-selected runtime directory.
+    const subjectsDir = '/run/custom-mcp/subjects';
+    // When configuration is parsed.
+    const config = parseServiceConfig({ ...base, subjectsDir });
+    // Then the listener owner receives the selected path.
+    expect(config.subjectsDir).toBe(subjectsDir);
+  });
+
   it.each([
-    { stateDir: 'state' }, { node: '/usr/bin/../bin/node' }, { engineUser: 'Dev Account' },
+    { stateDir: 'state' }, { subjectsDir: 'subjects' }, { subjectsDir: '/run/../subjects' }, { node: '/usr/bin/../bin/node' }, { engineUser: 'Dev Account' },
     { adminSocket: 'admin.sock' }, { adminSocket: '/run/../admin.sock' }, { adminSocketGroup: '123' },
     { adminSocketGroup: 1.5 }, { adminSocketGroup: Number.MAX_SAFE_INTEGER + 1 },
     { workerPath: 'bin:/usr/bin' }, { npm: [] }, { version: 2 },

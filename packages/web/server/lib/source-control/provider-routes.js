@@ -1200,6 +1200,13 @@ export function registerProviderRoutes(app, {
   };
 
   return Object.freeze({
+    readFixLoopPull: async ({ context, owner, repo, number }) => {
+      if (context.provider !== 'github' || context.instance !== 'github.com') throw invalidReadContext('Fix loops require github.com');
+      const validated = await validateReadContext(context);
+      const trusted = context.linked ? { ...validated, linked: true } : validated;
+      const pull = await readWithBoundAccount(trusted, 'fixLoopPull', { context: trusted, project: { owner, name: repo }, number });
+      return { context: trusted, pull };
+    },
     readPullStack: (input) => trustedRead(input, 'pullStack', () => ({
       project: { owner: input.owner, name: input.repo }, number: input.number,
     })),

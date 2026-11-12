@@ -88,7 +88,7 @@ async function completedTurnResult(readPage) {
 }
 
 /** Only the space id selects transport. Responses from inside never select host auth or a host operation. */
-export function createSpaceWorker({ dataDir, getHost, git, gitServices, readHostSession }) {
+export function createSpaceWorker({ dataDir, getHost, git, gitServices, readHostSession, seedHead = null, upstream = null }) {
   const records = createSpaceRecords({ dataDir });
   const { withHostGit } = createTransferSession({ git, temporaryDirectory: dataDir, name: 'approval worker' });
   const host = () => {
@@ -171,12 +171,15 @@ export function createSpaceWorker({ dataDir, getHost, git, gitServices, readHost
       const spacePath = requireSpaceProjectPath(worker.spaceId, record.spacePath);
       const head = commitSchema.parse(snapshot.headSha);
       // Fetch the provider-resolved PR head even when this checkout has no local branch or object.
-      await gitServices().fetchHead(loop, snapshot);
-      await withHostGit('approval_seed_failed', async (g) => {
-        const url = buildExtUrl([...(await host().manager.execArgv(worker.spaceId)), IMAGE_GIT, 'receive-pack', spacePath]);
-        await g.output(worker.directory, ['-c', 'protocol.ext.allow=always', 'push', '--no-verify', '--', url,
-          `${head}:refs/heads/openchamber-fix-loop`], { timeoutMs: 300_000, killTree: true });
-      });
+      if (seedHead) await seedHead(loop, snapshot, { manager: host().manager, spaceId: worker.spaceId, spacePath });
+      else {
+        await gitServices().fetchHead(loop, snapshot);
+        await withHostGit('approval_seed_failed', async (g) => {
+          const url = buildExtUrl([...(await host().manager.execArgv(worker.spaceId)), IMAGE_GIT, 'receive-pack', spacePath]);
+          await g.output(worker.directory, ['-c', 'protocol.ext.allow=always', 'push', '--no-verify', '--', url,
+            `${head}:refs/heads/openchamber-fix-loop`], { timeoutMs: 300_000, killTree: true });
+        });
+      }
       const checkout = await host().manager.exec(worker.spaceId, [IMAGE_GIT, '-C', spacePath, 'checkout', '--force', '--detach', head], { timeoutMs: 60_000 });
       if (checkout.code !== 0) throw approvalError('The PR head could not be checked out inside the worker.');
       const created = sessionSchema.parse(await request(worker, '/api/session', { method: 'POST', body: {
@@ -219,7 +222,7 @@ export function createSpaceWorker({ dataDir, getHost, git, gitServices, readHost
     },
     async export(loop) {
       const record = await validate(loop.worker);
-      return createCodeOut({ git, place: host().manager, temporaryDirectory: dataDir }).bringCodeOut({
+      return createCodeOut({ git, place: host().manager, temporaryDirectory: dataDir, upstream, dataDir }).bringCodeOut({
         repository: record.repository, spaceId: loop.worker.spaceId, spacePath: record.spacePath,
       });
     },

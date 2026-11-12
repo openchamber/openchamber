@@ -180,7 +180,7 @@ export const useSpacesStore = create<SpacesState>((set, get) => ({
       grants: [...entry.grants.filter((known) => known.id !== grant.id), grant],
       needsAccess: entry.needsAccess.filter((id) => id !== grant.id),
       // The host takes the provider's creation failure off its list with the grant; so does this copy.
-      accessFailures: grant.kind === 'domain' ? entry.accessFailures : entry.accessFailures.filter((failure) => failure.provider !== grant.provider),
+      accessFailures: grant.kind === 'domain' || grant.kind === 'mcp' ? entry.accessFailures : entry.accessFailures.filter((failure) => failure.provider !== grant.provider),
     });
     return { journey, progressRevision };
   }),

@@ -5,6 +5,18 @@ import { firstPartyIntegrationsI18n } from './first-party-integrations.i18n';
 import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
 import { extensionCatalogI18n } from './extension-catalog.i18n';
 export const settingsDict = {
+  'settings.openchamber.spaces.host.installation': 'OpenChamber のホストインストールに含まれます。',
+  'settings.openchamber.spaces.root.title': 'root スペース',
+  'settings.openchamber.spaces.root.available': 'root スペースを利用できます。作成、起動、再起動のたびに承認済みのパスキーが必要です。',
+  'settings.openchamber.spaces.root.approve': 'パスキーを承認',
+  'settings.openchamber.spaces.root.commandInfo': 'サーバー上で root としてこのコマンドを実行し、表示されたコードを入力してください。',
+  'settings.openchamber.spaces.root.code': '承認コード',
+  'settings.openchamber.spaces.root.label': 'パスキーのラベル、任意',
+  'settings.openchamber.spaces.root.confirm': 'サーバーのターミナルでこのパスキーを確認',
+  'settings.openchamber.spaces.root.confirmInfo': 'このフィンガープリントをターミナルの表示と照合し、ターミナルで確認してください。ターミナルで受け付けられるまで承認は完了しません。',
+  'settings.openchamber.spaces.root.empty': 'root スペース用に承認されたパスキーはありません。',
+  'settings.openchamber.spaces.root.approvedAt': '{date} に承認',
+  'settings.openchamber.spaces.root.revoke': 'サーバーで承認を取り消す',
   'settings.openchamber.sessionRetention.field.archivedDescription': '保持期間はアーカイブ時点から数えます。期間を過ぎたセッションは削除されます。',
   'settings.openchamber.sessionRetention.field.unarchivedArchiveDescription': '保持期間はセッションの最終アクティビティから数えます。期間を過ぎたセッションはアーカイブされます。',
   'settings.openchamber.sessionRetention.field.unarchivedDeleteDescription': '保持期間はセッションの最終アクティビティから数えます。期間を過ぎたセッションは削除されます。',

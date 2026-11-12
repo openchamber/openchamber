@@ -150,5 +150,9 @@ export function serializeMessageStreamWsEvent(payload, options = {}) {
   const frame = { type: 'event', payload };
   if (typeof options.eventId === 'string' && options.eventId.length > 0) frame.eventId = options.eventId;
   if (typeof options.directory === 'string' && options.directory.length > 0) frame.directory = options.directory;
+  if (options.origin === 'agent' || options.origin === 'space') {
+    frame.origin = options.origin;
+    frame.spaceId = options.spaceId ?? null;
+  }
   return JSON.stringify(frame);
 }

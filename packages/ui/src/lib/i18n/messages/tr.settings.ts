@@ -5,6 +5,18 @@ import { firstPartyIntegrationsI18n } from './first-party-integrations.i18n';
 import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
 import { extensionCatalogI18n } from './extension-catalog.i18n';
 export const settingsDict = {
+  'settings.openchamber.spaces.host.installation': 'OpenChamber ana makine kurulumu tarafından sağlanır.',
+  'settings.openchamber.spaces.root.title': 'root alanları',
+  'settings.openchamber.spaces.root.available': 'root alanları kullanılabilir. Her oluşturma, başlatma ve yeniden başlatma işlemi onaylı bir geçiş anahtarı gerektirir.',
+  'settings.openchamber.spaces.root.approve': 'Geçiş anahtarını onayla',
+  'settings.openchamber.spaces.root.commandInfo': 'Bu komutu sunucuda root olarak çalıştırın ve yazdırdığı kodu girin.',
+  'settings.openchamber.spaces.root.code': 'Onay kodu',
+  'settings.openchamber.spaces.root.label': 'Geçiş anahtarı etiketi, isteğe bağlı',
+  'settings.openchamber.spaces.root.confirm': 'Bu geçiş anahtarını sunucu terminalinde doğrulayın',
+  'settings.openchamber.spaces.root.confirmInfo': 'Bu parmak izini terminaldekiyle karşılaştırın ve terminalde doğrulayın. Onay ancak terminal kabul ettikten sonra tamamlanır.',
+  'settings.openchamber.spaces.root.empty': 'root alanları için onaylanmış geçiş anahtarı yok.',
+  'settings.openchamber.spaces.root.approvedAt': '{date} tarihinde onaylandı',
+  'settings.openchamber.spaces.root.revoke': 'Sunucuda onayı kaldır',
   'settings.openchamber.sessionRetention.field.archivedDescription': 'Saklama süresi arşivleme anından itibaren sayılır. Süresi dolan oturumlar silinir.',
   'settings.openchamber.sessionRetention.field.unarchivedArchiveDescription': 'Saklama süresi oturumun son etkinliğinden itibaren sayılır. Süresi dolan oturumlar arşivlenir.',
   'settings.openchamber.sessionRetention.field.unarchivedDeleteDescription': 'Saklama süresi oturumun son etkinliğinden itibaren sayılır. Süresi dolan oturumlar silinir.',

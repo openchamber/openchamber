@@ -17,6 +17,7 @@ import { SharedTrustConfirmDialog } from '@/components/projects/SharedTrustConfi
 import { OpenCodeTrustDialog } from '@/components/projects/OpenCodeTrustDialog';
 import { SpaceAccessDialog } from '@/components/session/spaces/SpaceAccessDialog';
 import { SpaceActionsSheet, SpaceDeleteDialog } from '@/components/session/spaces/SpaceActions';
+import { RootSpaceActivationDialog } from '@/components/session/spaces/RootSpaceActivationDialog';
 import { SpaceApplyDialog } from '@/components/session/spaces/SpaceApplyDialog';
 import { SpaceSetupOutputDialog } from '@/components/session/spaces/SpaceSetupOutput';
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
@@ -1417,7 +1418,7 @@ function MobileAppContent({ apis }: MobileAppProps) {
               <SnippetQuickCreateDialog />
               <SharedTrustConfirmDialog />
               <OpenCodeTrustDialog />
-              {isolatedSpacesEnabled ? <><SpaceAccessDialog /><SpaceActionsSheet /><SpaceApplyDialog /><SpaceDeleteDialog /><SpaceSetupOutputDialog /></> : null}
+        {isolatedSpacesEnabled ? <><SpaceAccessDialog /><SpaceActionsSheet /><SpaceApplyDialog /><SpaceDeleteDialog /><RootSpaceActivationDialog /><SpaceSetupOutputDialog /></> : null}
               <MobileToaster />
               {isInitialized ? <ConfigUpdateOverlay /> : null}
             </div>

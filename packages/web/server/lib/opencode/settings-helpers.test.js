@@ -32,6 +32,23 @@ const createTestHelpers = () => createSettingsHelpers({
   sanitizeProjects: () => undefined,
 });
 
+it('retains the server browser origin policy through settings persistence and response', () => {
+  // Given a mirrored field unknown to older settings files.
+  const helpers = createTestHelpers();
+  const policy = { serverBrowserOpenChamberOrigins: ['https://front.example', 'http://localhost:4321'] };
+  // When sanitizing the update and formatting the persisted value.
+  const response = helpers.formatSettingsResponse(helpers.sanitizeSettingsUpdate(policy));
+  // Then the complete policy survives the boundary.
+  expect(response.serverBrowserOpenChamberOrigins).toEqual(policy.serverBrowserOpenChamberOrigins);
+});
+
+it('refuses malformed origin policies without accepting only the valid entries', () => {
+  // Given one valid and one malformed entry.
+  const helpers = createTestHelpers();
+  // When applying the mirrored settings, then it fails closed.
+  expect(() => helpers.sanitizeSettingsUpdate({ serverBrowserOpenChamberOrigins: ['https://front.example', 'bad'] })).toThrow();
+});
+
 const createTestHelpersWithRealSanitizers = () => {
   const runtime = createSettingsNormalizationRuntime({
     os: { homedir: () => '/home/testuser' },

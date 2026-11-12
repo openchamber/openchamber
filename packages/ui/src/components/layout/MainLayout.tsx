@@ -19,6 +19,7 @@ import { ErrorBoundary } from '../ui/ErrorBoundary';
 import { SessionSidebar } from '@/components/session/SessionSidebar';
 import { SessionDialogs } from '@/components/session/SessionDialogs';
 import { SpaceActionsSheet, SpaceDeleteDialog } from '@/components/session/spaces/SpaceActions';
+import { RootSpaceActivationDialog } from '@/components/session/spaces/RootSpaceActivationDialog';
 import { DiffWorkerProvider } from '@/contexts/DiffWorkerProvider';
 import { ProjectActionsProvider } from './ProjectActionsProvider';
 import { RunAutoFusion } from '@/lib/multirun/autoFusion';
@@ -199,6 +200,7 @@ export const MainLayout: React.FC = () => {
                         <SpaceActionsSheet />
                         <OnDemand needed={isSpaceApplyDialogOpen} load={loadSpaceApplyDialog} onFailure={() => useSpacesStore.getState().closeApplyDialog()} />
                         <SpaceDeleteDialog />
+                        <RootSpaceActivationDialog />
                         <OnDemand needed={isSpaceSetupOutputDialogOpen} load={loadSpaceSetupOutputDialog} onFailure={() => useSpacesStore.getState().closeSetupOutputDialog()} />
                     </>
                 ) : null}
