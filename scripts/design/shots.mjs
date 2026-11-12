@@ -49,6 +49,9 @@ const SEED_VERSION = 2
 // The comparison shots of other apps are a 1454x841 window at 2x.
 const VIEWPORT = { width: 1454, height: 841, deviceScaleFactor: 2 }
 const NARROW_VIEWPORT = { width: 900, height: 841, deviceScaleFactor: 2 }
+// With the sidebar closed and the Git panel docked, a composer about 288px
+// wide, where the footer's labels collapse (14-composer-narrow).
+const COMPOSER_NARROW_VIEWPORT = { width: 1000, height: 841, deviceScaleFactor: 2 }
 const GIT_ENV = {
   GIT_AUTHOR_NAME: "Relay Desk",
   GIT_AUTHOR_EMAIL: "dev@relay-desk.test",
@@ -652,10 +655,18 @@ const SHOTS = [
   },
   {
     name: "02-chat",
+    // The Session card with a Usage section in it (usageStubScript).
+    stubUsage: true,
     async run(page, ctx) {
       await openMainSession(page, ctx)
       await setContextPanel(page, null)
       await scrollChatTo(page, MAIN_PROMPT.slice(0, 40), 90)
+      // The Usage section opened, its rows under each provider.
+      await page.waitFor(`document.body.innerText.includes("Usage")`, { what: "the Session card's Usage section" })
+      if (await page.evaluate(`[...document.querySelectorAll("[data-work-status-heading] button[aria-expanded=false]")].some((button) => button.textContent.includes("Usage"))`)) {
+        await page.click("[data-work-status-heading] button[aria-expanded=false]", { text: "Usage" })
+      }
+      await page.waitFor(`document.body.innerText.includes("OpenRouter")`, { what: "the Usage rows" })
       // A few words typed, not sent: Send in its enabled state. 01-draft
       // keeps the empty composer for the disabled one.
       await page.click('[data-chat-input="true"] .cm-content')
@@ -784,6 +795,23 @@ const SHOTS = [
       await page.waitFor(`document.body.innerText.includes("Session Totals")`, { what: "the session context's Session Totals" })
     },
   },
+  {
+    // The composer squeezed by the Git panel until its labels give way: the
+    // provider logo with its thinking level, the agent's icon, the mic and
+    // Send, grouped by their gaps.
+    name: "14-composer-narrow",
+    viewport: COMPOSER_NARROW_VIEWPORT,
+    async run(page, ctx) {
+      await openMainSession(page, ctx)
+      // The sidebar closed whatever the shots before left, so the composer
+      // beside the Git panel is about 288px wide, as the maintainer works.
+      if (await page.evaluate(`document.querySelector("[data-sidebar-toggle]")?.getAttribute("aria-pressed") === "true"`)) {
+        await page.click("[data-sidebar-toggle]")
+        await page.moveMouseAway()
+      }
+      await setContextPanel(page, "git")
+    },
+  },
 ]
 
 const selectShots = (only) => {
@@ -817,6 +845,44 @@ const clockScript = (now) => `(() => {
     static now() { return RealDate.now() + offset }
   }
   globalThis.Date = FixedDate
+})()`
+
+/**
+ * Usage data for the Session card's Usage section, answered in the page: the
+ * fixture has no provider accounts to read limits from, so the quota routes
+ * are stubbed for the shots that ask for it (`stubUsage`). Two providers with
+ * limits (Claude's weekly one in the warning band) and one count that is not a
+ * limit; every other provider reports no account.
+ */
+const usageStubScript = (now) => `(() => {
+  const now = ${now};
+  const hour = 60 * 60 * 1000;
+  const limit = (used, resetIn) => ({ usedPercent: used, remainingPercent: used === null ? null : 100 - used, windowSeconds: null, resetAfterSeconds: null, resetAt: resetIn === null ? null : now + resetIn, resetAtFormatted: null, resetAfterFormatted: null });
+  const results = {
+    claude: { providerName: "Claude", windows: { "5h": limit(27, 3 * hour), "7d": limit(62, 3 * 24 * hour) } },
+    codex: { providerName: "Codex", windows: { "5h": limit(12, 1 * hour), "7d": limit(8, 12 * 24 * hour) } },
+    openrouter: { providerName: "OpenRouter", windows: { credits: { ...limit(null, null), valueLabel: "10.2 / 20,000 used" } } },
+  };
+  const answer = (input) => {
+    const url = new URL(typeof input === "string" || input instanceof URL ? String(input) : input.url, location.href);
+    if (url.pathname.endsWith("/api/quota/providers")) return Response.json({ providers: Object.keys(results) });
+    const match = url.pathname.match(new RegExp("/api/quota/([^/]+)$"));
+    if (!match) return null;
+    const id = decodeURIComponent(match[1]);
+    const result = results[id];
+    return Response.json(result
+      ? { providerId: id, providerName: result.providerName, ok: true, configured: true, usage: { windows: result.windows }, fetchedAt: now }
+      : { providerId: id, providerName: id, ok: true, configured: false, usage: null, fetchedAt: now });
+  };
+  // The app wraps window.fetch in its runtime bridge as it loads; every
+  // fetch it installs is wrapped again, so the quota routes answer first.
+  const wrap = (inner) => async (input, init) => answer(input) ?? inner(input, init);
+  let wrapped = wrap(window.fetch.bind(window));
+  Object.defineProperty(window, "fetch", {
+    configurable: true,
+    get: () => wrapped,
+    set: (next) => { wrapped = wrap(next); },
+  });
 })()`
 
 /** Shoots every selected screen in one theme, in a browser context of its own. */
@@ -857,7 +923,14 @@ const shootTheme = async ({ chromePort, theme, shots, ctx, outDir }) => {
         await page.client.send("Page.bringToFront")
         await page.setViewport(viewport)
         await page.setTheme(theme)
-        await shot.run(page, ctx)
+        const stub = shot.stubUsage
+          ? await page.client.send("Page.addScriptToEvaluateOnNewDocument", { source: usageStubScript(ctx.now) })
+          : null
+        try {
+          await shot.run(page, ctx)
+        } finally {
+          if (stub) await page.client.send("Page.removeScriptToEvaluateOnNewDocument", { identifier: stub.identifier })
+        }
         const settled = await page.settle()
         await page.screenshot(file)
         if (shot.cleanup) await shot.cleanup(page, ctx)

@@ -91,3 +91,17 @@ they call tools (`reasoning` on a step in `fixture-conversations.mjs`, sent
 as `reasoning_content` by the fixture provider), so `03-chat-tools` shows
 Thinking rows between tool rows.
 
+### Why 02-chat stubs usage, and 14 squeezes the composer
+
+The fixture has no provider accounts, so the Session card never showed its
+Usage section. `02-chat` answers the quota routes in the page
+(`usageStubScript`, added for that shot only and removed after it): Claude and
+Codex with their limits, Claude's weekly one in the warning band, and an
+OpenRouter count that is not a limit. The page's own fetch bridge wraps
+`window.fetch` as it loads, so the stub wraps every fetch the page installs.
+
+`14-composer-narrow` closes the sidebar and opens the Git panel beside the
+chat at a 1000px window, which leaves the composer about 288px wide: the
+footer's model name and agent label have given way to the provider logo with
+its thinking level ("/ default"), the agent's icon, the mic and Send.
+
