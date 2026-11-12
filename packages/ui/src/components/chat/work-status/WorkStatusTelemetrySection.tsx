@@ -82,12 +82,15 @@ export const WorkStatusTelemetrySection: React.FC<Props> = ({ sessionId, directo
   }, [scope, status, eligibleForStats, computed, retained?.scope, store, sessionId]);
   const stats = eligibleForStats ? computed : status !== 'unknown' && retained?.scope === scope ? retained.stats : null;
   const previousTurn = stats !== null && (stats.previousTurn || !eligibleForStats);
-  // The header line the folded section is read by: the figures people scan,
-  // speed, time and cost, in the rows' own formats.
+  // The header line the folded section is read by, in the rows' own formats:
+  // time, plus one more figure so the line fits the card. A turn that cost
+  // something shows its cost; a free one (a subscription, a local model)
+  // shows its speed instead (maintainer, 2026-11-12).
+  const hasCost = stats !== null && stats.cost !== null && stats.cost > 0;
   const figures = stats ? [
-    stats.responseTokensPerSecond !== null ? formatThroughputRate(stats.responseTokensPerSecond) : null,
+    !hasCost && stats.responseTokensPerSecond !== null ? formatThroughputRate(stats.responseTokensPerSecond) : null,
     stats.elapsedDurationMs !== null ? formatTelemetryDuration(stats.elapsedDurationMs) : null,
-    stats.cost !== null ? formatCost(stats.cost) : null,
+    hasCost && stats.cost !== null ? formatCost(stats.cost) : null,
   ].filter((figure): figure is string => figure !== null).join(' · ') : '';
   const summary = previousTurn
     ? figures

@@ -217,7 +217,7 @@ which requests only providers enabled for this panel.
 | Subagents | child sessions from `useAllLiveSessions` (`parentID`) + `useAllSessionStatuses`; per-row cost from `computeRollup`'s `perChildCost` (each child's own subtree total, so nested subagent-of-subagent cost rolls up under its immediate parent row) | |
 | Subagent blockers | directory `permission` / `question` maps | one subscription covers every child |
 | Workflows | `useSessionWorkflowRuns` (`lib/workflows/store.ts`): the session's runs read once from the server, then kept current by `openchamber:workflow-run` events | only while workflows are shown: not in VS Code, and only with the workflow tool on (`selectWorkflowsShown`) |
-| Usage | `components/usage/usageGroups.ts` over `useQuotaStore` | grouping shared with the mobile popover; presentation is not |
+| Usage | `components/usage/usageGroups.ts` over `useQuotaStore` | grouping shared with the mobile popover; presentation is not: a provider line in the text colour with its logo muted (`ProviderLogo tint`), groups set apart by 8px, limit rows under the name at the label x with a short reset time (`formatQuotaResetShort`) and compacted counts (`compactQuotaValueLabel`), full figures in the row tooltip; values muted unless a limit is in its warning or critical band (`usageValueTone`) |
 | Linked plans | `useProjectContextStore` plans of the session's project whose `session.sessionId` is this session | refreshed through `observeProjectContext` |
 | Linked threads | `lib/linkedIssues.ts` over session metadata; state from tracked items | written by the flows that attach an issue or PR, and removable from the row; a linked PR that is also the checked-out branch's PR shows the branch summary, as its sidebar row does |
 | Turn stats | `telemetry.ts` over `useSessionMessageRecords` | computed while authoritatively idle, including when collapsed; active mounts read warm records once for the previous turn; either rate above 5,000 tok/s is reported as unknown (see the two-rate description below) |
@@ -269,8 +269,10 @@ tooltip. Model-only session updates invalidate the live-session comparison.
 The section follows Usage by default and reuses the panel's existing rows. Only its header
 has an icon; metric rows use labels and values without leading icons. It starts
 folded: its rows took more height than the rest of the card, and the header
-line carries the figures people scan (response speed, elapsed time, cost),
-joined with ` · `, folded and open alike. Once the user opens or folds it,
+line carries two of the figures people scan, joined with ` · `, folded and
+open alike, so it fits the card: elapsed time plus cost when the turn cost
+something, response speed plus elapsed time when its cost is absent or zero
+(a subscription, a local model). Once the user opens or folds it,
 `workStatusExpandedSections` keeps that choice. It
 reads already-loaded records without fetching history. The newest turn needs a
 preceding user message and completed assistant steps. A truncated or unfinished
@@ -321,12 +323,12 @@ input excludes cached tokens and output includes reasoning across all steps.
 
 Records subscriptions stop while busy, retrying, or awaiting
 status authority. Explicit idle events or a successful directory status snapshot
-allow computation even when collapsed: the response-speed headline remains visible
+allow computation even when collapsed: the headline remains visible
 and updates when a turn completes, after a remount, or when idle records change.
 The collapsed body stays unmounted. One component-owned committed result keeps the
 headline and rows stable during the next active turn. Whenever the shown numbers
 belong to an earlier turn (a pending prompt, or a busy or retrying session), the
-header says "Previous turn", followed by the response speed when there is one.
+header says "Previous turn", followed by the same two figures.
 Opening or reopening the section mid-run reads already-loaded, revert-filtered
 records once per scope, without fetching history or subscribing to streaming
 updates. It excludes the entire newest user-bounded turn, even if some of its

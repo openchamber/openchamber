@@ -26,6 +26,15 @@ const assistant: AssistantMessage = {
   time: { created: 2000, completed: 7000 }, cost: 0.01,
   get tokens() { tokenReads += 1; return { input: 100, output: 20, reasoning: 10, cache: { read: 40, write: 0 } }; },
 };
+// The same turn at no cost, its token getter kept. The folded heading shows
+// time plus cost for a paid turn and speed plus time for a free one, so tests
+// about the heading's speed run on the free turn.
+const freeAssistant: AssistantMessage = {
+  id: 'assistant-final', sessionID: sessionId, role: 'assistant',
+  agent: 'build', providerID: 'test', modelID: 'test',
+  time: { created: 2000, completed: 7000 }, cost: 0,
+  get tokens() { tokenReads += 1; return { input: 100, output: 20, reasoning: 10, cache: { read: 40, write: 0 } }; },
+};
 
 const DOM_GLOBAL_NAMES = ['window', 'document', 'navigator', 'Node', 'Element', 'HTMLElement', 'HTMLIFrameElement', 'localStorage', 'getComputedStyle', 'ResizeObserver', 'requestAnimationFrame', 'cancelAnimationFrame', 'IS_REACT_ACT_ENVIRONMENT'] as const;
 const installDom = () => {
@@ -119,7 +128,7 @@ describe('mounted turn telemetry with live sync stores', () => {
     expect(dom.container.textContent).toContain('~6 tok/s');
   });
 
-  test('starts folded with speed, time and cost in its heading, and keeps the user\'s choice', async () => {
+  test('starts folded with time and cost in its heading, and keeps the user\'s choice', async () => {
     await render(false);
     await act(async () => {
       useUIStore.setState({ workStatusExpandedSections: {} });
@@ -130,7 +139,7 @@ describe('mounted turn telemetry with live sync stores', () => {
     await render();
     const heading = () => dom.container.querySelector('button');
     expect(heading()?.getAttribute('aria-expanded')).toBe('false');
-    expect(heading()?.textContent).toBe('Turn stats~10 tok/s · 6.0s · $0.01');
+    expect(heading()?.textContent).toBe('Turn stats6.0s · $0.01');
     expect(dom.container.textContent).not.toContain('Whole turn');
     await act(async () => heading()?.click());
     await render(false);
@@ -143,7 +152,7 @@ describe('mounted turn telemetry with live sync stores', () => {
     await render(false);
     await act(async () => {
       useUIStore.getState().setWorkStatusSectionExpanded('telemetry', false);
-      store().setState({ part: { [assistant.id]: [
+      store().setState({ message: { [sessionId]: [user, freeAssistant] }, part: { [assistant.id]: [
         { id: 'text', type: 'text', sessionID: sessionId, messageID: assistant.id, text: 'Final reply', time: { start: 3000, end: 5000 } },
       ] } });
     });
@@ -151,14 +160,14 @@ describe('mounted turn telemetry with live sync stores', () => {
     expect(dom.container.querySelector('button')?.textContent).toBe('Turn stats');
     await act(async () => store().setState({ sessionStatusReady: true }));
     expect(dom.container.querySelector('button')?.getAttribute('aria-expanded')).toBe('false');
-    expect(dom.container.querySelector('button')?.textContent).toBe('Turn stats~10 tok/s · 6.0s · $0.01');
+    expect(dom.container.querySelector('button')?.textContent).toBe('Turn stats~10 tok/s · 6.0s');
     expect(dom.container.textContent).not.toContain('Response');
     expect(dom.container.textContent).not.toContain('Whole turn');
     expect(messageRequests).toBe(0);
   });
 
   test('a turn completed while collapsed publishes its speed without opening the section', async () => {
-    const completed: AssistantMessage = { ...assistant,
+    const completed: AssistantMessage = { ...assistant, cost: 0,
       get tokens() { tokenReads += 1; return { input: 100, output: 40, reasoning: 10, cache: { read: 40, write: 0 } }; },
     };
     await act(async () => {
@@ -176,13 +185,13 @@ describe('mounted turn telemetry with live sync stores', () => {
     expect(dom.container.querySelector('button')?.textContent).toBe('Turn stats');
     await act(async () => store().setState({ session_status: { [sessionId]: { type: 'idle' } } }));
     expect(dom.container.querySelector('button')?.getAttribute('aria-expanded')).toBe('false');
-    expect(dom.container.querySelector('button')?.textContent).toBe('Turn stats~20 tok/s · 6.0s · $0.01');
+    expect(dom.container.querySelector('button')?.textContent).toBe('Turn stats~20 tok/s · 6.0s');
     expect(dom.container.textContent).not.toContain('Whole turn');
     expect(messageRequests).toBe(0);
   });
 
   test('collapsed remount retains the response headline and reopening reads fresh data', async () => {
-    await act(async () => store().setState({ session_status: { [sessionId]: { type: 'idle' } }, part: { [assistant.id]: [
+    await act(async () => store().setState({ session_status: { [sessionId]: { type: 'idle' } }, message: { [sessionId]: [user, freeAssistant] }, part: { [assistant.id]: [
       { id: 'text', type: 'text', sessionID: sessionId, messageID: assistant.id, text: 'Final reply', time: { start: 3000, end: 5000 } },
     ] } }));
     const button = dom.container.querySelector('button');
@@ -191,7 +200,7 @@ describe('mounted turn telemetry with live sync stores', () => {
     await render(false);
     await render();
     expect(dom.container.querySelector('button')?.getAttribute('aria-expanded')).toBe('false');
-    expect(dom.container.querySelector('button')?.textContent).toBe('Turn stats~10 tok/s · 6.0s · $0.01');
+    expect(dom.container.querySelector('button')?.textContent).toBe('Turn stats~10 tok/s · 6.0s');
     expect(dom.container.textContent).not.toContain('Whole turn');
     const reopen = dom.container.querySelector('button');
     if (!reopen) throw new Error('Expected reopen button');
@@ -276,20 +285,20 @@ describe('mounted turn telemetry with live sync stores', () => {
 
   test('a new prompt keeps the finished turn on screen, labelled as the previous turn, until its reply completes', async () => {
     const reply = { id: 'text', type: 'text', sessionID: sessionId, messageID: assistant.id, text: 'Final reply', time: { start: 3000, end: 5000 } } as const;
-    await act(async () => store().setState({ session_status: { [sessionId]: { type: 'idle' } }, part: { [assistant.id]: [reply] } }));
+    await act(async () => store().setState({ session_status: { [sessionId]: { type: 'idle' } }, message: { [sessionId]: [user, freeAssistant] }, part: { [assistant.id]: [reply] } }));
     const heading = () => dom.container.querySelector('button')?.textContent;
-    expect(heading()).toBe('Turn stats~10 tok/s · 6.0s · $0.01');
+    expect(heading()).toBe('Turn stats~10 tok/s · 6.0s');
     // The prompt lands while the session still reports idle.
     const prompt: UserMessage = { id: 'user-2', sessionID: sessionId, role: 'user', time: { created: 8000 } };
-    await act(async () => store().setState({ message: { [sessionId]: [user, assistant, prompt] } }));
-    expect(heading()).toBe('Turn statsPrevious turn · ~10 tok/s · 6.0s · $0.01');
+    await act(async () => store().setState({ message: { [sessionId]: [user, freeAssistant, prompt] } }));
+    expect(heading()).toBe('Turn statsPrevious turn · ~10 tok/s · 6.0s');
     expect(dom.container.textContent).toContain('Elapsed6.0s');
     await act(async () => store().setState({ session_status: { [sessionId]: { type: 'busy' } } }));
-    expect(heading()).toBe('Turn statsPrevious turn · ~10 tok/s · 6.0s · $0.01');
+    expect(heading()).toBe('Turn statsPrevious turn · ~10 tok/s · 6.0s');
     expect(dom.container.textContent).toContain('Elapsed6.0s');
     const next: AssistantMessage = { ...assistant, id: 'assistant-next', time: { created: 9000, completed: 11000 } };
     await act(async () => store().setState({
-      message: { [sessionId]: [user, assistant, prompt, next] },
+      message: { [sessionId]: [user, freeAssistant, prompt, next] },
       part: { [assistant.id]: [reply], [next.id]: [] },
       session_status: { [sessionId]: { type: 'idle' } },
     }));
@@ -300,23 +309,23 @@ describe('mounted turn telemetry with live sync stores', () => {
   test('collapsed headlines follow corrections and clear on revert, empty history and scope changes', async () => {
     await act(async () => {
       useUIStore.getState().setWorkStatusSectionExpanded('telemetry', false);
-      store().setState({ sessionStatusReady: true, part: { [assistant.id]: [
+      store().setState({ sessionStatusReady: true, message: { [sessionId]: [user, freeAssistant] }, part: { [assistant.id]: [
         { id: 'text', type: 'text', sessionID: sessionId, messageID: assistant.id, text: 'Final reply', time: { start: 3000, end: 5000 } },
       ] } });
     });
-    expect(dom.container.querySelector('button')?.textContent).toBe('Turn stats~10 tok/s · 6.0s · $0.01');
+    expect(dom.container.querySelector('button')?.textContent).toBe('Turn stats~10 tok/s · 6.0s');
     await act(async () => store().setState({ part: { [assistant.id]: [
       { id: 'text', type: 'text', sessionID: sessionId, messageID: assistant.id, text: 'Final reply', time: { start: 3000, end: 4000 } },
     ] } }));
-    expect(dom.container.querySelector('button')?.textContent).toBe('Turn stats~20 tok/s · 6.0s · $0.01');
+    expect(dom.container.querySelector('button')?.textContent).toBe('Turn stats~20 tok/s · 6.0s');
     await act(async () => store().setState({ session: [{ ...session, revert: { messageID: user.id } }] }));
     expect(dom.container.querySelector('button')?.textContent).toBe('Turn stats');
     await act(async () => store().setState({ session: [session] }));
-    expect(dom.container.querySelector('button')?.textContent).toBe('Turn stats~20 tok/s · 6.0s · $0.01');
+    expect(dom.container.querySelector('button')?.textContent).toBe('Turn stats~20 tok/s · 6.0s');
     await render(true, '/another-repo');
     expect(dom.container.querySelector('button')?.textContent).toBe('Turn stats');
     await render();
-    expect(dom.container.querySelector('button')?.textContent).toBe('Turn stats~20 tok/s · 6.0s · $0.01');
+    expect(dom.container.querySelector('button')?.textContent).toBe('Turn stats~20 tok/s · 6.0s');
     await act(async () => store().setState({ message: {} }));
     expect(dom.container.querySelector('button')?.textContent).toBe('Turn stats');
     expect(messageRequests).toBe(0);
@@ -360,16 +369,29 @@ describe('mounted turn telemetry with live sync stores', () => {
   });
 
   test('the heading\'s speed is response speed only, never whole-turn speed as a fallback', async () => {
-    await act(async () => store().setState({ sessionStatusReady: true, part: { [assistant.id]: [
+    await act(async () => store().setState({ sessionStatusReady: true, message: { [sessionId]: [user, freeAssistant] }, part: { [assistant.id]: [
       { id: 'text', type: 'text', sessionID: sessionId, messageID: assistant.id, text: 'Final reply', time: { start: 3000, end: 5000 } },
     ] } }));
-    expect(dom.container.querySelector('button')?.textContent).toBe('Turn stats~10 tok/s · 6.0s · $0.01');
+    expect(dom.container.querySelector('button')?.textContent).toBe('Turn stats~10 tok/s · 6.0s');
     expect(dom.container.textContent).toContain('Response~10 tok/s');
     expect(dom.container.textContent).toContain('Whole turn~6 tok/s');
     await act(async () => store().setState({ part: { [assistant.id]: [] } }));
-    expect(dom.container.querySelector('button')?.textContent).toBe('Turn stats6.0s · $0.01');
+    expect(dom.container.querySelector('button')?.textContent).toBe('Turn stats6.0s');
     expect(dom.container.textContent).not.toContain('Response');
     expect(dom.container.textContent).toContain('Whole turn~6 tok/s');
+  });
+
+  test('the folded heading carries two figures: time and cost for a paid turn, speed and time for a free one', async () => {
+    await act(async () => {
+      useUIStore.getState().setWorkStatusSectionExpanded('telemetry', false);
+      store().setState({ sessionStatusReady: true, part: { [assistant.id]: [
+        { id: 'text', type: 'text', sessionID: sessionId, messageID: assistant.id, text: 'Final reply', time: { start: 3000, end: 5000 } },
+      ] } });
+    });
+    const heading = () => dom.container.querySelector('button')?.textContent;
+    expect(heading()).toBe('Turn stats6.0s · $0.01');
+    await act(async () => store().setState({ message: { [sessionId]: [user, freeAssistant] } }));
+    expect(heading()).toBe('Turn stats~10 tok/s · 6.0s');
   });
 
   test('every metric has a full-row focus target and hover waits 300ms', async () => {
