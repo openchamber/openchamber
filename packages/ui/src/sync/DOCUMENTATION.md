@@ -1187,7 +1187,10 @@ keeps the last 20 of them in memory (`recordSessionError`, fed from the
 event pipeline next to the error notification) and `summarizeOpenCodeError`
 reads the `{ type, message }` structured error the event carries. The chat shows the newest
 error for the open session under its last message while that turn is the
-latest one (`SessionErrorNotice`), and also names a user message that an idle
+latest one (`SessionErrorNotice`). The error keeps OpenCode's time of the
+failure, the `created` of `session.execution.failed`, not its arrival, so a
+replayed copy of an old failure cannot read as newer than the turns after it.
+The notice also names a user message that an idle
 session has left unanswered for five seconds, since an accepted send that
 produced neither a message nor an error would otherwise look like nothing
 happened. Before that no-reply notice shows, the session tail is re-read

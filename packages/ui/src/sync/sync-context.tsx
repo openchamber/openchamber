@@ -2084,10 +2084,13 @@ const recordTurnOutcomeNotification = (
   // The unread mark itself is OpenCode's (`session-unread.ts`); only the error
   // details the chat shows under a failed turn are kept here.
   if (!errorSummary || isSubtaskSession(sessionID, directory, childStores, batch)) return
+  // OpenCode's time of the failure, not this arrival: a replayed or late copy
+  // of an old failure must stay older than the turns that followed it.
+  const failedAt = payload.type === "session.error" ? payload.properties.time : undefined
   appendErrorNotification({
     directory,
     session: sessionID,
-    time: Date.now(),
+    time: failedAt ?? Date.now(),
     error: { ...errorSummary, responseBody },
   })
 }
