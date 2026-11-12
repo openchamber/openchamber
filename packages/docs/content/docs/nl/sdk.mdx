@@ -95,7 +95,7 @@ Gebruik voor een bord `host.storage` voor blijvende JSON-gegevens en de project-
 
 `contributes.integration` is optioneel. Het voegt een kaart bij Instellingen → Integraties toe waar de gebruiker een account verbindt. Zie [Accounts en netwerk](#accounts-en-netwerk).
 
-`contributes.service` is optioneel. Hiermee geeft u een lokaal proces op dat OpenChamber naast de extensie start voor zaken die een webpagina niet kan bereiken, zoals een Docker-socket. Het proces heeft de volledige gebruikerstoegang en draait zonder sandbox. Het toestemmingsvenster waarschuwt hiervoor. Gebruik een service alleen als de pagina het werk niet zelf kan doen. Zie `GUEST_SERVICES.md` in het pakket. Een service met `provides: ["browser"]` kan ook de browser van de agent leveren. Ze beantwoordt `browser.*`-acties op de server, zodat agents zonder geopende desktopapp kunnen browsen. De gebruiker kiest haar bij Instellingen → OpenChamber-tools. Zo'n service heeft geen paneel nodig. Een service kan ook te horen krijgen wat er in de sessies van de gebruiker gebeurt: geef `contributes.sessionEvents` ernaast op, en OpenChamber stuurt elke beurt die wordt afgerond of mislukt en elke toestemming of vraag van de agent naar de service, uit elk project, zonder geopend venster. Zie [Sessiegebeurtenissen](/nl/sdk/host/#sessiegebeurtenissen). En een service met `provides: ["notifications"]` bezorgt de meldingen van de gebruiker naast de desktop en de telefoon, aan Slack, Matrix of een eigen server; de gebruiker verbindt het account bij Instellingen → Integraties en het token blijft in OpenChamber. Zie [Meldingskanalen](/nl/sdk/host/#meldingskanalen). Een service met `provides: ["tracker"]` is een tracker voor werkitems naast Linear, met zijn accountkaart onder Extensieaccounts; zie [Trackers](/nl/sdk/host/#trackers). En een service met `provides: ["quota"]` rapporteert het verbruik naast de ingebouwde providers en leest daarvoor de aanmeldgegevens die OpenCode bewaart voor de providers die hij in het manifest noemt; zie [Verbruiksproviders](/nl/sdk/host/#verbruiksproviders).
+`contributes.service` is optioneel. Hiermee geeft u een lokaal proces op dat OpenChamber naast de extensie start voor zaken die een webpagina niet kan bereiken, zoals een Docker-socket. Het proces heeft de volledige gebruikerstoegang en draait zonder sandbox. Het toestemmingsvenster waarschuwt hiervoor. Gebruik een service alleen als de pagina het werk niet zelf kan doen. Zie `GUEST_SERVICES.md` in het pakket. Een service met `provides: ["browser"]` kan ook de browser van de agent leveren. Ze beantwoordt `browser.*`-acties op de server, zodat agents zonder geopende desktopapp kunnen browsen. De gebruiker kiest haar bij Instellingen → OpenChamber-tools. Zo'n service heeft geen paneel nodig. Een service kan ook te horen krijgen wat er in de sessies van de gebruiker gebeurt: geef `contributes.sessionEvents` ernaast op, en OpenChamber stuurt elke beurt die wordt afgerond of mislukt en elke toestemming of vraag van de agent naar de service, uit elk project, zonder geopend venster. Zie [Sessiegebeurtenissen](/nl/sdk/host/#sessiegebeurtenissen). En een service met `provides: ["notifications"]` bezorgt de meldingen van de gebruiker naast de desktop en de telefoon, aan Slack, Matrix of een eigen server; de gebruiker verbindt het account bij Instellingen → Integraties en het token blijft in OpenChamber. Zie [Meldingskanalen](/nl/sdk/host/#meldingskanalen). Een service met `provides: ["tracker"]` is een tracker voor werkitems naast Linear, met zijn accountkaart onder Extensieaccounts; zie [Trackers](/nl/sdk/host/#trackers). En een service met `provides: ["quota"]` rapporteert het verbruik naast de ingebouwde providers en leest daarvoor de aanmeldgegevens die OpenCode bewaart voor de providers die hij in het manifest noemt; zie [Verbruiksproviders](/nl/sdk/host/#verbruiksproviders). Een service kan met `contributes.marks` ook kleine pictogrammen op rijen in de zijbalk zetten; zie [Markeringen op rijen in de zijbalk](/nl/sdk/host/#markeringen-op-rijen-in-de-zijbalk).
 
 ## Rechten
 
@@ -108,7 +108,7 @@ Een paneel tonen en de huidige sessie lezen vereist geen toestemming. Voor hande
 | `files` | bestanden in het geopende project lezen en schrijven via `readFile`, `writeFile`, `listDir` en `stat` met een relatief pad |
 | `model` | eenmalig tekst genereren met het Small Model via `generate`, buiten een sessie |
 
-Twaalf rechten worden automatisch toegevoegd: `network` bij een `integration`, `service` bij een `service`, `filesystem` bij `filesystem`-patronen, `origins` bij `origins`, `conversation` als een sessieactie berichten opvraagt, `transcript` als `sessionEvents` of `sessionControl` om `content` vraagt, `sessionControl` als uw service op sessies inwerkt, `sessionAnswers` als die namens de gebruiker de toestemmingsverzoeken en formulieren van de agent beantwoordt (`sessionControl: { answers: true }`), `instructions` als die aanvult wat agents lezen, en `skills` als u `contributes.skills` opgeeft, een map in het pakket met skills die elke agent bereiken zolang de extensie aanstaat. Zie [Acties, opdrachten en de badge](#acties-opdrachten-en-de-badge), [Sessiegebeurtenissen](/nl/sdk/host/#sessiegebeurtenissen) en [OpenChamber aanroepen](/nl/sdk/host/#openchamber-aanroepen-vanuit-uw-service). Verder `opencodePlugin` wanneer u `contributes.opencodePlugin` declareert (zie hieronder) en `links` wanneer u `contributes.links` declareert (zie [Links in chatberichten](#links-in-chatberichten)).
+Dertien rechten worden automatisch toegevoegd: `network` bij een `integration`, `service` bij een `service`, `filesystem` bij `filesystem`-patronen, `origins` bij `origins`, `conversation` als een sessieactie berichten opvraagt, `transcript` als `sessionEvents` of `sessionControl` om `content` vraagt, `sessionControl` als uw service op sessies inwerkt, `sessionAnswers` als die namens de gebruiker de toestemmingsverzoeken en formulieren van de agent beantwoordt (`sessionControl: { answers: true }`), `instructions` als die aanvult wat agents lezen, en `skills` als u `contributes.skills` opgeeft, een map in het pakket met skills die elke agent bereiken zolang de extensie aanstaat. Zie [Acties, opdrachten en de badge](#acties-opdrachten-en-de-badge), [Sessiegebeurtenissen](/nl/sdk/host/#sessiegebeurtenissen) en [OpenChamber aanroepen](/nl/sdk/host/#openchamber-aanroepen-vanuit-uw-service). Verder `opencodePlugin` wanneer u `contributes.opencodePlugin` declareert (zie hieronder) en `links` wanneer u `contributes.links` declareert (zie [Links in chatberichten](#links-in-chatberichten)). `marks` komt erbij wanneer u `contributes.marks` declareert (zie [Markeringen op rijen in de zijbalk](/nl/sdk/host/#markeringen-op-rijen-in-de-zijbalk)).
 
 Bij installatie ziet de gebruiker de volledige lijst en kan die goedkeuren of de extensie verwijderen. Vraagt een nieuwe versie meer, dan verschijnt het venster opnieuw. Een aanroep waarvoor een nog niet goedgekeurd recht nodig is, faalt met `NOT_GRANTED`.
 
@@ -341,11 +341,49 @@ Tools uit een OpenCode-plugin of MCP-server verschijnen standaard met een algeme
 ]
 ```
 
-`match` is de toolnaam zoals OpenCode die meldt. Een afsluitende `*` vergelijkt op voorvoegsel. `icon` is een Remixicon-naam of `.svg`-bestand in uw pakket, net als `panel.icon`. `title` en `subtitle` zijn sjablonen op basis van `input`, `output` en `metadata`. `output` bepaalt de weergave: `text`, `json` als boom, `markdown`, `code` met `language`, `table` met `columns`, of `auto` voor de standaard. Tabelrijen komen uit de uitvoerarray of `output.items`. Een exacte overeenkomst gaat boven een jokerteken; bij gelijke matches wint de eerst geïnstalleerde extensie. Er is geen toestemming nodig, omdat alleen de weergave van bestaande chatgegevens verandert.
+`match` is de toolnaam zoals OpenCode die meldt. Een afsluitende `*` vergelijkt op voorvoegsel. `icon` is een Remixicon-naam of `.svg`-bestand in uw pakket, net als `panel.icon`. `title` en `subtitle` zijn sjablonen op basis van `input`, `output` en `metadata`. `output` bepaalt de weergave: `text`, `json` als boom, `markdown`, `code` met `language`, `table` met `columns`, `card` met `card` (één item als kaart, zie hieronder), of `auto` voor de standaard. Tabelrijen komen uit de uitvoerarray of `output.items`. Een exacte overeenkomst gaat boven een jokerteken; bij gelijke matches wint de eerst geïnstalleerde extensie. Er is geen toestemming nodig, omdat alleen de weergave van bestaande chatgegevens verandert.
 
 Met Code Mode van OpenCode aan roept de agent tools aan vanuit een kort script in plaats van één voor één. Een script met één aanroep verschijnt als de rij van die tool, en `output` is wat het script teruggaf. Schrijf in `match` een `_` waar het script een punt heeft: `tools.github.list_issues` in een script is `github_list_issues`. Een script met meerdere aanroepen houdt zijn eigen rij.
 
 Een extensie die alleen tools opmaakt, heeft geen pagina nodig. Zonder `panel.entry` verschijnt geen balkpictogram, alleen een kaart bij Instellingen → Extensies. Zonder pagina mag ze uitsluitend `tools` en `providerLogos` opgeven. Een Werkstatus-onderdeel, bestandseditor of schermvullende pagina met een eigen `entry` is de andere uitzondering, zoals hierboven beschreven.
+
+### Een kaart voor één item
+
+Als een tool met één object antwoordt, zoals een issue, toont `output: "card"` het als een kaart in plaats van onbewerkte JSON. `card` bepaalt welk deel van de uitvoer waar komt:
+
+```json
+"tools": [
+  {
+    "match": "jira_get_issue",
+    "name": "Jira issue",
+    "title": "{input.key}",
+    "output": "card",
+    "card": {
+      "label": "{output.key} · {output.fields.issuetype.name}",
+      "title": "{output.fields.summary}",
+      "status": {
+        "value": "{output.fields.status.name}",
+        "tones": { "In Progress": "info", "Blocked": "error", "Done": "success" }
+      },
+      "fields": [
+        { "label": "Assignee", "value": "{output.fields.assignee.displayName}" },
+        { "label": "Priority", "value": "{output.fields.priority.name}" }
+      ],
+      "link": { "label": "Open in Jira", "url": "{output.url}" }
+    }
+  }
+]
+```
+
+`label` is de kleine regel bovenaan, `title` de kop, `status` een badge, `fields` maximaal acht waarden met een label en `link` een link onderaan. Geef minstens een van de eerste vier op. Elke waarde is een sjabloon dat de `output` van de tool leest. `tones` kleurt de badge op basis van de exacte tekst, als `info`, `success`, `warning`, `error` of `neutral`. Een status die u niet hebt opgegeven, is neutraal.
+
+Als de uitvoer een array is of een `items`-array bevat, toont dezelfde `card` een compacte lijst: één rij per item met het label, de titel, het eerste veld en de status, waarbij `{output.…}` dat item leest. De eerste 200 items worden getoond, en rijen hebben geen link.
+
+Een deel waarvan de waarde niet in de uitvoer staat, wordt weggelaten. Staat er niets in van wat u hebt opgegeven, of is de uitvoer geen JSON, dan toont de chat de uitvoer zoals zonder de weergaveregel.
+
+De link opent alleen een `https`-adres. `"{output.url}"` neemt het adres ongewijzigd over uit de uitvoer. U kunt het adres ook zelf rond waarden schrijven, zoals `"https://tracker.example.com/browse/{output.key}"`. Elke waarde wordt dan procentgecodeerd en kan de host of het pad dat u hebt geschreven dus niet veranderen. Een extensie met `settings` van een integratie (zie Accounts en netwerk hierboven) kan ook een instelling lezen die niet geheim is: `"https://{settings.site}/browse/{output.key}"`, waarbij de gebruiker een hostnaam zoals `acme.atlassian.net` heeft opgeslagen als `site`. Een instelling met een volledig adres, een poort of een pad levert geen link op, en een ontbrekende waarde ook niet.
+
+`card` vereist een OpenChamber-versie die nieuwer is dan 2.7.0. Een oudere versie weigert de extensie als ongeldig, en `engines.openchamber` verandert daar niets aan.
 
 ## Het logo van uw provider
 

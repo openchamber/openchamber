@@ -265,6 +265,28 @@ Bir servis ilk istekle başlar ve bir role sahip servis boşta kalınca durur. `
 
 Bir çalıştırma tek bir `POST /schedule` isteğidir. `readServiceScheduleRequest` ile okuyun ve 200 yanıtlayın. OpenChamber kapalıyken kaçırılan bir çalıştırma kaybolur. Dış olaylara ihtiyaç duyan bir servis kendi bağlantısını tutar ya da yoklama yapar.
 
+## Kenar çubuğu satırlarındaki işaretler
+
+`contributes.marks: true`, servisinizin kenar çubuğu satırlarına küçük simgeler koymasını sağlar; örneğin kontrolleri başarısız olan bir dalın her oturumuna kırmızı bir çarpı. Kullanıcı bunu ayrı bir satır olarak onaylar.
+
+```ts
+await host.setMark({ directory, branch: 'feature/login' }, { icon: 'close-circle', tone: 'error', text: 'Checks failed' });
+await host.setMark({ sessionId }, { icon: 'robot-2', tone: 'info', text: 'Started from the desk' });
+await host.setMark({ sessionId }, null);
+```
+
+| Hedef | Satırlar |
+| --- | --- |
+| `{ sessionId }` | o oturum |
+| `{ directory, branch }` | o daldaki her oturum ve dalın worktree satırı; `directory` deponun herhangi bir klasörüdür |
+| `{ directory }` | o klasördeki oturumlar ve o klasörde duran worktree |
+
+`icon` bir Remixicon adıdır, `tone` `neutral`, `info`, `success`, `warning` ya da `error` olur, `text` (en fazla 200 karakter) ise uzantının adından sonra gösterilen ipucudur. Tıklama, panelinizi o satırın oturumunda açar. Paneli olmayan bir uzantı `url` içinde bir `https` adresi verebilir ve tıklama o adresi açar.
+
+Bir hedefi yeniden ayarlamak işaretini değiştirir, `null` ise kaldırır. Bir satır en fazla iki işaret çizer, uzantı başına bir tane, ve hepsini kendi ipucunda listeler. Tek satırlık bir satırda, işaretçi üzerindeyken satırın düğmeleri işaretleri örter; bu yüzden tıklama bir işarete iki satırlık satırlarda ve dokunmatik ekranlarda ulaşır.
+
+Bir işaret, servis süreciniz yaşadığı sürece yaşar; bu yüzden `service.keepRunning` tanımlayın ve servis başladığında işaretleri yeniden ayarlayın. Bir servis en fazla 200 işaret tutar ve bunları dakikada en fazla 60 kez değiştirir. İşaretler 2.7.0'dan yeni bir OpenChamber sürümü gerektirir: daha eski bir sürüm anahtarı yok sayar ve çağrıyı reddeder.
+
 ## @ menüsündeki satırlar
 
 `contributes.mentions: { label }`, sohbet kutusunun `@` menüsüne bir bölüm ekler. Servisiniz `POST /mentions/search` isteğini 2 saniye içinde `{ items: [{ id, title, subtitle?, url? }] }` ile, `POST /mentions/resolve` isteğini ise kullanıcının seçtiği satır için `{ text }` ile yanıtlar. Metin mesajla birlikte ajana gider ve kullanıcı bir etiket görür. Yavaş bir servis satır eklemez ve dosyaları hiçbir zaman bekletmez; okunamayan bir satır etiket bırakmaz ve bunu bildirir.

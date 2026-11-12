@@ -387,6 +387,9 @@ export const inspectGuestPackage = async (packageRoot, { openchamberVersion, ski
   if (parsed.manifest.contributes.instructions) {
     guest.instructions = true;
   }
+  if (parsed.manifest.contributes.marks) {
+    guest.marks = true;
+  }
   if (parsed.manifest.contributes.mentions) {
     guest.mentions = parsed.manifest.contributes.mentions;
   }
@@ -444,8 +447,13 @@ export const setGuestConfigurationNote = (guestId, message) => {
   return true;
 };
 
-/** Catalog JSON. Drops packageRoot. Keeps attach only when true. `entry` is absent for a page-less guest. */
-export const toPublicGuest = (guest) => {
+/**
+ * Catalog JSON. Drops packageRoot. Keeps attach only when true. `entry` is absent for a page-less guest.
+ * `toolLinkSettings` are the setting values the guest's card links read
+ * (`toolLinkSettingsOf`); only the catalog route passes them, since the chat
+ * draws from the catalog alone.
+ */
+export const toPublicGuest = (guest, toolLinkSettings = null) => {
   const row = {
     id: guest.id,
     name: guest.name,
@@ -527,6 +535,9 @@ export const toPublicGuest = (guest) => {
   if (Array.isArray(guest.tools) && guest.tools.length > 0) {
     row.tools = guest.tools.map((tool) => ({ ...tool }));
   }
+  if (toolLinkSettings && Object.keys(toolLinkSettings).length > 0) {
+    row.toolLinkSettings = { ...toolLinkSettings };
+  }
   if (guest.providerLogos) {
     row.providerLogos = { ...guest.providerLogos };
   }
@@ -576,6 +587,9 @@ export const toPublicGuest = (guest) => {
   }
   if (guest.instructions) {
     row.instructions = true;
+  }
+  if (guest.marks) {
+    row.marks = true;
   }
   if (guest.skills) {
     row.skills = true;

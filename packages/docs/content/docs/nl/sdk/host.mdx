@@ -280,6 +280,28 @@ Een service start bij het eerste verzoek, en de service van een rol stopt bij in
 
 Een run is één `POST /schedule`. Lees hem met `readServiceScheduleRequest` en antwoord met 200. Een run die is gemist terwijl OpenChamber niet draaide, vervalt. Een service die externe gebeurtenissen nodig heeft, houdt een eigen verbinding open of pollt.
 
+## Markeringen op rijen in de zijbalk
+
+Met `contributes.marks: true` kan uw service kleine pictogrammen op rijen in de zijbalk zetten, bijvoorbeeld een rood kruis bij elke sessie van een branch waarvan de checks falen. De gebruiker keurt dit als eigen regel goed.
+
+```ts
+await host.setMark({ directory, branch: 'feature/login' }, { icon: 'close-circle', tone: 'error', text: 'Checks failed' });
+await host.setMark({ sessionId }, { icon: 'robot-2', tone: 'info', text: 'Started from the desk' });
+await host.setMark({ sessionId }, null);
+```
+
+| Doel | Rijen |
+| --- | --- |
+| `{ sessionId }` | die sessie |
+| `{ directory, branch }` | elke sessie op die branch en de worktree-rij van de branch; `directory` is een willekeurige map van de repository |
+| `{ directory }` | de sessies in die map en de worktree die daar staat |
+
+`icon` is een Remixicon-naam, `tone` is `neutral`, `info`, `success`, `warning` of `error`, en `text` (maximaal 200 tekens) is de tooltip, getoond na de naam van de extensie. Een klik opent uw paneel in de sessie van die rij. Een extensie zonder paneel kan een `https`-adres meegeven als `url`, en de klik opent dat adres.
+
+Een doel opnieuw instellen vervangt de markering, en `null` verwijdert haar. Een rij tekent hoogstens twee markeringen, één per extensie, en toont ze allemaal in zijn tooltip. Op een rij van één regel bedekken de knoppen van de rij de markeringen zolang de aanwijzer erboven staat, dus een klik bereikt een markering op rijen van twee regels en op aanraakschermen.
+
+Een markering leeft zo lang als uw serviceproces. Declareer daarom `service.keepRunning` en zet de markeringen opnieuw wanneer de service start. Een service houdt maximaal 200 markeringen vast en wijzigt ze maximaal 60 keer per minuut. Markeringen vereisen een OpenChamber-versie die nieuwer is dan 2.7.0: een oudere negeert de sleutel en weigert de aanroep.
+
 ## Rijen in het @-menu
 
 `contributes.mentions: { label }` voegt een sectie toe aan het `@`-menu van het chatveld. Uw service beantwoordt `POST /mentions/search` binnen 2 seconden met `{ items: [{ id, title, subtitle?, url? }] }` en `POST /mentions/resolve` met `{ text }` voor de rij die de gebruiker kiest. De tekst gaat met het bericht naar de agent, en de gebruiker ziet een chip. Een trage service voegt geen rijen toe en houdt de bestanden nooit op; een rij die niet gelezen kan worden, laat geen chip achter en meldt dat.

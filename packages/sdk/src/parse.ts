@@ -22,6 +22,11 @@ import {
   GUEST_PROVIDER_LOGOS_MAX,
   GUEST_SERVICE_PROVIDES,
   GUEST_TOOLS_MAX,
+  GUEST_TONES,
+  GUEST_TOOL_CARD_FIELDS_MAX,
+  GUEST_TOOL_CARD_TEMPLATE_ROOTS,
+  GUEST_TOOL_CARD_TONES_MAX,
+  GUEST_TOOL_CARD_TONE_KEY_MAX,
   GUEST_TOOL_COLUMNS_MAX,
   GUEST_TOOL_COLUMN_MAX,
   GUEST_TOOL_LANGUAGE_MAX,
@@ -31,12 +36,15 @@ import {
   GUEST_TOOL_OUTPUTS,
   GUEST_TOOL_TEMPLATE_MAX,
   PANEL_ID,
+  guestToolLinkSettingIds,
+  guestToolPlaceholderPattern,
   hasGuestPage,
   isGuestFilesystemPattern,
   isGuestPackageSvgIcon,
   isGuestProviderLogoPath,
   isSafeAssetPath,
   resolveIntegrationAuth,
+  type GuestToolCard,
   type ServicePermissions,
   type ParseManifestErrorCode,
   type ParseManifestFailure,
@@ -98,7 +106,8 @@ const isPanelIcon = (value: string): boolean => (
   PANEL_ID.test(value) || isGuestPackageSvgIcon(value)
 );
 
-const isHttpsUrl = (value: string): boolean => {
+/** An `https` address without credentials. */
+export const isHttpsUrl = (value: string): boolean => {
   try {
     const parsed = new URL(value);
     return parsed.protocol === 'https:' && parsed.username === '' && parsed.password === '';
@@ -582,9 +591,93 @@ const commandSchema = z.object({
 const commandsSchema = z.array(commandSchema).min(1).max(GUEST_COMMANDS_MAX)
   .refine((commands) => uniqueBy(commands, (command) => command.name), { message: 'command names must be unique' });
 
-// `language` only means something for `code` and `columns` only for `table`;
-// a table without columns has nothing to draw. Each is a misconfiguration
-// that fails closed instead of carrying a dead field.
+const cardPlaceholders = (template: string): { text: string; root: string; path: string }[] => (
+  [...template.matchAll(guestToolPlaceholderPattern(GUEST_TOOL_CARD_TEMPLATE_ROOTS))]
+    .map((match) => ({ text: match[0], root: match[1] ?? '', path: (match[2] ?? '').slice(1) }))
+);
+
+// A card draws the tool's output and nothing else, so a template naming
+// another root is refused here instead of rendering the placeholder as written.
+const cardTemplateSchema = z.string().trim().min(1).max(GUEST_TOOL_TEMPLATE_MAX).superRefine((template, ctx) => {
+  const placeholders = cardPlaceholders(template);
+  const foreign = placeholders.find((placeholder) => placeholder.root !== 'output');
+  if (foreign) {
+    ctx.addIssue({ code: 'custom', message: `a card reads the tool's output only: write {output.path} where it says ${foreign.text}.` });
+    return;
+  }
+  if (placeholders.length === 0) ctx.addIssue({ code: 'custom', message: 'needs at least one {output.path} placeholder.' });
+});
+
+// The address is an `href`, so the manifest fixes its shape: one placeholder
+// that holds a whole address, or an https address written around placeholders,
+// which is checked here with each placeholder standing for one plain letter.
+// In the host a placeholder is whole labels, never part of one.
+const cardLinkUrlSchema = z.string().trim().min(1).max(GUEST_TOOL_TEMPLATE_MAX).superRefine((template, ctx) => {
+  const placeholders = cardPlaceholders(template);
+  const foreign = placeholders.find((placeholder) => placeholder.root === 'input' || placeholder.root === 'metadata');
+  if (foreign) {
+    ctx.addIssue({ code: 'custom', message: `a card link reads {output.path} and {settings.<id>} only, and it says ${foreign.text}.` });
+    return;
+  }
+  const setting = placeholders.find((placeholder) => placeholder.root === 'settings' && !PANEL_ID.test(placeholder.path));
+  if (setting) {
+    ctx.addIssue({ code: 'custom', message: `${setting.text} must name one contributes.integration.settings field, like {settings.site}.` });
+    return;
+  }
+  if (!placeholders.some((placeholder) => placeholder.root === 'output')) {
+    ctx.addIssue({ code: 'custom', message: 'needs at least one {output.path} placeholder.' });
+    return;
+  }
+  if (placeholders.length === 1 && placeholders[0]?.text === template) return;
+  if (!isHttpsUrl(template.replace(guestToolPlaceholderPattern(GUEST_TOOL_CARD_TEMPLATE_ROOTS), 'x'))) {
+    ctx.addIssue({ code: 'custom', message: 'an address written around placeholders starts with https://, has no user name or password, and takes no placeholder as its port.' });
+    return;
+  }
+  // Encoding keeps dots, so a value written against the host's own text
+  // ("tracker.example{output.path}") would carry the host on to another one.
+  const host = template.slice('https://'.length).split(/[/?#\\]/, 1)[0] ?? '';
+  const joined = [...host.matchAll(guestToolPlaceholderPattern(GUEST_TOOL_CARD_TEMPLATE_ROOTS))].find((match) => (
+    (host[match.index - 1] ?? '.') !== '.' || (host[match.index + match[0].length] ?? '.') !== '.'
+  ));
+  if (joined) {
+    ctx.addIssue({ code: 'custom', message: `in the host ${joined[0]} stands between dots or at either end, like https://{settings.site}/… or https://{output.team}.tracker.example/…; start the path with / before a placeholder.` });
+  }
+});
+
+/** The `card` of a tool rule, shared with the host UI so its catalog read admits exactly what a manifest may declare. */
+export const guestToolCardSchema = z.object({
+  label: cardTemplateSchema.optional(),
+  title: cardTemplateSchema.optional(),
+  status: z.object({
+    value: cardTemplateSchema,
+    tones: z.record(z.string().min(1).max(GUEST_TOOL_CARD_TONE_KEY_MAX), z.enum(GUEST_TONES))
+      .refine((tones) => Object.keys(tones).length <= GUEST_TOOL_CARD_TONES_MAX)
+      .optional(),
+  }).strict().optional(),
+  fields: z.array(z.object({
+    label: z.string().trim().min(1).max(GUEST_TOOL_NAME_MAX),
+    value: cardTemplateSchema,
+  }).strict()).min(1).max(GUEST_TOOL_CARD_FIELDS_MAX).optional(),
+  link: z.object({
+    label: z.string().trim().min(1).max(GUEST_TOOL_NAME_MAX),
+    url: cardLinkUrlSchema,
+  }).strict().optional(),
+}).strict().refine(
+  (card) => card.label !== undefined || card.title !== undefined || card.status !== undefined || card.fields !== undefined,
+  { message: 'needs label, title, status or fields; a link alone is not a card.' },
+);
+
+// The hand-written contract and the schema describe the same card; either
+// drifting from the other fails this file's type-check.
+type ParsedToolCard = z.infer<typeof guestToolCardSchema>;
+const assertCardParsed: (value: ParsedToolCard) => GuestToolCard = (value) => value;
+const assertCardContract: (value: GuestToolCard) => ParsedToolCard = (value) => value;
+void assertCardParsed; void assertCardContract;
+
+// `language` only means something for `code`, `columns` only for `table` and
+// `card` only for `card`; a table without columns or a card without its
+// description has nothing to draw. Each is a misconfiguration that fails
+// closed instead of carrying a dead field.
 const toolSchema = z.object({
   match: z.string().trim().min(1).max(GUEST_TOOL_MATCH_MAX).regex(GUEST_TOOL_MATCH),
   name: z.string().trim().min(1).max(GUEST_TOOL_NAME_MAX).optional(),
@@ -594,8 +687,10 @@ const toolSchema = z.object({
   output: z.enum(GUEST_TOOL_OUTPUTS).optional(),
   language: z.string().trim().min(1).max(GUEST_TOOL_LANGUAGE_MAX).optional(),
   columns: z.array(z.string().trim().min(1).max(GUEST_TOOL_COLUMN_MAX)).min(1).max(GUEST_TOOL_COLUMNS_MAX).optional(),
+  card: guestToolCardSchema.optional(),
 }).refine((value) => value.output === 'code' || value.language === undefined, { path: ['language'] })
-  .refine((value) => (value.output === 'table') === (value.columns !== undefined), { path: ['columns'] });
+  .refine((value) => (value.output === 'table') === (value.columns !== undefined), { path: ['columns'] })
+  .refine((value) => (value.output === 'card') === (value.card !== undefined), { path: ['card'], message: 'card and output "card" come together: declare both or neither.' });
 
 const toolsSchema = z.array(toolSchema).min(1).max(GUEST_TOOLS_MAX);
 
@@ -741,6 +836,7 @@ const contributesSchema = z.object({
   quota: quotaSchema.optional(),
   sessionControl: z.object({ content: z.literal(true).optional(), answers: z.literal(true).optional() }).strict().optional(),
   instructions: z.literal(true).optional(),
+  marks: z.literal(true).optional(),
   skills: z.string().trim().refine(isSafeAssetPath).optional(),
   // The value becomes a filesystem path OpenCode executes code from, so only a folder inside the package.
   opencodePlugin: z.string().trim().refine(isSafeAssetPath).optional(),
@@ -794,6 +890,21 @@ export const openChamberManifestSchema = z.object({
     openchamber: z.string().trim().regex(OPENCHAMBER_ENGINE_PATTERN),
   }).strict().optional(),
   contributes: contributesSchema.superRefine((contributes, ctx) => {
+    // A card link's `{settings.<id>}` is a field the user fills on the
+    // integration card, and never one that card masks.
+    const settingFields = new Map((contributes.integration?.settings ?? []).map((field) => [field.id, field]));
+    contributes.tools?.forEach((tool, index) => {
+      for (const id of guestToolLinkSettingIds([tool])) {
+        const field = settingFields.get(id);
+        if (field && !field.secret) continue;
+        ctx.addIssue({
+          code: 'custom', path: ['tools', index, 'card', 'link', 'url'],
+          message: field
+            ? `{settings.${id}} names a secret field, and a link reads only a field without "secret".`
+            : `{settings.${id}} names no contributes.integration.settings field.`,
+        });
+      }
+    });
     // The Git host and the role that serves it come together, and the host
     // names it `ext-<panel.id>` within the 32-character provider id.
     const providesSourceControl = contributes.service?.provides?.includes('source-control') === true;
@@ -909,7 +1020,7 @@ export const openChamberManifestSchema = z.object({
       });
       return;
     }
-    for (const key of ['sessionControl', 'instructions', 'mentions', 'waits'] as const) {
+    for (const key of ['sessionControl', 'instructions', 'marks', 'mentions', 'waits'] as const) {
       if (contributes[key] !== undefined && !contributes.service) {
         ctx.addIssue({
           code: 'custom', path: [key],
@@ -1107,10 +1218,10 @@ const failureFromIssue = (issue: { path: ReadonlyArray<PropertyKey>; code: strin
     );
   }
   if (path.startsWith('contributes.tools')) {
-    return fail(
-      'invalid-tools',
-      'contributes.tools lists up to 16 entries with a match of 1 to 128 characters ([A-Za-z0-9_.:-], "*" only at the end), optional name (1 to 40), icon (Remixicon name or package .svg path), title and subtitle templates (1 to 200), output "auto" | "text" | "json" | "markdown" | "code" | "table", language (code only), and columns (table only, 1 to 16).',
-    );
+    // A card's own rules say which field broke them; the rest answer with the whole shape.
+    return fail('invalid-tools', issue.code === 'custom' && segments.includes('card')
+      ? `${fieldPath(issue.path)}: ${issue.message}`
+      : `contributes.tools lists up to 16 entries with a match of 1 to 128 characters ([A-Za-z0-9_.:-], "*" only at the end), optional name (1 to 40), icon (Remixicon name or package .svg path), title and subtitle templates (1 to 200), output "auto" | "text" | "json" | "markdown" | "code" | "table" | "card", language (code only), columns (table only, 1 to 16), and card (card only): { label?, title?, status?: { value, tones?: up to ${GUEST_TOOL_CARD_TONES_MAX} of "status text": ${GUEST_TONES.map((tone) => `"${tone}"`).join(' | ')} }, fields?: 1 to ${GUEST_TOOL_CARD_FIELDS_MAX} of { label, value }, link?: { label, url } } with no other keys, where label, title, status.value, fields[].value and link.url are templates (1 to 200) and the other labels are text (1 to 40).`);
   }
   if (path.startsWith('contributes.providerLogos')) {
     return fail(
@@ -1134,6 +1245,9 @@ const failureFromIssue = (issue: { path: ReadonlyArray<PropertyKey>; code: strin
   }
   if (path === 'contributes.instructions') {
     return fail('invalid-instructions', issue.code === 'custom' ? issue.message : 'contributes.instructions is true.');
+  }
+  if (path === 'contributes.marks') {
+    return fail('invalid-marks', issue.code === 'custom' ? issue.message : 'contributes.marks is true.');
   }
   if (path === 'contributes.skills') {
     return fail('invalid-skills', 'contributes.skills is a folder inside the package.');

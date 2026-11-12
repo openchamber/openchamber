@@ -256,6 +256,28 @@ await host.emit('deploy-finished', { id: 42 });
 
 1 回の実行は 1 回の `POST /schedule` です。`readServiceScheduleRequest` で読み取り、200 を返します。OpenChamber が停止している間に逃した実行は失われます。外部のイベントが必要なサービスは、自分で接続を保持するかポーリングします。
 
+## サイドバーの行のマーク
+
+`contributes.marks: true` を宣言すると、サービスがサイドバーの行に小さなアイコンを置けるようになります。たとえば、チェックが失敗しているブランチのすべてのセッションに赤いバツ印を付けられます。ユーザーはこれを独立した行として承認します。
+
+```ts
+await host.setMark({ directory, branch: 'feature/login' }, { icon: 'close-circle', tone: 'error', text: 'Checks failed' });
+await host.setMark({ sessionId }, { icon: 'robot-2', tone: 'info', text: 'Started from the desk' });
+await host.setMark({ sessionId }, null);
+```
+
+| ターゲット | 行 |
+| --- | --- |
+| `{ sessionId }` | そのセッション |
+| `{ directory, branch }` | そのブランチ上のすべてのセッションと、そのブランチの worktree の行。`directory` はリポジトリ内の任意のフォルダーです |
+| `{ directory }` | そのフォルダー内のセッションと、そのフォルダーにある worktree |
+
+`icon` は Remixicon の名前、`tone` は `neutral`、`info`、`success`、`warning`、`error` のいずれかです。`text`（200 文字まで）はツールチップで、拡張機能の名前のあとに表示されます。クリックすると、その行のセッションでパネルが開きます。パネルのない拡張機能は `url` に `https` のアドレスを指定でき、クリックでそのアドレスが開きます。
+
+同じターゲットにもう一度設定するとマークが置き換わり、`null` で削除されます。1 つの行に描かれるマークは最大 2 つ、拡張機能ごとに 1 つで、行のツールチップにはすべてのマークが並びます。1 行表示の行では、ポインターが乗っている間は行のボタンがマークを覆うため、マークをクリックできるのは 2 行表示の行とタッチ画面です。
+
+マークはサービスのプロセスが動いている間だけ残ります。そのため `service.keepRunning` を宣言し、サービスの起動時にマークを設定し直してください。サービスは最大 200 個のマークを保持でき、1 分間に 60 回まで変更できます。マークには 2.7.0 より新しい OpenChamber が必要です。それより古いバージョンはこのキーを無視し、呼び出しを拒否します。
+
 ## @ メニューの行
 
 `contributes.mentions: { label }` は、チャット欄の `@` メニューにセクションを追加します。サービスは `POST /mentions/search` に 2 秒以内に `{ items: [{ id, title, subtitle?, url? }] }` を返し、`POST /mentions/resolve` にはユーザーが選んだ行に対して `{ text }` を返します。テキストはメッセージと一緒にエージェントに届き、ユーザーにはチップが表示されます。遅いサービスは行を追加せず、ファイルの表示を止めることもありません。読み取れない行はチップを残さず、その旨を表示します。

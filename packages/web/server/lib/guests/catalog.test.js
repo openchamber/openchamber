@@ -424,17 +424,31 @@ describe('actions and commands on the public row', () => {
     pkg.openchamber.contributes.commands = [{ name: 'task', description: 'Attach a task' }];
     pkg.openchamber.contributes.tools = [
       { match: 'mcp.tasks.*', name: 'Tasks', icon: 'checkbox-circle', title: '{input.id}', output: 'table', columns: ['id', 'title'] },
+      {
+        match: 'tasks_get', output: 'card',
+        card: {
+          label: '{output.id}', title: '{output.title}',
+          status: { value: '{output.state}', tones: { Done: 'success' } },
+          fields: [{ label: 'Owner', value: '{output.owner.name}' }],
+          link: { label: 'Open', url: 'https://tasks.example/{output.id}' },
+        },
+      },
     ];
     await fs.writeFile(path.join(root, 'package.json'), JSON.stringify(pkg));
 
     const inspected = await inspectGuestPackage(root);
     expect(inspected.ok).toBe(true);
     if (inspected.ok) {
-      const row = toPublicGuest({ ...inspected.guest, source: 'path', path: root, capabilityGrants: [] });
+      const guest = { ...inspected.guest, source: 'path', path: root, capabilityGrants: [] };
+      const row = toPublicGuest(guest);
       expect(row.actions).toEqual(pkg.openchamber.contributes.actions);
       expect(row.commands).toEqual(pkg.openchamber.contributes.commands);
       expect(row.tools).toEqual(pkg.openchamber.contributes.tools);
       expect(row.capabilities).toEqual({ requested: ['conversation'], granted: [] });
+      // The setting values a card link reads come only from the caller, and an empty set adds no field.
+      expect(row).not.toHaveProperty('toolLinkSettings');
+      expect(toPublicGuest(guest, {})).not.toHaveProperty('toolLinkSettings');
+      expect(toPublicGuest(guest, { site: 'acme.example' }).toolLinkSettings).toEqual({ site: 'acme.example' });
     }
 
     pkg.openchamber.contributes.actions = [{ id: 'x', label: 'X', where: 'message', payload: ['messages'] }];

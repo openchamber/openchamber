@@ -256,6 +256,28 @@ Un servicio arranca con la primera petición, y el servicio de un rol se detiene
 
 Una ejecución es un `POST /schedule`. Léela con `readServiceScheduleRequest` y responde 200. Una ejecución perdida mientras OpenChamber estaba caído no se recupera. Un servicio que necesita eventos externos mantiene su propia conexión o hace sondeos.
 
+## Marcas en las filas de la barra lateral
+
+`contributes.marks: true` permite que tu servicio ponga iconos pequeños en las filas de la barra lateral, por ejemplo una cruz roja en cada sesión de una rama cuyas comprobaciones fallan. El usuario lo aprueba como una línea propia.
+
+```ts
+await host.setMark({ directory, branch: 'feature/login' }, { icon: 'close-circle', tone: 'error', text: 'Checks failed' });
+await host.setMark({ sessionId }, { icon: 'robot-2', tone: 'info', text: 'Started from the desk' });
+await host.setMark({ sessionId }, null);
+```
+
+| Destino | Filas |
+| --- | --- |
+| `{ sessionId }` | esa sesión |
+| `{ directory, branch }` | cada sesión en esa rama y la fila del worktree de la rama; `directory` es cualquier carpeta del repositorio |
+| `{ directory }` | las sesiones en esa carpeta y el worktree que está en ella |
+
+`icon` es un nombre de Remixicon, `tone` es `neutral`, `info`, `success`, `warning` o `error`, y `text` (hasta 200 caracteres) es la descripción emergente, que se muestra después del nombre de la extensión. Un clic abre tu panel en la sesión de esa fila. Una extensión sin panel puede añadir una dirección `https` en `url`, y el clic abre esa dirección.
+
+Volver a fijar un destino reemplaza su marca, y `null` la quita. Una fila dibuja dos marcas como máximo, una por extensión, y las enumera todas en su descripción emergente. En una fila de una sola línea, los botones de la fila tapan las marcas mientras el puntero está encima, así que un clic alcanza una marca en las filas de dos líneas y en pantallas táctiles.
+
+Una marca vive mientras viva el proceso de tu servicio, así que declara `service.keepRunning` y vuelve a poner las marcas cuando el servicio arranque. Un servicio mantiene hasta 200 marcas y las cambia hasta 60 veces por minuto. Las marcas necesitan una versión de OpenChamber posterior a la 2.7.0: una anterior ignora la clave y rechaza la llamada.
+
 ## Filas en el menú @
 
 `contributes.mentions: { label }` añade una sección al menú `@` del cuadro de chat. Tu servicio responde a `POST /mentions/search` con `{ items: [{ id, title, subtitle?, url? }] }` en un máximo de 2 segundos, y a `POST /mentions/resolve` con `{ text }` para la fila que elige el usuario. El texto va al agente con el mensaje, y el usuario ve un chip. Un servicio lento no añade filas y nunca retiene los archivos; una fila que no se puede leer no deja chip y lo indica.

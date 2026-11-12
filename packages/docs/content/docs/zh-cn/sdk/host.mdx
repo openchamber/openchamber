@@ -256,6 +256,28 @@ await host.emit('deploy-finished', { id: 42 });
 
 一次运行就是一次 `POST /schedule`。用 `readServiceScheduleRequest` 读取并回答 200。OpenChamber 停机期间错过的运行不会补上。需要外部事件的服务要自己保持连接或进行轮询。
 
+## 侧边栏行上的标记
+
+`contributes.marks: true` 让你的服务在侧边栏的行上放置小图标，例如在检查失败的分支的每个会话上放一个红色叉号。用户会把它作为单独一行批准。
+
+```ts
+await host.setMark({ directory, branch: 'feature/login' }, { icon: 'close-circle', tone: 'error', text: 'Checks failed' });
+await host.setMark({ sessionId }, { icon: 'robot-2', tone: 'info', text: 'Started from the desk' });
+await host.setMark({ sessionId }, null);
+```
+
+| 目标 | 行 |
+| --- | --- |
+| `{ sessionId }` | 该会话 |
+| `{ directory, branch }` | 该分支上的每个会话，以及该分支的 worktree 行；`directory` 可以是仓库中的任意文件夹 |
+| `{ directory }` | 该文件夹中的会话，以及位于该文件夹的 worktree |
+
+`icon` 是 Remixicon 名称，`tone` 是 `neutral`、`info`、`success`、`warning` 或 `error`，`text`（最多 200 个字符）是提示，显示在扩展名称之后。点击会在该行的会话中打开你的面板。没有面板的扩展可以在 `url` 中提供一个 `https` 地址，点击会打开这个地址。
+
+对同一目标再次设置会替换它的标记，`null` 会移除它。一行最多绘制两个标记，每个扩展一个，并在该行的提示中列出全部标记。在单行显示的行上，指针悬停时行上的按钮会盖住标记，因此只有在双行显示的行和触摸屏上才能点击标记。
+
+标记的存续时间与服务进程相同，所以请声明 `service.keepRunning`，并在服务启动时重新设置标记。一个服务最多持有 200 个标记，每分钟最多更改 60 次。标记需要比 2.7.0 更新的 OpenChamber 版本：更旧的版本会忽略这个键并拒绝调用。
+
 ## @ 菜单中的行
 
 `contributes.mentions: { label }` 会在聊天框的 `@` 菜单中添加一个分区。你的服务要在 2 秒内用 `{ items: [{ id, title, subtitle?, url? }] }` 回答 `POST /mentions/search`，并针对用户选中的行用 `{ text }` 回答 `POST /mentions/resolve`。文本随消息发送给智能体，用户会看到一个标签。响应慢的服务不会添加任何行，也不会阻塞文件列表；无法读取的行不会留下标签，并会给出提示。

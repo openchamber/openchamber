@@ -95,7 +95,7 @@ Panolar `host.storage` ile proje, worktree ve oturum listelerini ve canlı durum
 
 `contributes.integration` isteğe bağlıdır. Ayarlar → Entegrasyonlar sayfasına kullanıcının hesap bağladığı bir kart ekler. Bkz. [Hesaplar ve ağ](#hesaplar-ve-ağ).
 
-`contributes.service` isteğe bağlıdır. OpenChamber'ın eklentinin yanında başlattığı yerel bir süreç tanımlar; bir web sayfasının ulaşamadığı şeyler için, örneğin bir Docker soketi. Bu süreç kullanıcının tam erişimiyle ve sandbox olmadan çalışır, bu yüzden onay iletişim kutusu bunu uyarır; sayfa işi yapamadığında bir tane tanımlayın. Paket dosyası `GUEST_SERVICES.md` dosyasına bakın. `provides: ["browser"]` içeren bir hizmet ajanın tarayıcısının yerine de geçebilir: `browser.*` eylemlerini sunucuda yanıtlar, böylece ajanlar açık bir masaüstü uygulaması olmadan gezinir; kullanıcı bunu Ayarlar → OpenChamber Araçları'ndan seçer. Böyle bir hizmetin panele ihtiyacı yoktur. Bir hizmete kullanıcının oturumlarında olanlar da bildirilebilir: yanına `contributes.sessionEvents` tanımlayın, OpenChamber biten ya da başarısız olan her turu ve ajanın sorduğu her izni ya da soruyu, her projeden ve açık bir pencere olmadan hizmete gönderir. Bkz. [Oturum olayları](/sdk/host/#oturum-olayları). `provides: ["notifications"]` içeren bir hizmet ise kullanıcının bildirimlerini masaüstü ve telefonun yanında Slack'e, Matrix'e ya da kendi sunucunuza iletir; kullanıcı hesabı Ayarlar → Entegrasyonlar'da bağlar ve token OpenChamber'da kalır. Bkz. [Bildirim kanalları](/sdk/host/#bildirim-kanalları). `provides: ["tracker"]` olan bir servis, Linear'ın yanında bir iş öğesi izleyicisidir ve hesap kartı Uzantı hesapları altında durur; bkz. [İzleyiciler](/sdk/host/#i̇zleyiciler). `provides: ["quota"]` olan bir servis ise yerleşik sağlayıcıların yanında kullanımı bildirir ve bunun için OpenCode'un manifestte listelenen sağlayıcılar için sakladığı kimlik bilgilerini okur; bkz. [Kullanım sağlayıcıları](/sdk/host/#kullanım-sağlayıcıları).
+`contributes.service` isteğe bağlıdır. OpenChamber'ın eklentinin yanında başlattığı yerel bir süreç tanımlar; bir web sayfasının ulaşamadığı şeyler için, örneğin bir Docker soketi. Bu süreç kullanıcının tam erişimiyle ve sandbox olmadan çalışır, bu yüzden onay iletişim kutusu bunu uyarır; sayfa işi yapamadığında bir tane tanımlayın. Paket dosyası `GUEST_SERVICES.md` dosyasına bakın. `provides: ["browser"]` içeren bir hizmet ajanın tarayıcısının yerine de geçebilir: `browser.*` eylemlerini sunucuda yanıtlar, böylece ajanlar açık bir masaüstü uygulaması olmadan gezinir; kullanıcı bunu Ayarlar → OpenChamber Araçları'ndan seçer. Böyle bir hizmetin panele ihtiyacı yoktur. Bir hizmete kullanıcının oturumlarında olanlar da bildirilebilir: yanına `contributes.sessionEvents` tanımlayın, OpenChamber biten ya da başarısız olan her turu ve ajanın sorduğu her izni ya da soruyu, her projeden ve açık bir pencere olmadan hizmete gönderir. Bkz. [Oturum olayları](/sdk/host/#oturum-olayları). `provides: ["notifications"]` içeren bir hizmet ise kullanıcının bildirimlerini masaüstü ve telefonun yanında Slack'e, Matrix'e ya da kendi sunucunuza iletir; kullanıcı hesabı Ayarlar → Entegrasyonlar'da bağlar ve token OpenChamber'da kalır. Bkz. [Bildirim kanalları](/sdk/host/#bildirim-kanalları). `provides: ["tracker"]` olan bir servis, Linear'ın yanında bir iş öğesi izleyicisidir ve hesap kartı Uzantı hesapları altında durur; bkz. [İzleyiciler](/sdk/host/#i̇zleyiciler). `provides: ["quota"]` olan bir servis ise yerleşik sağlayıcıların yanında kullanımı bildirir ve bunun için OpenCode'un manifestte listelenen sağlayıcılar için sakladığı kimlik bilgilerini okur; bkz. [Kullanım sağlayıcıları](/sdk/host/#kullanım-sağlayıcıları). Bir servis `contributes.marks` ile kenar çubuğu satırlarına küçük simgeler de koyabilir; bkz. [Kenar çubuğu satırlarındaki işaretler](/sdk/host/#kenar-çubuğu-satırlarındaki-işaretler).
 
 ## Yetenekler
 
@@ -108,7 +108,7 @@ Panel çizmek ve geçerli oturumu okumak izin gerektirmez. Kullanıcı adına bi
 | `files` | açık projedeki dosyaları okuyup yazmak (göreli yol ile `readFile`, `writeFile`, `listDir`, `stat`) |
 | `model` | kullanıcının Small Model'iyle tek seferlik metin üretimi (`generate`), herhangi bir oturumun dışında |
 
-On iki tanesi sizin için otomatik eklenir: bir `integration` tanımladığınızda `network`, bir `service` tanımladığınızda `service`, `filesystem` desenleri tanımladığınızda `filesystem`, `origins` tanımladığınızda `origins`, bir oturum eylemi mesajları istediğinde `conversation` (bkz. [Eylemler, komutlar ve rozet](#eylemler-komutlar-ve-rozet)), `sessionEvents` veya `sessionControl` `content` istediğinde `transcript` (bkz. [Oturum olayları](/sdk/host/#oturum-olayları)), servisiniz oturumlar üzerinde işlem yaptığında `sessionControl` (bkz. [OpenChamber'ı çağırma](/sdk/host/#openchamberı-servisinizden-çağırma)), servisiniz kullanıcı adına ajanın izin isteklerini ve formlarını yanıtladığında `sessionAnswers` (`sessionControl: { answers: true }`), ajanların okuduklarına ekleme yaptığında `instructions` ve `contributes.skills` tanımladığınızda `skills`. `contributes.skills`, eklenti açıkken her ajana ulaşan skill'lerin bulunduğu bir paket klasörüdür. `contributes.opencodePlugin` tanımladığınızda `opencodePlugin` (aşağıya bakın), `contributes.links` tanımladığınızda da `links` eklenir (bkz. [Sohbet mesajlarındaki bağlantılar](#sohbet-mesajlarındaki-bağlantılar)).
+On üç tanesi sizin için otomatik eklenir: bir `integration` tanımladığınızda `network`, bir `service` tanımladığınızda `service`, `filesystem` desenleri tanımladığınızda `filesystem`, `origins` tanımladığınızda `origins`, bir oturum eylemi mesajları istediğinde `conversation` (bkz. [Eylemler, komutlar ve rozet](#eylemler-komutlar-ve-rozet)), `sessionEvents` veya `sessionControl` `content` istediğinde `transcript` (bkz. [Oturum olayları](/sdk/host/#oturum-olayları)), servisiniz oturumlar üzerinde işlem yaptığında `sessionControl` (bkz. [OpenChamber'ı çağırma](/sdk/host/#openchamberı-servisinizden-çağırma)), servisiniz kullanıcı adına ajanın izin isteklerini ve formlarını yanıtladığında `sessionAnswers` (`sessionControl: { answers: true }`), ajanların okuduklarına ekleme yaptığında `instructions` ve `contributes.skills` tanımladığınızda `skills`. `contributes.skills`, eklenti açıkken her ajana ulaşan skill'lerin bulunduğu bir paket klasörüdür. `contributes.opencodePlugin` tanımladığınızda `opencodePlugin` (aşağıya bakın), `contributes.links` tanımladığınızda da `links` eklenir (bkz. [Sohbet mesajlarındaki bağlantılar](#sohbet-mesajlarındaki-bağlantılar)). `contributes.marks` tanımladığınızda `marks` eklenir (bkz. [Kenar çubuğu satırlarındaki işaretler](/sdk/host/#kenar-çubuğu-satırlarındaki-işaretler)).
 
 Kullanıcı tam listeyi bir kez, eklentiyi kurarken görür ve ya onaylar ya da eklentiyi kaldırır. Yeni bir sürüm daha fazlasını isterse pencere yeniden görünür. Kullanıcının onaylamadığı bir yeteneği gerektiren çağrı `NOT_GRANTED` ile başarısız olur.
 
@@ -341,11 +341,49 @@ OpenCode eklentiniz veya MCP sunucunuz bir araç eklediğinde sohbet, çağrıla
 ]
 ```
 
-`match`, OpenCode'un bildirdiği haliyle aracın adıdır; sondaki `*` bir öneki eşleştirir. `icon`, `panel.icon` gibi bir Remixicon adı ya da paketinizdeki bir `.svg` dosyasıdır. `title` ve `subtitle`, çağrının `input`, `output` ve `metadata` değerleri üzerinde çalışan şablonlardır. `output`, gövdenin nasıl çizileceğini seçer: `text`, `json` (ağaç), `markdown`, `language` ile `code`, `columns` ile `table` (satırlar çıktı dizisinden veya `output.items` içinden gelir) ya da varsayılan için `auto`. Tam bir `match` joker karakteri yener; eşitlikte ilk yüklenen eklenti kazanır. İzin gerekmez: bu yalnızca sohbette zaten bulunan verilerin nasıl çizildiğini değiştirir.
+`match`, OpenCode'un bildirdiği haliyle aracın adıdır; sondaki `*` bir öneki eşleştirir. `icon`, `panel.icon` gibi bir Remixicon adı ya da paketinizdeki bir `.svg` dosyasıdır. `title` ve `subtitle`, çağrının `input`, `output` ve `metadata` değerleri üzerinde çalışan şablonlardır. `output`, gövdenin nasıl çizileceğini seçer: `text`, `json` (ağaç), `markdown`, `language` ile `code`, `columns` ile `table` (satırlar çıktı dizisinden veya `output.items` içinden gelir), `card` ile `card` (kart olarak tek bir öğe, aşağıya bakın) ya da varsayılan için `auto`. Tam bir `match` joker karakteri yener; eşitlikte ilk yüklenen eklenti kazanır. İzin gerekmez: bu yalnızca sohbette zaten bulunan verilerin nasıl çizildiğini değiştirir.
 
 OpenCode'un Code Mode özelliği açıkken ajan, araçları tek tek değil kısa bir betikten çağırır. Tek bir çağrı yapan betik o aracın satırı olarak gösterilir ve `output`, betiğin döndürdüğü değerdir. `match` içinde, betikte nokta olan yere `_` yazın: betikteki `tools.github.list_issues`, `github_list_issues` olur. Birden fazla çağrı yapan betik kendi satırını korur.
 
 Yalnızca araçları biçimlendiren bir eklentinin sayfaya hiç ihtiyacı yoktur: `panel.entry` öğesini atlayın, şeritte simgesi olmaz, sadece Ayarlar → Uzantılar içinde bir kart görünür. Sayfası olmadan yalnızca `tools` ve `providerLogos` tanımlayabilir, başka bir şey tanımlamaz. Diğer istisna, kendi `entry` sayfası olan bir Work Status bölümü, dosya düzenleyicisi veya tam ekran sayfadır, yukarıya bakın.
+
+### Tek bir öğe için kart
+
+Bir araç tek bir nesneyle, örneğin bir issue ile yanıt verdiğinde `output: "card"` onu ham JSON yerine bir kart olarak çizer. `card`, çıktının hangi kısmının nereye gideceğini söyler:
+
+```json
+"tools": [
+  {
+    "match": "jira_get_issue",
+    "name": "Jira issue",
+    "title": "{input.key}",
+    "output": "card",
+    "card": {
+      "label": "{output.key} · {output.fields.issuetype.name}",
+      "title": "{output.fields.summary}",
+      "status": {
+        "value": "{output.fields.status.name}",
+        "tones": { "In Progress": "info", "Blocked": "error", "Done": "success" }
+      },
+      "fields": [
+        { "label": "Assignee", "value": "{output.fields.assignee.displayName}" },
+        { "label": "Priority", "value": "{output.fields.priority.name}" }
+      ],
+      "link": { "label": "Open in Jira", "url": "{output.url}" }
+    }
+  }
+]
+```
+
+`label` en üstteki küçük satır, `title` başlık, `status` bir rozet, `fields` en fazla sekiz etiketli değer, `link` ise en alttaki bağlantıdır. İlk dördünden en az birini tanımlayın. Her değer, aracın `output` değerini okuyan bir şablondur. `tones`, rozeti tam metnine göre `info`, `success`, `warning`, `error` veya `neutral` olarak renklendirir. Listelemediğiniz bir durum nötr olur.
+
+Çıktı bir diziyse ya da bir `items` dizisi içeriyorsa aynı `card` kompakt bir liste çizer: her öğe için etiketi, başlığı, ilk alanı ve durumuyla bir satır. Burada `{output.…}` o öğeyi okur. İlk 200 öğe gösterilir ve satırlarda bağlantı olmaz.
+
+Değeri çıktıda bulunmayan bir kısım atlanır. Adını verdiğiniz hiçbir şey çıktıda yoksa ya da çıktı JSON değilse sohbet, çıktıyı kural olmasaydı göstereceği gibi gösterir.
+
+Bağlantı yalnızca bir `https` adresini açar. `"{output.url}"`, adresi çıktıdan olduğu gibi alır. Adresi değerlerin çevresine kendiniz de yazabilirsiniz, örneğin `"https://tracker.example.com/browse/{output.key}"`. O zaman her değer yüzde kodlamasından geçer, bu yüzden yazdığınız ana makineyi veya yolu değiştiremez. Entegrasyon `settings` alanları olan bir eklenti (yukarıdaki Hesaplar ve ağ bölümüne bakın) gizli olmayan bir ayarı da okuyabilir: `"https://{settings.site}/browse/{output.key}"`. Burada kullanıcı `acme.atlassian.net` gibi bir ana makine adını `site` olarak kaydetmiştir. Tam bir adres, bir port veya bir yol içeren bir ayar bağlantı vermez; eksik bir değer de vermez.
+
+`card`, 2.7.0'dan yeni bir OpenChamber sürümü gerektirir. Daha eski bir sürüm eklentiyi geçersiz sayıp reddeder ve `engines.openchamber` bunu değiştirmez.
 
 ## Sağlayıcınızın logosu
 

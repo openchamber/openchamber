@@ -161,6 +161,12 @@ type QuotaProvidersChangedEvent = { type: 'quota-providers-changed' };
  */
 type GuestsChangedEvent = { type: 'guests-changed' };
 
+/**
+ * The marks extensions put on sidebar rows changed (`marks.set`, or a service
+ * ended). Carries nothing; listeners re-read the marks.
+ */
+type GuestMarksChangedEvent = { type: 'guest-marks-changed' };
+
 /** An extension's service sent its open frames something (`emit`). */
 type GuestServiceEvent = { type: 'guest-service-event'; guestId: string; topic: string; data: JsonValue };
 
@@ -327,6 +333,7 @@ type OpenChamberEvent =
   | TrackerProvidersChangedEvent
   | QuotaProvidersChangedEvent
   | GuestsChangedEvent
+  | GuestMarksChangedEvent
   | GuestServiceEvent
   | ThemesChangedEvent
   | LimitFailoverEvent
@@ -676,6 +683,11 @@ const dispatchFromEnvelope = (envelope: { type: string; properties: unknown }) =
 
   if (envelope.type === 'openchamber:guests-changed') {
     for (const listener of listeners) listener({ type: 'guests-changed' });
+    return;
+  }
+
+  if (envelope.type === 'openchamber:guest-marks-changed') {
+    for (const listener of listeners) listener({ type: 'guest-marks-changed' });
     return;
   }
 

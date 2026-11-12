@@ -62,6 +62,11 @@ type Props = {
   /** Goal status glyph; opens the second line's state cluster, so it stays
       visible while a turn runs and while the hover actions cover line one. */
   goal?: React.ReactNode;
+  /** The marks extensions put on the row, right after the PR badge. They never
+      open the second line: a mark that comes or goes leaves the row's height
+      as it was, so where that line has nothing else they ride in the first
+      line's cluster, as on a one-line row. */
+  marks?: React.ReactNode;
   badges: React.ReactNode;
   /** Jev's "looks done" check: it sits in the time cluster, where the hover
       Done action appears, left of the status dot so the dot stays by the time. */
@@ -133,6 +138,7 @@ export const SessionTimelineRowBody: React.FC<Props> = ({
   prBadge,
   zombieIndicator,
   goal = null,
+  marks = null,
   badges,
   doneHint = null,
   metaPaddingClass,
@@ -143,9 +149,10 @@ export const SessionTimelineRowBody: React.FC<Props> = ({
   // Compact rows have no second line, so their badges ride in the meta
   // cluster: the hover actions overlay that cluster, and anything placed
   // after it would sit underneath them.
-  const meta = <span className={cn('ms-auto flex flex-shrink-0 items-center gap-1', metaPaddingClass, hideMetaOnHoverClass)}>
+  const meta = (withMarks: boolean) => <span className={cn('ms-auto flex flex-shrink-0 items-center gap-1', metaPaddingClass, hideMetaOnHoverClass)}>
     {compact ? goal : null}
     {compact ? zombieIndicator ?? prBadge : null}
+    {withMarks ? marks : null}
     {compact ? badges : null}
     {directoryIndicator}
     {pinnedMarker}
@@ -187,22 +194,24 @@ export const SessionTimelineRowBody: React.FC<Props> = ({
   if (compact) {
     return <div className={cn('@container relative flex w-full min-w-0 items-center gap-1', actionsReserveClass)}>
       {titleLine}
-      {meta}
+      {meta(true)}
     </div>;
   }
+  const secondLine = Boolean(leadToggle || leadIcon || branchLine || goal || zombieIndicator || prBadge || badges);
   return <div className="flex w-full min-w-0 flex-col gap-px">
     {/* Fixed 20px first line: the hover actions are positioned against the
         row from outside and rely on this height to sit exactly on it. */}
     <div className={cn('@container relative flex h-5 w-full min-w-0 items-center gap-1', actionsReserveClass)}>
       {titleLine}
-      {meta}
+      {meta(!secondLine)}
     </div>
-    {leadToggle || leadIcon || branchLine || goal || zombieIndicator || prBadge || badges ? <div className="relative flex h-4 w-full min-w-0 items-center gap-1">
+    {secondLine ? <div className="relative flex h-4 w-full min-w-0 items-center gap-1">
       {leadSlot}
       {project ? branchLine : metaLineLead ?? (branchLabel ? branchText : null)}
       <span className="ms-auto flex flex-shrink-0 items-center gap-1">
         {goal}
         {zombieIndicator ?? prBadge}
+        {marks}
         {badges}
       </span>
     </div> : null}

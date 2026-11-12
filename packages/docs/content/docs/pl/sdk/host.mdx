@@ -256,6 +256,28 @@ Usługa startuje przy pierwszym żądaniu, a usługa z rolą zatrzymuje się, gd
 
 Jedno uruchomienie to jedno `POST /schedule`. Odczytaj je przez `readServiceScheduleRequest` i odpowiedz 200. Uruchomienie pominięte, gdy OpenChamber nie działał, przepada. Usługa, która potrzebuje zdarzeń z zewnątrz, utrzymuje własne połączenie albo odpytuje źródło.
 
+## Znaczniki na wierszach paska bocznego
+
+`contributes.marks: true` pozwala Twojej usłudze umieszczać małe ikony na wierszach paska bocznego, na przykład czerwony krzyżyk przy każdej sesji gałęzi, której testy nie przechodzą. Użytkownik zatwierdza to jako osobny wiersz.
+
+```ts
+await host.setMark({ directory, branch: 'feature/login' }, { icon: 'close-circle', tone: 'error', text: 'Checks failed' });
+await host.setMark({ sessionId }, { icon: 'robot-2', tone: 'info', text: 'Started from the desk' });
+await host.setMark({ sessionId }, null);
+```
+
+| Cel | Wiersze |
+| --- | --- |
+| `{ sessionId }` | ta sesja |
+| `{ directory, branch }` | każda sesja na tej gałęzi i wiersz worktree tej gałęzi; `directory` to dowolny folder repozytorium |
+| `{ directory }` | sesje w tym folderze i worktree, który się w nim znajduje |
+
+`icon` to nazwa z Remixicon, `tone` to `neutral`, `info`, `success`, `warning` albo `error`, a `text` (do 200 znaków) to podpowiedź, pokazywana po nazwie rozszerzenia. Kliknięcie otwiera Twój panel w sesji tego wiersza. Rozszerzenie bez panelu może dodać adres `https` w `url`, a kliknięcie otwiera ten adres.
+
+Ponowne ustawienie celu zastępuje jego znacznik, a `null` go usuwa. Wiersz rysuje najwyżej dwa znaczniki, po jednym na rozszerzenie, i wymienia wszystkie w swojej podpowiedzi. W wierszu jednoliniowym przyciski wiersza zasłaniają znaczniki, gdy wskaźnik jest nad nim, więc kliknięcie trafia w znacznik w wierszach dwuliniowych i na ekranach dotykowych.
+
+Znacznik żyje tak długo, jak proces Twojej usługi, więc zadeklaruj `service.keepRunning` i ustaw znaczniki ponownie, gdy usługa startuje. Usługa trzyma do 200 znaczników i zmienia je do 60 razy na minutę. Znaczniki wymagają wersji OpenChamber nowszej niż 2.7.0: starsza ignoruje klucz i odrzuca wywołanie.
+
 ## Wiersze w menu @
 
 `contributes.mentions: { label }` dodaje sekcję do menu `@` pola czatu. Twoja usługa odpowiada na `POST /mentions/search` w ciągu 2 sekund, zwracając `{ items: [{ id, title, subtitle?, url? }] }`, a na `POST /mentions/resolve`, zwracając `{ text }` dla wiersza wybranego przez użytkownika. Tekst trafia do agenta razem z wiadomością, a użytkownik widzi chip. Wolna usługa nie dodaje wierszy i nigdy nie wstrzymuje plików; wiersz, którego nie da się odczytać, nie zostawia chipa i informuje o tym.

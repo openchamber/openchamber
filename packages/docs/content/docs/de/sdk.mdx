@@ -95,7 +95,7 @@ Für Boards gibt es `host.storage` sowie Projekt-, Worktree- und Sitzungslisten 
 
 `contributes.integration` ist optional. Es fügt unter Einstellungen → Integrationen eine Karte hinzu, auf der der Nutzer ein Konto verbindet. Siehe [Konten und Netzwerk](#konten-und-netzwerk).
 
-`contributes.service` ist optional. Es deklariert einen lokalen Dienst (einen Prozess, den OpenChamber neben der Erweiterung startet) für Dinge, an die eine Webseite nicht herankommt, etwa einen Docker-Socket. Dieser Prozess läuft mit dem vollen Zugriff des Nutzers und ohne Sandbox, deshalb warnt der Bestätigungsdialog davor; deklariere einen nur, wenn die Seite die Aufgabe nicht selbst erledigen kann. Siehe die Paketdatei `GUEST_SERVICES.md`. Ein Service mit `provides: ["browser"]` kann außerdem den Browser des Agenten vertreten: Er beantwortet die `browser.*`-Aktionen auf dem Server, sodass Agenten ohne geöffnete Desktop-App browsen, und der Nutzer wählt ihn unter Einstellungen → OpenChamber-Werkzeuge. Ein solcher Service braucht kein Panel. Ein Service kann außerdem erfahren, was in den Sitzungen des Nutzers passiert: Deklariere `contributes.sessionEvents` daneben, und OpenChamber schickt dem Service jeden Zug, der endet oder fehlschlägt, und jede Bitte um Erlaubnis und jede Frage des Agenten, aus jedem Projekt und ohne geöffnetes Fenster. Siehe [Sitzungsereignisse](/sdk/host/#sitzungsereignisse). Und ein Service mit `provides: ["notifications"]` stellt die Benachrichtigungen des Nutzers neben Desktop und Telefon zu, an Slack, Matrix oder einen eigenen Server; der Nutzer verbindet das Konto unter Einstellungen → Integrationen, und das Token bleibt in OpenChamber. Siehe [Benachrichtigungskanäle](/sdk/host/#benachrichtigungskanäle). Ein Dienst mit `provides: ["tracker"]` ist ein Tracker für Arbeitselemente neben Linear, mit seiner Kontokarte unter Erweiterungskonten; siehe [Tracker](/sdk/host/#tracker). Und ein Dienst mit `provides: ["quota"]` meldet die Nutzung neben den eingebauten Anbietern und liest dafür die Zugangsdaten, die OpenCode für die im Manifest aufgezählten Anbieter hält; siehe [Nutzungsanbieter](/sdk/host/#nutzungsanbieter).
+`contributes.service` ist optional. Es deklariert einen lokalen Dienst (einen Prozess, den OpenChamber neben der Erweiterung startet) für Dinge, an die eine Webseite nicht herankommt, etwa einen Docker-Socket. Dieser Prozess läuft mit dem vollen Zugriff des Nutzers und ohne Sandbox, deshalb warnt der Bestätigungsdialog davor; deklariere einen nur, wenn die Seite die Aufgabe nicht selbst erledigen kann. Siehe die Paketdatei `GUEST_SERVICES.md`. Ein Service mit `provides: ["browser"]` kann außerdem den Browser des Agenten vertreten: Er beantwortet die `browser.*`-Aktionen auf dem Server, sodass Agenten ohne geöffnete Desktop-App browsen, und der Nutzer wählt ihn unter Einstellungen → OpenChamber-Werkzeuge. Ein solcher Service braucht kein Panel. Ein Service kann außerdem erfahren, was in den Sitzungen des Nutzers passiert: Deklariere `contributes.sessionEvents` daneben, und OpenChamber schickt dem Service jeden Zug, der endet oder fehlschlägt, und jede Bitte um Erlaubnis und jede Frage des Agenten, aus jedem Projekt und ohne geöffnetes Fenster. Siehe [Sitzungsereignisse](/sdk/host/#sitzungsereignisse). Und ein Service mit `provides: ["notifications"]` stellt die Benachrichtigungen des Nutzers neben Desktop und Telefon zu, an Slack, Matrix oder einen eigenen Server; der Nutzer verbindet das Konto unter Einstellungen → Integrationen, und das Token bleibt in OpenChamber. Siehe [Benachrichtigungskanäle](/sdk/host/#benachrichtigungskanäle). Ein Dienst mit `provides: ["tracker"]` ist ein Tracker für Arbeitselemente neben Linear, mit seiner Kontokarte unter Erweiterungskonten; siehe [Tracker](/sdk/host/#tracker). Und ein Dienst mit `provides: ["quota"]` meldet die Nutzung neben den eingebauten Anbietern und liest dafür die Zugangsdaten, die OpenCode für die im Manifest aufgezählten Anbieter hält; siehe [Nutzungsanbieter](/sdk/host/#nutzungsanbieter). Ein Dienst kann außerdem mit `contributes.marks` kleine Symbole an Zeilen der Seitenleiste setzen; siehe [Markierungen an Zeilen der Seitenleiste](/sdk/host/#markierungen-an-zeilen-der-seitenleiste).
 
 ## Berechtigungen
 
@@ -108,7 +108,7 @@ Ein Panel zeichnen und die aktuelle Session lesen braucht keine Berechtigung. Al
 | `files` | Dateien innerhalb des offenen Projekts lesen und schreiben (`readFile`, `writeFile`, `listDir`, `stat` mit einem relativen Pfad) |
 | `model` | einmalige Textgenerierung mit dem Small Model des Nutzers (`generate`), außerhalb jeder Session |
 
-Zwölf weitere kommen automatisch dazu: `network`, wenn du eine `integration` deklarierst, `service`, wenn du einen `service` deklarierst, `filesystem`, wenn du `filesystem`-Muster deklarierst, `origins`, wenn du `origins` deklarierst, `conversation`, wenn eine Session-Aktion die Nachrichten anfordert (siehe [Aktionen, Befehle und das Badge](#aktionen-befehle-und-das-badge)), `transcript`, wenn `sessionEvents` oder `sessionControl` `content` anfordert (siehe [Sitzungsereignisse](/sdk/host/#sitzungsereignisse)), `sessionControl`, wenn dein Dienst auf Sitzungen einwirkt (siehe [OpenChamber aufrufen](/sdk/host/#openchamber-aus-deinem-dienst-aufrufen)), `sessionAnswers`, wenn er im Namen des Nutzers die Berechtigungsanfragen und Formulare des Agenten beantwortet (`sessionControl: { answers: true }`), `instructions`, wenn er ergänzt, was Agenten lesen, `skills`, wenn du `contributes.skills` deklarierst, einen Paketordner mit Skills, die jeden Agenten erreichen, solange die Erweiterung aktiv ist, `opencodePlugin`, wenn du `contributes.opencodePlugin` deklarierst (siehe unten), und `links`, wenn du `contributes.links` deklarierst (siehe [Links in Chat-Nachrichten](#links-in-chat-nachrichten)).
+Dreizehn weitere kommen automatisch dazu: `network`, wenn du eine `integration` deklarierst, `service`, wenn du einen `service` deklarierst, `filesystem`, wenn du `filesystem`-Muster deklarierst, `origins`, wenn du `origins` deklarierst, `conversation`, wenn eine Session-Aktion die Nachrichten anfordert (siehe [Aktionen, Befehle und das Badge](#aktionen-befehle-und-das-badge)), `transcript`, wenn `sessionEvents` oder `sessionControl` `content` anfordert (siehe [Sitzungsereignisse](/sdk/host/#sitzungsereignisse)), `sessionControl`, wenn dein Dienst auf Sitzungen einwirkt (siehe [OpenChamber aufrufen](/sdk/host/#openchamber-aus-deinem-dienst-aufrufen)), `sessionAnswers`, wenn er im Namen des Nutzers die Berechtigungsanfragen und Formulare des Agenten beantwortet (`sessionControl: { answers: true }`), `instructions`, wenn er ergänzt, was Agenten lesen, `skills`, wenn du `contributes.skills` deklarierst, einen Paketordner mit Skills, die jeden Agenten erreichen, solange die Erweiterung aktiv ist, `opencodePlugin`, wenn du `contributes.opencodePlugin` deklarierst (siehe unten), und `links`, wenn du `contributes.links` deklarierst (siehe [Links in Chat-Nachrichten](#links-in-chat-nachrichten)). `marks` kommt dazu, wenn du `contributes.marks` deklarierst (siehe [Markierungen an Zeilen der Seitenleiste](/sdk/host/#markierungen-an-zeilen-der-seitenleiste)).
 
 Der Nutzer sieht die vollständige Liste einmal, bei der Installation der Erweiterung, und bestätigt sie oder entfernt die Erweiterung. Fordert eine neue Version mehr an, erscheint der Dialog erneut. Ein Aufruf, der eine nicht bestätigte Berechtigung braucht, schlägt mit `NOT_GRANTED` fehl.
 
@@ -341,11 +341,49 @@ Wenn dein OpenCode-Plugin oder MCP-Server ein Tool hinzufügt, zeigt der Chat de
 ]
 ```
 
-`match` ist der Tool-Name, wie OpenCode ihn meldet; ein `*` am Ende passt auf ein Präfix. `icon` ist ein Remixicon-Name oder eine `.svg`-Datei in deinem Paket, wie bei `panel.icon`. `title` und `subtitle` sind Vorlagen über `input`, `output` und `metadata` des Aufrufs. `output` bestimmt, wie der Inhalt dargestellt wird: `text`, `json` (als Baum), `markdown`, `code` mit einer `language`, `table` mit `columns` (die Zeilen kommen aus dem Ausgabe-Array oder aus `output.items`) oder `auto` für die Standarddarstellung. Ein exaktes `match` schlägt einen Platzhalter, und bei Gleichstand gewinnt die zuerst installierte Erweiterung. Eine Berechtigung ist nicht nötig: das ändert nur, wie Daten gezeichnet werden, die ohnehin schon im Chat sind.
+`match` ist der Tool-Name, wie OpenCode ihn meldet; ein `*` am Ende passt auf ein Präfix. `icon` ist ein Remixicon-Name oder eine `.svg`-Datei in deinem Paket, wie bei `panel.icon`. `title` und `subtitle` sind Vorlagen über `input`, `output` und `metadata` des Aufrufs. `output` bestimmt, wie der Inhalt dargestellt wird: `text`, `json` (als Baum), `markdown`, `code` mit einer `language`, `table` mit `columns` (die Zeilen kommen aus dem Ausgabe-Array oder aus `output.items`), `card` mit `card` (ein Eintrag als Karte, siehe unten) oder `auto` für die Standarddarstellung. Ein exaktes `match` schlägt einen Platzhalter, und bei Gleichstand gewinnt die zuerst installierte Erweiterung. Eine Berechtigung ist nicht nötig: das ändert nur, wie Daten gezeichnet werden, die ohnehin schon im Chat sind.
 
 Ist der Code Mode von OpenCode aktiv, ruft der Agent Tools aus einem kurzen Skript auf statt einzeln. Ein Skript mit einem einzigen Aufruf erscheint als Zeile dieses Tools, und `output` ist das, was das Skript zurückgegeben hat. Schreibe in `match` ein `_`, wo im Skript ein Punkt steht: `tools.github.list_issues` im Skript ist `github_list_issues`. Ein Skript mit mehreren Aufrufen behält seine eigene Zeile.
 
 Eine Erweiterung, die nur Tools gestaltet, braucht gar keine Seite: lass `panel.entry` weg, dann hat sie kein Icon in der Leiste, nur eine Karte unter Einstellungen → Erweiterungen. Ohne Seite darf sie `tools` und `providerLogos` und sonst nichts deklarieren. Die andere Ausnahme ist ein Work-Status-Abschnitt, ein Datei-Editor oder eine Vollbildseite mit eigenem `entry`, siehe oben.
+
+### Eine Karte für einen einzelnen Eintrag
+
+Wenn ein Tool mit einem einzelnen Objekt antwortet, etwa einem Issue, zeichnet `output: "card"` es als Karte statt als rohes JSON. `card` legt fest, welcher Teil der Ausgabe wohin kommt:
+
+```json
+"tools": [
+  {
+    "match": "jira_get_issue",
+    "name": "Jira issue",
+    "title": "{input.key}",
+    "output": "card",
+    "card": {
+      "label": "{output.key} · {output.fields.issuetype.name}",
+      "title": "{output.fields.summary}",
+      "status": {
+        "value": "{output.fields.status.name}",
+        "tones": { "In Progress": "info", "Blocked": "error", "Done": "success" }
+      },
+      "fields": [
+        { "label": "Assignee", "value": "{output.fields.assignee.displayName}" },
+        { "label": "Priority", "value": "{output.fields.priority.name}" }
+      ],
+      "link": { "label": "Open in Jira", "url": "{output.url}" }
+    }
+  }
+]
+```
+
+`label` ist die kleine Zeile oben, `title` die Überschrift, `status` ein Badge, `fields` bis zu acht beschriftete Werte und `link` ein Link unten. Deklariere mindestens eines der ersten vier. Jeder Wert ist eine Vorlage, die das `output` des Tools liest. `tones` färbt das Badge nach seinem exakten Text, als `info`, `success`, `warning`, `error` oder `neutral`. Ein Status, den du nicht aufgeführt hast, ist neutral.
+
+Ist die Ausgabe ein Array oder enthält sie ein `items`-Array, zeichnet dieselbe `card` eine kompakte Liste: eine Zeile pro Eintrag mit Label, Titel, erstem Feld und Status, wobei `{output.…}` diesen Eintrag liest. Angezeigt werden die ersten 200 Einträge, und Zeilen haben keinen Link.
+
+Ein Teil, dessen Wert in der Ausgabe fehlt, wird weggelassen. Ist nichts von dem da, was du angegeben hast, oder ist die Ausgabe kein JSON, zeigt der Chat die Ausgabe so, wie er es ohne die Regel täte.
+
+Der Link öffnet nur eine `https`-Adresse. `"{output.url}"` übernimmt die Adresse unverändert aus der Ausgabe. Du kannst die Adresse auch selbst um Werte herum schreiben, etwa `"https://tracker.example.com/browse/{output.key}"`. Jeder Wert wird dann prozentkodiert und kann den Host oder den Pfad, den du geschrieben hast, nicht ändern. Eine Erweiterung mit `settings` einer Integration (siehe Konten und Netzwerk oben) kann auch eine Einstellung lesen, die nicht geheim ist: `"https://{settings.site}/browse/{output.key}"`, wobei der Nutzer einen Hostnamen wie `acme.atlassian.net` als `site` gespeichert hat. Eine Einstellung, die eine vollständige Adresse, einen Port oder einen Pfad enthält, ergibt keinen Link, ebenso wenig ein fehlender Wert.
+
+`card` braucht eine OpenChamber-Version, die neuer ist als 2.7.0. Eine ältere lehnt die Erweiterung als ungültig ab, und `engines.openchamber` ändert daran nichts.
 
 ## Das Logo deines Anbieters
 
