@@ -18,6 +18,7 @@ import { useUIStore, type TimeFormatPreference } from '@/stores/useUIStore';
 import { useDurationTickerNow, useWaitingBlink } from '@/hooks/useDurationTicker';
 import { SettingsChipGroup, SettingsFieldRow, SettingsSection, SettingsStackedField, SettingsGroupTitle, SETTINGS_FIELD_LABEL_CLASS, SETTINGS_CALLOUT_TITLE_CLASS, SETTINGS_DESCRIPTION_CLASS, SETTINGS_HELPER_CLASS, SETTINGS_SELECT_ROW_TRIGGER_CLASS } from '@/components/sections/shared/SettingsSection';
 import { SettingsInfoHint } from '@/components/sections/shared/SettingsInfoHint';
+import { SETTINGS_LINK_CLASS } from '@/components/sections/classification/JevAccessNote';
 
 type TunnelState =
   | 'checking'
@@ -1339,7 +1340,7 @@ export const TunnelSettings: React.FC = () => {
             {' '}
             <button
               type="button"
-              className="inline-flex items-center gap-1 text-[var(--primary-text)] underline-offset-4 hover:underline"
+              className={cn('inline-flex items-center gap-1', SETTINGS_LINK_CLASS)}
               onClick={() => {
                 void openExternal(MANAGED_REMOTE_TUNNEL_DOC_URL);
               }}
@@ -1356,7 +1357,7 @@ export const TunnelSettings: React.FC = () => {
             {' '}
             <button
               type="button"
-              className="inline-flex items-center gap-1 text-[var(--primary-text)] underline-offset-4 hover:underline"
+              className={cn('inline-flex items-center gap-1', SETTINGS_LINK_CLASS)}
               onClick={() => {
                 void openExternal(MANAGED_LOCAL_TUNNEL_DOC_URL);
               }}
