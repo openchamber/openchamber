@@ -107,8 +107,9 @@ type PluginPaneProps = {
   surface?: GuestHostSurface;
   /**
    * The item this surface was opened for (`ready.item`). The dialog passes
-   * it explicitly; the rail pane takes it from `useGuestItemStore` when this
-   * prop is left undefined.
+   * it explicitly; the rail pane (`surface="panel"`) takes it from
+   * `useGuestItemStore` when this prop is left undefined. Any other surface
+   * left without it gets `null`.
    */
   item?: GuestItem | null;
   /**
@@ -241,14 +242,19 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
     [oauthStatus?.connection, trackerProvider, trackerStatus],
   );
   // A chip click parks the item under this guest's id; take it (clearing the
-  // slot) so a later mount of the same pane starts without a stale item.
+  // slot) so a later mount of the same pane starts without a stale item. Only
+  // the rail pane takes it: a block, file editor or other frame of the same
+  // guest may mount first and would keep the item from the panel it opened.
+  // A run that finds the slot already empty (Strict Mode runs a mount effect
+  // twice) keeps the item the first run took.
   const pendingItem = useGuestItemStore((state) => state.pendingItemByGuest[guestId]);
   const takePendingItem = useGuestItemStore((state) => state.takePendingItem);
   const [railItem, setRailItem] = React.useState<GuestItem | null>(null);
   React.useEffect(() => {
-    if (headless || itemProp !== undefined || !pendingItem) return;
-    setRailItem(takePendingItem(guestId));
-  }, [guestId, headless, itemProp, pendingItem, takePendingItem]);
+    if (surface !== 'panel' || headless || itemProp !== undefined || !pendingItem) return;
+    const taken = takePendingItem(guestId);
+    if (taken) setRailItem(taken);
+  }, [guestId, headless, itemProp, pendingItem, surface, takePendingItem]);
   const item = headless ? null : itemProp !== undefined ? itemProp : railItem;
   // The user opened this guest's panel: whatever it counted is seen.
   const clearBadge = useGuestBadgeStore((state) => state.clearBadge);
