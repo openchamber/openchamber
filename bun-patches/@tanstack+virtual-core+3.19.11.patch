@@ -1,8 +1,8 @@
 diff --git a/dist/cjs/index.cjs b/dist/cjs/index.cjs
-index c69f792d6293ba97a38faf47aa3f9236127d2291..677c3b26dfc77303c8a42e557b49d3d620bed1e2 100644
+index e08c978a8870d1560c13e30abc3a818823001f0c..2c93051299f99a3f71ad756a0d4d446df1cea680 100644
 --- a/dist/cjs/index.cjs
 +++ b/dist/cjs/index.cjs
-@@ -805,7 +805,10 @@ class Virtualizer {
+@@ -808,7 +808,10 @@ class Virtualizer {
          if (lanes === 1) {
            const need = count * 2;
            let flat = (_a = this._singleLaneMeasurements) == null ? void 0 : _a.flat;
@@ -14,7 +14,7 @@ index c69f792d6293ba97a38faf47aa3f9236127d2291..677c3b26dfc77303c8a42e557b49d3d6
              const next = new Float64Array(need);
              if (flat && min > 0) next.set(flat.subarray(0, min * 2));
              flat = next;
-@@ -919,6 +922,9 @@ class Virtualizer {
+@@ -922,6 +925,9 @@ class Virtualizer {
            this.range = null;
            return null;
          }
@@ -25,10 +25,10 @@ index c69f792d6293ba97a38faf47aa3f9236127d2291..677c3b26dfc77303c8a42e557b49d3d6
          this.range = calculateRangeImpl(
            measurements,
 diff --git a/dist/esm/index.js b/dist/esm/index.js
-index 514c03fd58092f6c6c1ce971c500f114803fc5c3..3b16966f03acf5833c701e01a54f7322d8549454 100644
+index abe4b4906a110b39d76eb8926db4af5683acc1d2..fcd39efda091d31ab5f03a2885448b113bfa87a4 100644
 --- a/dist/esm/index.js
 +++ b/dist/esm/index.js
-@@ -804,7 +804,10 @@ class Virtualizer {
+@@ -807,7 +807,10 @@ class Virtualizer {
          if (lanes === 1) {
            const need = count * 2;
            let flat = (_a = this._singleLaneMeasurements) == null ? void 0 : _a.flat;
@@ -40,7 +40,7 @@ index 514c03fd58092f6c6c1ce971c500f114803fc5c3..3b16966f03acf5833c701e01a54f7322
              const next = new Float64Array(need);
              if (flat && min > 0) next.set(flat.subarray(0, min * 2));
              flat = next;
-@@ -918,6 +921,9 @@ class Virtualizer {
+@@ -921,6 +924,9 @@ class Virtualizer {
            this.range = null;
            return null;
          }
