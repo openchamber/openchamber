@@ -11,7 +11,7 @@ import type {
   SourceControlDeviceFlowStart,
   SourceControlIdentity,
 } from '@/lib/api/types';
-import { SourceControlInstanceOtherProviderError } from '@/lib/api/types';
+import { SourceControlInstanceAliasError, SourceControlInstanceOtherProviderError } from '@/lib/api/types';
 import { useSourceControlProvider } from '@/lib/source-control/providers/registry';
 import {
   SETTINGS_CONTROL_CLUSTER_CLASS,
@@ -28,6 +28,13 @@ import { asksForUsername, providerSettingsCopy, tokenCreationUrl } from './sourc
 
 /** The ways to add an account in the form; the CLI login has its own row. */
 type ConnectMethod = 'device' | 'pat';
+
+/** Aliases as the field shows them: hosts, the way the instance heading reads. */
+const aliasesText = (aliases: readonly string[] | undefined): string => (aliases ?? [])
+  .map((alias) => alias.replace(/^https:\/\//, ''))
+  .join(', ');
+
+const parseAliasesText = (text: string): string[] => text.split(/[\s,]+/).filter(Boolean);
 
 interface ProviderInstanceAccountsProps {
   descriptor: SourceControlProviderDescriptor;
@@ -76,6 +83,15 @@ export const ProviderInstanceAccounts: React.FC<ProviderInstanceAccountsProps> =
   const [sshUrlInvalid, setSshUrlInvalid] = React.useState(false);
   const [savingSshUrl, setSavingSshUrl] = React.useState(false);
   const takesSshUrl = descriptor.settings.fields.some((field) => field.id === 'sshUrl');
+  const [aliases, setAliases] = React.useState(aliasesText(identity.instanceAliases));
+  const [aliasError, setAliasError] = React.useState<{ reason: 'invalid' | 'taken'; alias: string } | 'failed' | null>(null);
+  const [savingAliases, setSavingAliases] = React.useState(false);
+  // An instance the user added and the server already lists (an account or a
+  // CLI login made it known), never one the provider serves by default.
+  const defaultInstances = descriptor.instances.defaultInstances
+    ?? (descriptor.instances.defaultInstance ? [descriptor.instances.defaultInstance] : []);
+  const takesAliases = useSourceControlAuthStore((state) => !defaultInstances.includes(identity.instance)
+    && state.identities.some((known) => known.provider === identity.provider && known.instance === identity.instance));
   // An HTTP Basic host verifies the token as this username's password, so both are needed.
   const needsUsername = asksForUsername(descriptor);
   const [isAddingAccount, setIsAddingAccount] = React.useState(false);
@@ -119,6 +135,11 @@ export const ProviderInstanceAccounts: React.FC<ProviderInstanceAccountsProps> =
     setSshUrlFailed(false);
     setSshUrlInvalid(false);
   }, [identity.instance, identity.provider, identity.instanceSshUrl]);
+  const storedAliasesText = aliasesText(identity.instanceAliases);
+  React.useEffect(() => {
+    setAliases(storedAliasesText);
+    setAliasError(null);
+  }, [identity.instance, identity.provider, storedAliasesText]);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -261,6 +282,34 @@ export const ProviderInstanceAccounts: React.FC<ProviderInstanceAccountsProps> =
       if (isCurrentRuntime()) {
         setBusy(false);
         setSavingSshUrl(false);
+      }
+    }
+  };
+
+  const saveAliases = async () => {
+    const isCurrentRuntime = captureRuntime();
+    setBusy(true);
+    setSavingAliases(true);
+    setAliasError(null);
+    try {
+      await sourceControl.setInstanceAliases(identity, parseAliasesText(aliases));
+      if (!isCurrentRuntime()) return;
+      await refreshInstances(sourceControl, { force: true });
+      if (!isCurrentRuntime()) return;
+      // Saved, but links read through the listed instances: until a refresh
+      // lands they still miss the new addresses, so say so and let Save retry.
+      if (useSourceControlAuthStore.getState().identitiesError) {
+        setAliasError('failed');
+        return;
+      }
+      onSaved?.();
+    } catch (error) {
+      if (!isCurrentRuntime()) return;
+      setAliasError(error instanceof SourceControlInstanceAliasError ? { reason: error.reason, alias: error.alias } : 'failed');
+    } finally {
+      if (isCurrentRuntime()) {
+        setBusy(false);
+        setSavingAliases(false);
       }
     }
   };
@@ -414,6 +463,41 @@ export const ProviderInstanceAccounts: React.FC<ProviderInstanceAccountsProps> =
               size="sm"
               onClick={() => void saveSshUrl()}
               disabled={busy || savingSshUrl || sshUrl.trim() === (identity.instanceSshUrl ?? '')}
+            >
+              {t('settings.common.actions.saveChanges')}
+            </Button>
+          </div>
+        </SettingsFieldRow>
+      ) : null}
+
+      {takesAliases ? (
+        <SettingsFieldRow
+          label={t('settings.sourceControl.field.aliases.label')}
+          info={t('settings.sourceControl.field.aliases.info')}
+          description={aliasError === 'failed'
+            ? t(copy.operationFailed)
+            : aliasError?.reason === 'taken'
+              ? t('settings.sourceControl.field.aliases.taken', { alias: aliasesText([aliasError.alias]) })
+              : aliasError?.reason === 'invalid'
+                ? t('settings.sourceControl.field.aliases.invalid', { alias: aliasError.alias })
+                : undefined}
+        >
+          <div className={`${SETTINGS_CONTROL_CLUSTER_CLASS} flex flex-col gap-2 @xl:flex-row @xl:items-center`}>
+            <Input
+              className="h-8 w-full min-w-0 rounded-md"
+              value={aliases}
+              onChange={(event) => setAliases(event.target.value)}
+              placeholder={t('settings.sourceControl.field.aliases.placeholder')}
+              aria-label={t('settings.sourceControl.field.aliases.label')}
+              autoComplete="off"
+              autoCapitalize="off"
+              spellCheck={false}
+            />
+            <Button
+              className="w-full @xl:w-auto"
+              size="sm"
+              onClick={() => void saveAliases()}
+              disabled={busy || savingAliases || parseAliasesText(aliases).join(', ') === storedAliasesText}
             >
               {t('settings.common.actions.saveChanges')}
             </Button>

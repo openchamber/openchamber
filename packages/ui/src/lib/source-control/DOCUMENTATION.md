@@ -384,7 +384,9 @@ Invariants:
   a reconnect or resume does not rebuild every sidebar row's link matcher.
 - `parseRepositoryItemUrl` resolves a link in this order: a provider whose
   instance the host is known to be (a connected account's instance or the
-  provider's default instance), else the only provider whose pattern matches,
+  provider's default instance), or is an alias of (`instanceAliases`: the link
+  then names that instance, so every read and every `context.instance ===
+  target.instance` check goes to the instance), else the only provider whose pattern matches,
   else the first by `order`, so an unknown host with `/issues/N` or `/pull/N`
   keeps reading as GitHub-shaped. Patterns name `{owner}` or `{namespace+}`,
   `{repo}` and `{number}`, or `{project+}` (a whole project path, split on its
