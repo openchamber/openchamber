@@ -3336,6 +3336,44 @@ describe('createWorktree with OpenCode worktree.directory', () => {
     expect(fs.existsSync(created.path)).toBe(false);
   }));
 
+  it('inherits the worktree folder from an ancestor config outside the repository', withDataHome(async () => {
+    if (!canRunGit()) return;
+
+    const workspace = createTempDir();
+    const repo = path.join(workspace, 'repository');
+    fs.mkdirSync(repo);
+    runGit(repo, ['init', '-b', 'main']);
+    runGit(repo, ['config', 'user.email', 'test@example.com']);
+    runGit(repo, ['config', 'user.name', 'Test User']);
+    runGit(repo, ['commit', '--allow-empty', '-m', 'Initial commit']);
+    fs.mkdirSync(path.join(workspace, '.opencode'));
+    fs.writeFileSync(
+      path.join(workspace, '.opencode', 'opencode.jsonc'),
+      '{ // Shared workspace setting\n "worktree": { "directory": "../.worktrees" }\n}',
+    );
+    const customConfig = path.join(workspace, 'custom.json');
+    fs.writeFileSync(customConfig, JSON.stringify({ worktree: { directory: '.custom-trees' } }));
+    vi.stubEnv('OPENCODE_CONFIG', customConfig);
+    try {
+      const input = { mode: 'new', worktreeName: 'inherited-tree', branchName: 'inherited-tree' };
+      const preview = await previewWorktreeCreate(repo, input);
+      const created = await createWorktree(repo, input);
+      const expected = path.join(fs.realpathSync(workspace), '.worktrees', 'inherited-tree');
+      expect(created.path).toBe(expected);
+      expect(preview.path).toBe(expected);
+
+      // A request from the linked checkout still uses its canonical checkout's config.
+      const next = await createWorktree(created.path, {
+        mode: 'new', worktreeName: 'next-tree', branchName: 'next-tree',
+      });
+      expect(next.path).toBe(fs.realpathSync(path.join(workspace, '.worktrees', 'next-tree')));
+      await removeWorktree(repo, { directory: next.path });
+      await removeWorktree(repo, { directory: created.path });
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  }));
+
   it('uses an absolute configured folder as-is', withDataHome(async () => {
     if (!canRunGit()) return;
 
