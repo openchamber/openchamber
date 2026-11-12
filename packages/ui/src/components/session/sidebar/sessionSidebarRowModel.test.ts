@@ -494,11 +494,26 @@ describe('buildSessionSidebarRowModel', () => {
     expect(rows.find((row) => row.kind === 'activity-header' && row.activityKey === 'chats')).toMatchObject({ loading: true });
     expect(rows.some((row) => row.kind === 'status')).toBe(false);
 
+  });
+
+  test('an empty Chats section takes no caption once loaded; a failed load keeps it with its error row', () => {
+    const input = args([]);
+    input.chatGroup = group([], { id: 'managed-chats' });
     input.groupStatusByKey = new Map([['activity:chats', { state: 'ready', directory: null, canGrantAccess: false }]]);
-    const ready = buildSessionSidebarRowModel(input).rows;
-    expect(ready.find((row) => row.kind === 'activity-header' && row.activityKey === 'chats')).toMatchObject({ loading: false });
-    // Loading and loaded hold the same rows, so nothing below moves.
-    expect(ready.map((row) => row.key)).toEqual(rows.map((row) => row.key));
+    const ready = buildSessionSidebarRowModel(input);
+    expect(ready.rows.some((row) => row.kind === 'activity-header' && row.activityKey === 'chats')).toBe(false);
+    expect(ready.stickyHeaders.some((header) => header.kind === 'activity' && header.id === 'chats')).toBe(false);
+
+    // Collapsed, the caption stays: it is the only way to open the section,
+    // which may hold an empty folder or a failed load.
+    input.collapsedActivities = new Set(['chats']);
+    expect(buildSessionSidebarRowModel(input).rows.some((row) => row.kind === 'activity-header' && row.activityKey === 'chats')).toBe(true);
+    input.collapsedActivities = new Set();
+
+    input.groupStatusByKey = new Map([['activity:chats', { state: 'load-failed', directory: '/chats', canGrantAccess: false }]]);
+    const failed = buildSessionSidebarRowModel(input).rows;
+    expect(failed.some((row) => row.kind === 'activity-header' && row.activityKey === 'chats')).toBe(true);
+    expect(failed.find((row) => row.kind === 'status')).toMatchObject({ groupKey: 'activity:chats', status: { state: 'load-failed' } });
   });
 
   test('a collapsed folder retains activity coverage from nested folders without flattening subtasks', () => {

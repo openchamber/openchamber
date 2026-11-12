@@ -1082,7 +1082,21 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
     // row would push every zone below down and then back up once the list
     // turns out empty, which it often is.
     const chatsLoading = args.chatGroup.sessions.length === 0 && args.groupStatusByKey.get('activity:chats')?.state === 'loading';
+    const headerIndex = rows.length;
     const collapsed = appendActivityHeader('chats', undefined, chatsLoading);
+    // A caption over nothing says nothing (maintainer, 2026-11-12): an open
+    // section that drew no row under its caption takes no row at all. A load
+    // or an error still shows, through the header's spinner or the error row
+    // under it. Creating a chat stays reachable through New session while the
+    // caption, and its hover "+", are away.
+    const dropEmptyHeader = () => {
+      if (rows.length !== headerIndex + 1 || chatsLoading) return;
+      rows.pop();
+      if (stickyHeaders[stickyHeaders.length - 1]?.rowIndex === headerIndex) stickyHeaders.pop();
+    };
+    // A collapsed section keeps its caption even with no chats: what it hides
+    // may be an empty folder (a drop target) or a failed load with Retry, and
+    // the caption is the only way to open it again.
     if (collapsed) return;
     // Chats are one-line rows with the tree's state slot, on a short page
     // that pinned chats do not spend.
@@ -1093,6 +1107,7 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
     if (args.archivedChatGroup) {
       appendGroup(args.archivedChatGroup, 'activity:chats:archived', null, false, { renderContext: 'tree-chat' });
     }
+    dropEmptyHeader();
   };
 
   // Pinned, In work and the list by time mix every project's works: one-line
