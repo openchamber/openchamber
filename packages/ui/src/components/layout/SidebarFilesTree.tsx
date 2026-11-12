@@ -1712,72 +1712,17 @@ const SidebarFilesTreeContent: React.FC<{ visible: boolean; currentDirectory: st
 
   return (
     <section className="flex h-full min-h-0 flex-col overflow-hidden">
-      {/* The action band matches the file editor's docked toolbar (40px,
-          24px buttons) so the two read as one row across the panel. */}
-      <div className="flex flex-col border-b border-edge-muted">
-        <div className="flex h-8 shrink-0 items-center border-t border-edge-muted px-2">
-        {/* New file, new folder and upload share one "+" menu, so the band
-            keeps four buttons and fits even the narrowest tree. */}
-        <ActionToolbar
-          className="flex-1"
-          start={null}
-          groups={[[
-            (canCreateFile || canCreateFolder || canUpload) && {
-              id: 'add',
-              label: t('sidebarFilesTree.actions.addMenuTitle'),
-              icon: isUploading ? 'loader-4' : 'add',
-              iconClassName: isUploading ? 'animate-spin' : undefined,
-              menu: (
-                <>
-                  {canCreateFile ? (
-                    <DropdownMenuItem onClick={() => handleOpenDialog('createFile', { path: currentDirectory, type: 'directory' })}>
-                      <Icon name="file-add" className="me-2 h-4 w-4" /> {t('sidebarFilesTree.menu.newFile')}
-                    </DropdownMenuItem>
-                  ) : null}
-                  {canCreateFolder ? (
-                    <DropdownMenuItem onClick={() => handleOpenDialog('createFolder', { path: currentDirectory, type: 'directory' })}>
-                      <Icon name="folder-add" className="me-2 h-4 w-4" /> {t('sidebarFilesTree.menu.newFolder')}
-                    </DropdownMenuItem>
-                  ) : null}
-                  {canUpload ? (
-                    <DropdownMenuItem disabled={!root || isUploading} onClick={() => pickFiles(root)}>
-                      <Icon name="upload-2" className="me-2 h-4 w-4" /> {t('sidebarFilesTree.menu.uploadFiles')}
-                    </DropdownMenuItem>
-                  ) : null}
-                </>
-              ),
-            },
-            {
-              id: 'gitignored',
-              label: t('filesView.tree.actions.showGitignored'),
-              icon: 'file-forbid',
-              pressed: showGitignored,
-              onSelect: () => setFilesViewShowGitignored(!showGitignored),
-            },
-            {
-              id: 'refresh',
-              label: t('sidebarFilesTree.actions.refreshTitle'),
-              icon: 'refresh',
-              onSelect: () => void refreshRoot(),
-            },
-            {
-              id: 'collapse-all',
-              label: t('sidebarFilesTree.actions.collapseAllTitle'),
-              icon: 'collapse-vertical',
-              onSelect: () => {
-                if (root) collapseAllExpandedPaths(root);
-              },
-            },
-          ]]}
-        />
-        </div>
-        <div className="relative min-w-0 px-2 py-2">
+      {/* One band: the search field leads, the tree's actions follow it. The
+          band is as tall as the file editor's docked toolbar beside it, so the
+          two read as one strip across the panel. */}
+      <div className="flex h-9 shrink-0 items-center gap-1 border-t border-edge-muted px-2">
+        <div className="relative min-w-0 flex-1">
           {canSearchContents ? (
             <DropdownMenu>
               <Tooltip>
                 <TooltipTrigger asChild>
                   {/* The field sits in flow, so the span carries the placement the tooltip anchors to. */}
-                  <span className="absolute inset-s-3 top-3 inline-flex">
+                  <span className="absolute inset-s-0.5 top-1/2 inline-flex -translate-y-1/2">
                     <DropdownMenuTrigger asChild>
                       <Button
                         variant="ghost"
@@ -1811,14 +1756,15 @@ const SidebarFilesTreeContent: React.FC<{ visible: boolean; currentDirectory: st
               </DropdownMenuContent>
             </DropdownMenu>
           ) : (
-            <Icon name="search" className="pointer-events-none absolute inset-s-[1.0625rem] top-[1.0625rem] size-3.5 text-muted-foreground" />
+            <Icon name="search" className="pointer-events-none absolute inset-s-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
           )}
           <Input
             ref={searchInputRef}
+            inputSize="compact"
             value={searchQuery}
             onChange={(event) => setSearchQuery(event.target.value)}
             placeholder={t(contentSearchActive ? 'sidebarFilesTree.search.contentsPlaceholder' : 'sidebarFilesTree.search.placeholder')}
-            className={cn('h-8 ps-8 typography-meta', contentSearchActive ? 'pe-16' : 'pe-8')}
+            className={cn('ps-7', contentSearchActive ? 'pe-14' : 'pe-7')}
           />
           {contentSearchActive ? (
             <Tooltip>
@@ -1832,7 +1778,7 @@ const SidebarFilesTreeContent: React.FC<{ visible: boolean; currentDirectory: st
                     searchInputRef.current?.focus();
                   }}
                   aria-label={t('sidebarFilesTree.search.regexTitle')}
-                  className="absolute inset-e-3 top-3.5 h-5 min-w-0 px-1 font-mono typography-micro"
+                  className="absolute inset-e-1 top-1/2 h-5 min-w-0 -translate-y-1/2 px-1 font-mono typography-micro"
                 >
                   .*
                 </Button>
@@ -1846,19 +1792,75 @@ const SidebarFilesTreeContent: React.FC<{ visible: boolean; currentDirectory: st
                 <button
                   type="button"
                   aria-label={t('sidebarFilesTree.search.clearAria')}
-                  className={cn('absolute top-4 inline-flex h-4 w-4 items-center justify-center text-muted-foreground hover:text-foreground', contentSearchActive ? 'inset-e-10' : 'inset-e-4')}
+                  className={cn('absolute top-1/2 inline-flex size-4 -translate-y-1/2 items-center justify-center text-muted-foreground hover:text-foreground', contentSearchActive ? 'inset-e-8' : 'inset-e-2')}
                   onClick={() => {
                     setSearchQuery('');
                     searchInputRef.current?.focus();
                   }}
                 >
-                  <Icon name="close" className="h-4 w-4" />
+                  <Icon name="close" className="size-3.5" />
                 </button>
               </TooltipTrigger>
               <TooltipContent side="bottom" sideOffset={6}>{t('sidebarFilesTree.search.clearAria')}</TooltipContent>
             </Tooltip>
           ) : null}
         </div>
+        {/* New file, new folder and upload share one "+" menu; showing
+            gitignored files, refresh and collapse all are rarer and live in
+            "More actions", so the field keeps the width even in a narrow tree. */}
+        <ActionToolbar
+          className="shrink-0 gap-0.5"
+          groups={[[
+            (canCreateFile || canCreateFolder || canUpload) && {
+              id: 'add',
+              label: t('sidebarFilesTree.actions.addMenuTitle'),
+              icon: isUploading ? 'loader-4' : 'add',
+              iconClassName: isUploading ? 'animate-spin' : undefined,
+              menu: (
+                <>
+                  {canCreateFile ? (
+                    <DropdownMenuItem onClick={() => handleOpenDialog('createFile', { path: currentDirectory, type: 'directory' })}>
+                      <Icon name="file-add" className="me-2 h-4 w-4" /> {t('sidebarFilesTree.menu.newFile')}
+                    </DropdownMenuItem>
+                  ) : null}
+                  {canCreateFolder ? (
+                    <DropdownMenuItem onClick={() => handleOpenDialog('createFolder', { path: currentDirectory, type: 'directory' })}>
+                      <Icon name="folder-add" className="me-2 h-4 w-4" /> {t('sidebarFilesTree.menu.newFolder')}
+                    </DropdownMenuItem>
+                  ) : null}
+                  {canUpload ? (
+                    <DropdownMenuItem disabled={!root || isUploading} onClick={() => pickFiles(root)}>
+                      <Icon name="upload-2" className="me-2 h-4 w-4" /> {t('sidebarFilesTree.menu.uploadFiles')}
+                    </DropdownMenuItem>
+                  ) : null}
+                </>
+              ),
+            },
+          ]]}
+          menuOnly={[
+            {
+              id: 'gitignored',
+              label: t('filesView.tree.actions.showGitignored'),
+              icon: 'file-forbid',
+              pressed: showGitignored,
+              onSelect: () => setFilesViewShowGitignored(!showGitignored),
+            },
+            {
+              id: 'refresh',
+              label: t('sidebarFilesTree.actions.refreshTitle'),
+              icon: 'refresh',
+              onSelect: () => void refreshRoot(),
+            },
+            {
+              id: 'collapse-all',
+              label: t('sidebarFilesTree.actions.collapseAllTitle'),
+              icon: 'collapse-vertical',
+              onSelect: () => {
+                if (root) collapseAllExpandedPaths(root);
+              },
+            },
+          ]}
+        />
       </div>
 
       <div className="relative flex-1 min-h-0">

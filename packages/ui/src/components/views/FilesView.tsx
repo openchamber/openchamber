@@ -5048,10 +5048,11 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
         </div>
         ) : null}
 
-        {/* Row 2: Docked editor toolbar. 40px with 24px buttons, the same band
-            the context panel's file tree draws beside it, so the two line up. */}
+        {/* Row 2: Docked editor toolbar, 36px with 24px buttons: the same band
+            the context panel's file tree draws beside it with its search
+            field and actions, so the two read as one strip. */}
         {selectedFile ? (
-          <div className="flex h-8 min-w-0 shrink-0 items-center border-t border-edge-muted px-2">
+          <div className="flex h-9 min-w-0 shrink-0 items-center border-t border-edge-muted px-2">
             {renderFileToolbar({ layout: 'docked' })}
           </div>
         ) : null}
