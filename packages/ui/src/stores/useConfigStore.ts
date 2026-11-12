@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { listModelVariantIds, modelVariantNames, nextThinkingVariant } from "@/lib/modelVariants";
 import { AUTO_MODEL_ID, AUTO_PROVIDER_ID, isAutoModel } from '@/lib/routing/autoModel';
 import { selectAutoReady, useRoutingStore } from '@/stores/useRoutingStore';
+import { notifyAutoUnavailable } from '@/lib/routing/autoUnavailableNotice';
 import type { StoreApi, UseBoundStore } from "zustand";
 import { devtools, persist } from "zustand/middleware";
 import { findCatalogModel, type Provider, type Model, type Agent, type Config } from "@/lib/opencode/model";
@@ -3870,6 +3871,7 @@ export const useConfigStore = create<ConfigStore>()(
                         selection.saveSessionModelSelection(sessionId, resolved.providerId, resolved.modelId);
                         if (current.currentAgentName) selection.saveAgentModelForSession(sessionId, current.currentAgentName, resolved.providerId, resolved.modelId);
                     }
+                    notifyAutoUnavailable();
                 },
 
                 applyDefaultModelAgentSelection: (options) => {

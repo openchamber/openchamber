@@ -1106,9 +1106,9 @@ export const CommandPalette: React.FC = () => {
       </CommandItem>
     );
   };
-  // Message search is opt-in. While it is off the palette says nothing about
-  // messages: a line about a feature the user never turned on, on every query,
-  // is noise.
+  // Message search is on by default and can be turned off. While it is off the
+  // palette says nothing about messages: a line about a feature the user
+  // turned off, on every query, is noise.
   const messageSearchOff = !messageSearchEnabled || (messageSearch.status === 'unavailable' && unavailableStatus === 'off');
   const messageUnavailableStatus = messageSearchOff
     ? null

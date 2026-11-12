@@ -1353,6 +1353,8 @@ interface UIStore {
   setSettingsProvidersClassificationRequested: (requested: boolean) => void;
   setSettingsProvidersOpenRequested: (providerId: string | null) => void;
   requestSettingsJump: (page: string, itemId?: string | null) => void;
+  /** Opens Settings on `page` and reveals `itemId` there, from anywhere in the app. */
+  openSettingsAt: (page: string, itemId?: string | null) => void;
   clearSettingsJumpRequest: () => void;
   setSettingsRemoteInstancesSelectedId: (instanceId: string | null) => void;
   setEventStreamStatus: (status: EventStreamStatus, hint?: string | null) => void;
@@ -2693,6 +2695,10 @@ export const useUIStore = create<UIStore>()(
         },
         requestSettingsJump: (page, itemId = null) => {
           set({ settingsJumpRequest: { page, itemId } });
+        },
+        openSettingsAt: (page, itemId = null) => {
+          get().requestSettingsJump(page, itemId);
+          get().setSettingsDialogOpen(true);
         },
         clearSettingsJumpRequest: () => {
           set({ settingsJumpRequest: null });

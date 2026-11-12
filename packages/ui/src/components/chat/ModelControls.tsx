@@ -2000,6 +2000,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                     labels={modelPickerLabels}
                     selectedModel={currentProviderId && currentModelId ? { providerID: currentProviderId, modelID: currentModelId } : null}
                     leadingEntry={autoEntry}
+                    searchAction={selection ? null : { label: t('chat.modelControls.addNewProvider'), icon: 'add', onSelect: openAddProviderSettings }}
                     isFavorite={(entry) => isFavoriteModel(entry.providerID, entry.modelID)}
                     onToggleFavorite={(entry) => toggleFavoriteModel(entry.providerID, entry.modelID)}
                     onEntryDetails={(entry) => {

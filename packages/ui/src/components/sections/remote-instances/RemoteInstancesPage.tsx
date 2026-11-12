@@ -79,6 +79,7 @@ import { useDurationTickerNow, useWaitingBlink } from '@/hooks/useDurationTicker
 import { Spinner } from '@/components/ui/spinner';
 import { useSshConfirmation } from './useSshConfirmation';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
+import { SettingsInlineLink } from '@/components/sections/classification/JevAccessNote';
 
 const randomPort = (): number => {
   return Math.floor(20000 + Math.random() * 30000);
@@ -529,10 +530,10 @@ export const RemoteInstancesPage: React.FC = () => {
   const [transportOptions, setTransportOptions] = React.useState<{ localUrl: string | null; lanUrl: string | null; relayAvailable: boolean } | null>(null);
   const lanBlockedByEnterprise = useEnterprisePolicyStore((state) => state.networkAccessBlocked);
   // Why "Home network only" is unavailable depends on who owns the listening
-  // address: a local desktop can open it in Desktop Network Access (unless
-  // enterprise mode keeps it closed), a plain web server needs a restart with a
-  // LAN bind address, and a desktop connected to another server can change
-  // neither from here.
+  // address: a local desktop can open it in General → Password and network
+  // access, which the hint links to (unless enterprise mode keeps it closed),
+  // a plain web server needs a restart with a LAN bind address, and a desktop
+  // connected to another server can change neither from here.
   const lanTransportHint = (() => {
     if (!transportOptions || transportOptions.lanUrl) {
       return t('settings.remoteInstances.clientAuth.addDevice.transport.lanHint');
@@ -546,7 +547,20 @@ export const RemoteInstancesPage: React.FC = () => {
     if (lanBlockedByEnterprise) {
       return t('settings.openchamber.desktopNetwork.field.enterpriseBlocked');
     }
-    return t('settings.remoteInstances.clientAuth.addDevice.transport.lanUnavailableDesktopHint');
+    return (
+      <>
+        {t('settings.remoteInstances.clientAuth.addDevice.transport.lanNeedsDesktopAccess')}
+        {' '}
+        <SettingsInlineLink
+          onClick={() => {
+            setAddDeviceOpen(false);
+            useUIStore.getState().openSettingsAt('general', 'sessions.desktop-ui-password');
+          }}
+        >
+          {t('settings.remoteInstances.clientAuth.addDevice.transport.openNetworkSettings')}
+        </SettingsInlineLink>
+      </>
+    );
   })();
   const revokedClientCount = React.useMemo(() => remoteClients.filter((client) => Boolean(client.revokedAt)).length, [remoteClients]);
   const [sshAddDialogOpen, setSshAddDialogOpen] = React.useState(false);
