@@ -359,7 +359,7 @@ Invariants:
   `getRuntimeKey()` itself and first switches to that runtime's remembered list
   when it differs from the held key: the store is created at import, before
   the runtime endpoint is initialized. A transient key (`isTransientRuntimeKey`:
-  `url:default`, `mobile-disconnected`) is never a snapshot slot.
+  `url:default` outside VS Code, `mobile-disconnected`) is never a snapshot slot.
 - The served set can change while the app runs: an extension whose service
   provides `source-control` adds a provider (`ext-<guestId>`, marked with
   `extension: { guestId, name, version }`) when it is approved, enabled or

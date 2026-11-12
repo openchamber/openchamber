@@ -93,8 +93,8 @@ overlay.
 `useWorkStatusVisibility` hides the panel when any of these hold:
 
 - the user switched it off;
-- the runtime is mobile or VS Code. The phone shows the sections in its own
-  tab; VS Code has no inline card and uses the overlay form, see below;
+- the runtime is mobile. The phone shows the sections in its own tab, see
+  below;
 - the row cannot fit `WORK_STATUS_MIN_CHAT_WIDTH` of transcript alongside
   `WORK_STATUS_PANEL_WIDTH` of panel. Only the threshold decisions are state
   (`roomy`, `roomyBesidePanel`); the width itself is not, because it changes
@@ -190,11 +190,15 @@ and a laptop are set up apart anyway, as the drawer's tabs already are.
 
 ## In VS Code
 
-The extension has no right slot for the inline card and no desktop header
-switch. Its chat header carries one button that opens the overlay form
-(`workStatusOverlayOpen`). The overlay ignores `workStatusPanelEnabled` there:
-the preference has no switch in VS Code, so respecting it would leave the
-button unable to open anything. The overlay is transient and starts closed.
+VS Code mounts no `ContextPanel`, so `VSCodeChatArea` (`VSCodeLayout.tsx`)
+hosts the inline card's column itself, beside the chat, and carries the
+`data-chat-area` the visibility test measures. A wide editor tab or sidebar
+gets the inline card, a narrow one the overlay. The width test there ignores
+the context panel's store state: a skill citation still opens the right zone in
+the store, and a panel nobody sees must not hide the card. The chat header's button is the
+desktop header's toggle: `workStatusPanelEnabled` where the card fits, the
+overlay where it does not. The run overview covers the chat there, so it hides
+the card through `setChatCovered`, as a full-page surface does on desktop.
 
 Rows that would open the context panel are readouts there, because VS Code
 mounts no `ContextPanel`. A pull request row opens its URL in the browser, the
@@ -633,8 +637,7 @@ snapshots own this preference; unrelated partial save echoes leave it unchanged.
 `workStatusPanelVisible` is separate and transient: the switch can be on while
 layout still refuses the panel. The header's project/branch line and the git
 rail read it to drop the readouts the panel already carries, and it is deliberately not persisted — it
-describes the current frame, not a preference. In VS Code the header button is
-transient and ignores this preference; see *In VS Code*.
+describes the current frame, not a preference.
 
 ## Appearing and disappearing
 
