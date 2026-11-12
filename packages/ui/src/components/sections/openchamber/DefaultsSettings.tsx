@@ -481,13 +481,21 @@ export const DefaultsSettings: React.FC = () => {
           </p>
         </SettingsSection>
       )}
+    </>
+  );
+};
 
+/** What happens to a session's context: compaction, then the prompt cache. */
+export const SessionContextSettings: React.FC = () => {
+  const { t } = useI18n();
+  const isVSCode = isVSCodeRuntime();
+  return (
+    <>
+      <CompactionSettings />
       <SettingsSection title={t('settings.openchamber.defaults.promptCacheTitle')}>
         {/* VS Code has no OpenChamber server to warm chosen sessions: OpenCode's switch for all of them only. */}
         {isVSCode ? <SessionWarmingCheckbox /> : <SessionWarmingModeField />}
       </SettingsSection>
-
-      <CompactionSettings />
     </>
   );
 };

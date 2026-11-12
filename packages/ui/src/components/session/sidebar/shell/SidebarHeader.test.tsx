@@ -35,50 +35,58 @@ const { TooltipProvider } = await import('@/components/ui/tooltip');
 const { SidebarHeader } = await import('./SidebarHeader');
 const { closeSectionsManager, useSidebarSectionsUiStore } = await import('../sections/sectionActions');
 const { useSessionDisplayStore } = await import('@/stores/useSessionDisplayStore');
-const { SearchScopeMenu } = await import('@/components/search/SearchScopeMenu');
-const { sidebarSearchScopeOptions } = await import('../sidebarConversationSearch');
+const { useUIStore } = await import('@/stores/useUIStore');
 
-const baseProps = {
+type HeaderProps = React.ComponentProps<typeof SidebarHeader>;
+
+const baseProps: HeaderProps = {
   hideDirectoryControls: false,
   showProjectDisplayControls: true,
   showSectionControls: true,
   handleOpenDirectoryDialog: () => undefined,
   showSourceBoard: true,
   headerActionIconClass: 'h-4.5 w-4.5',
-  headerActionButtonClass: 'inline-flex h-6 w-6 cursor-pointer items-center justify-center rounded-md leading-none text-foreground hover:bg-interactive-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 disabled:cursor-not-allowed',
-  isSessionSearchOpen: false,
-  openSessionSearch: () => undefined,
+  headerActionButtonClass: 'inline-flex h-6 w-6',
   closeSessionSearch: () => undefined,
   sessionSearchInputRef: React.createRef<HTMLInputElement | null>(),
   sessionSearchQuery: '',
   setSessionSearchQuery: () => undefined,
-  hasSessionSearchQuery: false,
-  searchMatchCount: 0,
+  searchScope: 'everything',
+  setSearchScope: () => undefined,
+  searchStatus: { kind: 'idle' },
+  searchMatchCount: null,
   collapseAll: () => undefined,
   expandAll: () => undefined,
   showStats: true,
 };
 
-function StatefulHeader({
-  initialQuery = '',
-  ...props
-}: Omit<React.ComponentProps<typeof SidebarHeader>, 'sessionSearchQuery' | 'setSessionSearchQuery' | 'hasSessionSearchQuery'> & { initialQuery?: string }) {
+function StatefulHeader({ initialQuery = '', ...props }: HeaderProps & { initialQuery?: string }) {
   const [query, setQuery] = React.useState(initialQuery);
-  return (
-    <SidebarHeader
-      {...props}
-      sessionSearchQuery={query}
-      setSessionSearchQuery={setQuery}
-      hasSessionSearchQuery={query.trim().toLowerCase().length > 0}
-    />
-  );
+  return <SidebarHeader {...props} sessionSearchQuery={query} setSessionSearchQuery={setQuery} />;
 }
 
 let host: HTMLDivElement;
 let root: Root;
 
+const render = (node: React.ReactNode) => act(async () => root.render(<I18nProvider><TooltipProvider>{node}</TooltipProvider></I18nProvider>));
+const input = () => document.querySelector('input')!;
+const buttonLabels = () => [...document.querySelectorAll('button')].map((button) => button.getAttribute('aria-label'));
+const searchInTrigger = () => document.querySelector<HTMLButtonElement>('[data-search-in-trigger]');
+const menuItems = () => [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].map((item) => item.textContent?.trim());
+const type = async (text: string) => {
+  const setValue = Object.getOwnPropertyDescriptor(browser.HTMLInputElement.prototype, 'value')!.set!;
+  await act(async () => {
+    setValue.call(input(), text);
+    input().dispatchEvent(new InputEvent('input', { bubbles: true }));
+  });
+};
+const press = (key: string) => act(async () => {
+  input().dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
+});
+
 beforeEach(() => {
   closeSectionsManager();
+  useUIStore.setState({ messageSearchEnabled: true });
   host = document.createElement('div');
   document.body.append(host);
   root = createRoot(host);
@@ -98,12 +106,64 @@ afterAll(async () => {
 });
 
 describe('SidebarHeader', () => {
+  test('the search field is always in the row, after the list controls and the More menu, with no shortcut hint', async () => {
+    await render(<SidebarHeader {...baseProps} />);
+
+    expect(document.querySelectorAll('input')).toHaveLength(1);
+    expect(input().getAttribute('aria-label')).toBe('Search sessions');
+    expect(buttonLabels()).toEqual(['Add project', 'Display mode', 'More']);
+    const more = document.querySelector('[aria-label="More"]');
+    expect(more ? Boolean(more.compareDocumentPosition(input()) & 4) : false).toBe(true);
+    expect(document.querySelector('[data-session-search-input]')?.textContent).toBe('');
+  });
+
+  test('the field shows its own controls only while there is text', async () => {
+    await render(<SidebarHeader {...baseProps} searchStatus={{ kind: 'loading' }} />);
+    expect(searchInTrigger()).toBeNull();
+    expect(document.querySelector('[data-search-status]')).toBeNull();
+    expect(document.querySelector('[aria-label="Clear search"]')).toBeNull();
+
+    await render(<SidebarHeader {...baseProps} sessionSearchQuery="token" searchStatus={{ kind: 'loading' }} />);
+    expect(searchInTrigger()).not.toBeNull();
+    // A search under way shows no mark: it would only flicker while typing.
+    expect(document.querySelector('[data-search-status]')).toBeNull();
+    expect(document.querySelector('[aria-label="Clear search"]')).not.toBeNull();
+    // The list controls come first; the field's own controls sit inside it, after them.
+    expect(buttonLabels().slice(0, 3)).toEqual(['Add project', 'Display mode', 'More']);
+    expect(document.querySelector('[data-session-search-input]')?.contains(searchInTrigger())).toBe(true);
+
+    await render(<SidebarHeader {...baseProps} searchStatus={{ kind: 'loading' }} />);
+    expect(searchInTrigger()).toBeNull();
+    expect(document.querySelector('[data-search-status]')).toBeNull();
+  });
+
+  test('a search that went fine shows no status mark, a failed one shows the error', async () => {
+    await render(<SidebarHeader {...baseProps} sessionSearchQuery="token" searchStatus={{ kind: 'ready', indexing: null, lifecycleComplete: true, hasMore: false }} />);
+    expect(document.querySelector('[data-search-status]')).toBeNull();
+
+    await render(<SidebarHeader {...baseProps} sessionSearchQuery="token" searchStatus={{ kind: 'failed' }} />);
+    expect(document.querySelector('[data-search-status]')?.getAttribute('data-search-status')).toBe('error');
+  });
+
+  test('the menu in the field names where the search looks and picks another place', async () => {
+    const picked: string[] = [];
+    await render(<SidebarHeader {...baseProps} sessionSearchQuery="token" searchScope="titles" setSearchScope={(scope) => picked.push(scope)} />);
+    expect(searchInTrigger()?.getAttribute('aria-label')).toContain('Titles');
+
+    await act(async () => searchInTrigger()!.click());
+    const options = [...document.querySelectorAll<HTMLElement>('[data-search-in-option]')];
+    expect(options.map((option) => option.getAttribute('data-search-in-option'))).toEqual(['everything', 'titles', 'user', 'assistant']);
+    await act(async () => options[2]!.click());
+    expect(picked).toEqual(['user']);
+  });
+
   for (const query of ['token', 'another topic']) test(`save as section seeds the search words from ${query}`, async () => {
     let closed = 0;
-    await act(async () => root.render(<I18nProvider><TooltipProvider><SidebarHeader {...baseProps} isSessionSearchOpen hasSessionSearchQuery sessionSearchQuery={query} closeSessionSearch={() => { closed += 1; }} /></TooltipProvider></I18nProvider>));
-    expect(document.querySelector('input')?.value).toBe(query);
+    await render(<SidebarHeader {...baseProps} sessionSearchQuery={query} closeSessionSearch={() => { closed += 1; }} />);
+    expect(input().value).toBe(query);
     const savedSections = useSessionDisplayStore.getState().sections;
-    const save = [...document.querySelectorAll('button')].find((button) => button.textContent === 'Save as section');
+    await act(async () => searchInTrigger()!.click());
+    const save = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find((item) => item.textContent?.trim() === 'Save as section');
     expect(save).toBeDefined();
     await act(async () => {
       save!.click();
@@ -118,201 +178,69 @@ describe('SidebarHeader', () => {
     expect(closed).toBe(1);
   });
 
-  for (const query of ['', 'ses_123']) test(`a non-topic query cannot seed a section: ${query}`, async () => {
-    await act(async () => root.render(<I18nProvider><TooltipProvider><SidebarHeader {...baseProps} isSessionSearchOpen hasSessionSearchQuery sessionSearchQuery={query} /></TooltipProvider></I18nProvider>));
-    expect([...document.querySelectorAll('button')].some((button) => button.textContent === 'Save as section')).toBe(false);
+  test('an id lookup cannot seed a section', async () => {
+    await render(<SidebarHeader {...baseProps} sessionSearchQuery="ses_123" />);
+    await act(async () => searchInTrigger()!.click());
+    expect(document.querySelectorAll('[data-search-in-option]').length).toBeGreaterThan(0);
+    expect(menuItems()).not.toContain('Save as section');
     expect(useSidebarSectionsUiStore.getState().draft).toBeNull();
   });
 
-  test('unknown totals omit the count hint while an exact zero remains visible', async () => {
-    const render = (count: number | null) => act(async () => root.render(<I18nProvider><TooltipProvider><SidebarHeader {...baseProps} isSessionSearchOpen hasSessionSearchQuery searchMatchCount={count} /></TooltipProvider></I18nProvider>));
-    await render(null);
-    const hint = () => document.getElementById(document.querySelector('input')!.getAttribute('aria-describedby')!);
-    expect(hint()?.textContent).toBe('');
-    await render(0);
-    expect(hint()?.textContent).toContain('0');
-  });
-  test('compact variant renders a persistent search input and no directory controls', async () => {
-    await act(async () => root.render(
-      <I18nProvider>
-        <TooltipProvider>
-          <StatefulHeader {...baseProps} hideDirectoryControls />
-        </TooltipProvider>
-      </I18nProvider>,
-    ));
+  test('with only titles to search the menu is the search actions, and gone when there are none', async () => {
+    useUIStore.setState({ messageSearchEnabled: false });
+    await render(<SidebarHeader {...baseProps} sessionSearchQuery="token" />);
+    await act(async () => searchInTrigger()!.click());
+    expect(document.querySelectorAll('[data-search-in-option]')).toHaveLength(0);
+    expect(menuItems()).toEqual(['Save as section']);
 
-    const inputs = document.querySelectorAll('input');
-    expect(inputs.length).toBe(1);
-    expect(inputs[0]?.getAttribute('placeholder')).toBe('Search sessions...');
-
-    expect(document.querySelector('[aria-label="Search sessions"]')).toBeNull();
-    expect(document.querySelector('[aria-label="Add project"]')).toBeNull();
-    expect(document.querySelector('[aria-label="Display mode"]')).toBeNull();
+    await render(<SidebarHeader {...baseProps} sessionSearchQuery="ses_123" />);
+    expect(searchInTrigger()).toBeNull();
   });
 
-  test('compact search keeps one line through every search state', async () => {
-    const counts = new Map([['none', 0], ['one', 1], ['many', 3]]);
-    function CountingHeader() {
-      const [query, setQuery] = React.useState('');
-      return (
-        <SidebarHeader
-          {...baseProps}
-          hideDirectoryControls
-          sessionSearchQuery={query}
-          setSessionSearchQuery={setQuery}
-          hasSessionSearchQuery={query.trim().length > 0}
-          searchMatchCount={counts.get(query) ?? 0}
-        />
-      );
-    }
-    await act(async () => root.render(
-      <I18nProvider>
-        <TooltipProvider>
-          <CountingHeader />
-        </TooltipProvider>
-      </I18nProvider>,
-    ));
-    const input = document.querySelector('input');
-    const setter = Object.getOwnPropertyDescriptor(browser.HTMLInputElement.prototype, 'value')?.set;
-    if (!input || !setter) throw new Error('Search input missing');
-    // The field's wrapper is the header's only line: a count joins it, never a row below.
-    const line = () => {
-      const field = input.parentElement;
-      const search = field?.parentElement;
-      const count = search?.querySelector('p') ?? null;
-      return {
-        children: search ? Array.from(search.children).filter((child) => child !== field && child !== count).length : -1,
-        count: count?.textContent ?? null,
-        countOnFieldLine: count === null || count.parentElement === search,
-        text: search?.textContent ?? '',
-      };
-    };
-    const submit = async (query: string) => {
-      await act(async () => {
-        setter.call(input, query);
-        input.dispatchEvent(new InputEvent('input', { bubbles: true }));
-      });
-      await act(async () => {
-        input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
-      });
-    };
-
-    expect(line().count).toBeNull();
-    expect(line().children).toBe(0);
-    expect(line().text).not.toContain('Press Enter to search');
-    expect(line().text).not.toContain('Esc to clear');
-    for (const [query, expected] of [['none', '0 matches'], ['one', '1 match'], ['many', '3 matches']] as const) {
-      await submit(query);
-      expect(line().count).toBe(expected);
-      expect(line().countOnFieldLine).toBe(true);
-      expect(line().children).toBe(0);
-    }
-    await act(async () => {
-      document.querySelector<HTMLButtonElement>('[aria-label="Clear search"]')?.click();
-    });
-    expect(line().count).toBeNull();
-    expect(line().children).toBe(0);
-  });
-
-  test('compact variant clears the search query with the clear button', async () => {
-    await act(async () => root.render(
-      <I18nProvider>
-        <TooltipProvider>
-          <StatefulHeader {...baseProps} hideDirectoryControls initialQuery="draft" />
-        </TooltipProvider>
-      </I18nProvider>,
-    ));
-
-    const input = document.querySelector('input')!;
-    expect(input.value).toBe('draft');
-
-    const clearButton = document.querySelector<HTMLButtonElement>('[aria-label="Clear search"]');
-    expect(clearButton).not.toBeNull();
-    await act(async () => clearButton!.click());
-    expect(input.value).toBe('');
-  });
-
-  test('compact variant applies the query on Enter, not on every keystroke', async () => {
+  test('typing commits after the debounce, and Enter commits at once', async () => {
     const submitted: string[] = [];
-    await act(async () => root.render(
-      <I18nProvider>
-        <TooltipProvider>
-          <SidebarHeader {...baseProps} hideDirectoryControls setSessionSearchQuery={(value) => submitted.push(value)} />
-        </TooltipProvider>
-      </I18nProvider>,
-    ));
+    await render(<SidebarHeader {...baseProps} setSessionSearchQuery={(value) => submitted.push(value)} />);
 
-    const input = document.querySelector('input')!;
-    const setValue = Object.getOwnPropertyDescriptor(browser.HTMLInputElement.prototype, 'value')!.set!;
-    await act(async () => {
-      setValue.call(input, 'abc');
-      input.dispatchEvent(new InputEvent('input', { bubbles: true }));
-    });
+    await type('abc');
     expect(submitted).toEqual([]);
-
-    await act(async () => {
-      input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
-    });
+    await press('Enter');
     expect(submitted).toEqual(['abc']);
   });
 
-  test('full variant renders directory controls and hides the search input until opened', async () => {
-    await act(async () => root.render(
-      <I18nProvider>
-        <TooltipProvider>
-          <SidebarHeader {...baseProps} />
-        </TooltipProvider>
-      </I18nProvider>,
-    ));
-
-    expect(document.querySelector('input')).toBeNull();
-    expect(document.querySelector('[aria-label="Search sessions"]')).not.toBeNull();
-    expect(document.querySelector('[aria-label="Add project"]')).not.toBeNull();
-    expect(document.querySelector('[aria-label="Display mode"]')).not.toBeNull();
-  });
-
-  test('the row holds the list controls and one More menu, and no page buttons', async () => {
-    await act(async () => root.render(
-      <I18nProvider>
-        <TooltipProvider>
-          <SidebarHeader {...baseProps} />
-        </TooltipProvider>
-      </I18nProvider>,
-    ));
-    const labels = [...document.querySelectorAll('button')].map((button) => button.getAttribute('aria-label'));
-    expect(labels).toEqual(['Search sessions', 'Add project', 'Display mode', 'More']);
-  });
-
-  test('the search button opens the field and, once open, closes it', async () => {
-    let opened = 0;
+  test('the clear button and Escape empty the field; Escape on an empty field drops the search', async () => {
     let closed = 0;
-    const render = (isSessionSearchOpen: boolean) => act(async () => root.render(
-      <I18nProvider>
-        <TooltipProvider>
-          <SidebarHeader {...baseProps} isSessionSearchOpen={isSessionSearchOpen} openSessionSearch={() => { opened += 1; }} closeSessionSearch={() => { closed += 1; }} />
-        </TooltipProvider>
-      </I18nProvider>,
-    ));
-    const button = () => document.querySelector<HTMLButtonElement>('[aria-label="Search sessions"]')!;
-    await render(false);
-    await act(async () => button().click());
-    expect([opened, closed]).toEqual([1, 0]);
-    await render(true);
-    expect(button().getAttribute('aria-expanded')).toBe('true');
-    await act(async () => button().click());
-    expect([opened, closed]).toEqual([1, 1]);
+    await render(<StatefulHeader {...baseProps} initialQuery="draft" closeSessionSearch={() => { closed += 1; }} />);
+    expect(input().value).toBe('draft');
+
+    await act(async () => document.querySelector<HTMLButtonElement>('[aria-label="Clear search"]')!.click());
+    expect(input().value).toBe('');
+    expect(searchInTrigger()).toBeNull();
+
+    await type('again');
+    await press('Enter');
+    expect(searchInTrigger()).not.toBeNull();
+    await press('Escape');
+    expect(input().value).toBe('');
+    expect(closed).toBe(0);
+
+    await press('Escape');
+    expect(closed).toBe(1);
   });
 
-  for (const isVSCode of [true, false]) test(`the ${isVSCode ? 'compact' : 'full'} header renders the Filters menu its runtime supports`, async () => {
-    const options = sidebarSearchScopeOptions({ isVSCode, currentProjectAvailable: true });
-    // VS Code has one workspace and no message search; elsewhere Project and Author join.
-    expect(options).toEqual(isVSCode
-      ? { lifecycle: true, project: null, searchIn: true, author: false }
-      : { lifecycle: true, project: { currentAvailable: true }, searchIn: true, author: true });
-    const scope = <SearchScopeMenu filters={{}} defaults={{ lifecycle: 'active', searchIn: 'everything', author: 'any' }} options={options} onChange={() => undefined} resultCount={null} layout="sidebar" />;
-    await act(async () => root.render(<I18nProvider><TooltipProvider><SidebarHeader {...baseProps} hideDirectoryControls={isVSCode} isSessionSearchOpen={!isVSCode} searchScope={scope} /></TooltipProvider></I18nProvider>));
-    expect(document.querySelectorAll('[data-search-scope-trigger]')).toHaveLength(1);
+  test('the compact header is the search field alone, with the match count inside it', async () => {
+    await render(<SidebarHeader {...baseProps} hideDirectoryControls />);
     expect(document.querySelectorAll('input')).toHaveLength(1);
-    // Opening the menu is Base UI interaction, which needs a browser check.
+    expect(input().getAttribute('placeholder')).toBe('Search sessions...');
+    expect(buttonLabels()).toEqual([]);
+
+    const field = () => document.querySelector('[data-session-search-input]')!;
+    for (const [count, label] of [[0, '0 matches'], [1, '1 match'], [3, '3 matches']] as const) {
+      await render(<SidebarHeader {...baseProps} hideDirectoryControls sessionSearchQuery="token" searchMatchCount={count} />);
+      expect(field().querySelector(`[aria-label="${label}"]`)?.textContent).toBe(String(count));
+    }
+    // A total not known yet shows no number.
+    await render(<SidebarHeader {...baseProps} hideDirectoryControls sessionSearchQuery="token" searchMatchCount={null} />);
+    expect(field().querySelector('[aria-label$="matches"]')).toBeNull();
+    expect(searchInTrigger()).not.toBeNull();
   });
 });

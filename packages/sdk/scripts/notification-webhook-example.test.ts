@@ -1,9 +1,9 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
-import { spawn, type ChildProcess } from 'node:child_process';
+import type { ChildProcess } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import net from 'node:net';
 import { fileURLToPath } from 'node:url';
 
+import { startExampleService } from './fixtures/example-service';
 import { startReceiver, type Receiver } from '../examples/notification-webhook/receiver';
 import { notificationsProviderSchemasV1 as schemas } from '../src/service-provider-schemas';
 import {
@@ -20,15 +20,6 @@ import {
 
 const serviceEntry = fileURLToPath(new URL('../examples/notification-webhook/service/main.js', import.meta.url));
 const PROVIDER = 'ext-notification-webhook';
-
-const freePort = () => new Promise<number>((resolve, reject) => {
-  const server = net.createServer();
-  server.once('error', reject);
-  server.listen(0, '127.0.0.1', () => {
-    const { port } = Object(server.address());
-    server.close(() => resolve(Number(port)));
-  });
-});
 
 let receiver: Receiver;
 let service: ChildProcess;
@@ -57,24 +48,13 @@ beforeAll(async () => {
       return Response.json({ status: answer.status, headers: { 'content-type': answer.headers.get('content-type') ?? '' }, body: await answer.text() });
     },
   });
-  servicePort = await freePort();
-  service = spawn('node', [serviceEntry], {
+  ({ service, port: servicePort } = await startExampleService({
+    entry: serviceEntry,
+    token: serviceToken,
     env: {
-      PATH: process.env.PATH,
-      OPENCHAMBER_SERVICE_PORT: String(servicePort),
-      OPENCHAMBER_SERVICE_TOKEN: serviceToken,
       [OPENCHAMBER_HOST_CALLBACK_URL]: `http://127.0.0.1:${callback.port}`,
     },
-    stdio: 'ignore',
-  });
-  for (let attempt = 0; attempt < 100; attempt += 1) {
-    const ready = await fetch(`http://127.0.0.1:${servicePort}/health`, { headers: { authorization: `Bearer ${serviceToken}` } })
-      .then((response) => response.ok)
-      .catch(() => false);
-    if (ready) return;
-    await new Promise((resolve) => { setTimeout(resolve, 50); });
-  }
-  throw new Error('the webhook notifier service did not become ready');
+  }));
 });
 
 afterAll(async () => {

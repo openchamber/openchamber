@@ -73,7 +73,7 @@ export const MobileSessionRow: React.FC<{
   const hasActivityDuration = useHasSessionTurnDuration(session.id, isStreaming);
   const showActivityDuration = (isStreaming || showUnread) && hasActivityDuration;
   const hasChildren = node.children.length > 0;
-  const expanded = row.forceExpanded === true || row.expanded === true;
+  const expanded = row.expanded === true;
   // A folded row stands for its subsessions too: their waiting requests count here.
   const familyIds = React.useMemo(
     () => (hasChildren && !expanded ? [session.id, ...collectDescendantIds(node)] : [session.id]),
@@ -120,7 +120,7 @@ export const MobileSessionRow: React.FC<{
     </span>
   ) : null);
   const inSpace = row.secondaryMeta?.inSpace === true;
-  const toggle = hasChildren && !row.forceExpanded
+  const toggle = hasChildren
     ? () => toggleParent(sessionExpansionKey(row.renderContext, row.archived, session.id))
     : undefined;
 

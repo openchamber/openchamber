@@ -62,12 +62,9 @@ import {
 } from './sidebar/sessionWorktreeMenu';
 import { publishSessionWorktreeMenuLoader } from './sidebar/sessionWorktreeMenuLoader';
 import { resolveProjectRef } from '@/lib/worktreeSessionCreator';
-import { SearchScopeMenu } from '@/components/search/SearchScopeMenu';
-import { SearchFilterChips } from '@/components/search/SearchFilterChips';
-import { searchFilterChipKeys } from '@/components/search/searchFilterChipKeys';
-import { parseOmniQuery } from '@/lib/search/omniQuery';
-import { useOmniSearchState } from '@/lib/search/omniSearchState';
-import { isSidebarSearchActive, sidebarSearchScopeOptions } from './sidebar/sidebarConversationSearch';
+import type { SearchScope } from '@/lib/search/omniQuery';
+import { effectiveSearchScope, useSearchScopes } from '@/components/search/searchScopes';
+import type { ContentSearchStatus } from '@/hooks/useConversationSearch';
 
 const PROJECT_ACTIVE_SESSION_STORAGE_KEY = 'oc.sessions.activeSessionByProject';
 const activeSessionByProjectSchema = z.record(z.string(), z.string().min(1).catch(''));
@@ -85,10 +82,14 @@ interface SessionSidebarProps {
    */
   phone?: {
     searchQuery: string;
+    searchScope: SearchScope;
     clearSearch: () => void;
+    onSearchStatusChange: (status: ContentSearchStatus) => void;
     renderList: (props: SessionProjectListProps) => React.ReactNode;
   };
 }
+
+const IDLE_SEARCH_STATUS: ContentSearchStatus = { kind: 'idle' };
 
 const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
   isVisible = true,
@@ -104,10 +105,12 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
   streamPerfCount(`ui.session_sidebar.render.${mobileVariant ? 'mobile' : 'desktop'}`);
   streamPerfCount(`ui.session_sidebar.render.${isVisible ? 'visible' : 'hidden'}`);
   const { t } = useI18n();
-  const [isSessionSearchOpen, setIsSessionSearchOpen] = React.useState(false);
+  // The field is always in the header, so its text never filters the list unseen.
+  const [sessionSearchText, setSessionSearchText] = React.useState('');
+  const [sessionSearchScope, setSessionSearchScope] = React.useState<SearchScope>('everything');
   // Reported by the session list below: the header cannot see what matched.
   const [searchMatchCount, setSearchMatchCount] = React.useState<number | null>(0);
-  const sessionSearchContainerRef = React.useRef<HTMLDivElement | null>(null);
+  const [searchStatus, setSearchStatus] = React.useState<ContentSearchStatus>(IDLE_SEARCH_STATUS);
   const sessionSearchInputRef = React.useRef<HTMLInputElement | null>(null);
   const [editingProjectDialogId, setEditingProjectDialogId] = React.useState<string | null>(null);
   const safeStorage = React.useMemo(() => getDeferredSafeStorage(), []);
@@ -149,55 +152,32 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
   const updateProjectMeta = useProjectsStore((state) => state.updateProjectMeta);
   const reorderProjects = useProjectsStore((state) => state.reorderProjects);
 
-  const omniSearchProjects = React.useMemo(() => projects.flatMap((project) => {
-    const value = normalizePath(project.path);
-    return value ? [{ value, label: project.label || value.split('/').pop() || value }] : [];
-  }), [projects]);
-  const {
-    text: sessionSearchText,
-    filters: sessionSearchFilters,
-    query: sessionSearchQuery,
-    setText: setSessionSearchText,
-    setFilter: setOmniSearchFilter,
-    removeFilter: removeSessionSearchFilter,
-    clearAll: clearSessionSearchFilters,
-    clearText: clearSessionSearchText,
-  } = useOmniSearchState({
-    surface: 'sidebar',
-    defaults: { lifecycle: 'active', searchIn: 'everything', author: 'any' },
-    projects: omniSearchProjects,
-  });
-  const openSessionSearch = React.useCallback(() => setIsSessionSearchOpen(true), []);
-  // The field and its query go together: once the field is hidden, its filters
-  // cannot keep affecting the list.
+  // Clearing a search clears its scope too: the next one starts wide.
   const clearPhoneSearch = phone?.clearSearch;
   const resetSessionSearch = React.useCallback(() => {
-    clearSessionSearchText();
-    setIsSessionSearchOpen(false);
+    setSessionSearchText('');
+    setSessionSearchScope('everything');
     clearPhoneSearch?.();
-  }, [clearPhoneSearch, clearSessionSearchText]);
+  }, [clearPhoneSearch]);
+  const applySessionSearchText = React.useCallback((text: string) => {
+    setSessionSearchText(text);
+    if (text === '') setSessionSearchScope('everything');
+  }, []);
 
   const setSettingsDialogOpen = useUIStore((state) => state.setSettingsDialogOpen);
   const setSessionSwitcherOpen = useUIStore((state) => state.setSessionSwitcherOpen);
   const setWorktreesPageProjectId = useUIStore((state) => state.setWorktreesPageProjectId);
 
-  const searchQuery = phone ? phone.searchQuery : (hideDirectoryControls || isSessionSearchOpen) ? sessionSearchQuery : '';
-  const omniQuery = React.useMemo(() => parseOmniQuery(searchQuery), [searchQuery]);
-  const sidebarLifecycle = omniQuery.filters.lifecycle ?? 'active';
-  const sidebarSearchIn = omniQuery.filters.searchIn ?? 'everything';
-  const normalizedSessionSearchQuery = React.useMemo(() => omniQuery.text.trim().toLowerCase(), [omniQuery.text]);
-
-  const hasSessionSearchQuery = isSidebarSearchActive(omniQuery);
-
+  const searchQuery = phone ? phone.searchQuery : sessionSearchText;
+  const searchScopes = useSearchScopes();
+  const searchScope = effectiveSearchScope(phone ? phone.searchScope : sessionSearchScope, searchScopes);
+  const searchText = searchQuery.trim();
+  const hasSessionSearchQuery = searchText.length > 0;
 
   useSessionSearchEffects({
     // The phone's search field is its sheet's, without the keyboard shortcuts.
     enabled: isVisible && !phone,
-    isSessionSearchOpen,
-    openSessionSearch,
-    closeSessionSearch: resetSessionSearch,
     sessionSearchInputRef,
-    sessionSearchContainerRef,
   });
 
   const gitBranches = useGitAllBranches(isVisible);
@@ -532,7 +512,6 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
     projectRootBranches,
     resolvedWorktreeTopologyKey,
     unresolvedWorktreeProjectPaths,
-    isSessionSearchOpen,
     sessionSearchQuery: searchQuery,
     editingProjectDialogId,
     updateDialogOpen,
@@ -633,10 +612,9 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
     },
   });
 
-  // VS Code has no Archive page: its archived sessions sit inline behind the header toggle.
   const searchEmptyState = React.useMemo(() => (
-    <SidebarSearchEmptyState query={searchQuery} showArchive={!isVSCode} resetSessionSearch={resetSessionSearch} />
-  ), [isVSCode, resetSessionSearch, searchQuery]);
+    <SidebarSearchEmptyState />
+  ), []);
 
   // Web/desktop route archived sessions to the Archive page; only the VS Code
   // compact webview keeps inline archived buckets behind its toggle.
@@ -749,8 +727,8 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
       view={{
         isVisible,
         hasSessionSearchQuery,
-        normalizedSessionSearchQuery,
-        omniSearch: { text: omniQuery.text, lifecycle: sidebarLifecycle, searchIn: sidebarSearchIn, author: omniQuery.filters.author ?? 'any', project: omniQuery.filters.project, worktree: omniQuery.filters.worktree },
+        searchText,
+        searchScope,
         activeProjectId,
         showInlineArchived,
         useGroupedSections,
@@ -767,13 +745,13 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
         unresolvedWorktreeProjectPaths,
         projectView: projectView.state,
         onSearchMatchCountChange: setSearchMatchCount,
+        onSearchStatusChange: phone?.onSearchStatusChange ?? setSearchStatus,
       renderList: phone?.renderList,
       }}
       actions={{
         rowActions: {
           allowReselect,
           onSessionSelected,
-          resetSessionSearch,
         },
         alwaysShowActions: alwaysShowSidebarActions,
         setActiveProjectIdOnly,
@@ -805,7 +783,6 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
     // animation.
     <TooltipProvider delay={400} closeDelay={0} timeout={300}>
     <div
-      ref={sessionSearchContainerRef}
       className={cn(
         'relative flex h-full flex-col text-foreground overflow-x-hidden',
         mobileVariant ? '' : 'bg-transparent',
@@ -820,39 +797,14 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
         showSourceBoard={!mobileVariant && !isVSCode}
         headerActionIconClass={headerActionIconClass}
         headerActionButtonClass={headerActionButtonClass}
-        isSessionSearchOpen={isSessionSearchOpen}
-        openSessionSearch={openSessionSearch}
         closeSessionSearch={resetSessionSearch}
         sessionSearchInputRef={sessionSearchInputRef}
         sessionSearchQuery={sessionSearchText}
-        setSessionSearchQuery={setSessionSearchText}
-        searchChips={searchFilterChipKeys(sessionSearchFilters, { lifecycle: 'active', searchIn: 'everything', author: 'any' }).length > 0 ? <SearchFilterChips
-          filters={sessionSearchFilters}
-          defaults={{ lifecycle: 'active', searchIn: 'everything', author: 'any' }}
-          projectOptions={normalizedProjects.map((project) => ({ ...project, value: project.normalizedPath, label: project.label ?? project.normalizedPath.split('/').pop() ?? project.normalizedPath }))}
-          worktreeOptions={isVSCode ? undefined : [...availableWorktreesByProject.values()].flatMap((worktrees) => worktrees.map((worktree) => ({ value: worktree.path, label: worktree.branch || worktree.label || worktree.path.split('/').pop() || worktree.path })))}
-          onRemove={removeSessionSearchFilter}
-        /> : undefined}
-        onRemoveLastSearchChip={() => {
-          const keys = searchFilterChipKeys(sessionSearchFilters, { lifecycle: 'active', searchIn: 'everything', author: 'any' });
-          const key = keys.at(-1);
-          if (key) removeSessionSearchFilter(key);
-        }}
-        onClearSearchFilters={clearSessionSearchFilters}
-        onCommitSessionSearch={(text) => setSessionSearchText(text, { commit: true })}
-        hasSessionSearchQuery={hasSessionSearchQuery}
-        searchMatchCount={searchMatchCount}
-        // The compact header (VS Code) keeps its search field open, so its menu shows too.
-        searchScope={isSessionSearchOpen || hideDirectoryControls ? <SearchScopeMenu
-          filters={sessionSearchFilters}
-          defaults={{ lifecycle: 'active', searchIn: 'everything', author: 'any' }}
-          options={sidebarSearchScopeOptions({ isVSCode, currentProjectAvailable: Boolean(activeProjectId) })}
-          projectOptions={isVSCode ? undefined : normalizedProjects.map((project) => ({ value: project.normalizedPath, label: project.label ?? project.normalizedPath.split('/').pop() ?? project.normalizedPath }))}
-          worktreeOptions={isVSCode ? undefined : [...availableWorktreesByProject.values()].flatMap((worktrees) => worktrees.map((worktree) => ({ value: worktree.path, label: worktree.branch || worktree.label || worktree.path.split('/').pop() || worktree.path })))}
-          onChange={setOmniSearchFilter}
-          resultCount={searchMatchCount}
-          layout="sidebar"
-        /> : null}
+        setSessionSearchQuery={applySessionSearchText}
+        searchScope={sessionSearchScope}
+        setSearchScope={setSessionSearchScope}
+        searchStatus={hasSessionSearchQuery ? searchStatus : IDLE_SEARCH_STATUS}
+        searchMatchCount={hasSessionSearchQuery ? searchMatchCount : null}
         collapseAll={projectView.actions.collapseAll}
         expandAll={projectView.actions.expandAll}
         showStats={!isVSCode}

@@ -2,13 +2,12 @@ import { describe, expect, test } from 'bun:test';
 import type { SessionSidebarActivityKey, SessionSidebarRow } from './sessionSidebarRowModel';
 import { findSessionSidebarDisclosure } from './sessionSidebarDisclosure';
 
-const header = (activityKey: SessionSidebarActivityKey, collapsed: boolean, forceExpanded = false): SessionSidebarRow => ({
+const header = (activityKey: SessionSidebarActivityKey, collapsed: boolean): SessionSidebarRow => ({
   kind: 'activity-header',
   key: `activity:${activityKey}`,
   estimateSize: 28,
   activityKey,
   collapsed,
-  forceExpanded,
 });
 
 const child = (key: string): SessionSidebarRow => ({
@@ -30,7 +29,6 @@ const sessionRow = (key: string, expanded?: boolean): SessionSidebarRow => ({
   key,
   estimateSize: 34,
   expanded,
-  forceExpanded: expanded === undefined ? undefined : false,
 } as SessionSidebarRow);
 
 describe('findSessionSidebarDisclosure', () => {
@@ -80,9 +78,9 @@ describe('findSessionSidebarDisclosure', () => {
     expect(findSessionSidebarDisclosure(previous, next)).toBeNull();
   });
 
-  test('ignores headers search holds open', () => {
-    const previous = [header('chats', true), header('work', false)];
-    const next = [header('chats', false, true), child('c1'), header('work', false, true)];
+  test('ignores a search replacing the headers with its results', () => {
+    const previous = [header('chats', true), header('work', false), child('w1')];
+    const next: SessionSidebarRow[] = [{ kind: 'search-archived-caption', key: 'search:archived', estimateSize: 34 }, { kind: 'search-more', key: 'search:more', estimateSize: 36 }];
 
     expect(findSessionSidebarDisclosure(previous, next)).toBeNull();
   });

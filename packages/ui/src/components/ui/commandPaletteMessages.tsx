@@ -13,8 +13,6 @@ const ROLE_ICON: Record<MessageSearchRole, IconName> = {
   reasoning: 'brain-ai-3',
 };
 
-export type MessageAuthor = 'any' | 'user' | 'assistant' | 'reasoning';
-
 const formatHitDate = (createdAt: number): string => {
   const date = new Date(createdAt);
   if (!Number.isFinite(date.getTime())) return '';

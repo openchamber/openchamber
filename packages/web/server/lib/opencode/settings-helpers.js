@@ -162,6 +162,13 @@ const sanitizeCustomProviderLogos = (value) => {
   return result;
 };
 
+/**
+ * Message search is on unless the user turned it off. A settings file that
+ * never mentions it is a user who never chose, and gets the default; an
+ * explicit `false` is a choice and stays.
+ */
+export const isMessageSearchEnabled = (settings) => settings?.messageSearchEnabled !== false;
+
 export const createSettingsHelpers = (dependencies) => {
   const {
     normalizePathForPersistence,
@@ -662,10 +669,6 @@ export const createSettingsHelpers = (dependencies) => {
     }
     if (candidate.sessionTabsPerWorkspace === true || candidate.sessionTabsPerWorkspace === false) {
       result.sessionTabsPerWorkspace = candidate.sessionTabsPerWorkspace;
-    }
-    const commandPaletteShowArchivedSessions = z.boolean().safeParse(candidate.commandPaletteShowArchivedSessions);
-    if (commandPaletteShowArchivedSessions.success) {
-      result.commandPaletteShowArchivedSessions = commandPaletteShowArchivedSessions.data;
     }
     if (candidate.terminalCloseOnExit === true || candidate.terminalCloseOnExit === false) {
       result.terminalCloseOnExit = candidate.terminalCloseOnExit;
@@ -1427,6 +1430,8 @@ export const createSettingsHelpers = (dependencies) => {
       mobileKeyboardMode,
       inputHistoryScope,
       inputHistoryLimit,
+      // Always sent, resolved: the client holds its own copy of this switch and must follow the server's.
+      messageSearchEnabled: isMessageSearchEnabled(sanitized),
       securityScopedBookmarks: bookmarks,
       pinnedDirectories: normalizeStringArray(settings.pinnedDirectories),
       ...(process.env.OPENCHAMBER_RUNTIME === 'desktop'

@@ -63,8 +63,8 @@ export const MobileWorktreeRow: React.FC<{
   const { worktree, space, spaceName, project, refs, label, secondName, branch, title, inWork, selected, finishing, worktreeRemoving, activityState } = work;
   const mixedProject = useMixedRowProject(row.projectId, row.mixed && row.detailed);
   const expandable = !row.empty;
-  const expanded = row.forceExpanded || !row.collapsed;
-  const toggle = expandable && !row.forceExpanded ? () => onToggle(row.groupKey) : undefined;
+  const expanded = !row.collapsed;
+  const toggle = expandable ? () => onToggle(row.groupKey) : undefined;
   const setRevealed = (next: boolean) => useMobileSidebarRowsStore.getState().setRevealed(row.key, next);
   const after = (action: () => void) => () => {
     setRevealed(false);
@@ -322,8 +322,8 @@ export const MobileRunRow: React.FC<{
   const activityState = useCollapsedSessionActivityState({ nodes: activityNodes, blockingSessionIds: row.blockingSessionIds });
   const activity = activityState ? <CollapsedActivityIndicator state={activityState} /> : null;
   const mixedProject = useMixedRowProject(row.projectId, row.detailed && row.renderContext === 'timeline-mixed');
-  const expanded = row.forceExpanded || row.expanded;
-  const toggle = row.laneNodes.length > 0 && !row.forceExpanded ? () => toggleParent(row.expansionKey) : undefined;
+  const expanded = row.expanded;
+  const toggle = row.laneNodes.length > 0 ? () => toggleParent(row.expansionKey) : undefined;
   const laneCount = run.lanes.length;
   const setRevealed = (next: boolean) => useMobileSidebarRowsStore.getState().setRevealed(row.key, next);
   const after = (action: () => void) => () => {

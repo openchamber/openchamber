@@ -1782,7 +1782,7 @@ const ToolPartContent: React.FC<ToolPartProps & { header?: ToolRowHeader; subage
 
     const normalizedPartTool = normalizeToolName(part.tool);
     const isTaskTool = isSubagentTool(normalizedPartTool);
-    // The registry sees the full name OpenCode reported (`mcp.jira.search`);
+    // The registry sees the full name OpenCode reported (`jira_search`);
     // the built-in switches below keep the normalized one.
     const presentation = useGuestToolPresentation(part.tool);
 

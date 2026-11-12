@@ -5,7 +5,7 @@ import { FinishedWorktreesSettings } from './FinishedWorktreesSettings';
 import { SessionWorkSettings } from './SessionWorkSettings';
 import { PasskeySettings } from './PasskeySettings';
 import { AppLinkSecuritySettings } from './AppLinkSecuritySettings';
-import { DefaultsSettings } from './DefaultsSettings';
+import { DefaultsSettings, SessionContextSettings } from './DefaultsSettings';
 import { GitSettings } from './GitSettings';
 import { NotificationSettings } from './NotificationSettings';
 import { VoiceSettings } from './VoiceSettings';
@@ -157,14 +157,16 @@ const VisualSectionContent: React.FC = () => {
 
 const ChatSectionContent: React.FC = () => <ChatSettings />;
 
-// Sessions section: Default model & agent, Session retention
+// Sessions: the models sessions run on, then what the sidebar shows and what
+// gets cleaned out of it, then the context mechanics (compaction, prompt cache).
 const SessionsSectionContent: React.FC<{ runtimeEndpointEpoch: number }> = ({ runtimeEndpointEpoch }) => {
     return (
         <>
-            <DefaultsSettings key={runtimeEndpointEpoch} />
+            <DefaultsSettings key={`defaults-${runtimeEndpointEpoch}`} />
             <SessionWorkSettings />
             <SessionRetentionSettings />
             {!isVSCodeRuntime() && <FinishedWorktreesSettings />}
+            <SessionContextSettings key={`context-${runtimeEndpointEpoch}`} />
         </>
     );
 };

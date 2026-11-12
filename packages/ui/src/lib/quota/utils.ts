@@ -114,6 +114,8 @@ export const formatWindowLabel = (label: string): string => {
   if (label === 'plan_limit') return t('quota.window.planLimit');
   if (label === 'auto') return t('quota.window.auto');
   if (label === 'api') return t('quota.window.api');
+  // A product name, the same in every language.
+  if (label === 'vibe') return 'Vibe';
   if (label === 'on_demand') return t('quota.window.onDemand');
   if (label === 'session') return t('quota.window.session');
   if (label === 'premium') return t('quota.window.premium');

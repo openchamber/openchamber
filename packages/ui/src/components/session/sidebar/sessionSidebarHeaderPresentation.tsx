@@ -20,19 +20,17 @@ export const SessionSidebarActivityHeader: React.FC<{
   label?: string;
   preview?: boolean;
   collapsed: boolean;
-  forceExpanded: boolean;
   alwaysShowActions: boolean;
   onToggle: () => void;
   onNewChat: () => void;
-}> = ({ activityKey, label, preview = false, collapsed, forceExpanded, alwaysShowActions, onToggle, onNewChat }) => {
+}> = ({ activityKey, label, preview = false, collapsed, alwaysShowActions, onToggle, onNewChat }) => {
   const { t } = useI18n();
   const chats = activityKey === 'chats';
   // One header for every zone, so zones line up with the project headers.
   return <div className="relative group/chats -ms-2.5 -me-2">
     <button
       type="button"
-      onClick={forceExpanded ? undefined : onToggle}
-      disabled={forceExpanded}
+      onClick={onToggle}
       // The caption's own toggle: pressing it can lift the section (`rowDrag`).
       data-row-drag=""
       className={cn('group flex w-full items-center gap-1 py-1 ps-4 text-start focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50', chats ? 'pe-10' : 'pe-3.5')}
@@ -46,15 +44,13 @@ export const SessionSidebarActivityHeader: React.FC<{
         {label ?? (isBuiltinActivityKey(activityKey) ? t(ACTIVITY_TITLE_KEY[activityKey]) : '')}
       </span>
       {preview ? <PreviewMark /> : null}
-      {!forceExpanded ? (
-        <Icon
-          name={collapsed ? 'arrow-right-s' : 'arrow-down-s'}
-          className={cn(
-            'h-3.5 w-3.5 text-muted-foreground',
-            collapsed || alwaysShowActions ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100',
-          )}
-        />
-      ) : null}
+      <Icon
+        name={collapsed ? 'arrow-right-s' : 'arrow-down-s'}
+        className={cn(
+          'h-3.5 w-3.5 text-muted-foreground',
+          collapsed || alwaysShowActions ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100',
+        )}
+      />
     </button>
     {chats ? <button
       type="button"
@@ -73,16 +69,14 @@ export const SessionSidebarCaption: React.FC<{
   label?: string;
   preview?: boolean;
   collapsed: boolean;
-  forceExpanded: boolean;
   alwaysShowActions: boolean;
   onToggle: () => void;
-}> = ({ label, preview = false, collapsed, forceExpanded, alwaysShowActions, onToggle }) => {
+}> = ({ label, preview = false, collapsed, alwaysShowActions, onToggle }) => {
   const { t } = useI18n();
   return <div className="relative -ms-2.5 -me-2">
     <button
       type="button"
-      onClick={forceExpanded ? undefined : onToggle}
-      disabled={forceExpanded}
+      onClick={onToggle}
       // The caption's own toggle: pressing it can lift the section (`rowDrag`).
       data-row-drag=""
       className="group flex w-full items-center gap-1 py-1 ps-4 pe-3.5 text-start focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
@@ -92,15 +86,13 @@ export const SessionSidebarCaption: React.FC<{
         {label ?? t('sessions.sidebar.activity.projectsTitle')}
       </span>
       {preview ? <PreviewMark /> : null}
-      {!forceExpanded ? (
-        <Icon
-          name={collapsed ? 'arrow-right-s' : 'arrow-down-s'}
-          className={cn(
-            'h-3.5 w-3.5 text-muted-foreground',
-            collapsed || alwaysShowActions ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100',
-          )}
-        />
-      ) : null}
+      <Icon
+        name={collapsed ? 'arrow-right-s' : 'arrow-down-s'}
+        className={cn(
+          'h-3.5 w-3.5 text-muted-foreground',
+          collapsed || alwaysShowActions ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100',
+        )}
+      />
     </button>
   </div>;
 };

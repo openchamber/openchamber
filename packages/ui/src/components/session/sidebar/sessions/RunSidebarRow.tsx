@@ -55,7 +55,6 @@ type Props = {
   mixed: boolean;
   expansionKey: string;
   expanded: boolean;
-  forceExpanded: boolean;
   alwaysShowActions: boolean;
   toggleParent: (key: string) => void;
 };
@@ -92,7 +91,6 @@ function RunSidebarRowComponent({
   mixed,
   expansionKey,
   expanded,
-  forceExpanded,
   alwaysShowActions,
   toggleParent,
 }: Props): React.ReactNode {
@@ -110,7 +108,6 @@ function RunSidebarRowComponent({
   const activityState = useCollapsedSessionActivityState({ nodes: activityNodes, blockingSessionIds });
   const activity = activityState ? <CollapsedActivityIndicator state={activityState} /> : null;
   const expandable = laneNodes.length > 0;
-  const isExpanded = forceExpanded || expanded;
   const [renaming, setRenaming] = React.useState(false);
   const [renameDraft, setRenameDraft] = React.useState('');
   const renameInputRef = React.useRef<HTMLInputElement>(null);
@@ -132,7 +129,7 @@ function RunSidebarRowComponent({
   };
   const toggle = (event: React.SyntheticEvent): void => {
     event.stopPropagation();
-    if (!forceExpanded) toggleParent(expansionKey);
+    toggleParent(expansionKey);
   };
   const toggleWork = (event: React.MouseEvent): void => {
     event.stopPropagation();
@@ -179,8 +176,8 @@ function RunSidebarRowComponent({
       role="button"
       tabIndex={0}
       className={cn('absolute inset-0 inline-flex items-center justify-center rounded-sm text-muted-foreground hover:text-foreground focus-visible:outline-none', hoverIn)}
-      aria-label={isExpanded ? t('sessions.sidebar.run.collapse') : t('sessions.sidebar.run.expand')}
-      aria-expanded={isExpanded}
+      aria-label={expanded ? t('sessions.sidebar.run.collapse') : t('sessions.sidebar.run.expand')}
+      aria-expanded={expanded}
       onClick={toggle}
       onKeyDown={(event) => {
         if (event.key !== 'Enter' && event.key !== ' ') return;
@@ -188,7 +185,7 @@ function RunSidebarRowComponent({
         toggle(event);
       }}
     >
-      <FileTreeChevron expanded={isExpanded} />
+      <FileTreeChevron expanded={expanded} />
     </span>
   ) : null;
   // The run's mark, where a worktree shows its branch mark.

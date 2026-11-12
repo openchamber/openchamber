@@ -1,37 +1,7 @@
 // How the chat follows a live reply, and the rules that decide it.
 //
-// The viewport trails the growing tail with one native smooth scroll after
-// another; the reply lands a block at a time (lib/streamTextCommit.ts), so
-// each landing reads as one short glide. Pure: no DOM, no React.
-
-// How long a just-issued follow glide counts as moving before it has moved:
-// a smooth scroll starts a frame or two after it is issued.
-export const GLIDE_START_GRACE_MS = 50;
-
-interface FollowGlideProgress {
-    // Scroll offset when last checked.
-    readonly lastTop: number;
-    readonly issuedAt: number;
-    // The content end per the list's state when the glide was issued.
-    readonly stateEnd: number;
-}
-
-/**
- * Whether a follow glide is still under way and should be left to finish,
- * decided from the list's state alone so these frames read no layout. A glide
- * is re-issued once the end moved on (re-issuing restarts the animation, so
- * only then).
- */
-export const isFollowGlideUnderWay = (
-    glide: FollowGlideProgress | null,
-    stateScroll: number,
-    stateEnd: number,
-    now: number,
-): boolean => (
-    glide !== null
-    && (Math.abs(stateScroll - glide.lastTop) > 0.5 || now - glide.issuedAt < GLIDE_START_GRACE_MS)
-    && Math.abs(glide.stateEnd - stateEnd) <= 1
-);
+// The viewport trails the growing tail with one glide (followGlide.ts) that
+// each landed block (lib/streamTextCommit.ts) re-aims. Pure: no DOM, no React.
 
 /**
  * Where a follow glide should go, or null to hold still: the true end (the

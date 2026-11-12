@@ -558,7 +558,15 @@ jobs:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           PR_NUMBER: ${{ steps.pr.outputs.number }}
         run: |
-          message="$(cat "$RUNNER_TEMP/review-message.md")"
+          # The review model sometimes closes the final marker line with stray
+          # characters, mostly `} */ -->`, and the strict check in the verdict
+          # step then fails the run. Rewrite that line from the JSON it holds;
+          # a message whose last line is not a marker stays as it is.
+          message="$(jq -Rrs '
+            (sub("\\s+$"; "") | split("\n")) as $lines
+            | ([$lines[-1] | capture("^\\s*<!-- oc-review-meta (?<json>\\{[^{}\\n]*\\})")? | .json | fromjson? | objects | {head, verdict}] | first) as $meta
+            | if $meta then $lines[:-1] + ["<!-- oc-review-meta \($meta | tojson) -->"] else $lines end
+            | join("\n")' "$RUNNER_TEMP/review-message.md")"
           heading='<h3>Code Review Summary</h3>'
 
           # Without the metadata marker there is no review to post; the verdict

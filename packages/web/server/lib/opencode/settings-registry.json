@@ -553,9 +553,6 @@
         "mobile"
       ]
     },
-    "commandPaletteShowArchivedSessions": {
-      "scope": "profile"
-    },
     "terminalCloseOnExit": {
       "scope": "profile",
       "surfaces": [

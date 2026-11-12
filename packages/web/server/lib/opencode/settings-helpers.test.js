@@ -8,7 +8,7 @@ import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_INPUT_HISTORY_LIMIT,
 } from './input-history-scope.js';
-import { createSettingsHelpers } from './settings-helpers.js';
+import { createSettingsHelpers, isMessageSearchEnabled } from './settings-helpers.js';
 import { createSettingsNormalizationRuntime } from './settings-normalization-runtime.js';
 
 const testFilePath = fileURLToPath(import.meta.url);
@@ -940,7 +940,7 @@ describe('settings registry gate', () => {
     codeBlockLineWrap: true, tableCellWrap: true, copyMessagesAsPlainText: true, showTurnChangedFiles: true, toolJsonViewMode: 'raw',
     timeFormatPreference: '24h', weekStartPreference: 'monday', messageStreamTransport: 'ws', diffLayoutPreference: 'inline', diffWrapLines: true, diffHideWhitespace: true,
     gitChangesViewMode: 'tree', gitmojiEnabled: true, defaultFileViewerPreview: true, directoryShowHidden: true, filesViewShowGitignored: true,
-    fileEditorKeymap: 'vim', fileEditorVimMappings: 'inoremap jk <Esc>', autoSaveEnabled: true, fileEditorWrapLines: false, confirmFileTreeMove: false, layoutAnimations: false, openLinksInBrowserPanel: true, liveBrowserTabLimit: 8, openTrackerLinksOnBoard: true, fileTreeSide: 'left', autoCreateWorktree: true, sessionTabsEnabled: true, sessionTabsPerWorkspace: true, commandPaletteShowArchivedSessions: true,
+    fileEditorKeymap: 'vim', fileEditorVimMappings: 'inoremap jk <Esc>', autoSaveEnabled: true, fileEditorWrapLines: false, confirmFileTreeMove: false, layoutAnimations: false, openLinksInBrowserPanel: true, liveBrowserTabLimit: 8, openTrackerLinksOnBoard: true, fileTreeSide: 'left', autoCreateWorktree: true, sessionTabsEnabled: true, sessionTabsPerWorkspace: true,
     allowPromptingSubagentSessions: true, inputSpellcheckEnabled: true, enterToSend: true, enterToSendConfigured: true, mobileReturnKeySends: true,
     largeTextPasteBehavior: 'attach', savePastedImagesAsFiles: true, followUpBehavior: 'steer', queueModeEnabled: true, inputHistoryScope: 'global', inputHistoryLimit: 40,
     draftStarters: [{ type: 'command', name: 'plan-feature' }], draftStartersVisible: true, draftStartersCraftGoalAdded: true, draftStartersScheduleTaskAdded: true,
@@ -1060,5 +1060,22 @@ describe('settings registry gate', () => {
       fileEditorWrapLines: false,
     });
     expect(helpers.sanitizeSettingsUpdate({ largeTextPasteBehavior: 'maybe', fileEditorKeymap: 'emacs' })).toEqual({});
+  });
+});
+
+describe('message search default', () => {
+  it('is on for a user who never chose, and keeps an explicit choice either way', () => {
+    const helpers = createTestHelpers();
+    // Never touched: the file has no key, the index runs, and the client is told so.
+    expect(isMessageSearchEnabled({})).toBe(true);
+    expect(isMessageSearchEnabled(undefined)).toBe(true);
+    expect(helpers.formatSettingsResponse({}).messageSearchEnabled).toBe(true);
+    // Turned off by hand: it stays off across a save and a reload.
+    const off = helpers.mergePersistedSettings({}, helpers.sanitizeSettingsUpdate({ messageSearchEnabled: false }));
+    expect(isMessageSearchEnabled(off)).toBe(false);
+    expect(helpers.formatSettingsResponse(JSON.parse(JSON.stringify(off))).messageSearchEnabled).toBe(false);
+    // An unrelated save does not write the default into the file.
+    expect('messageSearchEnabled' in helpers.mergePersistedSettings({}, helpers.sanitizeSettingsUpdate({ inputHistoryLimit: 40 }))).toBe(false);
+    expect(helpers.formatSettingsResponse({ messageSearchEnabled: true }).messageSearchEnabled).toBe(true);
   });
 });

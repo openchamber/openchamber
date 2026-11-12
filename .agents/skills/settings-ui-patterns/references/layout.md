@@ -19,7 +19,7 @@ All primitives and class constants below live in
 
 - `SettingsPageLayout` owns scrolling, page padding, the `@container` context, and the quiet save indicator (`showSaveStatus`).
 - A page opened from the settings sidebar passes `namedBySidebar` and no `description`: the sidebar already names it, so the title stays only for screen readers and focus, and only `headerEnd` actions show. A detail page (one agent, provider, server) keeps its visible title. A line the user must read (a consequence, a warning) goes into the content, not the page description.
-- Sections separate with a top border (`divider`, default true); the first section under the page header passes `divider={false}`.
+- Sections separate with a top border (`divider`, default true). The layout drops it above the first section that renders, so a section that is first only in some runtimes needs no `divider` logic of its own.
 - Section titles are real headers (L2). Do not nest an umbrella section around a list of `SettingsControlGroup`s when each group deserves its own header — promote groups to sections instead (see the Chat page precedent).
 
 ## Hierarchy Levels
@@ -38,9 +38,21 @@ Sidebar groups are defined in `packages/ui/src/lib/settings/metadata.ts`; `pageO
 
 Placement rules:
 
-- **General** hosts app-level settings that don't belong to a feature page, in this order: desktop app (startup, menu bar, tray, keep awake) and quick access (the system-wide Mini Chat and Quake shortcuts), files and editor, terminal, panels and links, password and network access, passkeys, trusted app links, OpenCode CLI binary, environment, agent tools, message stream transport, privacy.
+- **General** hosts app-level settings that don't belong to a feature page, in this order (see *Section Order*): desktop app, OpenChamber Tools, password and network access (desktop) or passkeys (web), panels and links, quick access, OpenCode CLI binary, environment, files and editor, terminal, trusted app links, message stream transport, privacy.
 - Feature pages (Appearance, Chat, Sessions…) keep only settings about that feature. If a setting reads awkwardly on its page, move it to General rather than inventing a new page.
 - New pages need metadata, `pageOrder`, nav icon, `settings.page.<slug>.title/description` in every locale, and mobile whitelist (`MOBILE_SETTINGS_PAGES` in `MobileApp.tsx`) when relevant.
+
+## Section Order
+
+Sections go in the order of what people open the page for, and that differs from how often they change a setting. LAN access is turned on once, but it is exactly what someone comes looking for to connect a phone, so it sits near the top of General.
+
+- The page's own thing first: the switch or choice the page is named for (the desktop app on General, the theme on Appearance, default models on Sessions).
+- Then what people come looking for on purpose, then what is set once per device, then what is empty for most people, and diagnostics last (transport, prompt cache, privacy).
+- Related sections stay together as one block, ordered as a block.
+- Between two sections of equal pull, the short one goes above the large one: a large section above pushes the short one a screen down.
+- Sections that never render in the same runtime share one slot: network access (desktop only) and passkeys (web only) are both second on General.
+
+Render sections as direct children of the page, without a wrapping element, and leave `divider` at its default: the layout drops the divider above whichever section renders first in each runtime. A section joined to the one above it (Themes under Color mode) is the only reason to pass `divider={false}` lower down.
 
 ## Pages With Tabs
 

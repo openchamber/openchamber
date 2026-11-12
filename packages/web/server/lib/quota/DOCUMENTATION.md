@@ -48,6 +48,7 @@ the list loses its usage card with no error.
 | `hyper` | Charm Hyper | `providers/hyper.js` | `hyper` (API key under `key` or `token`) |
 | `github-copilot` | GitHub Copilot | `providers/copilot.js` | `github-copilot`, `copilot` |
 | `github-copilot-addon` | GitHub Copilot Add-on | `providers/copilot.js` | `github-copilot`, `copilot` |
+| `mistral` | Mistral | `providers/mistral.js` / `providers/mistral-billing.js` | `mistral` (API key under `key` or `token`) |
 | `kimi-for-coding` | Kimi for Coding | `providers/kimi.js` | `kimi-code-plan-cn`, `kimi-for-coding`, `kimi`, `kimi-code-plan-global` (preference order; fallback after 401/403 only) |
 | `nano-gpt` | NanoGPT | `providers/nanogpt.js` | `nano-gpt`, `nanogpt`, `nano_gpt` |
 | `openrouter` | OpenRouter | `providers/openrouter.js` | `openrouter` |
@@ -132,6 +133,16 @@ The OpenCode Go result also carries the Console budgets of the same sign-in, the
 - **Go meters stay ours.** The same route also reports the Go allowance, but only for a Console sign-in; the provider above also covers API keys and the credit balance, so it keeps reading the Console itself.
 
 On the first OpenCode Go usage refresh after upgrading, OpenChamber deletes the obsolete `quota/opencode-go.json` credential file without reading its cookie value.
+
+## Mistral quota semantics
+
+Mistral documents usage only in its Admin API, which takes an Enterprise admin key. Its open-source Vibe CLI reads two other routes with the plain API key OpenCode holds, and the provider reads the same ones: `GET https://api.mistral.ai/v1/billing/budget` and `GET https://api.mistral.ai/v1/billing/subscription`. They are not in the public docs; the payload shape comes from the Vibe CLI's billing tests (`tests/app_server/test_billing.py` in `mistralai/mistral-vibe`), so re-check it there when Mistral answers differently.
+
+- **Windows**: `vibe_budget` becomes the `vibe` window and `api_budget` the `api` window, each a monthly allowance with `usage_percentage`, the amount spent of `initial_budget` in the response's `currency`, and `reset_at`. A budget without a positive `initial_budget` means the plan has no allowance of that kind and gets no row. No row at all is a failed refresh, never zero usage.
+- **Past 100%**: usage is not capped. With pay-as-you-go on, Mistral bills the overage from credits and Vibe keeps working, so the `vibe` row says `PAYG`; `payg_enabled` on the budget wins, `vibe_payg_enabled` on the subscription is the fallback, as the Vibe CLI reads them.
+- **Plan name**: the subscription read is best-effort and only names the plan (`INDIVIDUAL` is Pro, `EDU` is Student, as Vibe titles them). Its failure never fails the refresh, and it has its own 3-second deadline beside the budget's 15, so a hanging plan read neither aborts the budget body nor holds the card for long.
+- **Failure classes**: 401 is a rejected key, 403 a member without the permission to see the organization usage, 404 an account Mistral reports no usage for; each has its own message.
+- `providers/mistral-billing.js` owns the requests and parsing for both web and VS Code; the runtime wrappers own credential discovery and the result envelope.
 
 ## OpenCode Zen credential and quota semantics
 

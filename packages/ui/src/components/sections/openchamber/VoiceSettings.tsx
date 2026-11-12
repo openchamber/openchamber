@@ -1011,10 +1011,155 @@ export const VoiceSettings: React.FC = () => {
 
     return (
         <>
+            {/* Dictation first: far more people come here to talk to the agent than to hear it. */}
+            <SettingsSection
+                settingsItem="voice.speech-recognition"
+                title={t('settings.voice.page.section.speechRecognition')}
+                divider={false}
+                contentClassName="space-y-3"
+            >
+                <SettingsCheckboxRow
+                    checked={dictationEnabled}
+                    onChange={setDictationEnabled}
+                    label={t('settings.voice.page.field.enableVoiceInput')}
+                    ariaLabel={t('settings.voice.page.field.enableVoiceInputAria')}
+                />
+                <SettingsCheckboxRow
+                    checked={dictationAutoSend}
+                    onChange={setDictationAutoSend}
+                    label={t('settings.voice.page.field.dictationAutoSend')}
+                    ariaLabel={t('settings.voice.page.field.dictationAutoSendAria')}
+                    info={t('settings.voice.page.field.dictationAutoSendInfo')}
+                    settingsItem="voice.dictation-auto-send"
+                />
+
+                {dictationEnabled && (
+                    <>
+                        <SettingsFieldRow
+                            label={t('settings.voice.page.field.provider')}
+                            info={(
+                                <ul className="space-y-1">
+                                    <li><strong>{t('settings.voice.page.provider.local')}</strong> {t('settings.voice.page.tooltip.sttLocal')}</li>
+                                    <li><strong>{t('settings.voice.page.provider.server')}</strong> {t('settings.voice.page.tooltip.sttServer')}</li>
+                                </ul>
+                            )}
+                        >
+                            <SettingsChipGroup
+                                value={sttProvider}
+                                onChange={setSttProvider}
+                                aria-label={t('settings.voice.page.field.provider')}
+                                options={[
+                                    { value: 'local', label: t('settings.voice.page.provider.local') },
+                                    { value: 'openai-compatible', label: t('settings.voice.page.provider.server') },
+                                ]}
+                            />
+                        </SettingsFieldRow>
+
+                        {sttProvider === 'local' && (
+                            <SettingsStackedField label={t('settings.voice.page.field.model')} controlClassName="max-w-none">
+                                <LocalModelPicker savedModelId={sttLocalModel} onSelect={setSttLocalModel} />
+                            </SettingsStackedField>
+                        )}
+
+                        {sttProvider === 'local' && LOCAL_STT_MODELS.find((entry) => entry.id === sttLocalModel)?.languageHint && (
+                            <SettingsStackedField
+                                label={t('settings.voice.page.field.language')}
+                                info={t('settings.voice.page.field.sttLanguageHint')}
+                                controlClassName="max-w-[8rem]"
+                            >
+                                <input
+                                    type="text"
+                                    value={sttLanguage}
+                                    onChange={(e) => setSttLanguage(e.target.value)}
+                                    placeholder="auto"
+                                    className={VOICE_TEXT_INPUT_CLASS}
+                                />
+                            </SettingsStackedField>
+                        )}
+
+                        {sttProvider === 'openai-compatible' && (
+                            <div className="space-y-3">
+                                <SettingsStackedField
+                                    label={(
+                                        <span className={cn(!sttServerUrl.trim() && 'text-[var(--status-error)]')}>
+                                            {t('settings.voice.page.field.serverUrl')}
+                                        </span>
+                                    )}
+                                    info={t('settings.voice.page.field.sttServerUrlHint')}
+                                >
+                                    <div className="relative w-full">
+                                        <input
+                                            type="text"
+                                            value={sttServerUrl}
+                                            onChange={(e) => setSttServerUrl(e.target.value)}
+                                            placeholder="http://localhost:8001/v1"
+                                            className={VOICE_TEXT_INPUT_CLASS}
+                                        />
+                                        {sttServerUrl && (
+                                            <button
+                                                type="button"
+                                                onClick={() => setSttServerUrl('')}
+                                                className="absolute inset-e-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                                            >
+                                                <Icon name="close" className="w-3.5 h-3.5" />
+                                            </button>
+                                        )}
+                                    </div>
+                                </SettingsStackedField>
+                                <SettingsStackedField
+                                    label={t('settings.voice.page.field.apiKey')}
+                                    description={t('settings.voice.page.field.apiKeyOptional')}
+                                >
+                                    <VoiceApiKeyField kind="stt" />
+                                </SettingsStackedField>
+                                <SettingsStackedField label={t('settings.voice.page.field.model')}>
+                                    <input
+                                        type="text"
+                                        value={sttModel}
+                                        onChange={(e) => setSttModel(e.target.value)}
+                                        placeholder="deepdml/faster-whisper-large-v3-turbo-ct2"
+                                        className={VOICE_TEXT_INPUT_CLASS}
+                                    />
+                                </SettingsStackedField>
+                                <SettingsStackedField
+                                    settingsItem="voice.stt-endpoint-path"
+                                    label={t('settings.voice.page.field.endpointPath')}
+                                    info={t('settings.voice.page.field.endpointPathHint')}
+                                >
+                                    <input
+                                        type="text"
+                                        value={sttEndpointPath}
+                                        aria-label={t('settings.voice.page.field.endpointPath')}
+                                        dir="ltr"
+                                        onChange={(e) => setSttEndpointPath(e.target.value)}
+                                        placeholder="/audio/transcriptions"
+                                        className={VOICE_TEXT_INPUT_CLASS}
+                                    />
+                                </SettingsStackedField>
+                                <SettingsStackedField
+                                    label={t('settings.voice.page.field.language')}
+                                    info={t('settings.voice.page.field.sttLanguageHint')}
+                                    controlClassName="max-w-[8rem]"
+                                >
+                                    <input
+                                        type="text"
+                                        value={sttLanguage}
+                                        onChange={(e) => setSttLanguage(e.target.value)}
+                                        placeholder="auto"
+                                        className={VOICE_TEXT_INPUT_CLASS}
+                                    />
+                                </SettingsStackedField>
+                            </div>
+                        )}
+
+                        <TranscriptCorrectionRow />
+                    </>
+                )}
+            </SettingsSection>
+
             <SettingsSection
                 settingsItem="voice.playback"
                 title={t('settings.voice.page.section.playbackAndSummary')}
-                divider={false}
                 contentClassName="space-y-3"
             >
                 <SettingsCheckboxRow
@@ -1336,150 +1481,6 @@ export const VoiceSettings: React.FC = () => {
                                 )}
                             </div>
                         )}
-                    </>
-                )}
-            </SettingsSection>
-
-            <SettingsSection
-                settingsItem="voice.speech-recognition"
-                title={t('settings.voice.page.section.speechRecognition')}
-                contentClassName="space-y-3"
-            >
-                <SettingsCheckboxRow
-                    checked={dictationEnabled}
-                    onChange={setDictationEnabled}
-                    label={t('settings.voice.page.field.enableVoiceInput')}
-                    ariaLabel={t('settings.voice.page.field.enableVoiceInputAria')}
-                />
-                <SettingsCheckboxRow
-                    checked={dictationAutoSend}
-                    onChange={setDictationAutoSend}
-                    label={t('settings.voice.page.field.dictationAutoSend')}
-                    ariaLabel={t('settings.voice.page.field.dictationAutoSendAria')}
-                    info={t('settings.voice.page.field.dictationAutoSendInfo')}
-                    settingsItem="voice.dictation-auto-send"
-                />
-
-                {dictationEnabled && (
-                    <>
-                        <SettingsFieldRow
-                            label={t('settings.voice.page.field.provider')}
-                            info={(
-                                <ul className="space-y-1">
-                                    <li><strong>{t('settings.voice.page.provider.local')}</strong> {t('settings.voice.page.tooltip.sttLocal')}</li>
-                                    <li><strong>{t('settings.voice.page.provider.server')}</strong> {t('settings.voice.page.tooltip.sttServer')}</li>
-                                </ul>
-                            )}
-                        >
-                            <SettingsChipGroup
-                                value={sttProvider}
-                                onChange={setSttProvider}
-                                aria-label={t('settings.voice.page.field.provider')}
-                                options={[
-                                    { value: 'local', label: t('settings.voice.page.provider.local') },
-                                    { value: 'openai-compatible', label: t('settings.voice.page.provider.server') },
-                                ]}
-                            />
-                        </SettingsFieldRow>
-
-                        {sttProvider === 'local' && (
-                            <SettingsStackedField label={t('settings.voice.page.field.model')} controlClassName="max-w-none">
-                                <LocalModelPicker savedModelId={sttLocalModel} onSelect={setSttLocalModel} />
-                            </SettingsStackedField>
-                        )}
-
-                        {sttProvider === 'local' && LOCAL_STT_MODELS.find((entry) => entry.id === sttLocalModel)?.languageHint && (
-                            <SettingsStackedField
-                                label={t('settings.voice.page.field.language')}
-                                info={t('settings.voice.page.field.sttLanguageHint')}
-                                controlClassName="max-w-[8rem]"
-                            >
-                                <input
-                                    type="text"
-                                    value={sttLanguage}
-                                    onChange={(e) => setSttLanguage(e.target.value)}
-                                    placeholder="auto"
-                                    className={VOICE_TEXT_INPUT_CLASS}
-                                />
-                            </SettingsStackedField>
-                        )}
-
-                        {sttProvider === 'openai-compatible' && (
-                            <div className="space-y-3">
-                                <SettingsStackedField
-                                    label={(
-                                        <span className={cn(!sttServerUrl.trim() && 'text-[var(--status-error)]')}>
-                                            {t('settings.voice.page.field.serverUrl')}
-                                        </span>
-                                    )}
-                                    info={t('settings.voice.page.field.sttServerUrlHint')}
-                                >
-                                    <div className="relative w-full">
-                                        <input
-                                            type="text"
-                                            value={sttServerUrl}
-                                            onChange={(e) => setSttServerUrl(e.target.value)}
-                                            placeholder="http://localhost:8001/v1"
-                                            className={VOICE_TEXT_INPUT_CLASS}
-                                        />
-                                        {sttServerUrl && (
-                                            <button
-                                                type="button"
-                                                onClick={() => setSttServerUrl('')}
-                                                className="absolute inset-e-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                                            >
-                                                <Icon name="close" className="w-3.5 h-3.5" />
-                                            </button>
-                                        )}
-                                    </div>
-                                </SettingsStackedField>
-                                <SettingsStackedField
-                                    label={t('settings.voice.page.field.apiKey')}
-                                    description={t('settings.voice.page.field.apiKeyOptional')}
-                                >
-                                    <VoiceApiKeyField kind="stt" />
-                                </SettingsStackedField>
-                                <SettingsStackedField label={t('settings.voice.page.field.model')}>
-                                    <input
-                                        type="text"
-                                        value={sttModel}
-                                        onChange={(e) => setSttModel(e.target.value)}
-                                        placeholder="deepdml/faster-whisper-large-v3-turbo-ct2"
-                                        className={VOICE_TEXT_INPUT_CLASS}
-                                    />
-                                </SettingsStackedField>
-                                <SettingsStackedField
-                                    settingsItem="voice.stt-endpoint-path"
-                                    label={t('settings.voice.page.field.endpointPath')}
-                                    info={t('settings.voice.page.field.endpointPathHint')}
-                                >
-                                    <input
-                                        type="text"
-                                        value={sttEndpointPath}
-                                        aria-label={t('settings.voice.page.field.endpointPath')}
-                                        dir="ltr"
-                                        onChange={(e) => setSttEndpointPath(e.target.value)}
-                                        placeholder="/audio/transcriptions"
-                                        className={VOICE_TEXT_INPUT_CLASS}
-                                    />
-                                </SettingsStackedField>
-                                <SettingsStackedField
-                                    label={t('settings.voice.page.field.language')}
-                                    info={t('settings.voice.page.field.sttLanguageHint')}
-                                    controlClassName="max-w-[8rem]"
-                                >
-                                    <input
-                                        type="text"
-                                        value={sttLanguage}
-                                        onChange={(e) => setSttLanguage(e.target.value)}
-                                        placeholder="auto"
-                                        className={VOICE_TEXT_INPUT_CLASS}
-                                    />
-                                </SettingsStackedField>
-                            </div>
-                        )}
-
-                        <TranscriptCorrectionRow />
                     </>
                 )}
             </SettingsSection>

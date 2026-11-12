@@ -49,6 +49,7 @@ const baseCredentialList = (): CredentialEntry[] => [
   key('deepinfra'),
   key('hyper'),
   key('nano-gpt'),
+  key('mistral'),
   oauth('github-copilot', copilotEnterpriseUrl ? { enterpriseUrl: copilotEnterpriseUrl } : undefined),
   oauth('anthropic'),
 ];
@@ -3532,5 +3533,26 @@ describe('xAI quota provider (VS Code parity)', () => {
 
     assert.equal(result.configured, false);
     assert.equal(requests, 0);
+  });
+});
+
+describe('Mistral quota provider (VS Code parity)', () => {
+  test('reads the shared billing reader with the stored key', async () => {
+    const requests: Array<{ url: string; authorization: string | null }> = [];
+    stubFetchReturning((url, init) => {
+      requests.push({ url, authorization: new Headers(init?.headers).get('authorization') });
+      if (url.endsWith('/billing/subscription')) return Promise.resolve(mockResponse({ plan_name: 'TEAM' }));
+      return Promise.resolve(mockResponse({
+        vibe_budget: { usage_percentage: 40, initial_budget: 200, currency: 'EUR', reset_at: '2026-12-01T00:00:00Z', payg_enabled: false },
+      }));
+    });
+
+    assert.ok((await listConfiguredQuotaProviders()).includes('mistral'));
+    const result = await fetchQuotaForProvider('mistral');
+
+    assert.equal(result.ok, true);
+    assert.equal(result.planLabel, 'Team');
+    assert.equal(result.usage!.windows.vibe!.valueLabel, '€80.00 / €200.00');
+    assert.deepEqual(requests.map((request) => request.authorization), ['Bearer test-token', 'Bearer test-token']);
   });
 });

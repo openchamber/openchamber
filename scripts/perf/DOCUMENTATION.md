@@ -380,6 +380,13 @@ globbing (`isolated-server.mjs` writes them into the project under
 `agent-100tools-x5-300cps` makes its hundred calls five at a time: twenty
 steps whose messages hold five tool parts each, the turn that windowing by
 messages left fully mounted.
+`agent-20tools-wait3000ms-300cps` waits three seconds before each step's first
+token, as a hosted model does. Every step's assistant message then exists
+without parts for that long, which the instant fixtures never show; that wait
+is what once made the client reload the transcript page once per step. Read
+what a turn requested in `pageSignals.requestsByRoute` of the summary, a count
+per route with ids replaced and the `limit` kept
+(`GET /api/session/:id/message?limit=30`).
 `perf/unicode-300cps` (and `unicode-1200cps`) streams prose with em dashes,
 curly quotes and whole Cyrillic paragraphs, and a 150-line TypeScript fence
 whose comments and strings carry the same characters. V8 stores a string with

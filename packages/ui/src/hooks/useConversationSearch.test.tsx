@@ -770,3 +770,26 @@ test('titles only keeps metadata results to title matches and makes no content r
     await f.dispose();
   }
 });
+
+test('a messages-only search lists no title matches, asks for that author, and dates each row', async () => {
+  const f = await setup();
+  try {
+    await f.render({ metadataItems: ITEMS.map((item) => ({ ...item, updatedAt: 500 })) });
+    expect(ids(f.state().results)).toEqual(ITEM_IDS);
+    // A title match is dated by its conversation.
+    expect(f.state().results[0]?.updatedAt).toBe(500);
+    await f.render({ searchIn: 'messages', author: 'user' });
+    expect(ids(f.state().results)).toEqual([]);
+    await f.fireTimers(DEBOUNCE_MS);
+    const request = f.contentRequests.at(-1);
+    expect(request?.url.searchParams.get('role')).toBe('user');
+    expect(request?.url.searchParams.has('exclude')).toBe(false);
+    await f.respond(request, page([hit(ITEM_IDS[0] ?? 'ses_a', { createdAt: 42 })]));
+    // A session whose title also matches still comes from its message, dated by that message.
+    expect(f.state().results).toHaveLength(1);
+    expect(f.state().results[0]?.metadata).toBeNull();
+    expect(f.state().results[0]?.updatedAt).toBe(42);
+  } finally {
+    await f.dispose();
+  }
+});
