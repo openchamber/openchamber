@@ -680,6 +680,35 @@ describe('edit form from the stored config entry', () => {
     allowExistingAuth: true,
   }).result?.config;
 
+  test('keeps a stored built-in package until the user changes the protocol', () => {
+    const cases: { packageName: string; protocol: CustomProviderFormState['protocol'] }[] = [
+      { packageName: '@opencode/ai/providers/openai-compatible', protocol: 'openai-chat' },
+      { packageName: '@opencode/ai/providers/openai-compatible/responses', protocol: 'openai-responses' },
+      { packageName: '@opencode/ai/providers/openai-compatible-responses', protocol: 'openai-responses' },
+      { packageName: '@opencode/ai/providers/openai', protocol: 'openai-responses' },
+      { packageName: '@opencode/ai/providers/openai/chat', protocol: 'openai-chat' },
+      { packageName: '@opencode/ai/providers/openai/responses', protocol: 'openai-responses' },
+      { packageName: '@opencode/ai/providers/anthropic', protocol: 'anthropic-messages' },
+      { packageName: '@opencode/ai/providers/anthropic-compatible', protocol: 'anthropic-messages' },
+    ];
+    for (const { packageName, protocol } of cases) {
+      const stored = storedProviderEntrySchema.parse({
+        name: 'Campus LLM',
+        package: packageName,
+        settings: { baseURL: 'https://llm.example.edu/v1' },
+        models: { fast: { name: 'Fast' } },
+      });
+      const form = providerToEditFormState(live, stored);
+      expect(form.protocol).toBe(protocol);
+      expect(editAndSave({ ...form, name: 'Renamed' })?.package).toBe(packageName);
+
+      const changedProtocol = protocol === 'openai-chat' ? 'anthropic-messages' : 'openai-chat';
+      expect(editAndSave({ ...form, protocol: changedProtocol })?.package).toBe(
+        changedProtocol === 'anthropic-messages' ? 'aisdk:@ai-sdk/anthropic' : 'aisdk:@ai-sdk/openai-compatible',
+      );
+    }
+  });
+
   test('keeps env and writes back only the levels the user stored', () => {
     const stored = storedProviderEntrySchema.parse({
       name: 'Campus LLM',
@@ -759,6 +788,7 @@ describe('edit form from the stored config entry', () => {
 
   test('without a stored entry the live levels stay out of the save', () => {
     const form = providerToEditFormState(live, null);
+    expect(editAndSave(form)?.package).toBe('aisdk:@ai-sdk/openai-compatible');
     expect(editAndSave(form)?.models.fast).toEqual({ modelID: 'fast', name: 'Fast' });
   });
 });

@@ -78,6 +78,17 @@ describe('the host\'s custom providers', () => {
     expect(headerOfPackage('aisdk:@ai-sdk/openai-compatible')).toBe('authorization');
     expect(headerOfPackage('aisdk:@ai-sdk/openai')).toBe('authorization');
     expect(headerOfPackage('aisdk:@ai-sdk/anthropic')).toBe('x-api-key');
+    for (const packageName of [
+      '@opencode/ai/providers/openai-compatible',
+      '@opencode/ai/providers/openai-compatible/responses',
+      '@opencode/ai/providers/openai-compatible-responses',
+      '@opencode/ai/providers/openai',
+      '@opencode/ai/providers/openai/chat',
+      '@opencode/ai/providers/openai/responses',
+    ]) expect(headerOfPackage(packageName)).toBe('authorization');
+    expect(headerOfPackage('@opencode/ai/providers/anthropic')).toBe('x-api-key');
+    expect(headerOfPackage('@opencode/ai/providers/anthropic-compatible')).toBe('x-api-key');
+    expect(headerOfPackage('@opencode/ai/providers/amazon-bedrock')).toBeNull();
     expect(headerOfPackage('aisdk:@ai-sdk/amazon-bedrock')).toBeNull();
     expect(headerOfPackage(undefined)).toBeNull();
   });
