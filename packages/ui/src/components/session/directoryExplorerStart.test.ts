@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { initialBrowseQuery, projectBrowsePlaces, resolveBrowseQuery } from './directoryExplorerStart';
+import { getBrowseParentPath, initialBrowseQuery, projectBrowsePlaces, resolveBrowseQuery, trimTrailingSeparators } from './directoryExplorerStart';
 
 describe('initialBrowseQuery', () => {
   const home = '/Users/me';
@@ -21,6 +21,14 @@ describe('initialBrowseQuery', () => {
   test('keeps a folder outside home absolute, and falls back to the last entry without dates', () => {
     expect(initialBrowseQuery([{ path: '/Users/me/a' }, { path: 'D:\\code\\repo\\' }], home)).toBe('D:/code/');
     expect(initialBrowseQuery([{ path: '/Users/me/repo' }], home)).toBe('~/');
+  });
+
+  test('keeps filesystem roots when the project is at or directly under one', () => {
+    expect(initialBrowseQuery([{ path: 'D:\\' }], home)).toBe('D:/');
+    expect(initialBrowseQuery([{ path: 'D:\\repo' }], home)).toBe('D:/');
+    expect(initialBrowseQuery([{ path: '/' }], home)).toBe('/');
+    expect(initialBrowseQuery([{ path: '/repo' }], home)).toBe('/');
+    expect(projectBrowsePlaces([{ path: 'D:\\' }], home)).toEqual(['D:/']);
   });
 });
 
@@ -62,4 +70,13 @@ describe('resolveBrowseQuery', () => {
     }
     expect(resolveBrowseQuery(' /srv/app', '~/projects/')).toBe('/srv/app');
   });
+});
+
+test('keeps drive roots absolute when preparing a selected path', () => {
+  expect(trimTrailingSeparators('D:/')).toBe('D:/');
+  expect(trimTrailingSeparators('D:///')).toBe('D:/');
+  expect(trimTrailingSeparators('D:/repo/')).toBe('D:/repo');
+  expect(trimTrailingSeparators('/')).toBe('/');
+  expect(getBrowseParentPath('D:/')).toBeNull();
+  expect(getBrowseParentPath('D:/repo/')).toBe('D:/');
 });
