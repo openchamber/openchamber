@@ -267,7 +267,11 @@ tooltip. Model-only session updates invalidate the live-session comparison.
 ### Turn stats
 
 The section follows Usage by default and reuses the panel's existing rows. Only its header
-has an icon; metric rows use labels and values without leading icons. It
+has an icon; metric rows use labels and values without leading icons. It starts
+folded: its rows took more height than the rest of the card, and the header
+line carries the figures people scan (response speed, elapsed time, cost),
+joined with ` · `, folded and open alike. Once the user opens or folds it,
+`workStatusExpandedSections` keeps that choice. It
 reads already-loaded records without fetching history. The newest turn needs a
 preceding user message and completed assistant steps. A truncated or unfinished
 turn has no whole-turn result; later materialization can supply it. A newest
@@ -281,8 +285,8 @@ message's output tokens divided by the union of its nonempty text intervals.
 It excludes initial waiting, reasoning tokens and reasoning time, and earlier
 tool steps. It requires complete, valid text timing and a final message without
 tools, errors, synthetic text or ignored text. This measures text delivery from
-the live text timestamps, not provider-side decode speed. The header shows only
-this rate; unavailable response timing never falls back to whole-turn speed.
+the live text timestamps, not provider-side decode speed. The header's rate is
+only this one; unavailable response timing never falls back to whole-turn speed.
 OpenCode stores no timing for text, so a reloaded or never-watched turn has
 text stamped with its step's `created` and `completed`. A text start equal to
 `created` is that stamp, so Response speed is unknown after a reload.

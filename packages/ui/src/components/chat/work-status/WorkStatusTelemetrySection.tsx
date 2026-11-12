@@ -23,6 +23,9 @@ type Props = {
   directory: string | null;
 };
 
+/** US dollars to three places, trailing zeros dropped. */
+const formatCost = (cost: number): string => `$${cost.toFixed(3).replace(/0+$/, '').replace(/\.$/, '')}`;
+
 /** One hover/focus target covers both the label and its value. */
 const TelemetryRow: React.FC<{ label: string; description: string; value: React.ReactNode }> = ({ label, description, value }) => (
   <Tooltip delayDuration={300}>
@@ -79,14 +82,18 @@ export const WorkStatusTelemetrySection: React.FC<Props> = ({ sessionId, directo
   }, [scope, status, eligibleForStats, computed, retained?.scope, store, sessionId]);
   const stats = eligibleForStats ? computed : status !== 'unknown' && retained?.scope === scope ? retained.stats : null;
   const previousTurn = stats !== null && (stats.previousTurn || !eligibleForStats);
-  const rate = stats && stats.responseTokensPerSecond !== null
-    ? formatThroughputRate(stats.responseTokensPerSecond)
-    : undefined;
+  // The header line the folded section is read by: the figures people scan,
+  // speed, time and cost, in the rows' own formats.
+  const figures = stats ? [
+    stats.responseTokensPerSecond !== null ? formatThroughputRate(stats.responseTokensPerSecond) : null,
+    stats.elapsedDurationMs !== null ? formatTelemetryDuration(stats.elapsedDurationMs) : null,
+    stats.cost !== null ? formatCost(stats.cost) : null,
+  ].filter((figure): figure is string => figure !== null).join(' · ') : '';
   const summary = previousTurn
-    ? rate !== undefined
-      ? t('chat.workStatus.telemetry.previousTurnRate', { rate })
+    ? figures
+      ? t('chat.workStatus.telemetry.previousTurnRate', { rate: figures })
       : t('chat.workStatus.telemetry.previousTurn')
-    : rate;
+    : figures || undefined;
 
   useReportWorkStatusPresence('telemetry', Boolean(sessionId));
 
@@ -98,7 +105,8 @@ export const WorkStatusTelemetrySection: React.FC<Props> = ({ sessionId, directo
       title={t('chat.workStatus.section.telemetry')}
       icon="bar-chart-2"
       summary={summary}
-      defaultExpanded
+      // Folded at rest: its summary carries the figures, and the rows took
+      // more height than the rest of the card. A user's own choice persists.
     >
       {stats ? (
         <>
@@ -191,7 +199,7 @@ export const WorkStatusTelemetrySection: React.FC<Props> = ({ sessionId, directo
             <TelemetryRow
               label={t('chat.workStatus.telemetry.cost')}
               description={t('chat.workStatus.telemetry.costDescription')}
-              value={<WorkStatusValue tone="muted">{`$${stats.cost.toFixed(3).replace(/0+$/, '').replace(/\.$/, '')}`}</WorkStatusValue>}
+              value={<WorkStatusValue tone="muted">{formatCost(stats.cost)}</WorkStatusValue>}
             />
           ) : null}
         </>
