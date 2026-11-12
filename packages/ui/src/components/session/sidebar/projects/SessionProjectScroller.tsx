@@ -526,7 +526,11 @@ function SessionProjectScrollerComponent({ model, view, actions }: SessionProjec
     if (row.kind === 'search-result') {
       return <SidebarConversationRow result={row.result} context={row.context} search={model.search} />;
     }
-    if (row.kind === 'search-archived-caption') return <SidebarSearchArchivedCaption />;
+    if (row.kind === 'search-archived-caption') {
+      return <CrossfadeZoneHeader className={cn('sticky top-0 z-20', view.mobileVariant ? 'bg-background' : 'bg-sidebar')} data-sidebar-sticky-header="true">
+        <SidebarSearchArchivedCaption />
+      </CrossfadeZoneHeader>;
+    }
     if (row.kind === 'search-show-more') return <SidebarSearchShowMore section={row.section} hidden={row.hidden} onShow={model.search?.showMore} />;
     if (row.kind === 'search-more') return <SidebarSearchMore onLoadMore={() => model.search?.loadMore(row.section)} />;
     if (row.kind === 'draft') {

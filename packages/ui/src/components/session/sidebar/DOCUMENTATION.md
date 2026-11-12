@@ -22,9 +22,12 @@ A sidebar search answers with one flat list instead of the tree. The row model
 in search mode lists the active matches best first (titles that hold the words
 as typed, newest first; then conversations on a branch that holds them; then
 conversations found only by a message), the first fifty with a Show more row for the rest, then an
-Archived caption with the first five archived matches and its own Show more
-row. Each block ends with its own pager for more message matches. A block shown
-whole folds again when the search is cleared or changed. What a session started (a subagent, a
+Archived caption with every archived match found. The caption opens with the
+widest gap, as a zone's does, and on the desktop holds at the top of the list
+while its matches scroll under it. Each block ends with its own
+pager for more message matches; the active block draws it once its loaded
+matches all show, so a block never ends with two buttons. The active block
+shown whole folds again when the search is cleared or changed. What a session started (a subagent, a
 workflow's agent: any session with a `parentID`) is left out, by title and by
 message: it is part of its parent, and such sessions outnumber the user's own.
 Project and folder names are not searched: every row already shows its
@@ -74,8 +77,9 @@ tree out of the per-keystroke work.
 Searching for an old conversation is the main reason to search at all, and the
 user rarely knows whether they archived it. A lifecycle filter made them
 guess, and remembered its last value. Archived matches are always found and
-listed after the active ones, five at a time, so they never push the active
-ones down.
+listed after the active ones, so they never push the active ones down. The
+block is not folded to a first few: nothing follows it, and a Show more for
+loaded rows next to the pager for further ones read as two of the same button.
 
 ### Why each block asks for its own message matches
 

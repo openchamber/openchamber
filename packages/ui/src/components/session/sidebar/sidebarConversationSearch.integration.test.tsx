@@ -4,7 +4,7 @@ import { Window } from 'happy-dom';
 import { createRoot, type Root } from 'react-dom/client';
 import { searchFixture } from './sidebarSearch.fixture';
 import { resolveSidebarSearchScope, sidebarSearchMetadata } from './sidebarConversationSearch';
-import { ARCHIVED_SEARCH_INITIAL, buildSessionSidebarRowModel } from './sessionSidebarRowModel';
+import { buildSessionSidebarRowModel } from './sessionSidebarRowModel';
 import { searchScopeQuery, type SearchScope } from '@/lib/search/omniQuery';
 import type { Session } from '@/lib/opencode/model';
 import type { WorktreeMetadata } from '@/types/worktree';
@@ -84,7 +84,7 @@ const sessions = fixture.sections.flatMap((section) => section.groups.flatMap((g
 sessions[1]!.time.archived = 2;
 // Old conversations of project a, archived, that the tree does not list.
 // SAFETY: search metadata reads only identity, location, title and lifecycle.
-const archivedSessions = Array.from({ length: ARCHIVED_SEARCH_INITIAL + 2 }, (_, index) => ({ id: `old-${index}`, title: `Legacy plan ${index}`, directory: '/repo/a', time: { created: 1, updated: 1, archived: 2 } } as Session));
+const archivedSessions = Array.from({ length: 7 }, (_, index) => ({ id: `old-${index}`, title: `Legacy plan ${index}`, directory: '/repo/a', time: { created: 1, updated: 1, archived: 2 } } as Session));
 const projects = fixture.sections.map((section) => section.project);
 const worktrees = new Map<string, WorktreeMetadata[]>();
 const knownDirectories = new Set(['/repo/a', '/repo/b']);
@@ -93,18 +93,17 @@ const knownDirectories = new Set(['/repo/a', '/repo/b']);
 function Search({ mobile = false, vscode = false }: { mobile?: boolean; vscode?: boolean }) {
   const [text, updateText] = React.useState('needle');
   const [scopeChoice, updateScope] = React.useState<SearchScope>('everything');
-  const [archivedShown, setArchivedShown] = React.useState(false);
   setQuery = updateText;
   setScope = updateScope;
   const scope = React.useMemo(() => resolveSidebarSearchScope({ projects, worktrees, knownDirectories: vscode ? new Set(['/repo/a']) : knownDirectories, isVSCode: vscode }), [vscode]);
   const metadata = React.useMemo(() => sidebarSearchMetadata({ sessions: [...sessions, ...archivedSessions], isAdmitted: scope.isAdmitted, owners: fixture.sessionOwnerById, projects, worktrees }), [scope]);
   const query = searchScopeQuery(scopeChoice);
   const search = useSidebarConversationSearch({ enabled: scope.available, text, searchIn: query.searchIn, author: query.author, metadataItems: metadata, directories: scope.directories, isAdmitted: scope.isAdmitted });
-  const model = buildSessionSidebarRowModel({ ...fixture, mode: 'search', contentSearchResults: search.results, revealedSearchSections: archivedShown ? new Set(['archived'] as const) : undefined,
+  const model = buildSessionSidebarRowModel({ ...fixture, mode: 'search', contentSearchResults: search.results,
     searchSectionsWithMore: search.sectionsWithMore,
     searchIncomplete: search.contentStatus.kind === 'loading' || (search.contentStatus.kind === 'ready' && Boolean(search.contentStatus.indexing)),
   });
-  const presentation = { query: text, author: query.author, searchIn: query.searchIn, loadMore: search.loadMore, showMore: () => setArchivedShown(true) };
+  const presentation = { query: text, author: query.author, searchIn: query.searchIn, loadMore: search.loadMore, showMore: () => {} };
   return <div data-content-status={search.contentStatus.kind} data-search-total={JSON.stringify(search.totalCount)} data-row-kinds={model.rows.map((row) => row.kind).join(' ')}>
     {model.rows.map((row) => row.kind === 'search-result' ? <SidebarConversationRow key={row.key} result={row.result} context={row.context} mobile={mobile} search={presentation} />
       : row.kind === 'search-archived-caption' ? <SidebarSearchArchivedCaption key={row.key} />
@@ -117,7 +116,7 @@ function Search({ mobile = false, vscode = false }: { mobile?: boolean; vscode?:
 const render = (node: React.ReactNode) => act(async () => root.render(<I18nProvider>{node}</I18nProvider>));
 // What the list shows, top to bottom.
 const listed = () => [...document.querySelectorAll('[data-conversation-result], [data-sidebar-search-archived], [data-sidebar-search-show-more], [data-sidebar-search-more]')].map((element) => (
-  element.getAttribute('data-conversation-result') ?? (element.hasAttribute('data-sidebar-search-archived') ? 'ARCHIVED' : element.hasAttribute('data-sidebar-search-show-more') ? 'SHOW-ARCHIVED' : 'MORE')
+  element.getAttribute('data-conversation-result') ?? (element.hasAttribute('data-sidebar-search-archived') ? 'ARCHIVED' : element.hasAttribute('data-sidebar-search-show-more') ? 'SHOW-MORE' : 'MORE')
 ));
 const status = () => document.querySelector('[data-content-status]')?.getAttribute('data-content-status');
 const runContentSearch = () => act(async () => { const timers = [...searchTimers.values()]; searchTimers.clear(); timers.forEach((run) => run()); await new Promise<void>((resolve) => setImmediate(resolve)); });
@@ -134,14 +133,10 @@ for (const mobile of [false, true]) test(`${mobile ? 'phone' : 'desktop'} lists 
   expect(requests).toHaveLength(0);
 });
 
-for (const mobile of [false, true]) test(`${mobile ? 'phone' : 'desktop'} shows the first archived matches and the rest once asked for`, async () => {
+for (const mobile of [false, true]) test(`${mobile ? 'phone' : 'desktop'} lists every archived match, with no button to unfold them`, async () => {
   await render(<Search mobile={mobile} />);
   await act(async () => setQuery('legacy'));
 
-  expect(listed()).toEqual(['ARCHIVED', 'old-0', 'old-1', 'old-2', 'old-3', 'old-4', 'SHOW-ARCHIVED']);
-  expect(document.querySelector('[data-sidebar-search-show-more]')?.textContent).toBe('Show 2 more');
-
-  await act(async () => document.querySelector<HTMLElement>('[data-sidebar-search-show-more]')!.click());
   expect(listed()).toEqual(['ARCHIVED', 'old-0', 'old-1', 'old-2', 'old-3', 'old-4', 'old-5', 'old-6']);
 });
 
