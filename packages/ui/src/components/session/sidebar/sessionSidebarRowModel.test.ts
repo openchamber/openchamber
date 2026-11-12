@@ -232,6 +232,24 @@ describe('buildSessionSidebarRowModel', () => {
     expect(order).toEqual(['pinned', 'mixed-compact:pinned', 'work', 'mixed-compact:working', 'project:pinned', 'project:working']);
   });
 
+  test('a session listed again lower down is marked as a repeat; the first from the top is not', () => {
+    const input = args([project([group([node('pinned'), node('working'), node('plain')])])]);
+    input.pinnedItems = [timelineItem('pinned')];
+    input.workEntries = sessionWorks([timelineItem('working')]);
+
+    const marks = buildSessionSidebarRowModel(input).rows.flatMap((row) => (
+      row.kind === 'session' ? [`${row.renderContext}:${row.node.session.id}:${row.repeat === true}`] : []
+    ));
+
+    expect(marks).toEqual([
+      'mixed-compact:pinned:false',
+      'mixed-compact:working:false',
+      'project:pinned:true',
+      'project:plain:false',
+      'project:working:true',
+    ]);
+  });
+
   test('the blocks set the order: a section of the user\'s own lists its works under its name', () => {
     const input = args([project([group([node('waiting'), node('other')])])]);
     input.workEntries = sessionWorks([timelineItem('other')]);

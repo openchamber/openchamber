@@ -26,6 +26,8 @@ type Context = {
   renderContext?: SessionSidebarRenderContext;
   /** Two lines under the project: a work of its own with Detailed rows on. */
   detailed?: boolean;
+  /** The session is listed higher up too; see `SessionNodeItemProps.repeat`. */
+  repeat?: boolean;
   rowKey?: string;
   dragKey?: string;
 };
@@ -80,6 +82,7 @@ function SessionTreeItemComponent({
   secondaryMeta,
   renderContext = 'project',
   detailed = false,
+  repeat = false,
   rowKey,
   dragKey,
   renderExtras,
@@ -188,6 +191,7 @@ function SessionTreeItemComponent({
       secondaryMeta={secondaryMeta}
       renderContext={renderContext}
       detailed={detailed}
+      repeat={repeat}
       rowKey={effectiveRowKey}
       dragKey={dragKey ?? rowKey ?? node.session.id}
       subtreeContainsEditing={renderExtras?.subtreeContainsEditing ?? EMPTY_SUBTREE_CONTAINS_EDITING}
@@ -270,7 +274,7 @@ const areSessionTreeItemPropsEqual = (prev: SessionTreeItemProps, next: SessionT
   if ((prev.secondaryMeta?.inSpace ?? false) !== (next.secondaryMeta?.inSpace ?? false)) return false;
   const scalarKeys = [
     'depth', 'ownsWork', 'groupDirectory', 'projectId', 'folderOwnerKey', 'ownerProjectId', 'selectionScopeKey', 'archivedBucket',
-    'renderContext', 'detailed', 'rowKey', 'dragKey', 'renderChildren',
+    'renderContext', 'detailed', 'repeat', 'rowKey', 'dragKey', 'renderChildren',
     'editingId', 'editingRowKey', 'editTitle', 'openSidebarMenuKey',
     'mobileVariant', 'alwaysShowActions', 'allowReselect',
     'pinnedSessionIds', 'expandedParents', 'deleteSessionConfirm',

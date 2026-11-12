@@ -496,7 +496,7 @@ function SessionProjectScrollerComponent({ model, view, actions }: SessionProjec
           node={row.node} depth={row.depth} ownsWork={row.ownsWork} groupDirectory={row.groupDirectory} projectId={row.projectId}
           ownerProjectId={row.ownerProjectId}
           folderOwnerKey={row.ownerKey} selectionScopeKey={row.selectionScopeKey}
-          archivedBucket={row.archived} renderContext={row.renderContext} detailed={row.detailed} rowKey={row.key} dragKey={row.key}
+          archivedBucket={row.archived} renderContext={row.renderContext} detailed={row.detailed} repeat={row.repeat} rowKey={row.key} dragKey={row.key}
           secondaryMeta={row.secondaryMeta} renderChildren={false}
           editingId={model.state.editingId} openSidebarMenuKey={model.state.openSidebarMenuKey}
           setOpenSidebarMenuKey={model.state.setOpenSidebarMenuKey}

@@ -35,7 +35,7 @@ import { renameMobileSession, runMobileSubtreeAction, selectMobileSession, toggl
 import type { MobileTreeGeometry } from './mobileSidebarGeometry';
 import { useMobileRowSwipe, useMobileSidebarActions, useMobileSidebarRowsStore } from './mobileSidebarState';
 import { MobileRowMenu } from './MobileRowMenu';
-import { MOBILE_ACTIVE_ROW_CLASS, MobileRowChevron, MobileSlotChevron, MobileTwoLineLayout } from './mobileRowParts';
+import { MOBILE_ACTIVE_ROW_CLASS, MOBILE_REPEAT_ACTIVE_ROW_CLASS, MobileRowChevron, MobileSlotChevron, MobileTwoLineLayout } from './mobileRowParts';
 
 type SessionRowModel = Extract<SessionSidebarRow, { kind: 'session' }>;
 
@@ -152,7 +152,7 @@ export const MobileSessionRow: React.FC<{
     ? <Icon name="check" className="size-3.5 shrink-0 text-muted-foreground" aria-label={t('sessions.sidebar.session.work.doneSuggested')} />
     : null;
   const titleText = (
-    <span dir="auto" className={cn('block min-w-0 flex-1 truncate oc-ui-start-align typography-ui-label', mobileSessionTitleClass({ active, unread: showUnread, running: isStreaming, pending: pendingRequests }))}>
+    <span dir="auto" className={cn('block min-w-0 flex-1 truncate oc-ui-start-align typography-ui-label', mobileSessionTitleClass({ active, repeat: row.repeat, unread: showUnread, running: isStreaming, pending: pendingRequests }))}>
       {title}
     </span>
   );
@@ -269,7 +269,7 @@ export const MobileSessionRow: React.FC<{
       revealed={revealed}
       onRevealedChange={setRevealed}
       dataActiveSession={active}
-      contentClassName={cn('relative flex w-full items-center bg-background transition-colors', active && MOBILE_ACTIVE_ROW_CLASS)}
+      contentClassName={cn('relative flex w-full items-center bg-background transition-colors', active && (row.repeat ? MOBILE_REPEAT_ACTIVE_ROW_CLASS : MOBILE_ACTIVE_ROW_CLASS))}
       actions={(
         <MobileSessionRowActions
           sessionId={session.id}

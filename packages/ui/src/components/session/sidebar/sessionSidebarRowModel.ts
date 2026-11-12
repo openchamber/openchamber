@@ -115,7 +115,7 @@ export type SessionSidebarRow =
   // `ownsWork`: the row is a work of its own, so it offers Track / Done.
   // What nests under a session, a lane of a run and a session of a worktree
   // work belong to the work above them, which tracks and finishes them all.
-  | (RowBase & { kind: 'session'; node: SessionNode; blockingBadgeSessionScopes?: readonly BlockingBadgeSessionScope[]; depth: number; ownsWork: boolean; projectId: string | null; ownerProjectId: string | null; groupDirectory: string | null; ownerKey: string | null; selectionScopeKey: string | null; archived: boolean; renderContext: SessionSidebarRenderContext; secondaryMeta: SessionSidebarActivityItem['secondaryMeta']; detailed?: boolean; expanded?: boolean })
+  | (RowBase & { kind: 'session'; node: SessionNode; blockingBadgeSessionScopes?: readonly BlockingBadgeSessionScope[]; depth: number; ownsWork: boolean; projectId: string | null; ownerProjectId: string | null; groupDirectory: string | null; ownerKey: string | null; selectionScopeKey: string | null; archived: boolean; renderContext: SessionSidebarRenderContext; secondaryMeta: SessionSidebarActivityItem['secondaryMeta']; detailed?: boolean; expanded?: boolean; repeat?: boolean })
   // A multi-run: one derived parent row over its member sessions. It is not a
   // session, so it never enters selection, and its lanes render as session
   // rows one level deeper when it is expanded.
@@ -503,6 +503,8 @@ const PROJECT_PLACEMENT: GroupPlacement = { keyPrefix: '', depth: 0, mixed: fals
 
 export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): SessionSidebarRowModel => {
   const rows: SessionSidebarRow[] = [];
+  // Sessions already given a row, so a later row of the same session is a repeat.
+  const shownSessionIds = new Set<string>();
   const selectionEntries: SessionRowOrderEntry[] = [];
   const selectionDescendantIds: string[] = [];
   const selectionWorks = new Map<string, SessionRowOrderWork>();
@@ -548,6 +550,17 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
     return occurrence === 0 ? base : `${base}:${occurrence}`;
   };
   const push = (row: SessionSidebarRow): void => {
+    if (row.kind === 'session') {
+      // `repeat`: the session is already listed higher up (Pinned or In work
+      // above its project). The first row from the top is where the current
+      // session is marked in full; the later ones take a quieter mark.
+      const repeat = shownSessionIds.has(row.node.session.id);
+      shownSessionIds.add(row.node.session.id);
+      if (repeat) {
+        rows.push(Object.freeze({ ...row, repeat: true }));
+        return;
+      }
+    }
     rows.push(Object.freeze(row));
   };
   /**

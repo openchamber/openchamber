@@ -15,6 +15,13 @@ import { cn } from '@/lib/utils';
  */
 export const MOBILE_ACTIVE_ROW_CLASS = 'shadow-[inset_0_0_0_100vmax_color-mix(in_srgb,var(--interactive-selection)_70%,transparent)]';
 
+/**
+ * The open session's fill on a row that repeats it lower in the list (Pinned
+ * or In work above its project): half the step, as on the desktop, so the
+ * list shows one clear place for it.
+ */
+export const MOBILE_REPEAT_ACTIVE_ROW_CLASS = 'shadow-[inset_0_0_0_100vmax_color-mix(in_srgb,var(--interactive-selection)_35%,transparent)]';
+
 /** The selected row's title, in the selection's text colour as on the desktop. */
 export const MOBILE_ACTIVE_TITLE_CLASS = 'text-interactive-selection-foreground';
 

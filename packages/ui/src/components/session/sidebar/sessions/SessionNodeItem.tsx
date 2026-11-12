@@ -124,6 +124,12 @@ export type SessionNodeItemProps = {
   renderContext?: SessionSidebarRenderContext;
   /** A work's row under its project with Detailed rows on: two lines, keeping the tree slot. */
   detailed?: boolean;
+  /**
+   * The session is listed higher up in the sidebar too. Current, it takes a
+   * quieter fill here, half the selection's step, so the sidebar shows one
+   * clear place for it: the first row from the top.
+   */
+  repeat?: boolean;
   blockingBadgeSessionScopes?: readonly BlockingBadgeSessionScope[];
   rowKey?: string;
   dragKey?: string;
@@ -220,6 +226,10 @@ type QuickSessionActionProps = {
   onDelete: (event: React.MouseEvent<HTMLButtonElement>) => void;
 };
 
+// The current session's mark on a row that repeats it lower in the sidebar:
+// half the selection's step, under the sidebar's text colour.
+const REPEAT_ACTIVE_ROW_CLASS = 'bg-interactive-selection/35';
+
 // Extracted so only this small button re-renders when Shift is pressed/released,
 // instead of every mounted session row.
 const QuickSessionAction = React.memo(function QuickSessionAction({
@@ -309,6 +319,7 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
     secondaryMeta,
     renderContext = 'project',
     detailed = false,
+    repeat = false,
     blockingBadgeSessionScopes: timelineBadgeSessionScopes,
     rowKey,
     dragKey,
@@ -664,7 +675,7 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
           className={cn(
             'group relative my-0.5 flex items-center rounded-md pe-2.5',
             'py-1.5',
-            isActive && 'bg-interactive-selection/70 text-interactive-selection-foreground',
+            isActive && (repeat ? REPEAT_ACTIVE_ROW_CLASS : 'bg-interactive-selection/70 text-interactive-selection-foreground'),
           )}
         >
           <SessionTimelineRowBody
@@ -1123,15 +1134,23 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
       // A finished turn nobody has seen and a request waiting on the user
       // read like an unread mail; a running turn at full strength; the rest
       // recede.
-      titleClassName={isActive || isRowSelected
+      // A repeat row's fainter fill sits closer to the sidebar than to the
+      // selection, so its title keeps the sidebar's text colour.
+      titleClassName={isRowSelected || (isActive && !repeat)
         ? 'text-interactive-selection-foreground'
-        : showUnreadStatus || hasPendingPermission || hasPendingForm
+        : isActive
+          ? 'text-foreground'
+          : showUnreadStatus || hasPendingPermission || hasPendingForm
           ? 'font-semibold text-foreground'
           : isStreaming ? 'text-foreground' : 'oc-title-rest'}
       branchLabel={tooltipBranchLabel}
       spaceMark={branchInSpace ? t('sessions.sidebar.group.space') : null}
       statusDot={liveStateMark}
-      pinnedMarker={isPinnedSession && !isSessionActionPending && !hidePinnedMarker ? pinnedMarkerContent : null}
+      // Under a project, pinned and unpinned rows mix: every row keeps the
+      // pin's 12px column, so all titles end at one x.
+      pinnedMarker={isPinnedSession && !isSessionActionPending && !hidePinnedMarker
+        ? pinnedMarkerContent
+        : renderContext === 'project' && !hidePinnedMarker ? <span aria-hidden className="w-3 flex-shrink-0" /> : null}
       // No date: the list is ordered by recency and the row's tooltip carries
       // the time. A turn's duration shows while it runs and until it is read.
       timeSlot={showActivityDuration && !waitingOnUser
@@ -1207,7 +1226,8 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
                   // padding: the list reads denser without the rows touching.
                   isTwoLineRow ? 'py-1.5' : 'py-[5px]',
                   !(isActive || isRowSelected) && 'hover:bg-interactive-hover/60',
-                  (isActive || isRowSelected) && 'bg-interactive-selection/70 text-interactive-selection-foreground',
+                  (isRowSelected || (isActive && !repeat)) && 'bg-interactive-selection/70 text-interactive-selection-foreground',
+                  isActive && repeat && !isRowSelected && REPEAT_ACTIVE_ROW_CLASS,
                   isRowSelected && 'ring-1 ring-inset ring-border',
                 )}
               />
@@ -1525,6 +1545,7 @@ const sessionNodeItemPropsChange = (prev: SessionNodeItemProps, next: SessionNod
   if (prev.archivedBucket !== next.archivedBucket) return 'archivedBucket';
   if ((prev.renderContext ?? 'project') !== (next.renderContext ?? 'project')) return 'renderContext';
   if ((prev.detailed ?? false) !== (next.detailed ?? false)) return 'detailed';
+  if ((prev.repeat ?? false) !== (next.repeat ?? false)) return 'repeat';
   if (prev.mobileVariant !== next.mobileVariant) return 'mobileVariant';
   if (prev.alwaysShowActions !== next.alwaysShowActions) return 'alwaysShowActions';
   if (prev.nodeStructureKey !== next.nodeStructureKey) return 'nodeStructureKey';
