@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { Window } from 'happy-dom';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -7,20 +7,57 @@ import { dictationClient } from '@/lib/dictation/dictation-client';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { getDictationStartOptions, useDictation, type UseDictationResult } from './useDictation';
 
-// The microphone is not the subject here: the test feeds PCM itself.
-let audioConfig: { onPcmSegment: (base64Pcm: string) => void } | null = null;
-const audioSource = {
-    start: async () => {},
-    stop: async () => {},
-    subscribeLevel: () => () => {},
+const node = () => ({ connect: () => {}, disconnect: () => {} });
+
+// The microphone is not the subject here: the test pushes PCM through the
+// ScriptProcessorNode the real capture source installs. Stubbing the capture
+// module instead would replace it for every later test file in the same bun
+// process, and use-dictation-audio-source.test.tsx then tests the stub.
+const PROCESSOR_SAMPLES = 4096;
+const SAMPLES_PER_CHUNK = 16_000; // the capture source's 16 kHz output rate
+let processor: {
+    onaudioprocess: ((event: { inputBuffer: { getChannelData: () => Float32Array } }) => void) | null;
+} | null = null;
+
+class FakeAudioContext {
+    state = 'running';
+    sampleRate = SAMPLES_PER_CHUNK;
+    destination = node();
+    resume() {
+        return Promise.resolve();
+    }
+    close() {
+        return Promise.resolve();
+    }
+    createMediaStreamSource() {
+        return node();
+    }
+    createScriptProcessor() {
+        processor = { ...node(), onaudioprocess: null };
+        return processor;
+    }
+    createGain() {
+        return { ...node(), gain: { value: 1 } };
+    }
+}
+
+/** One second of audio, delivered the way the microphone delivers it. */
+const speakOneSecond = () => {
+    const callbacks = Math.ceil(SAMPLES_PER_CHUNK / PROCESSOR_SAMPLES);
+    for (let i = 0; i < callbacks; i++) {
+        processor?.onaudioprocess?.({
+            inputBuffer: { getChannelData: () => new Float32Array(PROCESSOR_SAMPLES) },
+        });
+    }
 };
 
-mock.module('@/lib/dictation/use-dictation-audio-source', () => ({
-    useDictationAudioSource: (config: { onPcmSegment: (base64Pcm: string) => void }) => {
-        audioConfig = config;
-        return audioSource;
-    },
-}));
+const restoreGlobal = (key: 'window' | 'document', descriptor: PropertyDescriptor | undefined) => {
+    if (descriptor) {
+        Object.defineProperty(globalThis, key, descriptor);
+    } else {
+        Reflect.deleteProperty(globalThis, key);
+    }
+};
 
 describe('getDictationStartOptions', () => {
     const original = {
@@ -109,6 +146,11 @@ describe('useDictation stream errors', () => {
     let socket: FakeSocket;
     let transcripts: string[];
     let errors: Error[];
+    let replaced: {
+        window: PropertyDescriptor | undefined;
+        document: PropertyDescriptor | undefined;
+        mediaDevices: PropertyDescriptor | undefined;
+    };
 
     const Probe: React.FC = () => {
         latest = useDictation({
@@ -119,15 +161,27 @@ describe('useDictation stream errors', () => {
     };
 
     beforeEach(() => {
-        audioConfig = null;
+        processor = null;
         latest = null;
         transcripts = [];
         errors = [];
         const dom = new Window({ url: 'http://localhost' });
+        Object.assign(dom, { AudioContext: FakeAudioContext });
+        replaced = {
+            window: Object.getOwnPropertyDescriptor(globalThis, 'window'),
+            document: Object.getOwnPropertyDescriptor(globalThis, 'document'),
+            mediaDevices: Object.getOwnPropertyDescriptor(globalThis.navigator, 'mediaDevices'),
+        };
         Object.defineProperty(globalThis, 'window', { configurable: true, writable: true, value: dom });
         Object.defineProperty(globalThis, 'document', { configurable: true, writable: true, value: dom.document });
-        Object.defineProperty(globalThis, 'navigator', { configurable: true, writable: true, value: dom.navigator });
         Object.defineProperty(globalThis, 'IS_REACT_ACT_ENVIRONMENT', { configurable: true, writable: true, value: true });
+        // Granted at once: no test here waits on the microphone prompt.
+        Object.defineProperty(globalThis.navigator, 'mediaDevices', {
+            configurable: true,
+            value: {
+                getUserMedia: async () => ({ getTracks: () => [{ stop: () => {} }] }),
+            },
+        });
 
         // The real client, wired to a socket that is already open: no network,
         // no reconnect loop, but the real message handling and bookkeeping.
@@ -147,9 +201,16 @@ describe('useDictation stream errors', () => {
         act(() => root?.unmount());
         root = null;
         (dictationClient as unknown as { socket: FakeSocket | null }).socket = null;
-        Reflect.deleteProperty(globalThis, 'window');
-        Reflect.deleteProperty(globalThis, 'document');
-        Reflect.deleteProperty(globalThis, 'navigator');
+        // Give back what this file replaced: the next test file in the same
+        // process reads the global window, document and navigator.
+        restoreGlobal('window', replaced.window);
+        restoreGlobal('document', replaced.document);
+        if (replaced.mediaDevices) {
+            Object.defineProperty(globalThis.navigator, 'mediaDevices', replaced.mediaDevices);
+        } else {
+            Reflect.deleteProperty(globalThis.navigator, 'mediaDevices');
+        }
+        Reflect.deleteProperty(globalThis, 'IS_REACT_ACT_ENVIRONMENT');
     });
 
     const mount = () => act(async () => root?.render(React.createElement(Probe)));
@@ -169,7 +230,7 @@ describe('useDictation stream errors', () => {
 
         // One second of audio is buffered, so the dictation is salvageable.
         await act(async () => {
-            audioConfig?.onPcmSegment('AAAA');
+            speakOneSecond();
         });
         // The server has already transcribed a segment.
         await act(async () => {
