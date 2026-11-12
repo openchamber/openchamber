@@ -32,7 +32,8 @@ const SECTION_CLASS = cn(
   '[&:not(:first-child)]:mt-5',
 );
 
-const HEADING_CLASS = 'text-xs font-semibold text-foreground';
+// A section's caption, as the sidebar writes them: a muted word at the rows' size.
+const HEADING_CLASS = 'text-[0.8125rem] font-medium text-muted-foreground';
 const TOUCH_HEADING_CLASS = 'typography-meta font-semibold text-muted-foreground';
 const SUMMARY_CLASS = 'min-w-0 max-w-[60%] truncate text-end text-muted-foreground tabular-nums';
 
@@ -43,22 +44,28 @@ const TouchCard: React.FC<{ children: React.ReactNode }> = ({ children }) => (
 
 export const WorkStatusSection: React.FC<{
   title: string;
-  /** Names what the section is about, right after the title (the project). */
+  /**
+   * Names what the section is about (the project). It takes the heading's
+   * trailing value, where a collapsible section shows its summary, so every
+   * heading reads as a title with its value at the end.
+   */
   subject?: React.ReactNode;
   /** Aggregate for the whole section; belongs on the heading, not on a row. */
   summary?: React.ReactNode;
   children: React.ReactNode;
 }> = ({ title, subject, summary, children }) => {
   const touch = React.useContext(WorkStatusTouchContext);
+  const trailing = summary ?? subject;
   return (
     <section className={SECTION_CLASS}>
-      <div data-work-status-heading className={cn('flex items-center gap-2', touch ? 'mb-1.5 min-h-6 px-2.5' : 'mb-0.5 px-1')}>
+      {/* As tall as a collapsible section's heading, so every gap between
+          sections is the same. */}
+      <div data-work-status-heading className={cn('flex items-center gap-2', touch ? 'mb-1.5 min-h-6 px-2.5' : 'mb-0.5 h-6 px-1')}>
         <h3 className={cn(touch ? TOUCH_HEADING_CLASS : HEADING_CLASS, 'min-w-0 flex-1 truncate')}>
           {title}
-          {subject ? <span className="ms-1.5 font-normal text-muted-foreground">{subject}</span> : null}
         </h3>
-        {summary !== undefined && summary !== null ? (
-          <span dir="auto" className={cn(SUMMARY_CLASS, touch ? 'typography-meta' : 'text-xs')}>{summary}</span>
+        {trailing !== undefined && trailing !== null ? (
+          <span dir="auto" className={cn(SUMMARY_CLASS, touch ? 'typography-meta' : 'text-xs')}>{trailing}</span>
         ) : null}
       </div>
       {touch ? <TouchCard>{children}</TouchCard> : children}
@@ -124,15 +131,17 @@ export const WorkStatusCollapsibleSection: React.FC<{
               style={iconColor ? { color: iconColor } : undefined}
             />
           ) : null)}
-          <span className={cn(touch ? TOUCH_HEADING_CLASS : HEADING_CLASS, 'min-w-0 truncate')}>{title}</span>
-          <Icon
-            name={expanded ? 'arrow-down-s' : 'arrow-right-s'}
-            className="size-3.5 shrink-0 text-muted-foreground"
-          />
+          <span className={cn(touch ? TOUCH_HEADING_CLASS : HEADING_CLASS, 'min-w-0 truncate transition-colors group-hover/section:text-foreground')}>{title}</span>
           <span className="flex-1" />
           {summary !== undefined && summary !== null ? (
-            <span dir="auto" className={cn(SUMMARY_CLASS, touch ? 'typography-meta pe-2.5' : 'text-xs')}>{summary}</span>
+            <span dir="auto" className={cn(SUMMARY_CLASS, touch ? 'typography-meta' : 'text-xs')}>{summary}</span>
           ) : null}
+          {/* At the heading's end, so the chevrons of every section share one
+              column whatever their titles' lengths. */}
+          <Icon
+            name={expanded ? 'arrow-down-s' : 'arrow-right-s'}
+            className={cn('size-3.5 shrink-0 text-muted-foreground rtl:-scale-x-100', touch && 'me-2.5')}
+          />
         </button>
         {actionLayout === 'inline' ? action : null}
       </div>

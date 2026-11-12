@@ -100,7 +100,8 @@ const SortableChip: React.FC<{
                         onClick={() => onSubmit(item)}
                         className={CHIP_CLASS}
                     >
-                        <Icon name={item.icon} className="h-3 w-3 shrink-0 opacity-70 transition-opacity group-hover:opacity-100" />
+                        {/* 16px beside the meta-size label, the composer footer's ratio. */}
+                        <Icon name={item.icon} className="size-4 shrink-0" />
                         <span className="whitespace-nowrap">{item.label}</span>
                     </button>
                 </TooltipTrigger>
@@ -223,9 +224,10 @@ const AddStarterPicker: React.FC<{
                         <button
                             type="button"
                             aria-label={t('chat.draftStarters.add')}
-                            className={cn(CHIP_ICON_BUTTON_CLASS, 'text-muted-foreground hover:bg-[var(--interactive-hover)] hover:text-foreground')}
+                            // A starter's own box, so it reads as one more chip of the row.
+                            className={CHIP_CLASS}
                         >
-                            <Icon name="add" className="h-3.5 w-3.5" />
+                            <Icon name="add" className="size-4 shrink-0" />
                         </button>
                     </DialogTrigger>
                 </TooltipTrigger>

@@ -267,7 +267,7 @@ export const WorkStatusPanel: React.FC<Props> = ({ sessionId, directory, visible
             onClick={() => setSectionsDialogOpen(true)}
             className="absolute inset-e-2 top-1.5 z-10 rounded p-0.5 text-muted-foreground transition-colors hover:text-foreground"
           >
-            <Icon name="equalizer-2" className="size-4" />
+            <Icon name="list-check-2" className="size-4" />
           </button>
         </TooltipTrigger>
         <TooltipContent side="bottom" sideOffset={6}>{t('chat.workStatus.sections.open')}</TooltipContent>

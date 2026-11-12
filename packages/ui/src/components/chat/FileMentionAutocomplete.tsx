@@ -575,7 +575,7 @@ export const FileMentionAutocomplete = React.forwardRef<FileMentionHandle, FileM
   return (
       <div
         ref={containerRef}
-        className="absolute z-[100] min-w-0 w-full max-w-[560px] max-h-64 oc-glass-popover oc-glass-floating rounded-xl bottom-full mb-2 inset-s-0 flex flex-col"
+        className="absolute z-[100] min-w-0 w-full max-w-[560px] max-h-64 oc-glass-popover oc-glass-floating rounded-lg bottom-full mb-2 inset-s-0 flex flex-col"
         style={mobileMaxHeight !== undefined ? { ...style, maxHeight: mobileMaxHeight } : style}
       >
         <ScrollableOverlay ref={listRef} preventOverscroll outerClassName="flex-1 min-h-0" className="p-1">
@@ -600,7 +600,7 @@ export const FileMentionAutocomplete = React.forwardRef<FileMentionHandle, FileM
                   key={`agent-${agent.name}`}
                   ref={(el) => { itemRefs.current[index] = el; }}
                   className={cn(
-                    'flex items-center gap-2 px-2 py-1.5 cursor-pointer typography-ui-label rounded-lg',
+                    'flex items-center gap-2 px-2 py-1.5 cursor-pointer typography-ui-label rounded-md',
                     isSelected && 'bg-interactive-selection',
                   )}
                   onClick={() => handleAgentPick(agent.name)}
@@ -632,7 +632,7 @@ export const FileMentionAutocomplete = React.forwardRef<FileMentionHandle, FileM
                   key={`recent-${file.path}`}
                   ref={(el) => { itemRefs.current[rowIndex] = el; }}
                   className={cn(
-                    "flex items-center gap-2 px-2 py-1.5 cursor-pointer typography-ui-label rounded-lg",
+                    "flex items-center gap-2 px-2 py-1.5 cursor-pointer typography-ui-label rounded-md",
                     isSelected && "bg-interactive-selection"
                   )}
                   onClick={() => handleFileSelect(file)}
@@ -685,7 +685,7 @@ export const FileMentionAutocomplete = React.forwardRef<FileMentionHandle, FileM
                 <div
                   ref={(el) => { itemRefs.current[rowIndex] = el; }}
                     className={cn(
-                      "flex items-center gap-2 px-2 py-1.5 cursor-pointer typography-ui-label rounded-lg",
+                      "flex items-center gap-2 px-2 py-1.5 cursor-pointer typography-ui-label rounded-md",
                       isSelected && "bg-interactive-selection"
                   )}
                   onClick={() => handleFileSelect(file)}
@@ -745,7 +745,7 @@ export const FileMentionAutocomplete = React.forwardRef<FileMentionHandle, FileM
                   key={`session-${session.id}`}
                   ref={(el) => { itemRefs.current[rowIndex] = el; }}
                   className={cn(
-                    'flex items-center gap-2 px-2 py-1.5 cursor-pointer typography-ui-label rounded-lg',
+                    'flex items-center gap-2 px-2 py-1.5 cursor-pointer typography-ui-label rounded-md',
                     selectedIndex === rowIndex && 'bg-interactive-selection',
                   )}
                   onClick={() => onSessionSelect?.(session)}
@@ -767,7 +767,7 @@ export const FileMentionAutocomplete = React.forwardRef<FileMentionHandle, FileM
                   key={`extension-${mention.guestId}-${mention.id}`}
                   ref={(el) => { itemRefs.current[rowIndex] = el; }}
                   className={cn(
-                    'flex items-center gap-2 px-2 py-1.5 cursor-pointer typography-ui-label rounded-lg',
+                    'flex items-center gap-2 px-2 py-1.5 cursor-pointer typography-ui-label rounded-md',
                     selectedIndex === rowIndex && 'bg-interactive-selection',
                   )}
                   onClick={() => onExtensionMentionSelect?.(mention)}

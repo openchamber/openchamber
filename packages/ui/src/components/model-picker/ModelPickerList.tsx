@@ -208,7 +208,7 @@ const ModelPickerRowCard: React.FC<{
 
   return (
     <Tooltip open onOpenChange={() => {}}>
-      <TooltipContent surface="card" anchor={placement.anchor} side={placement.side} sideOffset={ROW_TOOLTIP_OFFSET} className="max-w-xs text-start transition-none data-[starting-style]:opacity-100 data-[starting-style]:scale-100 data-[ending-style]:opacity-100 data-[ending-style]:scale-100">
+      <TooltipContent surface="card" anchor={placement.anchor} side={placement.side} align="start" sideOffset={ROW_TOOLTIP_OFFSET} className="max-w-xs text-start transition-none data-[starting-style]:opacity-100 data-[starting-style]:scale-100 data-[ending-style]:opacity-100 data-[ending-style]:scale-100">
         <ModelPickerCardBody metadata={metadata} providerName={providerName} labels={labels} />
       </TooltipContent>
     </Tooltip>
@@ -429,6 +429,8 @@ interface ModelPickerListProps {
   maxHeightClassName?: string;
   maxHeightStyle?: React.CSSProperties;
   sectionHeaderClassName?: string;
+  /** Uppercase section captions, as phone sheets write them; desktop lists take the sidebar's muted sentence case. */
+  sheetCaptions?: boolean;
   rowClassName?: string;
   stickyHeaders?: boolean;
   autoFocus?: boolean;
@@ -473,6 +475,7 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
   maxHeightClassName = 'max-h-[min(400px,calc(100dvh-12rem))] flex-1',
   maxHeightStyle,
   sectionHeaderClassName,
+  sheetCaptions = false,
   rowClassName,
   stickyHeaders = true,
   autoFocus = true,
@@ -939,8 +942,12 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
     if (stickyHeaders && scrollRef.current) syncStickyFade(scrollRef.current);
   }, [stickyHeaders, syncStickyFade, rows]);
 
+  const captionClassName = sheetCaptions
+    ? 'typography-micro font-semibold uppercase tracking-wider'
+    : 'typography-ui-label font-medium';
   const headerClassName = cn(
-    'typography-micro font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-2 px-2 py-1.5',
+    'text-muted-foreground flex items-center gap-2 px-2 py-1.5',
+    captionClassName,
     sectionHeaderClassName,
   );
 
@@ -1066,7 +1073,7 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
                 {/* A flex wrapper keeps the caller's element laid out as a row item. */}
                 {rowEnd ? <span id={`${rowId}-end`} className="flex">{rowEnd}</span> : null}
                 {/* Kept empty where a model reports no context size. */}
-                <span id={contextTokens ? `${rowId}-context` : undefined} className={cn('w-10 flex-shrink-0 whitespace-nowrap text-end typography-micro tabular-nums', isHighlighted ? 'text-interactive-selection-foreground/70' : 'text-muted-foreground')}>{contextTokens}</span>
+                <span id={contextTokens ? `${rowId}-context` : undefined} className={cn('w-12 flex-shrink-0 whitespace-nowrap text-end typography-micro tabular-nums', isHighlighted ? 'text-interactive-selection-foreground/70' : 'text-muted-foreground')}>{contextTokens}</span>
                 <span className="flex h-4 w-4 flex-shrink-0 items-center justify-center" aria-hidden={!isSelected}>
                   {isSelected ? <Icon name="check" className="h-4 w-4 text-inherit" /> : null}
                 </span>
@@ -1398,7 +1405,7 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
             aria-hidden="true"
             data-model-picker-sticky-header="true"
             onClick={() => toggleSection(stuckSectionKey)}
-            className="oc-sticky-fade-overlay absolute inset-x-0 top-0 z-30 flex items-center gap-2 px-3 py-1.5 text-start typography-micro font-semibold uppercase tracking-wider text-muted-foreground"
+            className={cn('oc-sticky-fade-overlay absolute inset-x-0 top-0 z-30 flex items-center gap-2 px-3 py-1.5 text-start text-muted-foreground', captionClassName)}
           >
             {renderSectionIdentity(stuckSectionKey)}
           </button>

@@ -180,7 +180,9 @@ export const SettingsSection: React.FC<SettingsSectionProps> = ({
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0 space-y-1">
             {title != null ? (
-              <div className="flex items-center gap-2">
+              // Beside a header action, the title line is the action's 28px
+              // height, so the two share a centre line.
+              <div className={cn('flex items-center gap-2', headerAction != null && 'min-h-7')}>
                 {typeof title === 'string' || typeof title === 'number' ? (
                   <h2 className={SETTINGS_SECTION_TITLE_CLASS}>{title}</h2>
                 ) : (

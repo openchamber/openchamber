@@ -531,7 +531,8 @@ export const ContextPanelRail: React.FC = () => {
             onClick={() => setIsSurfacesDialogOpen(true)}
             className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:text-foreground"
           >
-            <Icon name="equalizer-2" className="h-[17px] w-[17px]" />
+            {/* Its own glyph: the sliders mean the sidebar's display options. */}
+            <Icon name="apps" className="h-[17px] w-[17px]" />
           </button>
         </TooltipTrigger>
         <TooltipContent side="left" sideOffset={8}>

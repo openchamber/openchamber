@@ -121,7 +121,8 @@ const ToolPartDiffPreview: React.FC<ToolPartDiffPreviewProps> = React.memo(({ di
     const fallback = <PlainDiffFallback diff={diff} />;
 
     return (
-        <div className="typography-code px-1 pb-1 pt-0">
+        // No side padding: the diff starts at the tool body's edge, under nothing else.
+        <div className="typography-code pb-1 pt-0">
             <DiffPreviewErrorBoundary resetKey={diff} fallback={fallback}>
                 <PatchDiff
                     patch={diff}

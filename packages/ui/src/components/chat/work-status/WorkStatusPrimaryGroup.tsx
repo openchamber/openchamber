@@ -43,6 +43,7 @@ import { prChecksTooltip } from './prChecks';
 import { resolvePrRowTarget } from './prRowTarget';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { openExternalUrl } from '@/lib/url';
+import { DiffCount } from '@/components/ui/diff-count';
 
 type Props = {
   sessionId: string | null;
@@ -348,7 +349,7 @@ export const WorkStatusPrimaryGroup: React.FC<Props> = ({ sessionId, directory, 
           {/* Under the meter, from the same reply, so it reads as the cache right now. */}
           {lastReplyCacheHit !== null ? (
             <WorkStatusRow
-              muted
+              icon="database-2"
               label={t('contextSidebar.tokens.cacheHit')}
               value={<WorkStatusValue>{`${lastReplyCacheHit.toFixed(1)}%`}</WorkStatusValue>}
             />
@@ -408,13 +409,7 @@ export const WorkStatusPrimaryGroup: React.FC<Props> = ({ sessionId, directory, 
                 ? t('chat.workStatus.git.changedFileSingle', { count: changed.files })
                 : t('chat.workStatus.git.changedFilePlural', { count: changed.files })}
               value={changed.hasStats && (changed.additions > 0 || changed.deletions > 0) ? (
-                <>
-                  <WorkStatusValue tone="success">{`+${changed.additions}`}</WorkStatusValue>
-                  {/* Neutral separator: colouring it would imply it carries a
-                      status of its own. */}
-                  <WorkStatusValue tone="muted">/</WorkStatusValue>
-                  <WorkStatusValue tone="error">{`−${changed.deletions}`}</WorkStatusValue>
-                </>
+                <DiffCount added={changed.additions} removed={changed.deletions} />
               ) : undefined}
             />
           ) : null}

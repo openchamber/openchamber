@@ -39,6 +39,11 @@
     --oc-tile-tone: 4%;
     --oc-tile-inset-tone: 6%;
     --oc-tile-hover-tone: 7%;
+    /* A docked panel's step off the chat (oc-panel-edge). Light themes take a
+       wider one than a tile: the sidebar, the chat and a 4% panel were all
+       one cream, and the panel stopped reading as a card. Dark stays at the
+       tile step. hooks/usePageColors.ts mirrors these. */
+    --oc-panel-tone: 6%;
 
     /* Semantic typography defaults (must match SEMANTIC_TYPOGRAPHY) */
     --text-markdown: 0.875rem;
@@ -80,12 +85,14 @@
       0 0 0 0.5px var(--oc-elevation-ring),
       0 1px 2px -0.5px rgb(0 0 0 / 0.06),
       0 4px 10px -2px rgb(0 0 0 / 0.07);
+    /* Over the light chat a menu read as a pale stain: the floating level
+       casts a deeper shadow than the raised one, so it lifts off the page. */
     --oc-elevation-floating:
       inset 0 1px 0 0 rgb(255 255 255 / 0.7),
       0 0 0 0.5px var(--oc-elevation-ring),
-      0 1px 2px -0.5px rgb(0 0 0 / 0.06),
-      0 4px 8px -2px rgb(0 0 0 / 0.08),
-      0 12px 20px -4px rgb(0 0 0 / 0.06);
+      0 1px 2px -0.5px rgb(0 0 0 / 0.08),
+      0 4px 10px -2px rgb(0 0 0 / 0.11),
+      0 14px 28px -6px rgb(0 0 0 / 0.12);
 
     /* Motion: springs traced as linear() easings (lib/motion/springs.ts,
        whose test keeps these in step). Popups open on the popup spring and
@@ -143,6 +150,7 @@
     --oc-tile-tone: 3%;
     --oc-tile-inset-tone: 4.5%;
     --oc-tile-hover-tone: 5.5%;
+    --oc-panel-tone: 3%;
     --oc-elevation-ring: rgb(255 255 255 / 0.08);
     --oc-elevation-button:
       inset 0 1px 0 0 rgb(255 255 255 / 0.04),
@@ -504,8 +512,8 @@
    extension frames) follow through usePageColors (hooks/usePageColors.ts).
    Floating, the card keeps its glass. */
 .oc-panel-edge:not([data-edge-floating]) {
-  --background: color-mix(in srgb, var(--surface-foreground) var(--oc-tile-tone), var(--oc-chat-background));
-  --surface-background: color-mix(in srgb, var(--surface-foreground) var(--oc-tile-tone), var(--oc-chat-background));
+  --background: color-mix(in srgb, var(--surface-foreground) var(--oc-panel-tone), var(--oc-chat-background));
+  --surface-background: color-mix(in srgb, var(--surface-foreground) var(--oc-panel-tone), var(--oc-chat-background));
 }
 
 /* The work status card opened over the chat is a dropdown, and takes the

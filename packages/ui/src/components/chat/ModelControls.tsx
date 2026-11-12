@@ -2000,6 +2000,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                         setMobileDetailsEntry(entry);
                     }}
                     providersStartCollapsed
+                    sheetCaptions
                     autoFocus={false}
                     tooltipsEnabled={false}
                     maxHeightClassName="min-h-0 flex-1"
@@ -2672,7 +2673,8 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         const triggerLabel = (
             <>
                 <Icon name="brain-ai-3" className={cn('model-controls__variant-icon flex-shrink-0 text-muted-foreground group-hover:text-foreground', controlIconSize)} />
-                <span aria-hidden="true" className="model-controls__variant-slash text-muted-foreground/60">/</span>
+                {/* At the label's size, so it sits on the label's baseline. */}
+                <span aria-hidden="true" className={cn('model-controls__variant-slash text-muted-foreground/60', controlTextSize)}>/</span>
                 <span
                     className={cn(
                         'model-controls__variant-label',

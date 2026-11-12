@@ -44,6 +44,9 @@ function useConfirmedInlineFile(raw: string, inputKind: FileReferenceSource = 'p
   return fileReferences && confirmed?.raw === raw && confirmed.inputKind === inputKind && confirmed.directory === directory && confirmed.runtimeKey === runtimeKey ? confirmed.path : null;
 }
 
+/** Inline code up to this length never breaks across lines; longer code still wraps on a narrow column. */
+const SHORT_INLINE_CODE_CHARS = 32;
+
 export function MarkdownInlineCode({ children, node: _node, ...props }: React.ComponentProps<'code'> & ExtraProps) {
   const raw = _node?.children.map((child) => child.type === 'text' ? child.value : '').join('') ?? '';
   const path = useConfirmedInlineFile(raw);
@@ -66,6 +69,8 @@ export function MarkdownInlineCode({ children, node: _node, ...props }: React.Co
       {...props}
       dir="ltr"
       data-streamdown="inline-code"
+      // Short enough to move to the next line whole (index.css).
+      data-short={raw.length > 0 && raw.length <= SHORT_INLINE_CODE_CHARS ? '' : undefined}
       data-openchamber-file-link={path ? 'true' : undefined}
       data-openchamber-file-ref={path ? raw : undefined}
       data-openchamber-file-path={path ?? undefined}

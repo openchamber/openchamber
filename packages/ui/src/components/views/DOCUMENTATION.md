@@ -500,6 +500,19 @@ a whitespace-only note. Hunk stage and discard actions are withheld meanwhile,
 because they act on the whole hunk, whitespace included. Line numbers do not
 move, so comments and context expansion work unchanged.
 
+## Hunk actions
+
+A hunk's stage and discard buttons sit in a row of their own, a Pierre line
+annotation under the hunk's last changed line, at the row's end.
+
+### Why a row of its own and not a capsule over the code
+
+The capsule used to float over the context after the hunk, clamped inside the
+code column. On a long line it covered the code it acted on. The row costs
+2.25rem per hunk and covers nothing; the gutter is too narrow for two
+buttons, and a hunk that starts at the file's first line has no separator
+above it to hold them.
+
 ## Sticky horizontal scrollbar
 
 Pierre scrolls each code column sideways on its own (two in a split diff, one

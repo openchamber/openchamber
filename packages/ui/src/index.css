@@ -1985,6 +1985,15 @@ diffs-container {
   border-radius: 0.375rem;
   word-break: normal;
   overflow-wrap: break-word;
+  /* A chip that does break keeps its padding and corners on both lines. */
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+}
+
+/* A short chip ("GET /conversations") moves to the next line whole instead
+   of splitting its background across two (MarkdownInlineCode marks it). */
+.markdown-content code[data-streamdown="inline-code"][data-short] {
+  white-space: nowrap;
 }
 
 @supports (color: color-mix(in lab, red, red)) {

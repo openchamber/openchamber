@@ -128,6 +128,7 @@ import { findSubagentCancellation, findSubagentRun, readBackgroundSubagentChildI
 import { useGlobalSessionStatusStore } from '@/sync/global-session-status';
 import { useShellOutput } from './useShellOutput';
 import { useToolContentCompletion } from './useToolContentCompletion';
+import { DiffCount } from '@/components/ui/diff-count';
 
 type ToolJsonViewMode = 'summary' | 'formatted' | 'raw';
 
@@ -1471,9 +1472,13 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
                     {diffEntries.map((entry) => (
                         <div key={entry.id} className="w-full min-w-0">
                             <div className="mb-1 flex min-w-0 items-center gap-1 py-1">
-                                <div className="min-w-0 flex-1 typography-meta font-medium text-muted-foreground">
-                                    {renderPathLikeGitChanges(entry.title)}
-                                </div>
+                                {/* One file: the row above already names it, so only its
+                                    actions stay, and the code below starts at the body's edge. */}
+                                {diffEntries.length > 1 ? (
+                                    <div className="min-w-0 flex-1 typography-meta font-medium text-muted-foreground">
+                                        {renderPathLikeGitChanges(entry.title)}
+                                    </div>
+                                ) : <div className="flex-1" />}
                                 {entry.renderMode === 'diff' ? (
                                     <DiffViewToggle
                                         mode={diffViewMode}
@@ -2266,16 +2271,10 @@ const ToolPartContent: React.FC<ToolPartProps & { header?: ToolRowHeader; subage
                                 </>
                             ) : null}
                             {diffStats && (
-                                <span className="flex-shrink-0 inline-flex items-center gap-0 typography-meta" style={{ fontSize: '0.8rem', lineHeight: '1' }}>
-                                    <span style={{ color: 'var(--status-success)' }}>+{diffStats.added}</span>
-                                    <span style={{ color: 'var(--tools-description)' }}>/</span>
-                                    <span style={{ color: 'var(--status-error)' }}>-{diffStats.removed}</span>
-                                </span>
+                                <DiffCount added={diffStats.added} removed={diffStats.removed} className="typography-meta" />
                             )}
                             {writeLineCount && (
-                                <span className="flex-shrink-0 inline-flex items-center gap-0 typography-meta" style={{ fontSize: '0.8rem', lineHeight: '1' }}>
-                                    <span style={{ color: 'var(--status-success)' }}>+{writeLineCount}</span>
-                                </span>
+                                <DiffCount added={writeLineCount} removed={0} hideZero className="typography-meta" />
                             )}
                         </div>
                         {header?.stop ? (

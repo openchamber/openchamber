@@ -159,13 +159,13 @@ export const SnippetAutocomplete = React.forwardRef<SnippetAutocompleteHandle, S
   }), [actions, chooseSnippet, filteredSnippets, onClose]);
 
   return (
-    <div ref={containerRef} className="absolute z-[100] min-w-0 w-full max-w-[420px] max-h-64 oc-glass-popover oc-glass-floating rounded-xl bottom-full mb-2 inset-s-0 flex flex-col" style={mobileMaxHeight !== undefined ? { ...style, maxHeight: mobileMaxHeight } : style}>
+    <div ref={containerRef} className="absolute z-[100] min-w-0 w-full max-w-[420px] max-h-64 oc-glass-popover oc-glass-floating rounded-lg bottom-full mb-2 inset-s-0 flex flex-col" style={mobileMaxHeight !== undefined ? { ...style, maxHeight: mobileMaxHeight } : style}>
       <ScrollableOverlay preventOverscroll outerClassName="flex-1 min-h-0" className="p-1">
         {actions.map((action, index) => (
           <div
             key={action.id}
             ref={(el) => { itemRefs.current[index] = el; }}
-            className={cn('flex min-w-0 items-center gap-2 px-2 py-1.5 cursor-pointer rounded-lg typography-ui-label', selectedIndex === index && 'bg-interactive-selection')}
+            className={cn('flex min-w-0 items-center gap-2 px-2 py-1.5 cursor-pointer rounded-md typography-ui-label', selectedIndex === index && 'bg-interactive-selection')}
             onClick={action.run}
             onMouseMove={() => setSelectedIndex(index)}
           >
@@ -179,7 +179,7 @@ export const SnippetAutocomplete = React.forwardRef<SnippetAutocompleteHandle, S
             <div
               key={`${snippet.source}:${snippet.filePath}`}
               ref={(el) => { itemRefs.current[itemIndex] = el; }}
-              className={cn('flex items-center gap-2 px-2 py-1.5 cursor-pointer rounded-lg typography-ui-label', itemIndex === selectedIndex && 'bg-interactive-selection')}
+              className={cn('flex items-center gap-2 px-2 py-1.5 cursor-pointer rounded-md typography-ui-label', itemIndex === selectedIndex && 'bg-interactive-selection')}
               onClick={() => chooseSnippet(snippet)}
               onMouseMove={() => setSelectedIndex(itemIndex)}
             >
