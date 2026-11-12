@@ -35,7 +35,7 @@ export const isWorkExpanded = (expansion: WorkExpansion, key: string): boolean =
   expansion.expandedByDefault !== expansion.toggled.has(key)
 );
 
-type Project = { id: string };
+type Project = { id: string; sidebarCollapsed?: boolean };
 
 type SessionProjectViewStateArgs = {
   isVSCode: boolean;
@@ -69,6 +69,17 @@ export const useSessionProjectViewState = ({
   const [workExpansion, setWorkExpansion] = React.useState<WorkExpansion>(() => (
     parseWorkExpansion(safeStorage.getItem(WORK_EXPAND_STORAGE_KEY))
   ));
+  // The collapse key is one per browser origin, so after an instance switch it
+  // still names the previous instance's projects. The first project list the
+  // server sends replaces it, unless the user already folded or opened one here.
+  const hasServerSnapshot = useProjectsStore((store) => store.hasServerSnapshot);
+  const [awaitingServerProjects, setAwaitingServerProjects] = React.useState(() => (
+    !isVSCode && !useProjectsStore.getState().hasServerSnapshot
+  ));
+  if (awaitingServerProjects && hasServerSnapshot) {
+    setAwaitingServerProjects(false);
+    setCollapsedProjects(new Set(projects.flatMap((project) => (project.sidebarCollapsed === true ? [project.id] : []))));
+  }
   const workExpansionDirty = React.useRef(false);
   const ignoreIntersectionUntil = React.useRef<number>(0);
   const groupCollapseDirty = React.useRef(false);
@@ -157,6 +168,7 @@ export const useSessionProjectViewState = ({
       entry.kind === 'custom' && entry.grouping === 'time' ? [sidebarSectionActivityKey(entry.id)] : []
     ));
     setCollapsedActivities((current) => new Set([...current, ...SIDEBAR_ACTIVITY_KEYS, ...customZoneKeys]));
+    setAwaitingServerProjects(false);
     setCollapsedProjects(() => {
       const allIds = new Set(projects.map((project) => project.id));
       try {
@@ -183,6 +195,7 @@ export const useSessionProjectViewState = ({
       next.delete(PROJECTS_CAPTION_COLLAPSE_KEY);
       return next;
     });
+    setAwaitingServerProjects(false);
     setCollapsedProjects(() => {
       const empty = new Set<string>();
       try {
@@ -197,6 +210,7 @@ export const useSessionProjectViewState = ({
 
   const toggleProject = React.useCallback((projectId: string) => {
     ignoreIntersectionUntil.current = Date.now() + 150;
+    setAwaitingServerProjects(false);
     setCollapsedProjects((previous) => {
       const next = new Set(previous);
       if (next.has(projectId)) next.delete(projectId);

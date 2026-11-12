@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { useSessionUIStore } from '@/sync/session-ui-store';
+import { useProjectsStore } from '@/stores/useProjectsStore';
 import { getDeferredSafeStorage } from '@/stores/utils/safeStorage';
 import { useSessionProjectViewState } from './useSessionProjectViewState';
 
@@ -73,6 +74,7 @@ describe('useSessionProjectViewState', () => {
     storage.removeItem('oc.sessions.projectCollapse');
     storage.removeItem('oc.sessions.groupCollapse');
     storage.removeItem('oc.sessions.activityCollapse');
+    useProjectsStore.setState({ hasServerSnapshot: false });
   });
 
   test('keeps stable state/actions and ignores selection-store updates', async () => {
@@ -187,6 +189,63 @@ describe('useSessionProjectViewState', () => {
       expect(capture.state?.collapsedProjects).toEqual(new Set(['project-a']));
       expect(capture.state?.collapsedGroups).toEqual(new Set(['project-a:group-a']));
       expect(capture.state?.collapsedActivities).toEqual(new Set(['chats', 'work']));
+    } finally {
+      await act(async () => root.unmount());
+      dom.restore();
+    }
+  });
+  test('adopts the instance\'s own collapse state when its project list arrives after a switch', async () => {
+    // The device-wide key still lists the previous instance's projects.
+    getDeferredSafeStorage().setItem('oc.sessions.projectCollapse', JSON.stringify(['local-a']));
+    const dom = installMinimalDom();
+    const root = createRoot(dom.container);
+    const capture: HookCapture = { renderCount: 0 };
+    let projects: Array<{ id: string; sidebarCollapsed?: boolean }> = [{ id: 'remote-a' }, { id: 'remote-b' }];
+    const Harness = () => {
+      const value = useSessionProjectViewState({ isVSCode: false, projects });
+      capture.state = value.state;
+      capture.actions = value.actions;
+      return null;
+    };
+
+    try {
+      await act(async () => root.render(React.createElement(Harness)));
+      expect(capture.state?.collapsedProjects).toEqual(new Set(['local-a']));
+
+      projects = [{ id: 'remote-a', sidebarCollapsed: true }, { id: 'remote-b', sidebarCollapsed: false }];
+      await act(async () => useProjectsStore.setState({ hasServerSnapshot: true }));
+      expect(capture.state?.collapsedProjects).toEqual(new Set(['remote-a']));
+
+      // Later syncs leave the user's folding alone.
+      await act(async () => capture.actions!.toggleProject('remote-b'));
+      projects = [{ id: 'remote-a', sidebarCollapsed: false }, { id: 'remote-b', sidebarCollapsed: false }];
+      await act(async () => useProjectsStore.setState({ hasServerSnapshot: false }));
+      await act(async () => useProjectsStore.setState({ hasServerSnapshot: true }));
+      expect(capture.state?.collapsedProjects).toEqual(new Set(['remote-a', 'remote-b']));
+    } finally {
+      await act(async () => root.unmount());
+      dom.restore();
+    }
+  });
+
+  test('keeps a fold made before the project list arrives', async () => {
+    const dom = installMinimalDom();
+    const root = createRoot(dom.container);
+    const capture: HookCapture = { renderCount: 0 };
+    let projects: Array<{ id: string; sidebarCollapsed?: boolean }> = [{ id: 'remote-a' }];
+    const Harness = () => {
+      const value = useSessionProjectViewState({ isVSCode: false, projects });
+      capture.state = value.state;
+      capture.actions = value.actions;
+      return null;
+    };
+
+    try {
+      await act(async () => root.render(React.createElement(Harness)));
+      await act(async () => capture.actions!.toggleProject('remote-a'));
+      projects = [{ id: 'remote-a', sidebarCollapsed: false }];
+      await act(async () => useProjectsStore.setState({ hasServerSnapshot: true }));
+      expect(capture.state?.collapsedProjects).toEqual(new Set(['remote-a']));
     } finally {
       await act(async () => root.unmount());
       dom.restore();
