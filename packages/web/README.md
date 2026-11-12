@@ -65,6 +65,13 @@ external OpenCode servers.
 
 ### Connect other OpenChamber apps
 
+For a server protected by Cloudflare Access, add `CF-Access-Client-Id` and
+`CF-Access-Client-Secret` to the mobile instance's additional headers. Configure
+the Access application to bypass OPTIONS requests so CORS preflights can reach
+OpenChamber. Preflights carry header names without credential values; actual
+requests still require Access authentication and OpenChamber authentication.
+The server allows these headers for its existing approved client origins.
+
 Use `connect-url` when a web/API server should be added to OpenChamber Desktop or another OpenChamber app. If no server is running on the selected port, OpenChamber starts one first.
 
 ```bash
