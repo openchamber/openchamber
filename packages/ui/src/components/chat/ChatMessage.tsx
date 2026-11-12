@@ -641,7 +641,8 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
                                                 borderRadius: userMessageRadius,
                                                 borderBottomRightRadius: 'var(--radius-sm)',
                                             }}
-                                            className="px-5 py-3 shadow-none border border-primary/5"
+                                            // A tone step from the canvas, no ring: the bubble is layout.
+                                            className="px-5 py-3 shadow-none"
                                             data-user-message-bubble=""
                                         >
                                             <MessageBody
