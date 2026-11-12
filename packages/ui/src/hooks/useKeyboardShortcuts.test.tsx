@@ -14,6 +14,58 @@ import { useSettingsKeyboardShortcuts } from './useSettingsKeyboardShortcuts';
 
 const directory = '/workspace/shortcut-test';
 
+test('web terminal zoom handles configured shortcuts only while focused', async () => {
+  const previousOverrides = useUIStore.getState().shortcutOverrides;
+  try {
+    useUIStore.setState({ shortcutOverrides: {} });
+    await withShortcutsMounted(async () => {
+      const terminal = document.createElement('div');
+      terminal.dataset.terminalOwner = 'main';
+      const input = document.createElement('textarea');
+      terminal.append(input);
+      document.body.append(terminal);
+      const actions: string[] = [];
+      window.addEventListener('openchamber:zoom', (event) => {
+        if (event instanceof CustomEvent) actions.push(event.detail);
+      });
+      const press = (target: HTMLElement, key: string, code: string) => {
+        const event = new KeyboardEvent('keydown', { key, code, ctrlKey: true, bubbles: true, cancelable: true });
+        target.dispatchEvent(event);
+        return event.defaultPrevented;
+      };
+      input.focus();
+      expect(press(input, '=', 'Equal')).toBe(true);
+      expect(press(input, '-', 'Minus')).toBe(true);
+      expect(press(input, '0', 'Digit0')).toBe(true);
+      expect(actions).toEqual(['zoom-in', 'zoom-out', 'zoom-reset']);
+      useUIStore.setState({ shortcutOverrides: { zoom_in: 'mod+shift+y' } });
+      expect(press(input, '=', 'Equal')).toBe(false);
+      const rebound = new KeyboardEvent('keydown', { key: 'Y', code: 'KeyY', ctrlKey: true, shiftKey: true, bubbles: true, cancelable: true });
+      input.dispatchEvent(rebound);
+      expect(rebound.defaultPrevented).toBe(true);
+      expect(actions.at(-1)).toBe('zoom-in');
+      useUIStore.setState({ shortcutOverrides: { toggle_terminal: 'mod+minus' } });
+      expect(press(input, '-', 'Minus')).toBe(true);
+      expect(actions).toHaveLength(4);
+      useUIStore.setState({ shortcutOverrides: {} });
+      const other = document.createElement('input');
+      document.body.append(other);
+      other.focus();
+      expect(press(other, '-', 'Minus')).toBe(false);
+      terminal.dataset.terminalOwner = 'surface:guest';
+      input.focus();
+      expect(press(input, '-', 'Minus')).toBe(false);
+      terminal.dataset.terminalOwner = 'main';
+      Object.defineProperty(window, '__OPENCHAMBER_ELECTRON__', { configurable: true, value: { runtime: 'electron' } });
+      input.focus();
+      expect(press(input, '-', 'Minus')).toBe(false);
+      expect(actions).toHaveLength(4);
+    });
+  } finally {
+    useUIStore.setState({ shortcutOverrides: previousOverrides });
+  }
+});
+
 async function withShortcutsMounted(run: (requests: string[]) => Promise<void>, settingsOnly = false) {
   const dom = new Window({ url: 'http://shortcut.test' });
   const requests: string[] = [];
