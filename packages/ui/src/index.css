@@ -631,10 +631,11 @@ div[data-chat-input-footer="true"] {
    (ScrollToBottomButton). While it shows, the solid part also covers its band
    (the pill's 28px, 36px under the mobile touch floor, plus its 8px gap), so
    no line of text sits under it; the rows fade out above it over a short
-   ramp, about one line: the full 48px left several lines looking disabled. */
+   ramp of one line (the transcript's lines are about 24px): the full 48px
+   left several lines looking disabled. */
 [data-scroll-pill="true"] .chat-scroll-fade--end {
   --scroll-shadow-end-inset: calc(var(--chat-composer-inset, 0px) + var(--chat-floating-panel-clearance, 0px) + 2.25rem);
-  --scroll-shadow-end-size: 28px;
+  --scroll-shadow-end-size: 24px;
 }
 
 @media (pointer: coarse) {
@@ -1459,21 +1460,11 @@ diffs-container {
   padding-inline: 0.375rem;
 }
 
-/* When even the icons do not fit, the view options move from the end into
-   "More actions": side-by-side, whitespace, line wrap, then the tree view;
-   last, if the row still does not fit, the walkthrough. DiffView lists in the
-   menu the ones whose step is set. */
-.diff-toolbar__more,
-[data-diff-toolbar-more-layout] .diff-toolbar__layout-toggle,
-[data-diff-toolbar-more-whitespace] .diff-toolbar__whitespace-toggle,
-[data-diff-toolbar-more-wrap] .diff-toolbar__wrap-toggle,
-[data-diff-toolbar-more-tree] .diff-toolbar__tree-toggle,
+/* When even the icons do not fit, the walkthrough moves into "More actions",
+   where the view options always are; DiffView lists it there while its step
+   is set. */
 [data-diff-toolbar-more-walkthrough] .diff-toolbar__walkthrough-button {
   display: none;
-}
-
-[data-diff-toolbar-more-layout] .diff-toolbar__more {
-  display: inline-flex;
 }
 
 /* Walkthrough header: gives up room in steps while its row does not fit, as
@@ -2792,8 +2783,16 @@ textarea[data-terminal-hidden-input="true"]::placeholder {
   white-space: nowrap;
 }
 
+/* Cut short and at rest, the text is inline so its box can end in the
+   container's ellipsis (text-overflow does not reach into an inline-block).
+   Under the pointer it becomes a box again and scrolls. */
+.marquee-text--active {
+  display: inline;
+}
+
 .group:hover .marquee-text--active,
 .marquee-text--active:hover {
+  display: inline-block;
   animation: marquee-scroll 5s linear infinite alternate;
 }
 
@@ -2802,6 +2801,12 @@ textarea[data-terminal-hidden-input="true"]::placeholder {
   .group:hover .marquee-text--active,
   .marquee-text--active:hover {
     animation: none;
+  }
+
+  /* Nothing scrolls, so the ellipsis stays under the pointer too. */
+  .group:hover .marquee-text--active,
+  .marquee-text--active:hover {
+    display: inline;
   }
 
   .open-file-name-marquee-track {
