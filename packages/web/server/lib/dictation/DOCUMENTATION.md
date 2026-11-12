@@ -146,6 +146,27 @@ the user is still speaking, so only the tail is left to transcribe on stop.
   expected to retain unacked segments for retry/replay.
 - Silence-only segments (peak < 300) are cleared, never committed, so
   Whisper-style providers do not hallucinate on silence.
+- Silence is also cut off both segment edges before decoding, keeping about
+  100 ms after the last speech frame so the last word survives, and a segment
+  with less than 250 ms of speech is dropped instead of decoded. An offline
+  model invents words on silence ("Yeah", a switch to English) and drops the
+  last word when a long silent tail follows it. Never send the raw edges to
+  the recognizer again.
+- A dictation outlives its socket. Audio stays on the device until the final
+  transcript arrives, and a reconnect resumes the stream the server still
+  holds: same dictation id, server answers `ack` with its last acked seq, the
+  client sends from the next one. Never replay the whole recording after a
+  drop, and never let the server decode a segment twice.
+- Three frames can die with the socket and must be repeated on the next
+  connection: `start`, `finish`, and `final`. A finished dictation is held for
+  30 s so a client that never saw `final` can ask again instead of opening a
+  stream with no audio left.
+- The stream manager lives per runtime, not per socket. One per socket made a
+  resume impossible, because the close dropped the stream it had to continue.
+- Local engines take their thread count from the host, capped at 8 and leaving
+  two cores to the server. A fixed small number wastes half the decode time on
+  a machine with more cores (issue #6594: 2 threads 409 ms, 8 threads 195 ms,
+  same text). Do not pin it back to a constant.
 - A dictation id belongs to this one local host. The endpoint is served by the
   host's own process, ids are random per dictation
   (`dic_<time in hex><random>`), and the UI has one user, so any socket that
