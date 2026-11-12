@@ -34,7 +34,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
-import { initialBrowseQuery, isRootedBrowseQuery, projectBrowsePlaces, resolveBrowseQuery } from './directoryExplorerStart';
+import { initialBrowseQuery, isRootedBrowseQuery, projectBrowsePlaces, resolveBrowseQuery, trimTrailingBrowseSeparators as trimTrailingSeparators } from './directoryExplorerStart';
 import { getDirectoryPickerLabelKey } from './directoryExplorerLabels';
 import { useOpenCodeProjects } from './project-import/useOpenCodeProjects';
 import { formatShortcutForDisplay } from '@/lib/shortcuts';
@@ -85,18 +85,7 @@ type ExplorerView = 'folder' | 'opencode' | 'clone';
 
 const LOADING_MESSAGE_DELAY_MS = 200;
 
-const isRootPath = (value: string): boolean => value === '/';
-
 const normalizeSeparators = (value: string): string => value.replace(/\\/g, '/');
-
-const trimTrailingSeparators = (value: string): string => {
-  if (!value || isRootPath(value)) return value;
-  let result = value;
-  while (result.length > 1 && result.endsWith('/')) {
-    result = result.slice(0, -1);
-  }
-  return result;
-};
 
 const hasTrailingPathSeparator = (value: string): boolean => value.endsWith('/');
 
@@ -122,7 +111,7 @@ const getBrowseLeafPathSegment = (value: string): string => {
 
 const getBrowseParentPath = (value: string): string | null => {
   const trimmed = trimTrailingSeparators(value.trim());
-  if (!trimmed || trimmed === '~' || trimmed === '~/' || trimmed === '/') return null;
+  if (!trimmed || trimmed === '~' || trimmed === '~/' || trimmed === '/' || /^[a-zA-Z]:\/$/.test(trimmed)) return null;
   const lastSeparator = getLastPathSeparatorIndex(trimmed);
   if (lastSeparator < 0) return null;
   if (trimmed.startsWith('~/') && lastSeparator <= 1) return '~/';
@@ -426,9 +415,8 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
     const folderRealPath = realPaths.get(normalizeDirectoryPath(browseDirectoryAbsolutePath) ?? '');
     return filteredEntries.map((entry) => {
       const project = addedProjectOf(entry.path);
-      const unlinkedPath = !folderRealPath ? entry.path
-        : isRootPath(folderRealPath) ? `/${entry.name}`
-          : `${trimTrailingSeparators(folderRealPath)}/${entry.name}`;
+      const folder = folderRealPath ? trimTrailingSeparators(folderRealPath) : '';
+      const unlinkedPath = !folder ? entry.path : `${folder}${folder.endsWith('/') ? '' : '/'}${entry.name}`;
       const isLink = project !== null && normalizeDirectoryPath(project.path) !== normalizeDirectoryPath(unlinkedPath);
       return {
         value: `browse:${entry.path}`,
@@ -477,7 +465,7 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
     if (!pointsAtExistingFolder) return targetPath;
     const name = cloneDirectoryName(cloneRemoteUrl);
     if (!name) return '';
-    return isRootPath(targetPath) ? `/${name}` : `${targetPath}/${name}`;
+    return `${targetPath}${targetPath.endsWith('/') ? '' : '/'}${name}`;
   }, [browseErrorReason, cloneRemoteUrl, exactEntry, isBrowseDirectoryMissing, isCloneMode, isLoading, resolvedQuery, targetPath]);
   const submitTarget = isCloneMode ? cloneDestination : targetPath;
   const isAlreadyAdded = addedProjectOf(submitTarget) !== null;

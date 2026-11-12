@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { initialBrowseQuery, projectBrowsePlaces, resolveBrowseQuery } from './directoryExplorerStart';
+import { initialBrowseQuery, projectBrowsePlaces, resolveBrowseQuery, trimTrailingBrowseSeparators } from './directoryExplorerStart';
 
 describe('initialBrowseQuery', () => {
   const home = '/Users/me';
@@ -21,6 +21,13 @@ describe('initialBrowseQuery', () => {
   test('keeps a folder outside home absolute, and falls back to the last entry without dates', () => {
     expect(initialBrowseQuery([{ path: '/Users/me/a' }, { path: 'D:\\code\\repo\\' }], home)).toBe('D:/code/');
     expect(initialBrowseQuery([{ path: '/Users/me/repo' }], home)).toBe('~/');
+  });
+
+  test('keeps filesystem roots as browseable absolute paths', () => {
+    expect(initialBrowseQuery([{ path: 'D:\\' }], home)).toBe('D:/');
+    expect(initialBrowseQuery([{ path: 'D:\\repo' }], home)).toBe('D:/');
+    expect(initialBrowseQuery([{ path: '/repo' }], home)).toBe('/');
+    expect(initialBrowseQuery([{ path: '/' }], home)).toBe('/');
   });
 });
 
@@ -46,6 +53,13 @@ describe('projectBrowsePlaces', () => {
       { path: '/d/x', addedAt: 1 },
     ], home)).toEqual(['/a/', '/b/', '/c/']);
   });
+
+  test('lists drive and filesystem roots as absolute places', () => {
+    expect(projectBrowsePlaces([
+      { path: 'D:\\', addedAt: 2 },
+      { path: '/repo', addedAt: 1 },
+    ], home)).toEqual(['D:/', '/']);
+  });
 });
 
 describe('resolveBrowseQuery', () => {
@@ -61,5 +75,14 @@ describe('resolveBrowseQuery', () => {
       expect(resolveBrowseQuery(query, '~/projects/')).toBe(query);
     }
     expect(resolveBrowseQuery(' /srv/app', '~/projects/')).toBe('/srv/app');
+  });
+});
+
+describe('trimTrailingBrowseSeparators', () => {
+  test('preserves roots when preparing a folder for selection', () => {
+    expect(trimTrailingBrowseSeparators('D:/')).toBe('D:/');
+    expect(trimTrailingBrowseSeparators('/')).toBe('/');
+    expect(trimTrailingBrowseSeparators('D:/repo/')).toBe('D:/repo');
+    expect(trimTrailingBrowseSeparators('/repo/')).toBe('/repo');
   });
 });
