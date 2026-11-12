@@ -2503,6 +2503,8 @@ export const settingsDict = {
   'settings.openchamber.appLinks.removeAria': 'Güvenilen {scheme} linklerini kaldır',
   'settings.projects.page.field.projectAgent': 'Proje Agentı',
   'settings.projects.page.field.projectModel': 'Proje Modeli',
+  'settings.projects.page.field.projectModelUnavailableUsesGlobal': 'Bu model artık kullanılamıyor, bu yüzden bu projedeki yeni oturumlar genel varsayılan modeli kullanır.',
+  'settings.projects.page.field.projectModelUnavailable': 'Bu model artık kullanılamıyor, bu yüzden bu projedeki yeni oturumlar başka bir model kullanır.',
   'settings.projects.page.field.projectThinking': 'Proje Thinking\'i',
   'settings.projects.page.section.chatDefaults': 'Yeni sohbetler için varsayılanlar',
   'settings.projects.page.section.chatDefaultsDescription': 'Bu projede yeni bir sohbet başlatılırken kullanılır. Ayarlanmamışsa genel varsayılanlara düşer. Thinking yalnızca seviye sunan modellerde görünür.',

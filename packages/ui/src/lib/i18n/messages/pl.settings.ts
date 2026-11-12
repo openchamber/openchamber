@@ -1702,6 +1702,8 @@ export const settingsDict = {
   'settings.projects.page.field.projectName': 'Nazwa projektu',
   'settings.projects.page.field.projectAgent': 'Agent projektu',
   'settings.projects.page.field.projectModel': 'Model projektu',
+  'settings.projects.page.field.projectModelUnavailableUsesGlobal': 'Ten model nie jest już dostępny, więc nowe sesje w tym projekcie używają globalnego modelu domyślnego.',
+  'settings.projects.page.field.projectModelUnavailable': 'Ten model nie jest już dostępny, więc nowe sesje w tym projekcie używają innego modelu.',
   'settings.projects.page.field.projectThinking': 'Poziom myślenia projektu',
   'settings.projects.page.section.chatDefaults': 'Domyślne ustawienia nowych czatów',
   'settings.projects.page.section.chatDefaultsDescription': 'Używane przy starcie nowego czatu w tym projekcie. Bez ustawienia obowiązują wartości globalne. Poziom myślenia pojawia się tylko przy modelach, które mają poziomy.',

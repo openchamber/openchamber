@@ -1364,6 +1364,8 @@ export const settingsDict = {
   'settings.projects.page.field.projectName': 'Nom du projet',
   'settings.projects.page.field.projectAgent': 'Agent du projet',
   'settings.projects.page.field.projectModel': 'Modèle du projet',
+  'settings.projects.page.field.projectModelUnavailableUsesGlobal': 'Ce modèle n\'est plus disponible : les nouvelles sessions de ce projet utilisent le modèle par défaut global.',
+  'settings.projects.page.field.projectModelUnavailable': 'Ce modèle n\'est plus disponible : les nouvelles sessions de ce projet utilisent un autre modèle.',
   'settings.projects.page.field.projectThinking': 'Réflexion du projet',
   'settings.projects.page.section.chatDefaults': 'Valeurs par défaut des nouveaux chats',
   'settings.projects.page.section.chatDefaultsDescription': 'Utilisées au démarrage d’un nouveau chat dans ce projet. À défaut, les valeurs globales s’appliquent. La réflexion n’apparaît que pour les modèles qui proposent des niveaux.',

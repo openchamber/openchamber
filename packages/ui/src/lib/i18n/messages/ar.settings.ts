@@ -1493,6 +1493,8 @@ export const settingsDict = {
   'settings.projects.page.field.projectName': 'اسم المشروع',
   'settings.projects.page.field.projectAgent': 'وكيل المشروع',
   'settings.projects.page.field.projectModel': 'نموذج المشروع',
+  'settings.projects.page.field.projectModelUnavailableUsesGlobal': 'لم يعد هذا النموذج متاحًا، لذا تستخدم الجلسات الجديدة في هذا المشروع النموذج الافتراضي العام.',
+  'settings.projects.page.field.projectModelUnavailable': 'لم يعد هذا النموذج متاحًا، لذا تستخدم الجلسات الجديدة في هذا المشروع نموذجًا آخر.',
   'settings.projects.page.field.projectThinking': 'مستوى التفكير للمشروع',
   'settings.projects.page.section.chatDefaults': 'الإعدادات الافتراضية للمحادثات الجديدة',
   'settings.projects.page.section.chatDefaultsDescription': 'تُستخدم عند بدء محادثة جديدة في هذا المشروع. إذا لم تُحدَّد، تُستخدم الإعدادات الافتراضية العامة. يظهر مستوى التفكير فقط للنماذج التي توفر مستويات.',

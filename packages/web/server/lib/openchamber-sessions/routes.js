@@ -104,6 +104,16 @@ const findCatalogModel = (models, providerID, ref) => {
 
 const hasCatalogModel = (models, providerID, ref) => findCatalogModel(models, providerID, ref) !== null;
 
+// A model a catalog that lists anything does not offer: its provider was
+// removed or switched off. An empty catalog (an unread one, or a location still
+// starting) says nothing, so a configured model stands. Auto is not a catalog
+// model; routing availability decides it. The UI cascade applies the same test.
+const isMissingFromCatalog = (models, model) => {
+  if (models.length === 0 || isAutoModel(model)) return false;
+  const entry = findCatalogModel(models, model.providerID, model.modelID);
+  return !entry || entry.enabled === false;
+};
+
 const resolveVariant = (models, providerID, modelID, variant) => {
   const normalized = asNonEmptyString(variant);
   if (!normalized) return undefined;
@@ -267,36 +277,38 @@ const resolveDefaultSelection = ({ agents, models, settings, projectDefaults, co
   // can carry its variant and is parsed with the canonical parser.
   const projectDefaultModel = splitModel(projectDefaults?.defaultModel);
   const settingsDefaultModel = splitModel(settings?.defaultModel);
-  // A saved choice is honoured even when the catalog has not listed it yet: a
-  // discovery gap must not silently move the user onto another model.
-  if (projectDefaultModel) {
+  // Each configured model is skipped when the catalog no longer lists it (its
+  // provider was removed), so the next one down applies.
+  const runnable = (candidate) => candidate && !isMissingFromCatalog(models, candidate);
+  if (runnable(projectDefaultModel)) {
     model = projectDefaultModel;
     variant = resolveVariant(models, model.providerID, model.modelID, projectDefaults?.defaultVariant);
   }
-  if (!model && settingsDefaultModel) {
+  if (!model && runnable(settingsDefaultModel)) {
     model = settingsDefaultModel;
     variant = resolveVariant(models, model.providerID, model.modelID, settings?.defaultVariant);
   }
 
   // An agent's model is a v2 `ModelRef`: `id` is the model id, not a composite.
   const agentModel = resolvedAgent?.model;
-  if (!model && asNonEmptyString(agentModel?.providerID) && asNonEmptyString(agentModel?.id)) {
+  if (!model && asNonEmptyString(agentModel?.providerID) && asNonEmptyString(agentModel?.id)
+    && runnable({ providerID: agentModel.providerID, modelID: agentModel.id })) {
     model = { providerID: agentModel.providerID, modelID: agentModel.id };
     variant = resolveVariant(models, model.providerID, model.modelID, agentModel.variant);
   }
 
-  if (!model && opencodeDefaultModel) {
+  if (!model && opencodeDefaultModel && runnable(opencodeDefaultModel)) {
     model = { providerID: opencodeDefaultModel.providerID, modelID: opencodeDefaultModel.modelID };
     variant = resolveVariant(models, model.providerID, model.modelID, opencodeDefaultModel.variant);
   }
 
-  // The model last picked in a chat composer. Like a saved default it is kept
-  // through catalog gaps; a model hidden since, or Auto on a server without
-  // routing, is skipped.
+  // The model last picked in a chat composer. Like a saved default it is
+  // skipped once the catalog no longer lists it; a model hidden since, or Auto
+  // on a server without routing, is skipped too.
   const hiddenModels = asList(settings?.hiddenModels);
   const lastSelectedModel = splitModel(settings?.lastSelectedModel);
   if (!model
-    && lastSelectedModel
+    && runnable(lastSelectedModel)
     && !isModelHidden(hiddenModels, lastSelectedModel.providerID, lastSelectedModel.modelID)
     && (autoAvailable || !isAutoModel(lastSelectedModel))) {
     model = lastSelectedModel;

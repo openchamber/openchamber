@@ -2904,6 +2904,7 @@ export const dict = {
   'chat.modelControls.addNewProvider': 'Nieuwe provider toevoegen',
   'chat.modelControls.noAgentSelected': 'Geen agent geselecteerd.',
   'chat.modelControls.agentUnavailable': 'Agent "{agent}" is niet beschikbaar in de map van deze sessie. Kies een andere agent.',
+  'chat.modelControls.modelUnavailable': 'Model "{model}" is niet meer beschikbaar. De provider is verwijderd of uitgeschakeld. Kies een ander model.',
   'chat.modelControls.searchModels': 'Modellen zoeken',
   'chat.modelControls.modelListAria': 'Modellen',
   'chat.modelControls.searchAgents': 'Agents zoeken',

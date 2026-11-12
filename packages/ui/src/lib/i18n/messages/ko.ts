@@ -2904,6 +2904,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.modelControls.addNewProvider': '새 프로바이더 추가',
   'chat.modelControls.noAgentSelected': '선택된 에이전트가 없습니다',
   'chat.modelControls.agentUnavailable': '에이전트 "{agent}"은(는) 이 세션의 폴더에서 사용할 수 없습니다. 다른 에이전트를 선택하세요.',
+  'chat.modelControls.modelUnavailable': '모델 "{model}"은(는) 더 이상 사용할 수 없습니다. 제공자가 제거되었거나 꺼져 있습니다. 다른 모델을 선택하세요.',
   'chat.modelControls.searchModels': '모델 검색',
   'chat.modelControls.modelListAria': '모델',
   'chat.modelControls.searchAgents': '검색 에이전트',

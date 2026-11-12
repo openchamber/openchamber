@@ -2812,6 +2812,7 @@ export const dict = {
   'chat.modelControls.addNewProvider': 'הוסף ספק חדש',
   'chat.modelControls.noAgentSelected': 'לא נבחר סוכן.',
   'chat.modelControls.agentUnavailable': 'הסוכן "{agent}" אינו זמין בתיקייה של הפעלה זו. יש לבחור סוכן אחר.',
+  'chat.modelControls.modelUnavailable': 'המודל "{model}" כבר לא זמין. הספק שלו הוסר או כובה. יש לבחור מודל אחר.',
   'chat.modelControls.searchModels': 'חיפוש מודלים',
   'chat.modelControls.modelListAria': 'מודלים',
   'chat.modelControls.searchAgents': 'חיפוש סוכנים',

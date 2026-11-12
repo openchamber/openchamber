@@ -2881,6 +2881,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.modelControls.addNewProvider': '新增供應商',
   'chat.modelControls.noAgentSelected': '未選擇 Agent。',
   'chat.modelControls.agentUnavailable': '此會話的資料夾中沒有 Agent "{agent}"。請選擇其他 Agent。',
+  'chat.modelControls.modelUnavailable': '模型 "{model}" 已無法使用。它的提供者已被移除或停用。請選擇其他模型。',
   'chat.modelControls.searchModels': '搜尋模型',
   'chat.modelControls.modelListAria': '模型',
   'chat.modelControls.searchAgents': '搜尋 Agent',

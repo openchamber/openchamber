@@ -1461,6 +1461,8 @@ export const settingsDict = {
   'settings.projects.page.field.projectName': '项目名称',
   'settings.projects.page.field.projectAgent': '项目智能体',
   'settings.projects.page.field.projectModel': '项目模型',
+  'settings.projects.page.field.projectModelUnavailableUsesGlobal': '此模型已不可用，因此此项目中的新会话将使用全局默认模型。',
+  'settings.projects.page.field.projectModelUnavailable': '此模型已不可用，因此此项目中的新会话将使用其他模型。',
   'settings.projects.page.field.projectThinking': '项目思考级别',
   'settings.projects.page.section.chatDefaults': '新聊天的默认设置',
   'settings.projects.page.section.chatDefaultsDescription': '在此项目中开始新聊天时使用。未设置时使用全局默认值。思考级别仅在提供级别的模型上显示。',

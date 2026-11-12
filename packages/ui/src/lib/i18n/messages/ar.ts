@@ -2812,6 +2812,7 @@ export const dict = {
   'chat.modelControls.addNewProvider': 'إضافة موفر جديد',
   'chat.modelControls.noAgentSelected': 'لم يتم اختيار وكيل.',
   'chat.modelControls.agentUnavailable': 'الوكيل "{agent}" غير متاح في مجلد هذه الجلسة. اختر وكيلًا آخر.',
+  'chat.modelControls.modelUnavailable': 'النموذج "{model}" لم يعد متاحًا. أُزيل مزوّده أو أُوقف. اختر نموذجًا آخر.',
   'chat.modelControls.searchModels': 'البحث في النماذج',
   'chat.modelControls.modelListAria': 'النماذج',
   'chat.modelControls.searchAgents': 'البحث في الوكلاء',

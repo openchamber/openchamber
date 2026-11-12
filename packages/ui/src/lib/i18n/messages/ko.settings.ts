@@ -1461,6 +1461,8 @@ export const settingsDict = {
   'settings.projects.page.field.projectName': '프로젝트 이름',
   'settings.projects.page.field.projectAgent': '프로젝트 에이전트',
   'settings.projects.page.field.projectModel': '프로젝트 모델',
+  'settings.projects.page.field.projectModelUnavailableUsesGlobal': '이 모델은 더 이상 사용할 수 없어 이 프로젝트의 새 세션은 전역 기본 모델을 사용합니다.',
+  'settings.projects.page.field.projectModelUnavailable': '이 모델은 더 이상 사용할 수 없어 이 프로젝트의 새 세션은 다른 모델을 사용합니다.',
   'settings.projects.page.field.projectThinking': '프로젝트 사고 수준',
   'settings.projects.page.section.chatDefaults': '새 채팅 기본값',
   'settings.projects.page.section.chatDefaultsDescription': '이 프로젝트에서 새 채팅을 시작할 때 사용합니다. 비워 두면 전역 기본값을 따릅니다. 사고 수준은 수준을 제공하는 모델에서만 표시됩니다.',

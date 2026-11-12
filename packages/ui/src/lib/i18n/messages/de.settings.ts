@@ -1444,6 +1444,8 @@ export const settingsDict = {
   'settings.projects.page.field.projectName': 'Projektname',
   'settings.projects.page.field.projectAgent': 'Projekt-Agent',
   'settings.projects.page.field.projectModel': 'Projektmodell',
+  'settings.projects.page.field.projectModelUnavailableUsesGlobal': 'Dieses Modell ist nicht mehr verfügbar, daher verwenden neue Sitzungen in diesem Projekt das globale Standardmodell.',
+  'settings.projects.page.field.projectModelUnavailable': 'Dieses Modell ist nicht mehr verfügbar, daher verwenden neue Sitzungen in diesem Projekt ein anderes Modell.',
   'settings.projects.page.field.projectThinking': 'Projekt-Denkstufe',
   'settings.projects.page.section.chatDefaults': 'Vorgaben für neue Chats',
   'settings.projects.page.section.chatDefaultsDescription': 'Gilt beim Start eines neuen Chats in diesem Projekt. Ohne Angabe greifen die globalen Vorgaben. Die Denkstufe erscheint nur bei Modellen, die Stufen anbieten.',

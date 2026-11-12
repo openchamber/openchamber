@@ -1494,6 +1494,8 @@ export const settingsDict = {
   'settings.projects.page.field.projectName': 'Projectnaam',
   'settings.projects.page.field.projectAgent': 'Projectagent',
   'settings.projects.page.field.projectModel': 'Projectmodel',
+  'settings.projects.page.field.projectModelUnavailableUsesGlobal': 'Dit model is niet meer beschikbaar, dus nieuwe sessies in dit project gebruiken het algemene standaardmodel.',
+  'settings.projects.page.field.projectModelUnavailable': 'Dit model is niet meer beschikbaar, dus nieuwe sessies in dit project gebruiken een ander model.',
   'settings.projects.page.field.projectThinking': 'Projectdenken',
   'settings.projects.page.section.chatDefaults': 'Standaardwaarden voor nieuwe chats',
   'settings.projects.page.section.chatDefaultsDescription': 'Wordt gebruikt bij het starten van een nieuwe chat in dit project. Valt terug op de globale standaardwaarden indien niet ingesteld. Denken wordt alleen getoond bij modellen die niveaus bieden.',

@@ -2588,6 +2588,7 @@ export const dict = {
   'chat.modelControls.addNewProvider': 'Ajouter un nouveau fournisseur',
   'chat.modelControls.noAgentSelected': 'Aucun agent sélectionné.',
   'chat.modelControls.agentUnavailable': 'L\'agent "{agent}" n\'est pas disponible dans le dossier de cette session. Choisissez un autre agent.',
+  'chat.modelControls.modelUnavailable': 'Le modèle "{model}" n\'est plus disponible. Son fournisseur a été supprimé ou désactivé. Choisissez un autre modèle.',
   'chat.modelControls.searchModels': 'Rechercher des modèles',
   'chat.modelControls.modelListAria': 'Modèles',
   'chat.modelControls.searchAgents': 'Rechercher des agents',

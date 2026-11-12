@@ -15,7 +15,7 @@ import { SessionWarmingModeField } from './SessionWarmingModeField';
 import { PermissionDefaultModeField } from './PermissionDefaultModeField';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { loadDesktopSettings, updateDesktopSettings } from '@/lib/persistence';
-import { useConfigStore } from '@/stores/useConfigStore';
+import { selectIsModelMissingFromCatalog, useConfigStore } from '@/stores/useConfigStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useSelectionStore } from '@/sync/selection-store';
 import { useSessionUIStore } from '@/sync/session-ui-store';
@@ -91,6 +91,10 @@ export const DefaultsSettings: React.FC = () => {
   const [isLoading, setIsLoading] = React.useState(true);
 
   const parsedModel = React.useMemo(() => getDisplayModel(defaultModel), [defaultModel]);
+  // New sessions skip a model the live catalog no longer lists.
+  const defaultModelMissing = useConfigStore((state) => (
+    selectIsModelMissingFromCatalog(state, undefined, parsedModel.providerId, parsedModel.modelId)
+  ));
 
   React.useEffect(() => {
     const loadSettings = async () => {
@@ -359,6 +363,9 @@ export const DefaultsSettings: React.FC = () => {
           <SettingsFieldRow
             settingsItem="sessions.default-model"
             label={t('settings.openchamber.defaults.field.model')}
+            description={defaultModelMissing
+              ? <span className="text-[var(--status-warning)]">{t('settings.openchamber.defaults.field.modelUnavailable')}</span>
+              : undefined}
           >
             <ModelSelector
               providerId={parsedModel.providerId}

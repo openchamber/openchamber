@@ -1339,6 +1339,8 @@ export const settingsDict = {
   'settings.projects.page.field.projectName': '專案名稱',
   'settings.projects.page.field.projectAgent': '專案 Agent',
   'settings.projects.page.field.projectModel': '專案模型',
+  'settings.projects.page.field.projectModelUnavailableUsesGlobal': '此模型已無法使用，因此此專案中的新工作階段將使用全域預設模型。',
+  'settings.projects.page.field.projectModelUnavailable': '此模型已無法使用，因此此專案中的新工作階段將使用其他模型。',
   'settings.projects.page.field.projectThinking': '專案思考層級',
   'settings.projects.page.section.chatDefaults': '新聊天的預設設定',
   'settings.projects.page.section.chatDefaultsDescription': '在此專案中開始新聊天時使用。未設定時使用全域預設值。思考層級僅在提供層級的模型上顯示。',

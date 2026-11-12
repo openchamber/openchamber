@@ -1493,6 +1493,8 @@ export const settingsDict = {
   'settings.projects.page.field.projectName': 'Project name',
   'settings.projects.page.field.projectAgent': 'Project agent',
   'settings.projects.page.field.projectModel': 'Project model',
+  'settings.projects.page.field.projectModelUnavailableUsesGlobal': 'This model isn\'t available anymore, so new sessions in this project use the global default model.',
+  'settings.projects.page.field.projectModelUnavailable': 'This model isn\'t available anymore, so new sessions in this project use another model.',
   'settings.projects.page.field.projectThinking': 'Project thinking',
   'settings.projects.page.section.chatDefaults': 'Defaults for new chats',
   'settings.projects.page.section.chatDefaultsDescription': 'Used when starting a new chat in this project. Falls back to the global defaults when unset. Thinking appears only for models that offer levels.',

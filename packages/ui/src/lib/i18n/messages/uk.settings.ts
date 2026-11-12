@@ -1461,6 +1461,8 @@ export const settingsDict = {
   "settings.projects.page.field.projectName": "Назва проєкту",
   "settings.projects.page.field.projectAgent": "Агент проєкту",
   "settings.projects.page.field.projectModel": "Модель проєкту",
+  "settings.projects.page.field.projectModelUnavailableUsesGlobal": "Ця модель більше недоступна, тож нові сесії в цьому проєкті використовують глобальну модель за замовчуванням.",
+  "settings.projects.page.field.projectModelUnavailable": "Ця модель більше недоступна, тож нові сесії в цьому проєкті використовують іншу модель.",
   "settings.projects.page.field.projectThinking": "Міркування проєкту",
   "settings.projects.page.section.chatDefaults": "Значення за замовчуванням для нових чатів",
   "settings.projects.page.section.chatDefaultsDescription": "Використовується при старті нового чату в цьому проєкті. Якщо не задано, береться глобальне значення. Міркування показується лише для моделей, які мають рівні.",

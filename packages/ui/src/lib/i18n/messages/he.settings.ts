@@ -1493,6 +1493,8 @@ export const settingsDict = {
   'settings.projects.page.field.projectName': 'שם הפרויקט',
   'settings.projects.page.field.projectAgent': 'סוכן הפרויקט',
   'settings.projects.page.field.projectModel': 'מודל הפרויקט',
+  'settings.projects.page.field.projectModelUnavailableUsesGlobal': 'המודל הזה כבר לא זמין, ולכן סשנים חדשים בפרויקט הזה משתמשים במודל ברירת המחדל הגלובלי.',
+  'settings.projects.page.field.projectModelUnavailable': 'המודל הזה כבר לא זמין, ולכן סשנים חדשים בפרויקט הזה משתמשים במודל אחר.',
   'settings.projects.page.field.projectThinking': 'רמת חשיבה בפרויקט',
   'settings.projects.page.section.chatDefaults': 'ברירות מחדל לצ\'אטים חדשים',
   'settings.projects.page.section.chatDefaultsDescription': 'משמשות כשמתחילים צ\'אט חדש בפרויקט הזה. אם לא הוגדרו, חלות ברירות המחדל הכלליות. רמת החשיבה מופיעה רק במודלים שמציעים רמות.',

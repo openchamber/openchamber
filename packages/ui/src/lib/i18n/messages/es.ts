@@ -2860,6 +2860,7 @@ export const dict: Record<I18nKey, string> = {
   "chat.modelControls.addNewProvider": "Añadir nuevo proveedor",
   "chat.modelControls.noAgentSelected": "No se seleccionó ningún agente.",
   "chat.modelControls.agentUnavailable": "El agente \"{agent}\" no está disponible en la carpeta de esta sesión. Elige otro agente.",
+  "chat.modelControls.modelUnavailable": "El modelo \"{model}\" ya no está disponible. Su proveedor se eliminó o se desactivó. Elige otro modelo.",
   "chat.modelControls.searchModels": "Buscar modelos",
   "chat.modelControls.modelListAria": "Modelos",
   "chat.modelControls.searchAgents": "Buscar agentes",

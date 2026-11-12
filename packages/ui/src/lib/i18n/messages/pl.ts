@@ -1618,6 +1618,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.modelControls.model': 'Model',
   'chat.modelControls.noAgentSelected': 'Nie wybrano agenta.',
   'chat.modelControls.agentUnavailable': 'Agent "{agent}" nie jest dostępny w folderze tej sesji. Wybierz innego agenta.',
+  'chat.modelControls.modelUnavailable': 'Model "{model}" nie jest już dostępny. Jego dostawcę usunięto lub wyłączono. Wybierz inny model.',
   'chat.modelControls.noModelsFound': 'Nie znaleziono modeli',
   'chat.modelControls.output': 'Wyjście',
   'chat.modelControls.permissionLabel.allow': 'Zezwól',

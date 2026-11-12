@@ -2870,6 +2870,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.modelControls.addNewProvider': '添加新提供商',
   'chat.modelControls.noAgentSelected': '未选择智能体。',
   'chat.modelControls.agentUnavailable': '此会话的文件夹中没有智能体 "{agent}"。请选择其他智能体。',
+  'chat.modelControls.modelUnavailable': '模型 "{model}" 已不可用。它的提供商已被移除或停用。请选择其他模型。',
   'chat.modelControls.searchModels': '搜索模型',
   'chat.modelControls.modelListAria': '模型',
   'chat.modelControls.searchAgents': '搜索智能体',

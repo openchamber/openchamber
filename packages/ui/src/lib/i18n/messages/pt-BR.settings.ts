@@ -1461,6 +1461,8 @@ export const settingsDict = {
   "settings.projects.page.field.projectName": "Nome do projeto",
   "settings.projects.page.field.projectAgent": "Agente do projeto",
   "settings.projects.page.field.projectModel": "Modelo do projeto",
+  "settings.projects.page.field.projectModelUnavailableUsesGlobal": "Este modelo não está mais disponível, então novas sessões neste projeto usam o modelo padrão global.",
+  "settings.projects.page.field.projectModelUnavailable": "Este modelo não está mais disponível, então novas sessões neste projeto usam outro modelo.",
   "settings.projects.page.field.projectThinking": "Raciocínio do projeto",
   "settings.projects.page.section.chatDefaults": "Padrões para novos chats",
   "settings.projects.page.section.chatDefaultsDescription": "Usados ao iniciar um novo chat neste projeto. Sem definição, valem os padrões globais. O raciocínio só aparece em modelos que oferecem níveis.",

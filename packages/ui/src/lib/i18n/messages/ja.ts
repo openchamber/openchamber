@@ -2903,6 +2903,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.modelControls.addNewProvider': '新しいプロバイダーを追加',
   'chat.modelControls.noAgentSelected': 'エージェントが選択されていません。',
   'chat.modelControls.agentUnavailable': 'エージェント "{agent}" はこのセッションのフォルダーでは使用できません。別のエージェントを選んでください。',
+  'chat.modelControls.modelUnavailable': 'モデル "{model}" は利用できなくなりました。プロバイダーが削除されたか無効になっています。別のモデルを選んでください。',
   'chat.modelControls.searchModels': 'モデルを検索',
   'chat.modelControls.modelListAria': 'モデル',
   'chat.modelControls.searchAgents': 'エージェントを検索',
