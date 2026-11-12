@@ -1312,33 +1312,43 @@ diffs-container {
 }
 
 /* Model/agent controls: as the row narrows, the model's name truncates first
-   (its trigger is the one that shrinks; the agent's does not), so the agent
-   keeps its label. Past that, labels collapse to icons: variant, then agent,
-   then model. */
+   (its trigger is the one that shrinks; the agent's does not). Past that the
+   model's name and the agent's label give way, leaving the provider logo with
+   the thinking level as its muted text ("/ default"), the agent's icon, then
+   the mic and Send. The thinking level has no icon of its own in the desktop
+   footer; below the narrowest width it goes too, before any icon. */
+@container model-controls (max-width: 14rem) {
+  :root:not(.vscode-runtime) .model-controls__model-label {
+    display: none;
+  }
+}
+
 @container model-controls (max-width: 12rem) {
   :root:not(.vscode-runtime) .model-controls__agent-label {
     display: none;
   }
+
+  /* Collapsed, the groups sit closer: 12px to the agent, 12px (4px here plus
+     the footer's 8px) to the mic. */
+  :root:not(.vscode-runtime) .model-controls__row {
+    column-gap: 12px;
+    padding-inline-end: 4px;
+  }
 }
 
-/* The effort trigger is "/ medium" after the model; collapsed, its icon stands in. */
+/* The effort trigger is "/ medium" after the model; only VS Code's narrow
+   panel swaps it for its icon. */
 .model-controls__variant-icon {
   display: none;
 }
 
-@container model-controls (max-width: 14rem) {
-  :root:not(.vscode-runtime) .model-controls__variant-label,
-  :root:not(.vscode-runtime) .model-controls__variant-slash {
-    display: none;
-  }
-
-  :root:not(.vscode-runtime) .model-controls__variant-icon {
-    display: block;
-  }
-}
-
-@container model-controls (max-width: 10rem) {
-  :root:not(.vscode-runtime) .model-controls__model-label {
+/* The variant keeps its own width (it does not wrap or truncate here), so it
+   goes only when the collapsed row cannot hold it: logo 17px + 6px + "/ medium"
+   56px + 12px + the agent's 16px icon + 4px end padding = 111px (measured in
+   the harness). With the footer around it that is a composer narrower than
+   about 287px. */
+@container model-controls (max-width: 110.9px) {
+  :root:not(.vscode-runtime) .model-controls__variant-trigger {
     display: none;
   }
 }

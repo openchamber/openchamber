@@ -679,7 +679,9 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     const controlIconSize = sizeVariant === 'mobile' ? 'size-5' : sizeVariant === 'vscode' ? 'size-4' : 'size-4';
     const providerLogoSize = sizeVariant === 'mobile' ? 'size-[21px]' : 'size-[17px]';
     const controlTextSize = isCompact ? 'typography-micro' : 'typography-meta';
-    const inlineGapClass = sizeVariant === 'mobile' ? 'gap-x-1' : sizeVariant === 'vscode' ? 'gap-x-2' : 'gap-x-3';
+    // The model unit (logo, name, effort) to the agent: 16px on the desktop
+    // footer, a group gap; the footer adds 20px before the mic and Send.
+    const inlineGapClass = sizeVariant === 'mobile' ? 'gap-x-1' : sizeVariant === 'vscode' ? 'gap-x-2' : 'gap-x-4';
 
     const currentProvider = selection ? providers.find((provider) => provider.id === currentProviderId) : getCurrentProvider();
     const models = Array.isArray(currentProvider?.models) ? currentProvider.models : [];
@@ -3037,12 +3039,15 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                         // No overflow-hidden: mobile.css makes it a vertical scroller,
                         // and the 36px triggers in this 26px row would draw its thumb.
                         inlineGapClass,
+                        // The desktop footer's group gaps: 16px to the agent here,
+                        // and this padding plus the footer's 8px gap make 20px to
+                        // the mic. Collapsed narrow, both tighten to 12px (index.css).
+                        sizeVariant === 'default' && 'model-controls__row pe-3',
                     )}
                 >
-                    {/* The effort follows the model as its suffix, so the two sit closer
-                        than the other controls; on the desktop 8px, so a truncated
-                        name still ends clear of it. */}
-                    <div className={cn('flex items-center min-w-0', isMobile ? 'gap-x-0.5' : 'gap-x-2')}>
+                    {/* The effort follows the model as its suffix, one unit with it:
+                        6px on the desktop, as an icon to its label. */}
+                    <div className={cn('flex items-center min-w-0', isMobile ? 'gap-x-0.5' : sizeVariant === 'vscode' ? 'gap-x-2' : 'gap-x-1.5')}>
                         {renderModelSelector()}
                         {renderVariantSelector()}
                     </div>
