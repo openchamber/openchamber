@@ -287,7 +287,7 @@ function DropdownMenuRadioItem({
     <BaseMenu.RadioItem
       data-slot="dropdown-menu-radio-item"
       className={cn(
-        "data-[highlighted]:bg-interactive-hover hover:bg-interactive-hover relative flex cursor-pointer items-start gap-2 rounded-md py-1 ps-2 pe-8 typography-ui-label outline-hidden select-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-3.5",
+        "data-[highlighted]:bg-interactive-hover hover:bg-interactive-hover relative flex cursor-pointer items-start gap-2 rounded-lg py-1 ps-2 pe-8 typography-ui-label outline-hidden select-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-3.5",
         className
       )}
       {...props}

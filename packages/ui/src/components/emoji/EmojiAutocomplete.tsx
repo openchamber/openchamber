@@ -81,7 +81,7 @@ export const EmojiAutocomplete = React.forwardRef<EmojiAutocompleteHandle, Emoji
   return (
     <div
       ref={containerRef}
-      className="absolute z-[100] min-w-0 w-full max-w-[280px] max-h-64 oc-glass-popover oc-glass-floating rounded-lg bottom-full mb-2 inset-s-0 flex flex-col"
+      className="absolute z-[100] min-w-0 w-full max-w-[280px] max-h-64 oc-glass-popover oc-glass-floating rounded-xl bottom-full mb-2 inset-s-0 flex flex-col"
       style={mobileMaxHeight !== undefined ? { ...style, maxHeight: mobileMaxHeight } : style}
     >
       <ScrollableOverlay preventOverscroll outerClassName="flex-1 min-h-0" className="p-1">
@@ -89,7 +89,7 @@ export const EmojiAutocomplete = React.forwardRef<EmojiAutocompleteHandle, Emoji
           <div
             key={entry.emoji}
             ref={(el) => { itemRefs.current[index] = el; }}
-            className={cn('flex items-center gap-2 px-2 py-1.5 cursor-pointer rounded-md typography-ui-label', index === selectedIndex && 'bg-interactive-selection')}
+            className={cn('flex items-center gap-2 px-2 py-1.5 cursor-pointer rounded-lg typography-ui-label', index === selectedIndex && 'bg-interactive-selection')}
             onClick={() => onEmojiSelect(entry.emoji)}
             onMouseMove={() => setSelectedIndex(index)}
           >

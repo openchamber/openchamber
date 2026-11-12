@@ -143,7 +143,7 @@ export const SkillAutocomplete = React.forwardRef<SkillAutocompleteHandle, Skill
           itemRefs.current[index] = el;
         }}
         className={cn(
-          'flex items-center gap-2 px-2 py-1.5 cursor-pointer rounded-md typography-ui-label',
+          'flex items-center gap-2 px-2 py-1.5 cursor-pointer rounded-lg typography-ui-label',
           index === selectedIndex && 'bg-interactive-selection'
         )}
         onClick={() => onSkillSelect(skill.name)}
@@ -160,7 +160,7 @@ export const SkillAutocomplete = React.forwardRef<SkillAutocompleteHandle, Skill
   return (
     <div
       ref={containerRef}
-      className="absolute z-[100] min-w-0 w-full max-w-[420px] max-h-64 oc-glass-popover oc-glass-floating rounded-lg bottom-full mb-2 inset-s-0 flex flex-col"
+      className="absolute z-[100] min-w-0 w-full max-w-[420px] max-h-64 oc-glass-popover oc-glass-floating rounded-xl bottom-full mb-2 inset-s-0 flex flex-col"
       style={mobileMaxHeight !== undefined ? { ...style, maxHeight: mobileMaxHeight } : style}
     >
       <ScrollableOverlay ref={listRef} preventOverscroll outerClassName="flex-1 min-h-0" className="p-1">
